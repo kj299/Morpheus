@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,9 +31,9 @@ download_artifact "wheel-${REAL_ARCH}.tar.bz"
 
 tar xf "${WORKSPACE_TMP}/wheel-${REAL_ARCH}.tar.bz"
 
-pip install ${MORPHEUS_ROOT}/${BUILD_DIR}/python/morpheus/dist/*.whl
-pip install ${MORPHEUS_ROOT}/${BUILD_DIR}/python/morpheus_llm/dist/*.whl
-pip install ${MORPHEUS_ROOT}/${BUILD_DIR}/python/morpheus_dfp/dist/*.whl
+pip install --no-build-isolation ${MORPHEUS_ROOT}/${BUILD_DIR}/python/morpheus/dist/*.whl
+pip install --no-build-isolation ${MORPHEUS_ROOT}/${BUILD_DIR}/python/morpheus_llm/dist/*.whl
+pip install --no-build-isolation ${MORPHEUS_ROOT}/${BUILD_DIR}/python/morpheus_dfp/dist/*.whl
 
 rapids-logger "Pulling LFS assets"
 cd ${MORPHEUS_ROOT}
