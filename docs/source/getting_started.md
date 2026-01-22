@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,6 +33,7 @@ More advanced users, or those who are interested in using the latest pre-release
 - [Docker](https://docs.docker.com/get-docker/)
 - [The NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation)
 - [NVIDIA Triton Inference Server](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/tritonserver) `24.09` or higher
+- NVIDIA Driver >=525,<580 (currently Morpheus is not compatible with NVIDIA Driver versions 580+ due to a known issue with Numba refer to [#2305](https://github.com/nv-morpheus/Morpheus/issues/2305))
 
 > **Note for Arm64/AArch64 users:**
 >
