@@ -165,6 +165,9 @@ Output (`stages/output/`): `WriteToKafkaStage`, `WriteToElasticsearchStage`, `Wr
 General (`stages/general/`): `MonitorStage`, `TriggerStage`, `BufferStage`, `DelayStage`,
 `RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, `MultiPortModulesStage`.
 
+Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`. These were added to support the
+design in Part 4 and are covered in detail there.
+
 There is no Splunk sink. Delivery to Splunk goes through Kafka, HTTP Event Collector via
 `HttpClientSinkStage`, or a file drop consumed by a forwarder. Part 4 covers the tradeoffs.
 
@@ -1054,29 +1057,36 @@ link_uid = sha256(
 Recording `join_method` on the edge is what lets an analyst distinguish an exact attribution from an
 inferred one, months later, without re-deriving the join.
 
-**Chain identity.** For a correlation window, compute a Merkle root over the sorted `event_uid` values in
-the chain:
+**Chain identity.** For a correlation window, compute a Merkle root over the deduplicated, sorted
+`event_uid` values in the chain:
 
 ```python
-chain_root = merkle_root(sorted(event_uids))
+chain_root = merkle_root(event_uids)          # sorts and deduplicates internally
 lineage_id = sha256(root_entity_key || window_id || chain_root).hexdigest()[:32]
 ```
 
-Sorting before hashing makes `lineage_id` independent of the order in which events arrived, which is the
-property that survives out-of-order delivery and replay. `window_id` is the deterministic window
-identifier from Part 5.
+Sorting and deduplicating before hashing makes `lineage_id` a function of chain membership alone, which
+is the property that survives out-of-order delivery, redelivery, and replay. `window_id` is the
+deterministic window identifier from Part 5.
 
-Implement this as a stage that declares its outputs so the columns are preallocated:
+These four functions ship as {py:mod}`~morpheus.utils.lineage`, and
+{py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage` applies the first two to a
+message, declaring its outputs so the columns are preallocated:
 
 ```python
-class LineageStampStage(PassThruTypeMixin, SinglePortStage):
-    def __init__(self, c: Config, collector_id_col: str, relation: str):
-        super().__init__(c)
-        self._needed_columns['event_uid'] = TypeId.STRING
-        self._needed_columns['parent_event_uid'] = TypeId.STRING
-        self._needed_columns['link_uid'] = TypeId.STRING
-        self._needed_columns['join_method'] = TypeId.STRING
+from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
+
+pipe.add_stage(
+    LineageStampStage(config,
+                      id_columns=["collector_id", "schema_version", "origin_hash", "collector_seq"],
+                      parent_uid_column="parent_event_uid",
+                      relation="carried_by",
+                      join_method="hard:flow_id"))
 ```
+
+The stage hashes on the host in both GPU and CPU execution modes. That costs some throughput on the GPU
+path, and it is a deliberate trade: an identifier whose value depended on which execution mode produced
+it would defeat the purpose of having it.
 
 Emit the edges as a **separate stream** from the scored events, on its own Kafka topic and into its own
 SIEM index. Edges are small, numerous, and queried with entirely different access patterns than events.
@@ -1091,8 +1101,22 @@ bidirectional flow produce the same value, and it is computed identically by Zee
 and most modern network tooling.
 
 This one field turns most layer 3 and 4 joins from soft to hard, and it makes Morpheus output joinable
-against network telemetry the enterprise already collects without any coordination. The cost is a few
-lines in the lineage stage. It is the single highest-leverage decision in this entire section.
+against network telemetry the enterprise already collects without any coordination. It is the single
+highest-leverage decision in this entire section.
+
+{py:class}`~morpheus.stages.lineage.community_id_stage.CommunityIdStage` implements version 1 of the
+specification, including the ICMP and ICMPv6 message-type mapping:
+
+```python
+from morpheus.stages.lineage.community_id_stage import CommunityIdStage
+
+pipe.add_stage(CommunityIdStage(config, src_ip_column="src_ip", dst_ip_column="dest_ip",
+                                protocol_column="protocol", src_port_column="src_port",
+                                dst_port_column="dest_port"))
+```
+
+Leave `seed` at its default of zero. The seed is part of the hash input, so a non-default value produces
+identifiers that no other tool in the estate will agree with, which forfeits the entire benefit.
 
 ### Splunk implementation
 
@@ -1624,13 +1648,15 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Pretrained models for sensitive information detection, phishing, log parsing, ransomware, fraud, and
   anomalous behavior profiling.
 - Seeding utility and golden-file comparison stages.
+- Deterministic lineage identifiers ({py:mod}`~morpheus.utils.lineage` and
+  {py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage`) and the Community ID flow
+  hash ({py:mod}`~morpheus.utils.community_id` and
+  {py:class}`~morpheus.stages.lineage.community_id_stage.CommunityIdStage`).
 
 ### Must be built
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| `LineageStampStage` | Small | `event_uid`, `link_uid`, `join_method`; declare in `_needed_columns` |
-| `CommunityIdStage` | Small | Canonical flow hash for layers 3 and 4 |
 | Deterministic window sealing | Medium | Lateness horizon, revision numbering, late-arrival stream |
 | Entity sharding router configuration | Small | `RouterStage` with a stable hash; replaces intra-stage threading |
 | TC-1 and TC-2 collectors | Medium | SNMP, LLDP, DHCP, and 802.1X normalization. No Morpheus support today |

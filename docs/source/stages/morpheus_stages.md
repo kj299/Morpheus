@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,6 +24,7 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - [General](#general)
 - [Inference](#inference)
 - [Input](#input)
+- [Lineage](#lineage)
 - [LLM](#llm)
 - [Output](#output)
 - [Post-process](#post-process)
@@ -59,6 +60,11 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - In Memory Source Stage {py:class}`~morpheus.stages.input.in_memory_source_stage.InMemorySourceStage` Input source that emits a pre-defined list of DataFrames.
 - Kafka Source Stage {py:class}`~morpheus.stages.input.kafka_source_stage.KafkaSourceStage` Load messages from a Kafka cluster.
 - RSS Source Stage {py:class}`~morpheus.stages.input.rss_source_stage.RSSSourceStage` Load RSS feed items into a pandas DataFrame.
+
+## Lineage
+
+- Community ID Stage {py:class}`~morpheus.stages.lineage.community_id_stage.CommunityIdStage` Add a Community ID flow hash column to network telemetry. Both directions of a bidirectional flow produce the same value, which makes the column an exact join key against telemetry produced by other network tooling.
+- Lineage Stamp Stage {py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage` Attach deterministic `event_uid` and `link_uid` provenance identifiers to every row, so that a replay of the same input reconstructs the same lineage. Refer to [Predictive Behavioral Analytics Across OSI Layers 1-7](../developer_guide/guides/11_predictive_behavioral_analytics_osi.md) for how these identifiers are consumed by a SIEM.
 
 ## LLM
 
