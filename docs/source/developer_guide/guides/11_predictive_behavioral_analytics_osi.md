@@ -29,8 +29,42 @@ engineer can reproduce and defend.
 Every claim about Morpheus below is anchored to a file path in this repository. Where a capability does not
 exist and must be built, the document says so explicitly rather than implying the SDK already covers it.
 
+## Summary
+
+**The four decisions that matter.** If you read nothing else:
+
+1. **Emit `community_id` on layers 3 and 4.** One field converts most cross-layer correlation from
+   time-bounded approximate joins into equality joins, and makes Morpheus output joinable against Zeek,
+   Suricata, and Elastic with no coordination. Implemented as
+   {py:class}`~morpheus.stages.lineage.community_id_stage.CommunityIdStage`.
+2. **Shard by entity hash instead of raising `pe_count`.** Intra-stage threading destroys output
+   ordering; routing each entity to a fixed single-engine branch keeps N-way parallelism and gives
+   total per-entity order. This is control 4 in Part 5 and the cheapest determinism win available.
+3. **Sort before computing any cumulative feature.** `IncrementColumn` and `DistinctIncrementColumn`
+   are order-dependent, so an unsorted batch silently produces different features and different scores.
+   This is the most easily missed defect in the whole design, because the output stays plausible.
+4. **Build layers 5 and 7 first, then the lineage substrate, then everything else.** The sequencing in
+   Part 6 exists because the standalone detection value is concentrated at the top of the stack while
+   the collection cost is concentrated at the bottom.
+
+**What is verified versus designed.** The two shipped stages are real code with real tests, and the
+Community ID implementation was checked against the reference implementation over 46,448 flow tuples.
+Everything else here — the telemetry classes, the rules, the SIEM queries, the determinism controls — is
+a design rather than a running system. Thresholds are placeholders unless marked otherwise, and the SPL
+is written from the specification rather than executed against a live Splunk instance.
+
+**On the word "predictive."** Three of the four mechanisms in Part 1 are forward-looking in a defensible
+sense: trajectory features over reconstruction error, forecast residual from `TimeSeriesStage`, and
+ordered cross-layer precursor chains all fire before an objective is reached rather than after. The
+fourth — the premise that autoencoder reconstruction error rises during reconnaissance and staging — is
+a **hypothesis, not a measured result**. It is plausible and widely assumed, but this document does not
+establish it, and a deployment should validate the lead time against its own historical incidents before
+anyone promises prediction to a stakeholder. Absent that validation, what is described here is anomaly
+detection with a forward-looking read on its trend.
+
 **Contents**
 
+- [Summary](#summary)
 - [Part 0: Codebase Analysis](#part-0-codebase-analysis)
   - [Pass 1: Structure, Execution Model, and Type System](#pass-1-structure-execution-model-and-type-system)
   - [Pass 2: The Behavioral Analytics Substrate](#pass-2-the-behavioral-analytics-substrate)
@@ -763,6 +797,21 @@ The mistake to avoid is treating R-B output as R-D output. An autoencoder score 
 how unusual something is, not about whether it is malicious. Rules should say so in their metadata,
 and the SOC's runbook should reflect it.
 
+### On the numbers in this section
+
+The thresholds below are of two kinds, and the difference matters.
+
+A few are **conventional**: the 900 km/h impossible-travel speed and the `4xx`-to-`2xx` enumeration
+ratio are widely used starting points that transfer between environments. Most of the rest are
+**placeholders**. Values such as `max_abs_z >= 6.0`, DNS entropy above 4.0 bits per character, or a
+beaconing coefficient of variation below 0.15 are stated to make each rule concrete and testable, not
+because they are correct for any particular estate. They are the right *shape*; the values must be
+derived from a baseline period in your own data before the rule goes live.
+
+Treat a threshold copied from this document straight into production as an untuned rule, and expect it
+to behave accordingly. The `hysteresis` field exists partly so that the first tuning pass does not
+have to be perfect.
+
 ### Rule specification format
 
 Every rule carries the same metadata block, regardless of which SIEM executes it:
@@ -1084,9 +1133,23 @@ pipe.add_stage(
                       join_method="hard:flow_id"))
 ```
 
-The stage hashes on the host in both GPU and CPU execution modes. That costs some throughput on the GPU
-path, and it is a deliberate trade: an identifier whose value depended on which execution mode produced
-it would defeat the purpose of having it.
+The stage hashes on the host in both GPU and CPU execution modes. That is a deliberate trade: an
+identifier whose value depended on which execution mode produced it would defeat the purpose of having
+it. The cost is measurable, so budget for it rather than assuming it is free. Measured single-core on
+the reference implementation:
+
+| Path | Throughput |
+| --- | --- |
+| Community ID, realistic flow data (5k distinct tuples over 200k rows) | ~2.9M rows/s |
+| Community ID, every row a distinct tuple | ~180k rows/s |
+| `event_uid`, four fields, all rows unique | ~590k rows/s |
+
+The 16x spread on Community ID is the tuple memoization, and it is why the stage belongs *after* the
+flow rollup rather than on raw packets: rolled-up telemetry repeats tuples heavily, unaggregated
+telemetry does not. `event_uid` cannot benefit from memoization at all, because the identifiers are
+unique by construction, so its ~590k rows/s is the harder ceiling and the one to plan against. At
+layer 5 and layer 7 event volumes that is ample. At raw layer 3 and 4 packet rates it is not, and the
+lineage stamp has to sit downstream of aggregation.
 
 Emit the edges as a **separate stream** from the scored events, on its own Kafka topic and into its own
 SIEM index. Edges are small, numerous, and queried with entirely different access patterns than events.
@@ -1172,11 +1235,15 @@ time bucket. The summary-index approach:
 ```spl
 | tstats summariesonly=t count from datamodel=Network_Sessions
   where nodename=All_Sessions
-  by _time span=5m All_Sessions.mac All_Sessions.ip All_Sessions.port_id
+  by _time span=5m All_Sessions.src_mac All_Sessions.src_ip All_Sessions.dest_nt_host
 | rename "All_Sessions.*" as *
 | eval bucket=floor(_time/300)
 | collect index=behavior_bindings sourcetype=binding:bucketed
 ```
+
+The physical port is not a CIM field, so the switch and port columns have to come from the TC-1
+collector rather than from the Network Sessions model. Join them in on the way out, or write the
+bucketed binding from the collector directly and skip the data model.
 
 Joining against a discretized bucket is an approximation, and it is the right one: it is deterministic,
 it is fast, and its error is bounded by the bucket width, which can be documented. An exact interval join
@@ -1193,8 +1260,8 @@ Single hop, layer 3 to layer 2 to layer 1, resolving an IP to a physical port:
 ```spl
 index=behavior_events sourcetype=morpheus:score:l3 max_abs_z>=6.0
 | eval bucket=floor(_time/300)
-| lookup binding_l2_l3 ip AS src_ip, bucket OUTPUT mac, port_id, switch_id
-| lookup binding_l1     port_id, switch_id OUTPUT site_id, transceiver_serial, lldp_neighbor_chassis_id
+| lookup binding_l2_l3 ip AS src_ip bucket OUTPUT mac port_id switch_id
+| lookup binding_l1 port_id switch_id OUTPUT site_id transceiver_serial lldp_neighbor_chassis_id
 | table _time src_ip mac port_id switch_id site_id max_abs_z event_uid lineage_id
 ```
 
@@ -1213,27 +1280,39 @@ index=behavior_lineage sourcetype=morpheus:edge earliest=-30m
   by lineage_id
 | where layer_span >= 3
 | eval chain_duration = chain_end - chain_start
-| join type=left lineage_id
-  [ search index=behavior_events earliest=-30m
-    | stats max(max_abs_z)  AS peak_z
-            sum(risk_score) AS total_risk
-            values(rule_id) AS rules
-      by lineage_id ]
+```
+
+To attach the scores, do not reach for `join`. Its subsearch silently truncates at 50,000 rows by
+default, which is the same failure mode this document rejects `transaction` for, and it fails exactly
+when the environment is busy enough to matter. Union the two sources and let a single `stats` do the
+correlation:
+
+```spl
+(index=behavior_lineage sourcetype=morpheus:edge) OR (index=behavior_events) earliest=-30m
+| stats dc(osi_layer)   AS layer_span
+        min(_time)      AS chain_start
+        max(_time)      AS chain_end
+        max(max_abs_z)  AS peak_z
+        sum(risk_score) AS total_risk
+        values(rule_id) AS rules
+        values(join_method) AS methods
+  by lineage_id
+| where layer_span >= 3
 | where total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)
+| eval chain_duration = chain_end - chain_start
 | sort - total_risk
 ```
 
-The `layer_span >= 3` filter is what makes this cheap: the overwhelming majority of lineage chains are
-single-layer and are discarded before the expensive join.
+This works because both streams carry `lineage_id`, which is the entire point of minting it upstream.
+The `layer_span >= 3` filter is what keeps it cheap: the overwhelming majority of chains are
+single-layer and are discarded before anything expensive happens.
 
 Ordered-sequence detection for a specific chained rule, R-C-002:
 
 ```spl
 index=behavior_events (rule_id="R-B-L6-001" OR rule_id="R-B-L3-002") earliest=-2h
-| eval layer_event = rule_id . "@" . _time
-| stats list(layer_event) AS seq
-        earliest(eval(if(rule_id="R-B-L6-001", _time, null()))) AS t_tls
-        earliest(eval(if(rule_id="R-B-L3-002", _time, null()))) AS t_beacon
+| stats min(eval(if(rule_id="R-B-L6-001", _time, null()))) AS t_tls
+        min(eval(if(rule_id="R-B-L3-002", _time, null()))) AS t_beacon
         values(lineage_id) AS lineage_id
   by src_ip dest_ip
 | where isnotnull(t_tls) AND isnotnull(t_beacon)

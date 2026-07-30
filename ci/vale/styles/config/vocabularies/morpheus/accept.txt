@@ -104,6 +104,8 @@ Kerberos
 Merkle
 Neo4j
 NetFlow
+[Mm]emoization
+[Uu]ntuned
 [Nn]ondeterminism
 [Nn]ondeterministic
 Okta
