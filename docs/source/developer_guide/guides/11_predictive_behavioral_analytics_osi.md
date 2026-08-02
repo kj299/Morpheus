@@ -47,16 +47,23 @@ exist and must be built, the document says so explicitly rather than implying th
    Part 6 exists because the standalone detection value is concentrated at the top of the stack while
    the collection cost is concentrated at the bottom.
 
-**What is verified versus designed.** The two shipped stages are real code with real tests, and the
+**The SIEM is Splunk.** Part 4 targets Splunk specifically and goes as far as the configuration stanzas,
+rather than covering several SIEM products shallowly. The parts that are SIEM-independent (the
+identifier ladder, the deterministic identifiers, `community_id`, the binding tables) are marked as such,
+and
+[If the SIEM is not Splunk](#if-the-siem-is-not-splunk) says what a port would have to change.
+
+**What is verified versus designed.** The three shipped stages are real code with real tests, and the
 Community ID implementation was checked against the reference implementation over 46,448 flow tuples.
-Everything else here — the telemetry classes, the rules, the SIEM queries, the determinism controls — is
-a design rather than a running system. Thresholds are placeholders unless marked otherwise, and the SPL
-is written from the specification rather than executed against a live Splunk instance.
+Everything else here (the telemetry classes, the rules, the Splunk configuration and queries, the
+determinism controls) is a design rather than a running system. Thresholds are placeholders unless marked
+otherwise, and the SPL and the `.conf` stanzas are written from the documentation rather than executed
+against a live Splunk instance.
 
 **On the word "predictive."** Three of the four mechanisms in Part 1 are forward-looking in a defensible
 sense: trajectory features over reconstruction error, forecast residual from `TimeSeriesStage`, and
 ordered cross-layer precursor chains all fire before an objective is reached rather than after. The
-fourth — the premise that autoencoder reconstruction error rises during reconnaissance and staging — is
+fourth, the premise that autoencoder reconstruction error rises during reconnaissance and staging, is
 a **hypothesis, not a measured result**. It is plausible and widely assumed, but this document does not
 establish it, and a deployment should validate the lead time against its own historical incidents before
 anyone promises prediction to a stakeholder. Absent that validation, what is described here is anomaly
@@ -72,7 +79,7 @@ detection with a forward-looking read on its trend.
 - [Part 1: Reference Architecture for Layers 1-7](#part-1-reference-architecture-for-layers-1-7)
 - [Part 2: Telemetry Class Requirements](#part-2-telemetry-class-requirements)
 - [Part 3: Detection Rule Recommendations](#part-3-detection-rule-recommendations)
-- [Part 4: Chaining Layer 1-7 Lineage in Splunk and Other SIEMs](#part-4-chaining-layer-1-7-lineage-in-splunk-and-other-siems)
+- [Part 4: Chaining Layer 1-7 Lineage in Splunk](#part-4-chaining-layer-1-7-lineage-in-splunk)
 - [Part 5: Preserving Determinism in the Output](#part-5-preserving-determinism-in-the-output)
 - [Part 6: Gaps and Build List](#part-6-gaps-and-build-list)
 
@@ -88,8 +95,8 @@ The repository ships three Python packages plus a compiled core:
 
 | Path | Contents |
 | --- | --- |
-| `python/morpheus/morpheus` | Core SDK: config, pipeline, stages, messages, modules, parsers, controllers, I/O |
-| `python/morpheus/morpheus/_lib` | C++/CUDA core exposed through pybind11: messages, stages, tensors, cuDF interop |
+| `python/morpheus/morpheus` | Core SDK: configuration, pipeline, stages, messages, modules, parsers, controllers, I/O |
+| `python/morpheus/morpheus/_lib` | C++/CUDA core exposed through pybind11: messages, stages, tensors, cuDF interoperability |
 | `python/morpheus/morpheus/_lib/doca` | Optional NVIDIA DOCA GPUNetIO path for line-rate packet capture directly into GPU memory |
 | `python/morpheus_dfp/morpheus_dfp` | Digital fingerprinting: per-entity behavioral modeling, the piece most relevant here |
 | `python/morpheus_llm/morpheus_llm` | LLM engine nodes, vector database services, retrieval-augmented enrichment |
@@ -211,7 +218,7 @@ Modules are the composable sub-stage unit introduced in 23.03. They are register
 `@register_module(NAME, NAMESPACE)` from `python/morpheus/morpheus/utils/module_utils.py` and loaded with
 `builder.load_module(...)`. The DFP deployment in `python/morpheus_dfp/morpheus_dfp/modules/` is the
 reference example of nesting: `dfp_deployment` contains `dfp_training_pipe` and `dfp_inference_pipe`, each
-of which contains `dfp_preproc`, `dfp_rolling_window`, `dfp_data_prep`, and so on. Module identifiers live
+of which contains `dfp_preproc`, `dfp_rolling_window`, `dfp_data_prep`, among others. Module identifiers live
 in `python/morpheus_dfp/morpheus_dfp/utils/module_ids.py`.
 
 ---
@@ -255,7 +262,7 @@ DistinctIncrementColumn(name="appincrement", dtype=int, input_name="appDisplayNa
 Note the ordering dependency: both are cumulative and therefore only well-defined given a total order on
 rows. Part 5 treats this as a first-class determinism requirement.
 
-#### Digital fingerprinting: the per-entity model pattern
+#### Digital fingerprinting: The per-entity model pattern
 
 DFP is the architectural template to generalize. The flow is:
 
@@ -482,7 +489,7 @@ L1/L2 SNMP, LLDP, NAC   -->   segment_l12  ---\
 L3/L4 NetFlow, DOCA     -->   segment_l34  ----\
 L5   auth, VPN, RDP     -->   segment_l5   -----+--> segment_fuse --> Kafka --> Splunk
 L6   TLS, JA4, certs    -->   segment_l6   ----/                       |
-L7   HTTP, DNS, SaaS    -->   segment_l7   ---/                        +--> Elastic
+L7   HTTP, DNS, SaaS    -->   segment_l7   ---/                        +--> graph store
 Identity/asset context  -->   (enrichment lookups)                     +--> object store
 ```
 
@@ -1019,10 +1026,15 @@ Three requirements that are usually skipped and always regretted:
 
 ---
 
-## Part 4: Chaining Layer 1-7 Lineage in Splunk and Other SIEMs
+## Part 4: Chaining Layer 1-7 Lineage in Splunk
 
 This is the hardest part of the design and the part that determines whether the rest of it produces
 anything usable.
+
+This part targets Splunk specifically, down to the configuration stanzas. The identifier ladder, the
+hard-versus-soft join distinction, and the deterministic identifier construction that open the part are
+SIEM-independent and port to any SIEM product; everything from [Splunk implementation](#splunk-implementation)
+onward is Splunk-specific and is meant to be read as something to deploy rather than as an illustration.
 
 ### The identifier ladder
 
@@ -1199,15 +1211,96 @@ Four options, in descending order of preference:
 
 #### Index and sourcetype layout
 
+Four indexes, split by volume and retention rather than by layer:
+
+```ini
+# indexes.conf
+[behavior_events]
+homePath   = $SPLUNK_DB/behavior_events/db
+coldPath   = $SPLUNK_DB/behavior_events/colddb
+thawedPath = $SPLUNK_DB/behavior_events/thaweddb
+frozenTimePeriodInSecs = 7776000
+maxTotalDataSizeMB     = 2048000
+
+[behavior_lineage]
+homePath   = $SPLUNK_DB/behavior_lineage/db
+coldPath   = $SPLUNK_DB/behavior_lineage/colddb
+thawedPath = $SPLUNK_DB/behavior_lineage/thaweddb
+frozenTimePeriodInSecs = 2592000
+maxTotalDataSizeMB     = 512000
+
+[behavior_bindings]
+homePath   = $SPLUNK_DB/behavior_bindings/db
+coldPath   = $SPLUNK_DB/behavior_bindings/colddb
+thawedPath = $SPLUNK_DB/behavior_bindings/thaweddb
+frozenTimePeriodInSecs = 34560000
+
+[behavior_context]
+homePath   = $SPLUNK_DB/behavior_context/db
+coldPath   = $SPLUNK_DB/behavior_context/colddb
+thawedPath = $SPLUNK_DB/behavior_context/thaweddb
+frozenTimePeriodInSecs = 34560000
+```
+
+Sourcetypes within them:
+
 ```text
 index=behavior_events     sourcetype=morpheus:score:l<N>     # one per layer
 index=behavior_lineage    sourcetype=morpheus:edge
-index=behavior_bindings   sourcetype=binding:l2 | binding:l3 | binding:l5
+index=behavior_bindings   sourcetype=binding:l1 | binding:l2 | binding:l3 | binding:bucketed
 index=behavior_context    sourcetype=context:identity | context:asset
 ```
 
-Separating bindings from events is what makes the time-bounded joins tractable, because bindings are
-low-volume and can be replicated into a KV Store collection for lookup-speed access.
+Three deliberate choices here.
+
+**Bindings and context are retained for 400 days while events are retained for 90.** Bindings are the
+only thing that makes a historical attribution reconstructible: an incident investigated in month eleven
+needs to know which host held an address in month one, and if the binding has aged out, the layer 3 event
+that survived is unattributable. Bindings are also two to three orders of magnitude smaller than events,
+so the long retention is close to free. Getting this backwards, with long event retention and short
+binding retention, is a common and expensive mistake.
+
+**Edges are retained for 30 days**, shorter than events. An edge is derivable from the events it links, so
+a chain older than the edge retention can be rebuilt if it ever matters. Edge volume is high enough that
+matching event retention roughly doubles the total storage bill for something rarely queried past a month.
+
+**Separating bindings from events is what makes the time-bounded joins tractable**, because bindings are
+low-volume enough to be replicated into a KV Store collection for lookup-speed access.
+
+#### Parsing and timestamps
+
+Every stream is JSON. The setting that matters is the timestamp: Splunk's default is to find a timestamp
+anywhere in the payload, and with four timestamps in the envelope it will regularly pick the wrong one.
+
+```ini
+# props.conf
+[morpheus:score:l3]
+KV_MODE            = json
+SHOULD_LINEMERGE   = false
+TRUNCATE           = 0
+TIME_PREFIX        = "event_time":"
+TIME_FORMAT        = %Y-%m-%dT%H:%M:%S.%6N%Z
+MAX_TIMESTAMP_LOOKAHEAD = 32
+MAX_DAYS_AGO       = 30
+category           = Custom
+disabled           = false
+```
+
+`TIME_PREFIX` anchored to `event_time` is the single most important line in the Splunk configuration.
+Without it, `_time` drifts toward `ingest_time` and every windowed rule silently becomes a rule about when
+the pipeline was busy. `MAX_DAYS_AGO` must exceed the longest backfill you intend to run, or replayed
+history is quietly rejected.
+
+Repeat the stanza per layer, or use a single `morpheus:score` sourcetype with `osi_layer` as a field. One
+sourcetype per layer is worth the duplication because it lets you set different `MAX_DAYS_AGO` values,
+since SaaS audit APIs at layer 7 backfill far later than NetFlow at layer 3, and because it makes index-time
+routing per layer possible later without reindexing.
+
+`KV_MODE = json` extracts at search time, which keeps the index small. `tstats` cannot see search-time
+fields, so the acceleration path is data model acceleration rather than raw `tstats`, which is what the
+[acceleration section](#acceleration-and-determinism-in-splunk) assumes. The alternative,
+`INDEXED_EXTRACTIONS = json` with `KV_MODE = none`, makes `tstats` work directly against the raw index at
+the cost of a substantially larger index. Choose one and record which, because the queries differ.
 
 #### CIM mapping
 
@@ -1228,26 +1321,160 @@ CIM fields. `risk_score` maps cleanly onto the Risk data model if Enterprise Sec
 
 #### Time-bounded binding lookups
 
-Splunk's `lookup` command does not natively express interval containment, so implement bindings as a KV
-Store collection with an external lookup, or precompute them into a summary index keyed by a discretized
-time bucket. The summary-index approach:
-
-```spl
-| tstats summariesonly=t count from datamodel=Network_Sessions
-  where nodename=All_Sessions
-  by _time span=5m All_Sessions.src_mac All_Sessions.src_ip All_Sessions.dest_nt_host
-| rename "All_Sessions.*" as *
-| eval bucket=floor(_time/300)
-| collect index=behavior_bindings sourcetype=binding:bucketed
-```
-
-The physical port is not a CIM field, so the switch and port columns have to come from the TC-1
-collector rather than from the Network Sessions model. Join them in on the way out, or write the
-bucketed binding from the collector directly and skip the data model.
+Splunk's `lookup` command matches on equality, not on interval containment. An exact interval join is
+expressible in SPL and does not perform at enterprise volume, so the containment has to be precomputed:
+every binding is expanded across the time buckets its interval touches, and the lookup matches on
+`(key, bucket)`.
 
 Joining against a discretized bucket is an approximation, and it is the right one: it is deterministic,
-it is fast, and its error is bounded by the bucket width, which can be documented. An exact interval join
-in SPL is expressible but does not perform at enterprise volume.
+it is fast, and its error is bounded by the bucket width. State the bucket width in every rule that
+depends on it. At a 300-second bucket, an event can be attributed to a binding that had already expired by
+up to 300 seconds, which matters for a DHCP lease that churned within the bucket and does not matter for a
+switch port binding that lasts for months.
+
+**Compute the expansion in Morpheus, not in Splunk.**
+{py:class}`~morpheus.utils.binding_table.BindingTable` holds the intervals and
+{py:meth}`~morpheus.utils.binding_table.BindingTable.to_bucketed_frame` performs the expansion, applying
+the same tie-break that the in-pipeline resolver applies:
+
+```python
+from morpheus.utils.binding_table import BindingTable
+
+leases = BindingTable.from_dataframe(lease_df,
+                                     name="dhcp_lease",
+                                     key_column="ip",
+                                     value_columns=["mac", "port_id", "switch_id"],
+                                     start_column="bind_start",
+                                     end_column="bind_end",
+                                     open_end_duration_ns=8 * 3600 * 10**9)   # cap at the lease time
+
+lookup_rows = leases.to_bucketed_frame(bucket_seconds=300, key_name="ip")
+```
+
+Doing the expansion once, upstream, is what keeps the two sides consistent. If Splunk discretizes
+independently of the pipeline, a chain assembled in SPL can disagree with the columns Morpheus already
+resolved on the same event, and reconciling that during an incident is miserable.
+
+Two properties of the expansion are worth stating explicitly, because both are load-bearing:
+
+- **Exactly one row per key and bucket.** Where several bindings land in one bucket, which happens
+  whenever a lease churns faster than the bucket width, the most recent start wins. A multi-valued
+  lookup would make `lookup` return an unpredictable row.
+- **`open_end_duration_ns` is mandatory for open intervals.** A binding with no observed end is rejected
+  unless you say how long to assume it lasted. This is the guide's own rule, enforced in code: a soft
+  join against an unbounded interval is a guess.
+
+**Resolve in the pipeline as well.** Splunk-side lookups serve ad-hoc investigation; the scored event
+should already carry its resolution so that a rule at layer 3 can reference a physical port without a
+join at all. {py:class}`~morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage` does this at
+full interval precision, with no bucketing error:
+
+```python
+from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+
+pipe.add_stage(BindingResolverStage(config,
+                                    binding_table=leases,
+                                    key_column="src_ip",
+                                    time_column="event_time",
+                                    uid_column="binding_uid"))
+```
+
+Every row comes out with a `resolution_method` of either `soft:dhcp_lease` or `unresolved`, and resolved
+rows carry `binding_uid`, the content-addressed identifier of the exact lease used. That field is what
+makes an attribution auditable eleven months later: the analyst does not have to re-derive which lease was
+in force, because the event names it.
+
+Rows that do not resolve stay in the stream marked `unresolved` rather than being dropped. A dropped row
+looks like an absence of activity, which is the worst possible failure mode for a detection pipeline.
+Alert on the unresolved rate. A rising rate means the collector is losing expiry records, and every
+attribution it produces is suspect. `BindingTable` counts overlapping intervals at construction for the
+same reason and logs a warning.
+
+**Define the lookup.** The KV Store collection and its lookup definition:
+
+```ini
+# collections.conf
+[binding_l2_l3_collection]
+enforceTypes = true
+field.ip          = string
+field.bucket      = number
+field.mac         = string
+field.port_id     = string
+field.switch_id   = string
+field.binding_uid = string
+accelerated_fields.by_ip_bucket = {"ip": 1, "bucket": 1}
+```
+
+```ini
+# transforms.conf
+[binding_l2_l3]
+external_type = kvstore
+collection    = binding_l2_l3_collection
+fields_list   = ip, bucket, mac, port_id, switch_id, binding_uid
+
+[binding_l1]
+external_type = kvstore
+collection    = binding_l1_collection
+fields_list   = port_id, switch_id, site_id, transceiver_serial, lldp_neighbor_chassis_id
+```
+
+The accelerated field definition is not optional. Without it, every `lookup` against a collection holding
+tens of millions of bucket rows is a collection scan, and the chain queries below become unusable at
+exactly the moment they are needed.
+
+`binding_l1` has no bucket because a transceiver in a switch port is stable for months. Bucket only what
+actually churns; bucketing a stable binding multiplies its row count by the retention period for no gain.
+
+#### Populating the lookups
+
+Morpheus publishes the expanded rows to `index=behavior_bindings sourcetype=binding:bucketed`, and a
+scheduled search materializes them into the KV Store:
+
+```ini
+# savedsearches.conf
+[Binding lookup - L2/L3 refresh]
+enableSched          = 1
+cron_schedule        = */5 * * * *
+dispatch.earliest_time = -20m@m
+dispatch.latest_time   = -5m@m
+realtime_schedule    = 0
+search = index=behavior_bindings sourcetype=binding:bucketed binding_table=dhcp_lease \
+| eval _key = ip . "|" . bucket \
+| table _key ip bucket mac port_id switch_id binding_uid \
+| outputlookup binding_l2_l3 append=t key_field=_key
+```
+
+Three details carry the weight:
+
+- **`_key` is a deterministic composite of the lookup's own key fields.** That makes the write idempotent:
+  a re-run, a replay, or an overlapping schedule window overwrites the same document instead of appending
+  a duplicate. This is control 11 from Part 5 applied at the SIEM boundary, and without it a retry
+  silently corrupts the lookup.
+- **`realtime_schedule = 0`** puts the search on continuous scheduling, so a run skipped during a restart
+  is caught up rather than abandoned. With the default, a skipped run leaves a permanent hole in the
+  lookup and every event in that window becomes unattributable.
+- **The window trails by five minutes and is twice the schedule interval.** The lag absorbs indexing
+  latency; the overlap means a single late-arriving binding still lands, and the idempotent `_key` makes
+  the overlap harmless.
+
+Expiry is a separate job, because `outputlookup append=t` never removes anything:
+
+```ini
+[Binding lookup - L2/L3 expiry]
+enableSched   = 1
+cron_schedule = 17 3 * * *
+search = | inputlookup binding_l2_l3 \
+| where bucket >= floor((now() - 34560000) / 300) \
+| outputlookup binding_l2_l3
+```
+
+This is the one place `now()` is acceptable, because the job is maintenance rather than detection and its
+output is never compared across runs. Every search whose result a rule depends on must still use
+`info_max_time`.
+
+Run the expiry job at an hour when the refresh job is least likely to be mid-write, and keep its retention
+aligned with `frozenTimePeriodInSecs` on `behavior_bindings`. A lookup that expires before the index does
+produces the same unattributable-event failure as losing the index itself.
 
 #### Walking the ladder
 
@@ -1324,6 +1551,62 @@ index=behavior_events (rule_id="R-B-L6-001" OR rule_id="R-B-L3-002") earliest=-2
 Requiring `gap > 0` enforces the ordering, which is the entire point of a chained rule. A rule that
 matches the same two events in either order is a co-occurrence rule and should be labeled as one.
 
+#### Scheduling the detections
+
+The queries above are the logic. Turning one into a detection that fires reproducibly is a matter of the
+stanza around it:
+
+```ini
+# savedsearches.conf
+[R-C-002 - TLS anomaly precedes beaconing]
+enableSched            = 1
+cron_schedule          = */15 * * * *
+dispatch.earliest_time = -2h@m
+dispatch.latest_time   = -15m@m
+realtime_schedule      = 0
+schedule_window        = 5
+allow_skew             = 5m
+description = Layer 6 TLS fingerprint anomaly followed within one hour by layer 3 beaconing on the same \
+              endpoint pair. Determinism tier D2. Bucket width 300s on binding lookups.
+search = index=behavior_events (rule_id="R-B-L6-001" OR rule_id="R-B-L3-002") \
+| stats min(eval(if(rule_id="R-B-L6-001", _time, null()))) AS t_tls \
+        min(eval(if(rule_id="R-B-L3-002", _time, null()))) AS t_beacon \
+        values(lineage_id) AS lineage_id \
+  by src_ip dest_ip \
+| where isnotnull(t_tls) AND isnotnull(t_beacon) \
+| eval gap = t_beacon - t_tls \
+| where gap > 0 AND gap <= 3600 \
+| eval rule_id = "R-C-002", risk_score = 70
+action.correlationsearch.enabled = 1
+action.correlationsearch.label   = R-C-002
+```
+
+Point by point, because each line is there to prevent a specific failure:
+
+- **`dispatch.latest_time = -15m@m`, never `now`.** The 15-minute trailing edge is the lateness horizon
+  from Part 5. A search ending at `now` includes whatever happened to be indexed at the moment it ran, so
+  two runs over the same nominal window return different results and the rule is not reproducible. The
+  `@m` snap matters as much as the offset: without it the window boundary moves with the scheduler's
+  jitter.
+- **The window is 2 hours for a rule with a 1-hour `maxspan`.** A sequence rule needs a search window of
+  at least the span plus the schedule interval plus the lateness horizon, or a chain straddling a window
+  boundary is never seen by either run. Getting this wrong produces a rule that works in testing, where
+  events are dense, and misses in production, where they are not.
+- **`schedule_window = 5` and `allow_skew = 5m`** let the scheduler move the run to reduce contention.
+  Both are safe *only because* the time range is absolute rather than relative to the run: the search
+  returns the same rows whenever it actually executes. With `latest_time = now` they would be a source of
+  nondeterminism rather than a scheduling convenience.
+- **`realtime_schedule = 0`** again, for the same reason as the lookup jobs: catch up rather than skip.
+
+Overlapping windows mean a chain can match on consecutive runs. Deduplicate downstream on
+`(rule_id, lineage_id)` rather than by narrowing the window. The alternative trades duplicate alerts for
+missed ones, which is the wrong trade. The `lineage_id` is stable across runs by construction, which is
+what makes this deduplication reliable rather than best-effort.
+
+For rules driven off the summary index rather than the raw index, the same stanza applies with
+`index=behavior_summary` and a longer `dispatch.earliest_time`, since summary rows are written on a
+5-minute cadence and are themselves subject to the lateness horizon.
+
 #### Acceleration and determinism in Splunk
 
 - Use `tstats` against accelerated data models for the volume layers. Accept that acceleration introduces
@@ -1336,44 +1619,39 @@ matches the same two events in either order is a co-occurrence rule and should b
   when it runs. `earliest=-45m latest=-15m` does not.
 - Never use `now()` inside a search that must be reproducible. Use `info_max_time`.
 
-### Other SIEMs
+### A graph store alongside Splunk
 
-**Microsoft Sentinel.** The lineage edge stream becomes a custom table; chain assembly uses KQL's
-`make-series` and the `union` plus `summarize` pattern. Sentinel's `Watchlist` maps well to TC-0 context.
-For ordered sequences, KQL's `scan` operator expresses state machines directly and more naturally than
-SPL, and is a genuine advantage for chained rules:
+Splunk is the detection and alerting surface. It is a poor investigation surface for open-ended multi-hop
+questions, because every additional hop is another `stats` over another index and the query cost grows
+with the estate rather than with the answer.
 
-```kusto
-MorpheusEdges
-| where TimeGenerated > ago(2h)
-| sort by LineageId asc, TimeGenerated asc
-| scan declare (Stage: int = 0) with (
-    step s1: OsiLayer == 6 and RuleId == "R-B-L6-001" => Stage = 1;
-    step s2: OsiLayer == 3 and RuleId == "R-B-L3-002" and Stage == 1 => Stage = 2;
-  )
-| where Stage == 2
-```
+For investigation, fan the edge stream out to a property graph as well (Neo4j, or the RAPIDS `cugraph`
+stack that is already in the Morpheus dependency set). Questions such as "every layer 7 operation
+reachable from this physical port in the last 24 hours" are one Cypher clause and a page of SPL. This is
+an addition, not an alternative: the same Kafka topic feeds both, the graph carries no detection logic,
+and nothing in Part 3 depends on it.
 
-**Elastic.** Map to ECS: `related.ip`, `related.user`, `related.hosts`, `related.hash`, and
-`network.community_id`. The `related.*` fields are purpose-built for exactly this cross-document
-correlation problem and do most of the ladder's work natively. EQL sequences express chained rules
-directly:
+`examples/gnn_fraud_detection_pipeline` shows the pattern for scoring a graph with a GNN once it is
+built. The same technique applies to scoring lineage chains directly rather than scoring their
+constituent events, which is the natural next step once the edge stream has been running long enough to
+have a labeled history.
 
-```eql
-sequence by network.community_id with maxspan=1h
-  [ tls where morpheus.rule_id == "R-B-L6-001" ]
-  [ network where morpheus.rule_id == "R-B-L3-002" ]
-```
+### If the SIEM is not Splunk
 
-`WriteToElasticsearchStage` writes here directly, which makes Elastic the lowest-friction target of the
-three.
+This part is deliberately Splunk-only. The pieces that transfer without change are the ones that live
+upstream of the SIEM: the identifier ladder, `event_uid` / `link_uid` / `lineage_id`, `community_id`, the
+binding tables, and the four-timestamp discipline. Those are properties of the data Morpheus emits.
 
-**Graph store.** For investigation rather than detection, load the edge stream into a property graph
-(Neo4j, or the RAPIDS `cugraph` stack that is already in the Morpheus dependency set). Multi-hop
-questions such as "every layer 7 operation reachable from this physical port in the last 24 hours" are
-trivial in Cypher and painful in SPL. The `examples/gnn_fraud_detection_pipeline` shows the pattern for
-scoring a graph with a GNN once it is built, and the same technique applies to scoring lineage chains
-directly rather than scoring their constituent events.
+What does not transfer is everything from the index layout down. Two things are worth knowing before
+porting:
+
+- **Ordered-sequence detection is where backends differ most.** The `stats`-based sequence idiom below
+  exists because SPL has no native ordered-sequence operator that is safe at volume. Backends that do
+  have one, such as Microsoft Sentinel's `scan` and Elastic's EQL `sequence`, express the chained rules in
+  Part 3 far more directly, and a port should use them rather than transliterating the SPL.
+- **The bucketed binding lookup is a workaround for equality-only lookups.** A SIEM product with interval
+  joins should use them and skip the discretization, which removes the bounded attribution error
+  described below.
 
 ### Handling time correctly
 
@@ -1731,6 +2009,9 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage`) and the Community ID flow
   hash ({py:mod}`~morpheus.utils.community_id` and
   {py:class}`~morpheus.stages.lineage.community_id_stage.CommunityIdStage`).
+- Time-bounded soft joins with a fixed tie-break, in-pipeline resolution, and bucketed lookup generation
+  ({py:mod}`~morpheus.utils.binding_table` and
+  {py:class}`~morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage`).
 
 ### Must be built
 
@@ -1739,9 +2020,10 @@ What Morpheus provides versus what has to be built, stated plainly.
 | Deterministic window sealing | Medium | Lateness horizon, revision numbering, late-arrival stream |
 | Entity sharding router configuration | Small | `RouterStage` with a stable hash; replaces intra-stage threading |
 | TC-1 and TC-2 collectors | Medium | SNMP, LLDP, DHCP, and 802.1X normalization. No Morpheus support today |
-| Binding table maintenance | Medium | Interval-closed L2-to-L3 and L3-to-identity bindings with explicit expiry |
+| Binding table ingestion | Small | Feeding `BindingTable` from the collectors, and refreshing it on a schedule. The resolution and expansion logic ships |
 | Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |
-| Chained rule engine | Medium | Runs in the SIEM, not in Morpheus. SPL, KQL, or EQL per Part 4 |
+| Splunk app packaging | Small | The `indexes.conf`, `props.conf`, `collections.conf`, `transforms.conf`, and `savedsearches.conf` stanzas in Part 4 |
+| Chained rule engine | Medium | Runs in Splunk, not in Morpheus. SPL per Part 4 |
 | Determinism CI harness | Medium | Golden corpus plus the six checks in control 13 |
 | Bitemporal TC-0 context store | Medium | Valid-time and transaction-time intervals |
 

@@ -63,6 +63,7 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 
 ## Lineage
 
+- Binding Resolver Stage {py:class}`~morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage` Resolve each row against a time-bounded binding table, such as DHCP leases or switch forwarding entries, and write the resolved attributes as columns. Every row is marked as resolved or unresolved so that an inferred attribution is distinguishable from an exact one.
 - Community ID Stage {py:class}`~morpheus.stages.lineage.community_id_stage.CommunityIdStage` Add a Community ID flow hash column to network telemetry. Both directions of a bidirectional flow produce the same value, which makes the column an exact join key against telemetry produced by other network tooling.
 - Lineage Stamp Stage {py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage` Attach deterministic `event_uid` and `link_uid` provenance identifiers to every row, so that a replay of the same input reconstructs the same lineage. Refer to [Predictive Behavioral Analytics Across OSI Layers 1-7](../developer_guide/guides/11_predictive_behavioral_analytics_osi.md) for how these identifiers are consumed by a SIEM.
 
