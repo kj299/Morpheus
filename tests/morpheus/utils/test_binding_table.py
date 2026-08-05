@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import datetime
+import logging
 
 import pandas as pd
 import pytest
@@ -135,7 +136,15 @@ def test_overlapping_intervals_resolve_to_the_later_start(caplog: pytest.LogCapt
         "bind_end": [4 * HOUR_NS, 3 * HOUR_NS],
     })
 
-    table = build_leases(df=overlapping)
+    # The configured `morpheus` logger does not propagate to the root logger, where caplog listens, so the handler is
+    # attached to the emitting logger directly.
+    module_logger = logging.getLogger("morpheus.utils.binding_table")
+    module_logger.addHandler(caplog.handler)
+
+    try:
+        table = build_leases(df=overlapping)
+    finally:
+        module_logger.removeHandler(caplog.handler)
 
     assert table.overlapping_key_count == 1
     assert "overlapping intervals on 1 of 1 keys" in caplog.text

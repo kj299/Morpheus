@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+
 import numpy as np
 import pytest
 
@@ -185,8 +187,16 @@ def test_series_null_ports_treated_as_portless():
 
 
 def test_series_bad_row_yields_none_by_default(caplog: pytest.LogCaptureFixture):
-    results = community_id_series(["10.0.0.1", "bogus", None], ["10.0.0.2", "10.0.0.2", "10.0.0.2"],
-                                  [PROTO_TCP, PROTO_TCP, PROTO_TCP], [1234, 1234, 1234], [80, 80, 80])
+    # The configured `morpheus` logger does not propagate to the root logger, where caplog listens, so the handler is
+    # attached to the emitting logger directly.
+    module_logger = logging.getLogger("morpheus.utils.community_id")
+    module_logger.addHandler(caplog.handler)
+
+    try:
+        results = community_id_series(["10.0.0.1", "bogus", None], ["10.0.0.2", "10.0.0.2", "10.0.0.2"],
+                                      [PROTO_TCP, PROTO_TCP, PROTO_TCP], [1234, 1234, 1234], [80, 80, 80])
+    finally:
+        module_logger.removeHandler(caplog.handler)
 
     assert results[0] == community_id("10.0.0.1", "10.0.0.2", PROTO_TCP, 1234, 80)
     assert results[1] is None
