@@ -41,6 +41,16 @@ NS_PER_SECOND = 10**9
 DEFAULT_MAX_BUCKETS_PER_BINDING = 10_000
 """Bucket count above which `BindingTable.to_bucketed_records` refuses to expand a single binding."""
 
+DEFAULT_BUCKET_SECONDS = 300
+"""
+Canonical bucket width for the discretized binding lookups.
+
+This is a contract, not a preference: the pipeline expands bindings across buckets of this width and the SIEM
+rediscretizes event times with the same divisor. The two sides must agree exactly, or every lookup silently misses.
+The shipped Splunk app uses this value, and `tests/morpheus/utils/test_splunk_app_contracts.py` fails if they
+diverge.
+"""
+
 
 @dataclasses.dataclass(frozen=True)
 class Binding:
@@ -421,7 +431,7 @@ class BindingTable:
         return results
 
     def to_bucketed_records(self,
-                            bucket_seconds: int,
+                            bucket_seconds: int = DEFAULT_BUCKET_SECONDS,
                             key_name: str = "key",
                             bucket_name: str = "bucket",
                             include_uid: bool = True,
@@ -440,8 +450,8 @@ class BindingTable:
 
         Parameters
         ----------
-        bucket_seconds : int
-            Bucket width. Must match the discretization used by the query side.
+        bucket_seconds : int, default = 300
+            Bucket width. Must match the discretization used by the query side; see `DEFAULT_BUCKET_SECONDS`.
         key_name : str, default = "key"
             Field name for the key in the emitted records.
         bucket_name : str, default = "bucket"
@@ -500,14 +510,14 @@ class BindingTable:
 
         return records
 
-    def to_bucketed_frame(self, bucket_seconds: int, **kwargs) -> "pd.DataFrame":
+    def to_bucketed_frame(self, bucket_seconds: int = DEFAULT_BUCKET_SECONDS, **kwargs) -> "pd.DataFrame":
         """
         Flatten the table into a pandas DataFrame, ready to be written as a SIEM lookup.
 
         Parameters
         ----------
-        bucket_seconds : int
-            Bucket width in seconds.
+        bucket_seconds : int, default = 300
+            Bucket width in seconds; see `DEFAULT_BUCKET_SECONDS`.
         **kwargs
             Forwarded to `to_bucketed_records`.
 
