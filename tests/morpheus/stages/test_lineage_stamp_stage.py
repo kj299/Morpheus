@@ -222,3 +222,24 @@ def test_gpu_hashing_matches_host_path(config: Config, envelope_df):
     assert _as_list(gpu_meta, "event_uid") == _as_list(host_meta, "event_uid")
     assert _as_list(gpu_meta, "link_uid") == _as_list(host_meta, "link_uid")
     assert _as_list(gpu_meta, "join_method") == _as_list(host_meta, "join_method")
+
+
+@pytest.mark.gpu_mode
+def test_gpu_gate_failure_stops_the_stage(config: Config, envelope_df, monkeypatch: pytest.MonkeyPatch):
+    # Fail-closed at the stage level: a gate failure must abort the batch, never fall back to host hashing
+    # silently, and never be swallowed. This is the stage-side negative control for the equivalence gate.
+    from morpheus.utils import lineage_cudf
+
+    def forced_failure(**_kwargs):
+        raise RuntimeError("forced gate failure")
+
+    monkeypatch.setattr(lineage_cudf, "verify_digest_equivalence", forced_failure)
+
+    stage = LineageStampStage(config, use_gpu_hashing=True)
+    meta = MessageMeta(envelope_df)
+
+    with pytest.raises(RuntimeError, match="forced gate failure"):
+        stage.on_data(meta)
+
+    # The gate did not pass, so no identifiers may have been stamped.
+    assert "event_uid" not in meta.get_column_names()

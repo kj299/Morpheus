@@ -106,3 +106,23 @@ def test_validation():
 
     with pytest.raises(ValueError):
         link_uid_series_cudf(cudf.Series(["p"]), cudf.Series(["c", "d"]), "r", "m")
+
+
+def test_gate_fails_closed_on_event_uid_disagreement(monkeypatch: pytest.MonkeyPatch):
+    # The negative control for the gate itself: a check that has never been seen to fail proves nothing. Forcing
+    # the host reference to return a wrong digest must make the gate raise, or the gate is decoration.
+    import morpheus.utils.lineage_cudf as lineage_cudf_module
+
+    monkeypatch.setattr(lineage_cudf_module, "event_uid", lambda *args, **kwargs: "0" * 32)
+
+    with pytest.raises(RuntimeError, match="disagrees"):
+        verify_digest_equivalence()
+
+
+def test_gate_fails_closed_on_link_uid_disagreement(monkeypatch: pytest.MonkeyPatch):
+    import morpheus.utils.lineage_cudf as lineage_cudf_module
+
+    monkeypatch.setattr(lineage_cudf_module, "link_uid", lambda *args, **kwargs: "0" * 32)
+
+    with pytest.raises(RuntimeError, match="disagrees"):
+        verify_digest_equivalence()

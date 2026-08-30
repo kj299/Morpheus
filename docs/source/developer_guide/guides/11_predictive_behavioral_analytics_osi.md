@@ -1180,6 +1180,12 @@ speedup on the hashing alone. The comparison deliberately excludes the device-to
 host path additionally pays inside a GPU pipeline, so the in-pipeline gain is larger. As with the
 other figures in this section, treat these as one machine's measurement, not a specification.
 
+Be precise about which constraint this lifts. The device path covers `event_uid` and `link_uid`
+only, so a GPU pipeline that opts in can stamp lineage at raw layer 3 and 4 event rates. Community ID
+remains host-only, and its worst-case ~180k rows/s still argues for computing it downstream of the
+flow rollup, where memoization does the work; the placement advice earlier in this section stands for
+that stage unchanged.
+
 Emit the edges as a **separate stream** from the scored events, on its own Kafka topic and into its own
 SIEM index. Edges are small, numerous, and queried with entirely different access patterns than events.
 Denormalizing edges into event records seems simpler and makes the multi-hop walk in the next section
