@@ -560,7 +560,7 @@ pipeline is how lineage silently breaks.
 | `collector_id` | string | Stable identifier for the collecting agent or sensor. |
 | `collector_seq` | uint64 | Strictly monotonic sequence per `collector_id`. This is the tiebreaker that makes ordering total. |
 | `observed_time` | timestamp, UTC, nanoseconds | When the sensor saw the event. |
-| `event_time` | timestamp, UTC, nanoseconds | When the event occurred, if the source reports it. Defaults to `observed_time`. |
+| `event_time` | RFC 3339 UTC string on the wire, nanoseconds in the pipeline | When the event occurred, if the source reports it. Defaults to `observed_time`. The two representations are one field at different points; see [The event time wire format](#the-event-time-wire-format). |
 | `ingest_time` | timestamp, UTC | Set at the Morpheus source. Never used in a detection rule. |
 | `clock_source` | enum | `ptp`, `ntp_disciplined`, `ntp_undisciplined`, `unsynchronized`. |
 | `clock_offset_ms` | int | Last measured offset. Records above a configured bound are quarantined, not dropped. |
@@ -1237,6 +1237,40 @@ Four options, in descending order of preference:
    lineage edge stream, which is not latency-sensitive.
 4. **Elasticsearch as primary with Splunk federated search.** Viable if Elastic is already deployed;
    `WriteToElasticsearchStage` exists and works.
+
+#### The event time wire format
+
+`event_time` is an integer count of nanoseconds inside the pipeline, which is what
+`window_id_from_timestamp` and the binding tables consume. It must not reach the SIEM that way. Splunk
+anchors timestamp extraction on a prefix and applies a `strptime` format; a nineteen-digit integer
+matches neither, and the failure is silent.
+
+Render it before the sink:
+
+```python
+from morpheus.utils.siem_wire import render_event_time_series
+
+df["event_time"] = render_event_time_series(df["event_time"])   # 2026-08-30T18:25:00.123456UTC
+```
+
+Measured on a live Splunk instance, ingesting the same event both ways through Morpheus's own Kafka
+serializer: the rendered form lands at its true event time, three hours in the past. The unrendered
+form lands at **index time**, dated to the moment of ingest. Nothing in the pipeline, the sink, or
+Splunk reports an error.
+
+The fallback is worse than that experiment first suggested. Splunk only reaches for index time when it
+has nothing else; where an unparsable event follows a parsable one from the same source, it inherits
+**the previous event's timestamp**. A partially broken stream therefore produces timestamps that are
+wrong but entirely plausible, clustered near real events, and no threshold on `_indextime` will find
+them. This is the failure mode the four-timestamp discipline in [Handling time
+correctly](#handling-time-correctly) exists to prevent, and it starts here, at the rendering.
+
+Two consequences worth stating. The rendering is microsecond precision, matching Splunk's `%6N`, and
+truncates rather than rounds, so an event never crosses a window boundary it did not cross; carry the
+exact integer in a separate field where nanosecond fidelity has to survive the hop. And the
+`event_time` rendering is a fourth shared contract between the pipeline and the SIEM, alongside the
+bucket width, the binding retention, and the Community ID seed. `tests/morpheus/utils/test_siem_wire.py`
+enforces it by reading the shipped `props.conf` directly, so the two sides cannot drift apart.
 
 #### Index and sourcetype layout
 

@@ -73,6 +73,14 @@ side alone breaks the joins silently.
 3. **The Community ID seed, zero.** Not a Splunk setting, but the reason the `community_id` field
    joins against Zeek and Suricata data in the same estate. If any producer changes the seed, they
    all must.
+4. **The `event_time` rendering.** `props.conf` anchors `_time` on `event_time` arriving as an RFC 3339
+   UTC string, for example `2026-08-30T18:25:00.123456UTC`. Produce it with
+   `morpheus.utils.siem_wire.render_event_time_series` before the sink. Sending the pipeline's raw
+   nanosecond integer instead is silent and severe: verified on a live instance, such an event is
+   indexed at ingest time rather than its own, and where it follows a parsable event from the same
+   source it inherits *that* event's timestamp, which looks plausible and is wrong.
+   `tests/morpheus/utils/test_siem_wire.py` reads this app's `props.conf` directly and fails if the
+   two sides drift.
 
 ## What to expect once data flows
 

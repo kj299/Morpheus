@@ -137,6 +137,7 @@ Salesforce
 SOC's
 Splunk
 [Ss]caler('?s)?
+[Ss]erializer(s?)
 [Ss]cheduler's
 [Ss]Flow
 [Ss]harding
@@ -148,6 +149,7 @@ Suricata
 ULPs
 [Uu]naggregated
 [Uu]nattributable
+[Uu]nrendered
 [Uu]nmanaged
 [Uu]nsampled
 [Uu]ntuned
