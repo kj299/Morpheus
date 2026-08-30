@@ -83,9 +83,9 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     lateness_seconds : int, default = 900
         Lateness horizon: how far the watermark must pass a window's end before the window seals. Set it per
         telemetry class; 15 minutes suits network telemetry, SaaS audit feeds need more.
-    epoch : int or str, default = 0
-        Absolute anchor for window boundaries: nanoseconds since the Unix epoch, or any timestamp string
-        `pandas.Timestamp` accepts.
+    epoch : str, default = "1970-01-01"
+        Absolute anchor for window boundaries, as any timestamp string `pandas.Timestamp` accepts. An integer
+        nanosecond value is also accepted when constructing programmatically.
     time_column : str, default = "event_time"
         Column holding the event time. Event time, never ingest time.
     time_unit : str, default = "ns"
@@ -105,10 +105,10 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  c: Config,
                  period_seconds: int = 300,
                  lateness_seconds: int = 900,
-                 epoch: typing.Union[int, str] = 0,
+                 epoch: str = "1970-01-01",
                  time_column: str = "event_time",
                  time_unit: str = "ns",
-                 order_columns: typing.Optional[list[str]] = None,
+                 order_columns: list[str] = None,
                  seal_on_complete: bool = True,
                  raise_on_invalid: bool = False):
         super().__init__(c)

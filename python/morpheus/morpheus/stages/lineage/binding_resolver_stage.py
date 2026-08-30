@@ -38,7 +38,7 @@ UNRESOLVED = "unresolved"
 """Value written to the method column when no binding covered the row."""
 
 
-@register_stage("binding-resolve", ignore_args=["binding_table"])
+@register_stage("binding-resolve", ignore_args=["binding_table", "output_columns"])
 class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Resolve each row against a `BindingTable` and write the resolved attributes as columns.
@@ -62,9 +62,10 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     c : `morpheus.config.Config`
         Pipeline configuration instance.
     binding_table : `morpheus.utils.binding_table.BindingTable`
-        The facts to resolve against.
-    key_column : str
-        Column holding the value to resolve, for example `src_ip`.
+        The facts to resolve against. Required; the default of `None` exists only so the CLI can register the
+        stage, and construction rejects it.
+    key_column : str, default = "src_ip"
+        Column holding the value to resolve.
     time_column : str, default = "event_time"
         Column holding the event time. Must be event time, never ingest time: resolving a lease against the moment the
         record reached the pipeline attributes late-arriving telemetry to whoever holds the address now.
@@ -86,13 +87,13 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
     def __init__(self,
                  c: Config,
-                 binding_table: BindingTable,
-                 key_column: str,
+                 binding_table: BindingTable = None,
+                 key_column: str = "src_ip",
                  time_column: str = "event_time",
                  time_unit: str = "ns",
-                 output_columns: typing.Optional[dict[str, str]] = None,
+                 output_columns: dict = None,
                  method_column: str = "resolution_method",
-                 uid_column: typing.Optional[str] = None,
+                 uid_column: str = None,
                  raise_on_unresolved: bool = False):
         super().__init__(c)
 
