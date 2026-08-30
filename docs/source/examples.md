@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,6 +25,7 @@ Ensure the environment is set up by following [Getting Started with Morpheus](./
 * [Example Ransomware Detection Morpheus Pipeline for AppShield Data](../../examples/ransomware_detection/README.md)
 * [Root Cause Analysis Acceleration & Predictive Maintenance Example](../../examples/root_cause_analysis/README.md)
 * [SID Visualization Example](../../examples/sid_visualization/README.md)
+* [Splunk Lineage App for Morpheus Behavioral Analytics](../../examples/splunk_lineage_app/README.md)
 * Large Language Models (LLMs)
   * [Agents](../../examples/llm/agents/README.md)
   * [Completion](../../examples/llm/completion/README.md)

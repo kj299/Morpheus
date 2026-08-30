@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -62,3 +62,7 @@ will walk through the process of creating a custom module in Python and C++.
 - [Digital Fingerprinting (DFP)](./guides/5_digital_fingerprinting.md)
 - [Digital Fingerprinting (DFP) Reference](./guides/6_digital_fingerprinting_reference.md)
 - [Modular DFP Reference](./guides/10_modular_pipeline_digital_fingerprinting.md)
+
+## Solution Design
+
+- [Predictive Behavioral Analytics Across OSI Layers 1-7](./guides/11_predictive_behavioral_analytics_osi.md)

@@ -1,5 +1,5 @@
 ..
-   SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+   SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
    SPDX-License-Identifier: Apache-2.0
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,6 +32,7 @@ Developer Guides
    ./8_cpp_modules.md
    ./9_control_messages.md
    ./10_modular_pipeline_digital_fingerprinting.md
+   ./11_predictive_behavioral_analytics_osi.md
 
 
 .. toctree::
