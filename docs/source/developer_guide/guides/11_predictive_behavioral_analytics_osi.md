@@ -591,6 +591,15 @@ security, badge readers and rack door sensors.
 Counters must be reported as **deltas with an explicit interval**, not raw values, because raw counters
 wrap and reset silently on device reboot. A `counter_reset` flag on each record removes ambiguity.
 
+{py:class}`~morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage` performs that conversion in
+the pipeline, so the collector stays a stateless poller. Differencing needs the previous sample, which
+makes it stateful, and state at the collector is state to be replicated, aged, and lost on restart.
+Placed here it also inherits the pipeline's determinism controls: the stage is single-engine and shards
+by device (control 4), and it processes rows in the order given, flagging a sample that arrives out of
+order rather than reporting the negative delta a naive subtraction would produce. A wrap and a reboot are
+indistinguishable in the counter alone, so `sysUpTime` is what separates them; without it the stage emits
+no delta rather than guessing, because either guess would read like a measurement.
+
 **Behavioral features:** `DistinctIncrementColumn` over `transceiver_serial` per port catches hardware
 substitution. `DistinctIncrementColumn` over `lldp_neighbor_chassis_id` catches topology change. Optical
 power deviation from a per-port rolling baseline catches both degradation and physical tapping. Link
@@ -2137,13 +2146,17 @@ What Morpheus provides versus what has to be built, stated plainly.
 - The determinism CI harness: control 13's six checks running against the reference lineage pipeline
   over a seeded golden corpus ({py:mod}`~morpheus.utils.determinism` and
   `tests/morpheus/determinism/`).
+- TC-1 counter normalization: monotonic interface counters turned into per-interval deltas, with a
+  counter wrap distinguished from a device reboot, and the `site_id:device_id:port_id` entity key
+  ({py:mod}`~morpheus.utils.counter_delta` and
+  {py:class}`~morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage`).
 
 ### Must be built
 
 | Component | Effort | Notes |
 | --- | --- | --- |
 | Entity sharding router configuration | Small | `RouterStage` with a stable hash; replaces intra-stage threading |
-| TC-1 and TC-2 collectors | Medium | SNMP, LLDP, DHCP, and 802.1X normalization. No Morpheus support today |
+| TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
 | Binding table ingestion | Small | Feeding `BindingTable` from the collectors, and refreshing it on a schedule. The resolution and expansion logic ships |
 | Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |
 | Chained rule engine | Medium | Runs in Splunk, not in Morpheus. The `examples/splunk_lineage_app` searches are the starting set |

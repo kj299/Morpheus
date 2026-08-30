@@ -29,6 +29,7 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - [Output](#output)
 - [Post-process](#post-process)
 - [Pre-process](#pre-process)
+- [Telemetry](#telemetry)
 
 
 ## DOCA
@@ -98,3 +99,7 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - Drop Null Stage {py:class}`~morpheus.stages.preprocess.drop_null_stage.DropNullStage` Drop null data entries from a DataFrame.
 - Preprocess FIL Stage {py:class}`~morpheus.stages.preprocess.preprocess_fil_stage.PreprocessFILStage` Prepare FIL input DataFrames for inference.
 - Preprocess NLP Stage {py:class}`~morpheus.stages.preprocess.preprocess_nlp_stage.PreprocessNLPStage` Prepare NLP input DataFrames for inference.
+
+## Telemetry
+
+- TC-1 Normalize Stage {py:class}`~morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage` Turn the monotonic interface counters emitted by an SNMP and LLDP collector into per-interval deltas, distinguishing a counter wrap from a device reboot and flagging samples that arrive out of order. Also writes the `site_id:device_id:port_id` entity key the per-port models are keyed on. Refer to [Predictive Behavioral Analytics Across OSI Layers 1-7](../developer_guide/guides/11_predictive_behavioral_analytics_osi.md) for the telemetry classes this envelope belongs to.

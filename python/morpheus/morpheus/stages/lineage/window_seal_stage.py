@@ -28,9 +28,9 @@ from morpheus.messages import MessageMeta
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.stages.lineage._column_utils import to_host_list
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.window_seal import SEALED_BY_FLUSH
 from morpheus.utils.window_seal import SEALED_BY_WATERMARK
 from morpheus.utils.window_seal import WindowSealer
