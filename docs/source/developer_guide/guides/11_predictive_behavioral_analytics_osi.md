@@ -1174,6 +1174,12 @@ accepts only string and integer identifier columns and refuses nulls, because th
 whose rendering is provably identical between the two implementations; anything else must be
 pre-rendered as a string or stay on the host path.
 
+Measured over two million rows on an RTX 5000 Ada laptop GPU, warmed and best of three: the device
+path hashed ~57M rows/s against ~1.5M rows/s for the host path on the same machine's CPU, a 38x
+speedup on the hashing alone. The comparison deliberately excludes the device-to-host copy that the
+host path additionally pays inside a GPU pipeline, so the in-pipeline gain is larger. As with the
+other figures in this section, treat these as one machine's measurement, not a specification.
+
 Emit the edges as a **separate stream** from the scored events, on its own Kafka topic and into its own
 SIEM index. Edges are small, numerous, and queried with entirely different access patterns than events.
 Denormalizing edges into event records seems simpler and makes the multi-hop walk in the next section
