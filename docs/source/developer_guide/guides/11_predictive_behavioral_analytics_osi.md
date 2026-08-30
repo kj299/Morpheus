@@ -2021,6 +2021,16 @@ golden output is a checked-in CSV regenerated deliberately, never silently, via
 fresh interpreters with two different `PYTHONHASHSEED` values, which is the variation an in-process
 double run cannot see.
 
+One trap in check 6 deserves calling out, because the shipped harness initially fell into it.
+Canonicalization sorts output rows before comparing, so a permutation of the input can only be detected
+through a *value* that depends on row order. A pipeline with no cumulative features passes the
+permutation check unconditionally, sort or no sort, and the check proves nothing. The reference
+pipeline therefore derives an `IncrementColumn`-style ordinal (`window_seq`) inside each sealed
+window, and the harness carries a negative control that reintroduces the removed-sort defect and
+asserts the check catches it. Apply the same discipline to any pipeline this harness is pointed at: if
+none of the compared columns is order-derived, check 6 is decoration, and a negative control is the
+only way to know.
+
 ### What cannot be made deterministic
 
 Being straightforward about the boundaries is part of the design:

@@ -27,6 +27,7 @@ binding resolution, and deterministic window sealing.
 """
 
 import random
+import typing
 
 import pandas as pd
 
@@ -149,7 +150,12 @@ def build_pipeline_config(use_cpp: bool = False) -> Config:
     return config
 
 
-def run_pipeline(config: Config, dataframes: list[pd.DataFrame]) -> pd.DataFrame:
+DEFAULT_ORDER_COLUMNS = ["event_time", "collector_id", "collector_seq"]
+
+
+def run_pipeline(config: Config,
+                 dataframes: list[pd.DataFrame],
+                 order_columns: typing.Optional[list[str]] = None) -> pd.DataFrame:
     """
     Run the reference lineage pipeline over the given source frames and return the canonicalized output.
 
@@ -159,12 +165,19 @@ def run_pipeline(config: Config, dataframes: list[pd.DataFrame]) -> pd.DataFrame
         Pipeline configuration.
     dataframes : list of `pandas.DataFrame`
         Source frames; how the corpus is split across them is the batching under test.
+    order_columns : list of str, optional
+        Passed through to `WindowSealStage`. Defaults to the guide's total row order. The permutation check's
+        negative control passes an explicit `[]` to reproduce the removed-sort defect and prove the harness
+        catches it.
 
     Returns
     -------
     `pandas.DataFrame`
         The concatenated, canonicalized output of every emitted window.
     """
+    if (order_columns is None):
+        order_columns = DEFAULT_ORDER_COLUMNS
+
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(
@@ -175,7 +188,7 @@ def run_pipeline(config: Config, dataframes: list[pd.DataFrame]) -> pd.DataFrame
         WindowSealStage(config,
                         period_seconds=PERIOD_SECONDS,
                         lateness_seconds=LATENESS_SECONDS,
-                        order_columns=["event_time", "collector_id", "collector_seq"]))
+                        order_columns=order_columns if len(order_columns) > 0 else None))
     sink = pipe.add_stage(InMemorySinkStage(config))
 
     pipe.run()
@@ -188,6 +201,12 @@ def run_pipeline(config: Config, dataframes: list[pd.DataFrame]) -> pd.DataFrame
 
         if (hasattr(df, "to_pandas")):
             df = df.to_pandas()
+
+        # A cumulative, order-derived feature in the style of IncrementColumn: each row's ordinal among its
+        # entity's rows within the emitted window. Canonicalization erases row *order*, so without a *value*
+        # that depends on order, the permutation check could never fail and would prove nothing. This column is
+        # what gives that check teeth: remove the stage's sort and permuted input changes these values.
+        df["window_seq"] = df.groupby("src_ip").cumcount()
 
         frames.append(df)
 

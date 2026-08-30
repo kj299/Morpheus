@@ -139,7 +139,10 @@ def test_against_golden_via_compare_dataframe_stage(config: Config, corpus: pd.D
                         period_seconds=lineage_pipeline.PERIOD_SECONDS,
                         lateness_seconds=lineage_pipeline.LATENESS_SECONDS,
                         order_columns=["event_time", "collector_id", "collector_seq"]))
-    comp_stage = pipe.add_stage(CompareDataFrameStage(config, compare_df=golden, index_col="event_uid"))
+    # window_seq is derived by the harness after collection, not by a stage, so it is excluded from the raw
+    # in-pipeline comparison; the harness-side golden check covers it.
+    comp_stage = pipe.add_stage(
+        CompareDataFrameStage(config, compare_df=golden, index_col="event_uid", exclude=["window_seq"]))
 
     pipe.run()
 
@@ -165,6 +168,26 @@ def test_batch_split_sweep(config: Config, corpus: pd.DataFrame):
 
     assert diff_frames(whole, _run(config, thirds)) is None
     assert diff_frames(whole, _run(config, by_row)) is None
+
+
+@pytest.mark.cpu_mode
+def test_permutation_check_has_teeth(config: Config, corpus: pd.DataFrame):
+    # The negative control for check 6: reintroduce the exact defect control 8 targets, a removed sort, and
+    # assert the harness catches it. Canonicalization erases row order, so this only works because the pipeline
+    # emits window_seq, a value derived from row order; without such a value the permutation check passes
+    # unconditionally and proves nothing. A harness change that makes this test fail has disarmed check 6.
+    windows = [window_id_from_timestamp(int(t), lineage_pipeline.PERIOD_SECONDS * 10**9) for t in corpus["event_time"]]
+
+    unsorted_baseline = lineage_pipeline.run_pipeline(config, [corpus.copy()], order_columns=[])
+
+    detected = False
+    for seed in (1, 2, 3):
+        shuffled = permute_within_contiguous_groups(corpus, windows, seed=seed)
+        detected = detected or (diff_frames(
+            unsorted_baseline, lineage_pipeline.run_pipeline(config, [shuffled], order_columns=[])) is not None)
+
+    assert detected, ("Removing the window sort did not change any output under permutation; the permutation "
+                      "check has lost its teeth.")
 
 
 @pytest.mark.cpu_mode
