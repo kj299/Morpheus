@@ -27,8 +27,8 @@ from morpheus.messages import MessageMeta
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.stages.lineage._column_utils import assign_str_column
-from morpheus.stages.lineage._column_utils import to_host_list
+from morpheus.utils.column_assign import assign_str_column
+from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.lineage import DEFAULT_DIGEST_LENGTH
 from morpheus.utils.lineage import event_uid_series
 from morpheus.utils.lineage import link_uid_series

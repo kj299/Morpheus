@@ -213,3 +213,8 @@ examples/digital_fingerprinting/visualization/*-dfp-output/
 # Ignore saved benchmark data
 tests/benchmarks/.benchmarks/
 examples/digital_fingerprinting/production/benchmarks/.benchmarks/
+
+# Ignore the third-party Vale style packages that `vale sync` downloads. Only the project's own
+# vocabularies under ci/vale/styles/config/ are tracked.
+ci/vale/styles/*/
+!ci/vale/styles/config/
