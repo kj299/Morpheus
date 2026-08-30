@@ -2009,6 +2009,18 @@ Determinism claims decay silently. Enforce them:
 
 Run 1 and 2 on every commit; run the rest nightly.
 
+All six checks ship, implemented against the reference lineage pipeline in
+`tests/morpheus/determinism/`, with the comparison half factored into
+{py:mod}`~morpheus.utils.determinism` for reuse against any pipeline: `canonicalize` reduces output to
+a normal form in which two deterministic runs compare equal, `diff_frames` explains the first
+disagreement in build-log terms, `frame_digest` gives the one-line D0 verdict, and
+`permute_within_contiguous_groups` produces the legal input shuffles for check 6. The corpus is seeded
+code rather than checked-in data, which keeps it out of LFS while remaining exactly as fixed, and the
+golden output is a checked-in CSV regenerated deliberately, never silently, via
+`tests/morpheus/determinism/run_lineage_pipeline.py`. The cross-restart check runs that same driver in
+fresh interpreters with two different `PYTHONHASHSEED` values, which is the variation an in-process
+double run cannot see.
+
 ### What cannot be made deterministic
 
 Being straightforward about the boundaries is part of the design:
@@ -2057,6 +2069,9 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Deterministic window sealing with a lateness horizon, revision numbering, and a late-arrival stream
   ({py:mod}`~morpheus.utils.window_seal` and
   {py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage`).
+- The determinism CI harness: control 13's six checks running against the reference lineage pipeline
+  over a seeded golden corpus ({py:mod}`~morpheus.utils.determinism` and
+  `tests/morpheus/determinism/`).
 
 ### Must be built
 
@@ -2067,7 +2082,6 @@ What Morpheus provides versus what has to be built, stated plainly.
 | Binding table ingestion | Small | Feeding `BindingTable` from the collectors, and refreshing it on a schedule. The resolution and expansion logic ships |
 | Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |
 | Chained rule engine | Medium | Runs in Splunk, not in Morpheus. The `examples/splunk_lineage_app` searches are the starting set |
-| Determinism CI harness | Medium | Golden corpus plus the six checks in control 13 |
 | Bitemporal TC-0 context store | Medium | Valid-time and transaction-time intervals |
 
 ### Sequencing recommendation
