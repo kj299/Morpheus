@@ -4,5 +4,5 @@
 # Make the app's knowledge objects visible to all apps, so the lookups and
 # saved searches can be used from Search and from Enterprise Security.
 []
-access = read : [ * ], write : [ admin ]
+access = read : [ * ], write : [ admin, sc_admin ]
 export = system

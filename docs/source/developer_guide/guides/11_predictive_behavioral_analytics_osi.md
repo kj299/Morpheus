@@ -1249,14 +1249,12 @@ homePath   = $SPLUNK_DB/behavior_events/db
 coldPath   = $SPLUNK_DB/behavior_events/colddb
 thawedPath = $SPLUNK_DB/behavior_events/thaweddb
 frozenTimePeriodInSecs = 7776000
-maxTotalDataSizeMB     = 2048000
 
 [behavior_lineage]
 homePath   = $SPLUNK_DB/behavior_lineage/db
 coldPath   = $SPLUNK_DB/behavior_lineage/colddb
 thawedPath = $SPLUNK_DB/behavior_lineage/thaweddb
 frozenTimePeriodInSecs = 2592000
-maxTotalDataSizeMB     = 512000
 
 [behavior_bindings]
 homePath   = $SPLUNK_DB/behavior_bindings/db

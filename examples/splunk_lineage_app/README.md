@@ -85,6 +85,36 @@ side alone breaks the joins silently.
   fires, the collector is losing lease or expiry records, and attributions are degrading into
   guesses; fix collection before trusting anything downstream.
 
+## Packaging
+
+To produce an installable package for Splunkbase-style distribution:
+
+```bash
+COPYFILE_DISABLE=1 tar -czf TA-morpheus-lineage.spl TA-morpheus-lineage
+```
+
+## How this app was validated
+
+Three levels, strongest last:
+
+1. **AppInspect.** `splunk-appinspect inspect TA-morpheus-lineage --mode precert` passes with zero
+   failures. The remaining warning is informational (the app contains `collections.conf`, which is
+   expected).
+2. **Live load.** The app was installed into a fresh Splunk Enterprise 10.2 instance: `btool check`
+   reports no errors, all five indexes are created, all seven scheduled searches register, and every
+   one of them executes without a parse error against empty indexes.
+3. **Functional.** With synthetic JSON telemetry seeded into the indexes and bindings written to the
+   KV Store: timestamps anchor to `event_time` as the props intend, the identifier ladder resolves an
+   IP through both lookups to a physical port and site, the chain assembly search emits the seeded
+   cross-layer chain with the expected span and risk, and R-C-002 detects its ordered sequence with
+   the expected gap.
+
+One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
+`KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields
+at search time and every query silently matches nothing. Seed test events with a JSON `_raw`
+(`| eval _raw=json_object(...)`) including an `event_time` field, exactly as the Morpheus pipeline
+emits them.
+
 ## Relationship to the design guide
 
 The stanzas here are the normative copies of the fragments quoted in the guide's Part 4. When the
