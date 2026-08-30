@@ -1850,6 +1850,27 @@ Then:
 - `window_id` is a component of `lineage_id`, so an event's chain membership is a function of its event
   time alone.
 
+This control ships as {py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage`, backed by
+{py:mod}`~morpheus.utils.window_seal`. The seal is driven by the event-time watermark rather than the
+wall clock, which is the property that makes it replayable: the same rows in the same order seal the
+same windows at the same points in the stream, however fast the replay runs. Window membership is a pure
+function of each row's event time; only the on-time versus late split depends on stream order, and that
+split is exactly what the late-arrival stream records:
+
+```python
+from morpheus.stages.lineage.window_seal_stage import WindowSealStage
+
+pipe.add_stage(
+    WindowSealStage(config,
+                    period_seconds=300,
+                    lateness_seconds=900,
+                    order_columns=["event_time", "collector_id", "collector_seq"]))
+```
+
+`order_columns` applies control 8's stable total order to each emitted window, so cumulative features
+computed downstream see rows in a reproducible order. The stage is stateful and runs single-engine;
+for parallelism, shard by entity upstream (control 4) and give each shard its own instance.
+
 ### Control 8: A total order on rows
 
 `IncrementColumn` and `DistinctIncrementColumn` are cumulative and therefore order-dependent. Two runs
@@ -2033,12 +2054,14 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage`).
 - The Splunk side of Part 4 as an installable app: indexes, sourcetypes, KV Store binding lookups,
   and the scheduled searches ([`examples/splunk_lineage_app`](../../../../examples/splunk_lineage_app/README.md)).
+- Deterministic window sealing with a lateness horizon, revision numbering, and a late-arrival stream
+  ({py:mod}`~morpheus.utils.window_seal` and
+  {py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage`).
 
 ### Must be built
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| Deterministic window sealing | Medium | Lateness horizon, revision numbering, late-arrival stream |
 | Entity sharding router configuration | Small | `RouterStage` with a stable hash; replaces intra-stage threading |
 | TC-1 and TC-2 collectors | Medium | SNMP, LLDP, DHCP, and 802.1X normalization. No Morpheus support today |
 | Binding table ingestion | Small | Feeding `BindingTable` from the collectors, and refreshing it on a schedule. The resolution and expansion logic ships |

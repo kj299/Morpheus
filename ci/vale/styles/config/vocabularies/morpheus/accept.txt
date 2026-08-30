@@ -129,6 +129,7 @@ Okta
 [Qq]uantize(d?)
 [Rr]econstructible
 [Rr]eindexing
+[Rr]eplayable
 [Rr]ollup(s?)
 [Rr]unbook
 SaaS
