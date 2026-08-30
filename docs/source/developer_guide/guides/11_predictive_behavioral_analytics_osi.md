@@ -1195,6 +1195,12 @@ identifiers that no other tool in the estate will agree with, which forfeits the
 
 ### Splunk implementation
 
+Everything in this section ships as an installable app,
+[`examples/splunk_lineage_app`](../../../../examples/splunk_lineage_app/README.md). The stanzas
+quoted below are the explanation; the app is the normative copy, and when the two disagree the app
+is what was meant to run. The app's README lists the three values that must match the Morpheus
+pipeline configuration.
+
 #### Getting data in
 
 Four options, in descending order of preference:
@@ -1240,6 +1246,12 @@ homePath   = $SPLUNK_DB/behavior_context/db
 coldPath   = $SPLUNK_DB/behavior_context/colddb
 thawedPath = $SPLUNK_DB/behavior_context/thaweddb
 frozenTimePeriodInSecs = 34560000
+
+[behavior_summary]
+homePath   = $SPLUNK_DB/behavior_summary/db
+coldPath   = $SPLUNK_DB/behavior_summary/colddb
+thawedPath = $SPLUNK_DB/behavior_summary/thaweddb
+frozenTimePeriodInSecs = 7776000
 ```
 
 Sourcetypes within them:
@@ -1248,10 +1260,17 @@ Sourcetypes within them:
 index=behavior_events     sourcetype=morpheus:score:l<N>     # one per layer
 index=behavior_lineage    sourcetype=morpheus:edge
 index=behavior_bindings   sourcetype=binding:l1 | binding:l2 | binding:l3 | binding:bucketed
+index=behavior_summary    sourcetype=stash               # written by collect
 index=behavior_context    sourcetype=context:identity | context:asset
 ```
 
-Three deliberate choices here.
+`behavior_summary` holds the 5-minute per-layer score rollups that the chained rules read; it is
+populated by a scheduled search rather than by Morpheus directly, and its retention matches
+`behavior_events` because a chained rule can look back as far as any event it correlates. Its
+sourcetype stays at `collect`'s default (`stash`) deliberately: that is what keeps summary volume
+exempt from license metering, so consumers filter on the index alone.
+
+Four deliberate choices here.
 
 **Bindings and context are retained for 400 days while events are retained for 90.** Bindings are the
 only thing that makes a historical attribution reconstructible: an incident investigated in month eleven
@@ -2012,6 +2031,8 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Time-bounded soft joins with a fixed tie-break, in-pipeline resolution, and bucketed lookup generation
   ({py:mod}`~morpheus.utils.binding_table` and
   {py:class}`~morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage`).
+- The Splunk side of Part 4 as an installable app: indexes, sourcetypes, KV Store binding lookups,
+  and the scheduled searches ([`examples/splunk_lineage_app`](../../../../examples/splunk_lineage_app/README.md)).
 
 ### Must be built
 
@@ -2022,8 +2043,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 | TC-1 and TC-2 collectors | Medium | SNMP, LLDP, DHCP, and 802.1X normalization. No Morpheus support today |
 | Binding table ingestion | Small | Feeding `BindingTable` from the collectors, and refreshing it on a schedule. The resolution and expansion logic ships |
 | Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |
-| Splunk app packaging | Small | The `indexes.conf`, `props.conf`, `collections.conf`, `transforms.conf`, and `savedsearches.conf` stanzas in Part 4 |
-| Chained rule engine | Medium | Runs in Splunk, not in Morpheus. SPL per Part 4 |
+| Chained rule engine | Medium | Runs in Splunk, not in Morpheus. The `examples/splunk_lineage_app` searches are the starting set |
 | Determinism CI harness | Medium | Golden corpus plus the six checks in control 13 |
 | Bitemporal TC-0 context store | Medium | Valid-time and transaction-time intervals |
 
