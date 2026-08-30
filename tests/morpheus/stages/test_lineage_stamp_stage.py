@@ -198,3 +198,27 @@ def test_missing_parent_column_raises(config: Config, envelope_df):
 def test_constructor_validation(config: Config, kwargs: dict):
     with pytest.raises(ValueError):
         LineageStampStage(config, **kwargs)
+
+
+@pytest.mark.cpu_mode
+def test_gpu_hashing_requires_gpu_mode(config: Config):
+    with pytest.raises(ValueError, match="GPU execution mode"):
+        LineageStampStage(config, use_gpu_hashing=True)
+
+
+@pytest.mark.gpu_mode
+def test_gpu_hashing_matches_host_path(config: Config, envelope_df):
+    # The stage-level equivalence check: the opt-in device path must stamp byte-identical identifiers, and its
+    # runtime gate must have passed for the batch to be processed at all.
+    envelope_df["parent_event_uid"] = ["p1", None, ""]
+
+    host_meta = MessageMeta(envelope_df.copy(deep=True))
+    gpu_meta = MessageMeta(envelope_df.copy(deep=True))
+
+    common = {"parent_uid_column": "parent_event_uid", "relation": "carried_by", "join_method": "hard:flow_id"}
+    LineageStampStage(config, **common).on_data(host_meta)
+    LineageStampStage(config, use_gpu_hashing=True, **common).on_data(gpu_meta)
+
+    assert _as_list(gpu_meta, "event_uid") == _as_list(host_meta, "event_uid")
+    assert _as_list(gpu_meta, "link_uid") == _as_list(host_meta, "link_uid")
+    assert _as_list(gpu_meta, "join_method") == _as_list(host_meta, "join_method")

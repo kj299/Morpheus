@@ -1163,6 +1163,17 @@ unique by construction, so its ~590k rows/s is the harder ceiling and the one to
 layer 5 and layer 7 event volumes that is ample. At raw layer 3 and 4 packet rates it is not, and the
 lineage stamp has to sit downstream of aggregation.
 
+Where the host ceiling still binds, `LineageStampStage` offers an opt-in device path
+(`use_gpu_hashing=True`) that computes the same SHA-256 digests through cuDF's `hash_values`. The
+identifiers are still required to be byte-identical to the host path, and that requirement is enforced
+rather than assumed: {py:mod}`~morpheus.utils.lineage_cudf` ships a digest-equivalence gate over probe
+vectors, covering the separator boundary case, non-ASCII text, and negative integers, and the stage
+runs it before the first device-hashed batch. If this cuDF's digests ever disagree with `hashlib`, the
+pipeline fails closed instead of minting identifiers nothing else can reproduce. The device path
+accepts only string and integer identifier columns and refuses nulls, because those are the cases
+whose rendering is provably identical between the two implementations; anything else must be
+pre-rendered as a string or stay on the host path.
+
 Emit the edges as a **separate stream** from the scored events, on its own Kafka topic and into its own
 SIEM index. Edges are small, numerous, and queried with entirely different access patterns than events.
 Denormalizing edges into event records seems simpler and makes the multi-hop walk in the next section

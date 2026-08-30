@@ -49,8 +49,13 @@ class LineageStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     it. Recording the join method is what later lets an analyst distinguish an exact attribution from an inferred one.
 
     Every identifier is a pure function of values already in the message, so replaying the same input reproduces the
-    same lineage. Hashing is performed on the host in both GPU and CPU execution modes so that an identifier never
-    depends on which mode produced it.
+    same lineage. By default, hashing is performed on the host in both GPU and CPU execution modes so that an
+    identifier never depends on which mode produced it. `use_gpu_hashing` opts a GPU pipeline into device-side
+    hashing via cuDF; the identifiers are still required to be byte-identical to the host path, and the stage
+    enforces that by running `morpheus.utils.lineage_cudf.verify_digest_equivalence` before the first GPU-hashed
+    batch. If this cuDF's digests disagree with the host digests, the pipeline fails closed rather than minting
+    identifiers nothing else can reproduce. The GPU path accepts only string and integer id columns and refuses
+    nulls, because those are the cases whose rendering is provably identical between the two implementations.
 
     Place this stage immediately after normalization, before any windowing or scoring, so that downstream stages carry
     the identifiers and any late-arriving copy of a record resolves to the same `event_uid`.
@@ -78,6 +83,9 @@ class LineageStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Column to write `join_method` to. Only used when `parent_uid_column` is set.
     digest_length : int, default = 32
         Number of hexadecimal characters retained from each SHA-256 digest.
+    use_gpu_hashing : bool, default = False
+        Compute the digests on the device via cuDF instead of on the host. Requires GPU execution mode. Gated by a
+        runtime digest-equivalence check that fails closed; see the class description.
     """
 
     def __init__(self,
@@ -89,8 +97,16 @@ class LineageStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  relation: str = "derived_from",
                  join_method: str = "hard",
                  join_method_column: str = "join_method",
-                 digest_length: int = DEFAULT_DIGEST_LENGTH):
+                 digest_length: int = DEFAULT_DIGEST_LENGTH,
+                 use_gpu_hashing: bool = False):
         super().__init__(c)
+
+        if (use_gpu_hashing):
+            from morpheus.config import ExecutionMode
+
+            if (c.execution_mode != ExecutionMode.GPU):
+                raise ValueError("use_gpu_hashing requires GPU execution mode. The host path is the default and "
+                                 "works in both modes.")
 
         if (id_columns is None):
             id_columns = list(DEFAULT_ID_COLUMNS)
@@ -111,6 +127,8 @@ class LineageStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._join_method = join_method
         self._join_method_column = join_method_column
         self._digest_length = digest_length
+        self._use_gpu_hashing = use_gpu_hashing
+        self._gpu_gate_passed = False
 
         self._needed_columns[event_uid_column] = TypeId.STRING
 
@@ -165,6 +183,12 @@ class LineageStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 raise KeyError(f"LineageStampStage requires columns {missing} which are not present in the DataFrame. "
                                f"Available columns: {sorted(df.columns)}")
 
+            # Imported here so that this module remains importable in CPU-only environments where cuDF is absent.
+            from morpheus.utils.type_utils import is_cudf_type
+
+            if (self._use_gpu_hashing and is_cudf_type(df)):
+                return self._stamp_on_device(message, df)
+
             columns = [to_host_list(df, col) for col in self._id_columns]
             event_uids = event_uid_series(columns, digest_length=self._digest_length)
             assign_str_column(df, self._event_uid_column, event_uids)
@@ -184,6 +208,33 @@ class LineageStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
                 assign_str_column(df, self._link_uid_column, link_uids)
                 assign_str_column(df, self._join_method_column, [self._join_method] * len(event_uids))
+
+        return message
+
+    def _stamp_on_device(self, message: typing.Union[ControlMessage, MessageMeta], df):
+        """Stamp identifiers via cuDF, running the digest-equivalence gate before the first batch."""
+        from morpheus.utils import lineage_cudf
+
+        if (not self._gpu_gate_passed):
+            lineage_cudf.verify_digest_equivalence(digest_length=self._digest_length)
+            self._gpu_gate_passed = True
+            logger.info("GPU digest-equivalence gate passed; LineageStampStage hashing on the device.")
+
+        event_uids = lineage_cudf.event_uid_series_cudf(df, self._id_columns, digest_length=self._digest_length)
+        df[self._event_uid_column] = event_uids
+
+        if (self._parent_uid_column is not None):
+            if (self._parent_uid_column not in df.columns):
+                raise KeyError(f"LineageStampStage was configured with parent_uid_column="
+                               f"'{self._parent_uid_column}' which is not present in the DataFrame. "
+                               f"Available columns: {sorted(df.columns)}")
+
+            df[self._link_uid_column] = lineage_cudf.link_uid_series_cudf(df[self._parent_uid_column],
+                                                                          event_uids,
+                                                                          self._relation,
+                                                                          self._join_method,
+                                                                          digest_length=self._digest_length)
+            df[self._join_method_column] = self._join_method
 
         return message
 
