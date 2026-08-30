@@ -605,6 +605,15 @@ substitution. `DistinctIncrementColumn` over `lldp_neighbor_chassis_id` catches 
 power deviation from a per-port rolling baseline catches both degradation and physical tapping. Link
 flap count per interval catches instability that often precedes a layer 2 loop.
 
+The two novelty features ship as
+{py:class}`~morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage`, over the schema in
+{py:mod}`~morpheus.utils.tc1_features`. Both are cumulative and therefore order-dependent, so the stage
+imposes control 8's total order before counting rather than trusting the caller to have sorted; that is
+the whole reason the derivation is a stage and not a bare schema. Note the limit of a period-bucketed
+count: it resets at each boundary, so a swap between the last poll of one day and the first of the next
+reads as one distinct value on each day and is not detected. Choose `period` against the cadence of
+legitimate change, and treat the boundary as a known blind spot rather than assumed coverage.
+
 **Cadence:** 30 to 60 seconds for counters, event-driven for state transitions.
 **Cardinality:** thousands to low tens of thousands of ports. Low enough for per-port models.
 **Retention:** 13 months. Physical changes are investigated long after the fact.
@@ -1953,6 +1962,11 @@ df = df.sort_values(["event_time", "collector_id", "collector_seq"], kind="merge
 `collector_seq` to be strictly monotonic per collector. `kind="mergesort"` selects a stable sort, so rows
 that compare equal retain their relative order rather than being permuted arbitrarily.
 
+`morpheus.utils.determinism.sort_for_cumulative_features` is that sort, with one addition: it rejects
+ties by default rather than falling back on stability. A stable sort makes the output a function of the
+input arrangement, which is the property determinism is supposed to remove, so leftover ties mean the
+order columns do not identify a row and the caller is told rather than handed plausible output.
+
 Apply the same discipline to the rolling window. `CachedUserWindow.append_dataframe` already computes
 `_row_hash` via `pd.util.hash_pandas_object` and uses it to find the boundary between seen and unseen
 rows; combined with a `max_history` expressed as a duration rather than a row count, window membership
@@ -2150,6 +2164,10 @@ What Morpheus provides versus what has to be built, stated plainly.
   counter wrap distinguished from a device reboot, and the `site_id:device_id:port_id` entity key
   ({py:mod}`~morpheus.utils.counter_delta` and
   {py:class}`~morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage`).
+- The TC-1 novelty features, transceiver substitution and neighbor change, with control 8's total order
+  imposed before the cumulative primitives run ({py:mod}`~morpheus.utils.tc1_features`,
+  {py:class}`~morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage`, and
+  `morpheus.utils.determinism.sort_for_cumulative_features`).
 
 ### Must be built
 
