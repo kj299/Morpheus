@@ -625,6 +625,17 @@ legitimately changed optics reads above 1 for the rest of the quarter and a rule
 value carried across periods per entity, the way {py:mod}`~morpheus.utils.counter_delta` carries counter
 state, which is a different primitive from `DistinctIncrementColumn`.
 
+Optical power deviation ships as {py:class}`~morpheus.stages.telemetry.tc1_optical_stage.TC1OpticalStage`
+over {py:mod}`~morpheus.utils.optical_baseline`. The baseline is the median of the port's own prior
+readings inside a trailing window, which is the only reference that generalizes: an absolute threshold
+loose enough not to alarm on a long span is loose enough to miss a tap on a short one. The median rather
+than the mean because optical diagnostics report an occasional wild value, and prior readings rather
+than all of them because a sample included in its own baseline damps the very step it should expose.
+Note that the baseline follows the link, so a step is a transient signal: once the window has rolled
+past the last pre-step reading the deviation returns to zero, and a degradation slower than the window
+is invisible because the baseline drifts down with it. Catching that needs a commissioning value to
+compare against, which is asset context and belongs in TC-0.
+
 **Cadence:** 30 to 60 seconds for counters, event-driven for state transitions.
 **Cardinality:** thousands to low tens of thousands of ports. Low enough for per-port models.
 **Retention:** 13 months. Physical changes are investigated long after the fact.
@@ -2179,6 +2190,9 @@ What Morpheus provides versus what has to be built, stated plainly.
   imposed before the cumulative primitives run ({py:mod}`~morpheus.utils.tc1_features`,
   {py:class}`~morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage`, and
   `morpheus.utils.determinism.sort_for_cumulative_features`).
+- TC-1 optical power deviation against a per-port rolling baseline
+  ({py:mod}`~morpheus.utils.optical_baseline` and
+  {py:class}`~morpheus.stages.telemetry.tc1_optical_stage.TC1OpticalStage`).
 
 ### Must be built
 
