@@ -23,6 +23,10 @@ Canonicalization exists because a deterministic pipeline is allowed to emit the 
 arrangement: the row set is the contract, the emission order of otherwise-identical messages is not. `canonicalize`
 reduces a DataFrame to a normal form, sorted rows, sorted columns, plain index, optionally quantized floats, and
 `diff_frames` explains the first disagreement in terms a build log can show.
+
+`sort_for_cumulative_features` is the one piece here that runs in the pipeline rather than in the harness. Control 8
+requires a total row order to be established before any cumulative feature is computed, because those features
+accumulate down the frame; without it the harness above has nothing to prove.
 """
 
 import decimal
@@ -34,6 +38,82 @@ import pandas as pd
 
 DEFAULT_FLOAT_DECIMALS = 4
 """Decimal places used when quantizing float columns, matching determinism control 9's score quantum."""
+
+DEFAULT_ORDER_COLUMNS = ("event_time", "collector_id", "collector_seq")
+"""Total order for cumulative features, per determinism control 8.
+
+`event_time` alone is insufficient because ties are common at second or millisecond resolution, and
+`collector_id` with `collector_seq` breaks every remaining tie: the envelope requires `collector_seq` to be strictly
+monotonic per collector, so the pair is unique on its own.
+"""
+
+
+def sort_for_cumulative_features(df: pd.DataFrame,
+                                 order_columns: typing.Sequence[str] = DEFAULT_ORDER_COLUMNS,
+                                 require_total_order: bool = True) -> pd.DataFrame:
+    """
+    Impose determinism control 8's total row order, which every cumulative feature depends on.
+
+    `IncrementColumn` and `DistinctIncrementColumn` accumulate down the frame, so the value they produce for a row is
+    a function of which rows preceded it. Two runs that see the same rows in different orders therefore produce
+    different features and different scores. Nothing about the result looks wrong, which is what makes this the most
+    easily missed defect in the pipeline: an unsorted batch does not raise, it silently answers a different question.
+
+    The sort is stable, so rows that compare equal on every order column keep their relative order rather than being
+    permuted arbitrarily. That is a weaker guarantee than it appears, because it makes the output a function of the
+    input arrangement, which is exactly what determinism is supposed to eliminate. `require_total_order` is therefore
+    on by default: ties mean the order columns do not identify a row, and the caller is told so rather than being
+    handed a frame whose features depend on how the batch happened to arrive.
+
+    The index is reset, both because the sorted position is the only meaningful one afterwards and because the
+    cumulative primitives realign their output by index and need it to be unique.
+
+    Parameters
+    ----------
+    df : `pandas.DataFrame`
+        Frame to order. A cuDF frame is accepted and copied to the host, since the cumulative primitives run there.
+    order_columns : list of str, default = `DEFAULT_ORDER_COLUMNS`
+        Sort key, in significant order.
+    require_total_order : bool, default = True
+        Raise when the order columns leave ties, rather than falling back on the input's own arrangement.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        The rows in total order, with a fresh index.
+
+    Raises
+    ------
+    KeyError
+        If an order column is absent.
+    ValueError
+        If `order_columns` is empty, or if `require_total_order` is set and the columns leave ties.
+    """
+    if (hasattr(df, "to_pandas")):
+        df = df.to_pandas()
+
+    order_columns = list(order_columns)
+
+    if (len(order_columns) == 0):
+        raise ValueError("At least one order column is required")
+
+    missing = [column for column in order_columns if column not in df.columns]
+
+    if (len(missing) > 0):
+        raise KeyError(f"Order columns {missing} are not present in the DataFrame. "
+                       f"Available columns: {sorted(df.columns)}")
+
+    if (require_total_order and len(df) > 0):
+        tied = int(df.duplicated(subset=order_columns).sum())
+
+        if (tied > 0):
+            raise ValueError(
+                f"Order columns {order_columns} leave {tied} tied row(s), so they do not define a total order and "
+                "any cumulative feature computed after this point would depend on the order the batch arrived in. "
+                "Add a tie-breaking column, or pass require_total_order=False to accept the input's own order for "
+                "ties.")
+
+    return df.sort_values(order_columns, kind="mergesort").reset_index(drop=True)
 
 
 def quantize_value(value: float, decimals: int = DEFAULT_FLOAT_DECIMALS) -> float:

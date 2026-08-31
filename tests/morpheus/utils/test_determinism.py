@@ -22,6 +22,7 @@ from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
 from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.determinism import quantize_value
+from morpheus.utils.determinism import sort_for_cumulative_features
 
 
 def test_quantize_value_uses_half_even():
@@ -130,3 +131,57 @@ def test_permute_is_reproducible_and_seed_sensitive():
 def test_permute_rejects_length_mismatch():
     with pytest.raises(ValueError):
         permute_within_contiguous_groups(pd.DataFrame({"row": [1]}), [0, 1], seed=1)
+
+
+def _order_frame() -> pd.DataFrame:
+    return pd.DataFrame({
+        "event_time": [30, 10, 20, 10],
+        "collector_id": ["a", "b", "a", "a"],
+        "collector_seq": [3, 1, 2, 1],
+        "row": ["fourth", "third", "second", "first"],
+    })
+
+
+def test_sort_for_cumulative_features_orders_by_every_key():
+    result = sort_for_cumulative_features(_order_frame())
+
+    # event_time alone leaves the two rows at 10 tied; collector_id then collector_seq settles them.
+    assert result["row"].tolist() == ["first", "third", "second", "fourth"]
+    assert result.index.tolist() == [0, 1, 2, 3]
+
+
+def test_sort_for_cumulative_features_rejects_ties():
+    df = _order_frame()
+    # A collector that repeats a sequence number has broken the envelope's monotonicity contract, and the order of
+    # the two rows it produced is then whatever the batch happened to carry.
+    df.loc[3, "collector_seq"] = 3
+    df.loc[3, "event_time"] = 30
+
+    with pytest.raises(ValueError, match="tied"):
+        sort_for_cumulative_features(df)
+
+
+def test_sort_for_cumulative_features_can_accept_ties_explicitly():
+    df = _order_frame()
+    df.loc[3, "collector_seq"] = 3
+    df.loc[3, "event_time"] = 30
+
+    result = sort_for_cumulative_features(df, require_total_order=False)
+
+    # The stable sort keeps the input's relative order for the tied pair, which is deterministic only given the same
+    # input arrangement. That weaker guarantee is what the caller opted into.
+    assert result["row"].tolist() == ["third", "second", "fourth", "first"]
+
+
+def test_sort_for_cumulative_features_validates_columns():
+    with pytest.raises(KeyError, match="collector_seq"):
+        sort_for_cumulative_features(pd.DataFrame({"event_time": [1], "collector_id": ["a"]}))
+
+    with pytest.raises(ValueError):
+        sort_for_cumulative_features(_order_frame(), order_columns=[])
+
+
+def test_sort_for_cumulative_features_accepts_an_empty_frame():
+    empty = _order_frame().iloc[0:0]
+
+    assert len(sort_for_cumulative_features(empty)) == 0

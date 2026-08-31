@@ -605,6 +605,50 @@ substitution. `DistinctIncrementColumn` over `lldp_neighbor_chassis_id` catches 
 power deviation from a per-port rolling baseline catches both degradation and physical tapping. Link
 flap count per interval catches instability that often precedes a layer 2 loop.
 
+The two novelty features ship as
+{py:class}`~morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage`, over the schema in
+{py:mod}`~morpheus.utils.tc1_features`. Both are cumulative and therefore order-dependent, so the stage
+imposes control 8's total order before counting rather than trusting the caller to have sorted; that is
+the whole reason the derivation is a stage and not a bare schema.
+
+A period-bucketed count resets at each boundary, so a change from the last poll before one to the first
+poll after it reads as one distinct value on each side and is not detected. What decides whether that
+matters is the period against the span of a frame, not anything about the estate: a boundary can only
+hide a change when it falls inside the frame being counted. Set `period` longer than one frame and there
+is no boundary for a change to hide behind. The default is monthly, which clears a daily window with
+room to spare, where the daily bucketing the primitive defaults to would put a boundary inside every
+window. Lengthening the period makes boundaries rarer but never removes them, so the stage warns when it
+sees a frame that straddles one rather than leaving the residual exposure to be assumed away. The cost of
+going longer still is drift: the count never decays within its period, so under `period="Q"` a port that
+legitimately changed optics reads above 1 for the rest of the quarter and a rule with a threshold of
+"greater than 1" fires for all of it. Closing the boundary entirely, rather than narrowing it, needs the last
+value carried across periods per entity, the way {py:mod}`~morpheus.utils.counter_delta` carries counter
+state, which is a different primitive from `DistinctIncrementColumn`.
+
+Optical power deviation ships as {py:class}`~morpheus.stages.telemetry.tc1_optical_stage.TC1OpticalStage`
+over {py:mod}`~morpheus.utils.optical_baseline`. The baseline is the median of the port's own prior
+readings inside a trailing window, which is the only reference that generalizes: an absolute threshold
+loose enough not to alarm on a long span is loose enough to miss a tap on a short one. The median rather
+than the mean because optical diagnostics report an occasional wild value, and prior readings rather
+than all of them because a sample included in its own baseline damps the very step it should expose.
+Note that the baseline follows the link, so a step is a transient signal: once the window has rolled
+past the last pre-step reading the deviation returns to zero, and a degradation slower than the window
+is invisible because the baseline drifts down with it. Catching that needs a commissioning value to
+compare against, which is asset context and belongs in TC-0.
+
+Link flap counting ships as {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage` over
+{py:mod}`~morpheus.utils.link_flap`, and the reason it is not a status comparison is worth stating: a
+port that drops and recovers inside one sixty-second polling gap shows the same `oper_status` at both
+polls, so a diff calls the flapping port stable. `last_change_time` is what closes that, since the
+device records the transition even though no poll saw it. Every count is consequently a lower bound,
+because the device retains only the most recent transition and a port that flapped nine times between
+polls still reports two. A floor is the right shape for this signal: an under-counted flapping port is
+still flagged, whereas an interpolated estimate would put a number nobody measured in front of an
+analyst. Devices report the field relative to their own uptime, so a Tier 1 collector has to normalize
+it to an absolute time; a value that goes backwards is read as a device restart, which is counted as a
+transition and labelled so a planned reboot can be excluded by rule rather than silently inflating the
+count.
+
 **Cadence:** 30 to 60 seconds for counters, event-driven for state transitions.
 **Cardinality:** thousands to low tens of thousands of ports. Low enough for per-port models.
 **Retention:** 13 months. Physical changes are investigated long after the fact.
@@ -1953,6 +1997,11 @@ df = df.sort_values(["event_time", "collector_id", "collector_seq"], kind="merge
 `collector_seq` to be strictly monotonic per collector. `kind="mergesort"` selects a stable sort, so rows
 that compare equal retain their relative order rather than being permuted arbitrarily.
 
+`morpheus.utils.determinism.sort_for_cumulative_features` is that sort, with one addition: it rejects
+ties by default rather than falling back on stability. A stable sort makes the output a function of the
+input arrangement, which is the property determinism is supposed to remove, so leftover ties mean the
+order columns do not identify a row and the caller is told rather than handed plausible output.
+
 Apply the same discipline to the rolling window. `CachedUserWindow.append_dataframe` already computes
 `_row_hash` via `pd.util.hash_pandas_object` and uses it to find the boundary between seen and unseen
 rows; combined with a `max_history` expressed as a duration rather than a row count, window membership
@@ -2150,6 +2199,17 @@ What Morpheus provides versus what has to be built, stated plainly.
   counter wrap distinguished from a device reboot, and the `site_id:device_id:port_id` entity key
   ({py:mod}`~morpheus.utils.counter_delta` and
   {py:class}`~morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage`).
+- The TC-1 novelty features, transceiver substitution and neighbor change, with control 8's total order
+  imposed before the cumulative primitives run ({py:mod}`~morpheus.utils.tc1_features`,
+  {py:class}`~morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage`, and
+  `morpheus.utils.determinism.sort_for_cumulative_features`).
+- TC-1 optical power deviation against a per-port rolling baseline
+  ({py:mod}`~morpheus.utils.optical_baseline` and
+  {py:class}`~morpheus.stages.telemetry.tc1_optical_stage.TC1OpticalStage`).
+- TC-1 link flap counting, including the flaps that begin and end between two polls
+  ({py:mod}`~morpheus.utils.link_flap` and
+  {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage`). This completes the four
+  behavioral features the TC-1 section names.
 
 ### Must be built
 
