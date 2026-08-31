@@ -71,6 +71,14 @@ class TC1FeatureStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     The stage is stateless across messages, so novelty is counted within each batch; feed it whole windows rather
     than arbitrary batches, or a swap that spans a batch boundary is split across two counts and seen by neither.
 
+    The count also resets at each period boundary, so a change from the last row before one to the first row after
+    it reads as no change. A boundary can only hide a change when it falls inside the frame being counted, so the
+    rule is to set `period` longer than the span of one frame; the monthly default clears a daily window with room
+    to spare. Lengthening the period makes boundaries rarer but never removes them, and it is not free: the count
+    is cumulative within the period and never decays, so a long period leaves a port that legitimately changed
+    optics reading above 1 for the rest of it. When a frame does straddle a boundary the stage says so, so the
+    residual exposure is reported rather than assumed away.
+
     Parameters
     ----------
     c : `morpheus.config.Config`
@@ -86,9 +94,10 @@ class TC1FeatureStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Identifier for the installed optic.
     neighbor_column : str, default = "lldp_neighbor_chassis_id"
         Identifier for the neighbor the port sees.
-    period : str, default = "D"
-        Period over which distinct values are counted, as a pandas offset alias. The count resets at each boundary,
-        so a change that straddles one is not seen; see `morpheus.utils.tc1_features`.
+    period : str, default = "M"
+        Period over which distinct values are counted, as a pandas period alias (`"M"` is monthly; `"ME"` is an
+        offset alias and is rejected). Set it longer than the span of one frame, so that no boundary falls inside
+        the frame being counted; see the note on boundaries above.
     order_columns : list of str, optional
         Total order imposed before counting. Defaults to `["event_time", "collector_id", "collector_seq"]`.
     require_total_order : bool, default = True
@@ -124,6 +133,7 @@ class TC1FeatureStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._neighbor_column = neighbor_column
         self._order_columns = order_columns
         self._require_total_order = require_total_order
+        self._period = period
 
         self._feature_schema = build_tc1_feature_schema(
             entity_key_column=entity_key_column,
@@ -166,6 +176,28 @@ class TC1FeatureStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         return pd.to_datetime(series, unit=self._time_unit)
 
+    def _warn_if_straddling(self, period_time: pd.Series):
+        """
+        Report a frame that crosses a period boundary, which is the only case where the count can hide a change.
+
+        The count resets at each boundary, so a change from the last row before one to the first row after it is a
+        single distinct value on each side and reads as no change at all. That can only happen when the boundary
+        falls inside the frame being counted, which is a condition this stage can see, so it says so rather than
+        leaving the exposure to be assumed absent. The fix is a period longer than the span of one frame.
+        """
+        buckets = period_time.dt.to_period(self._period)
+        distinct = buckets.nunique()
+
+        if (distinct > 1):
+            logger.warning(
+                "TC1FeatureStage received a frame spanning %d '%s' periods (%s to %s). The count resets at each "
+                "boundary, so an identifier that changed across one is not detected in this frame. Use a period "
+                "longer than the span of a frame.",
+                distinct,
+                self._period,
+                buckets.min(),
+                buckets.max())
+
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
         Order the payload and add the novelty features.
@@ -206,6 +238,7 @@ class TC1FeatureStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                                require_total_order=self._require_total_order)
 
         ordered[_PERIOD_TIME_COLUMN] = self._period_time(ordered[self._timestamp_column])
+        self._warn_if_straddling(ordered[_PERIOD_TIME_COLUMN])
 
         features = process_dataframe(ordered, self._feature_schema)
         ordered[FEATURE_COLUMNS] = features[FEATURE_COLUMNS]

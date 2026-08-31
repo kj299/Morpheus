@@ -100,8 +100,8 @@ def test_steady_state_never_increments(config: Config):
 def test_transceiver_substitution_increments(config: Config):
     result = run(config, samples(["hq:sw1:Gi1/0/1"] * 4, ["SN-AAA", "SN-AAA", "SN-BBB", "SN-BBB"], ["chassis-a"] * 4))
 
-    # The count rises at the swap and stays up: the port has seen two distinct optics today, which remains true for
-    # the rest of the period.
+    # The count rises at the swap and stays up: the port has seen two distinct optics in this period, which
+    # remains true for the rest of it.
     assert _as_list(result, "transceiver_increment") == [1, 1, 2, 2]
     # Swapping an optic does not change who is on the far end.
     assert _as_list(result, "lldp_neighbor_increment") == [1, 1, 1, 1]
@@ -170,16 +170,64 @@ def test_without_the_sort_a_permuted_batch_scores_differently():
 
 
 @pytest.mark.gpu_and_cpu_mode
-def test_period_boundary_is_a_blind_spot(config: Config):
-    # An honest test of a known limitation rather than a claim of coverage. The count resets at the period boundary,
-    # so a swap between the last poll of one day and the first of the next is one distinct value on each day and is
-    # invisible to this feature. Detecting it needs a period longer than the gap, or state carried across days.
+def test_a_swap_across_midnight_is_detected(config: Config):
+    # The case a daily period misses. The monthly default puts both polls in one bucket, so the swap is counted.
     frame = samples(["hq:sw1:Gi1/0/1"] * 2, ["SN-AAA", "SN-BBB"], ["chassis-a"] * 2,
                     times=[23 * HOUR_NS, DAY_NS + HOUR_NS])
 
     result = run(config, frame)
 
-    assert _as_list(result, "transceiver_increment") == [1, 1]
+    assert _as_list(result, "transceiver_increment") == [1, 2]
+    # Same rows, daily buckets: one distinct value on each side of midnight, so the swap reads as no change at all.
+    assert _as_list(run(config, frame, period="D"), "transceiver_increment") == [1, 1]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_boundary_inside_the_frame_is_still_a_blind_spot(config: Config):
+    # Lengthening the period makes boundaries rarer, it does not remove them. A swap across a month end is still
+    # invisible, and the residual exposure is stated rather than assumed away.
+    frame = samples(["hq:sw1:Gi1/0/1"] * 2, ["SN-AAA", "SN-BBB"], ["chassis-a"] * 2, times=[30 * DAY_NS, 33 * DAY_NS])
+
+    assert _as_list(run(config, frame), "transceiver_increment") == [1, 1]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_straddling_frame_is_reported(config: Config, caplog: pytest.LogCaptureFixture):
+    # A frame that crosses a boundary is the only case where the count can hide a change, and it is a condition the
+    # stage can see, so it warns instead of leaving the gap silent.
+    import logging
+
+    from morpheus.stages.telemetry import tc1_feature_stage
+
+    frame = samples(["hq:sw1:Gi1/0/1"] * 2, ["SN-AAA", "SN-BBB"], ["chassis-a"] * 2, times=[30 * DAY_NS, 33 * DAY_NS])
+
+    # The repo's morpheus logger does not propagate, so the handler is attached to the emitting module's logger.
+    tc1_feature_stage.logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING):
+            run(config, frame)
+    finally:
+        tc1_feature_stage.logger.removeHandler(caplog.handler)
+
+    assert "spanning 2 'M' periods" in caplog.text
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_contained_frame_is_not_reported(config: Config, caplog: pytest.LogCaptureFixture):
+    import logging
+
+    from morpheus.stages.telemetry import tc1_feature_stage
+
+    frame = samples(["hq:sw1:Gi1/0/1"] * 2, ["SN-AAA", "SN-BBB"], ["chassis-a"] * 2)
+
+    tc1_feature_stage.logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING):
+            run(config, frame)
+    finally:
+        tc1_feature_stage.logger.removeHandler(caplog.handler)
+
+    assert "periods" not in caplog.text
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -257,6 +305,11 @@ def test_constructor_validation(config: Config):
 
     with pytest.raises(ValueError):
         TC1FeatureStage(config, period="")
+
+    # "ME" is an offset alias, not a period alias. Catching it here turns a failure deep inside a groupby on the
+    # first batch into one at pipeline build.
+    with pytest.raises(ValueError, match="period alias"):
+        TC1FeatureStage(config, period="ME")
 
     with pytest.raises(ValueError, match="identical"):
         TC1FeatureStage(config, transceiver_column="same", neighbor_column="same")

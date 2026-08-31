@@ -609,10 +609,21 @@ The two novelty features ship as
 {py:class}`~morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage`, over the schema in
 {py:mod}`~morpheus.utils.tc1_features`. Both are cumulative and therefore order-dependent, so the stage
 imposes control 8's total order before counting rather than trusting the caller to have sorted; that is
-the whole reason the derivation is a stage and not a bare schema. Note the limit of a period-bucketed
-count: it resets at each boundary, so a swap between the last poll of one day and the first of the next
-reads as one distinct value on each day and is not detected. Choose `period` against the cadence of
-legitimate change, and treat the boundary as a known blind spot rather than assumed coverage.
+the whole reason the derivation is a stage and not a bare schema.
+
+A period-bucketed count resets at each boundary, so a change from the last poll before one to the first
+poll after it reads as one distinct value on each side and is not detected. What decides whether that
+matters is the period against the span of a frame, not anything about the estate: a boundary can only
+hide a change when it falls inside the frame being counted. Set `period` longer than one frame and there
+is no boundary for a change to hide behind. The default is monthly, which clears a daily window with
+room to spare, where the daily bucketing the primitive defaults to would put a boundary inside every
+window. Lengthening the period makes boundaries rarer but never removes them, so the stage warns when it
+sees a frame that straddles one rather than leaving the residual exposure to be assumed away. The cost of
+going longer still is drift: the count never decays within its period, so under `period="Q"` a port that
+legitimately changed optics reads above 1 for the rest of the quarter and a rule with a threshold of
+"greater than 1" fires for all of it. Closing the boundary entirely, rather than narrowing it, needs the last
+value carried across periods per entity, the way {py:mod}`~morpheus.utils.counter_delta` carries counter
+state, which is a different primitive from `DistinctIncrementColumn`.
 
 **Cadence:** 30 to 60 seconds for counters, event-driven for state transitions.
 **Cardinality:** thousands to low tens of thousands of ports. Low enough for per-port models.

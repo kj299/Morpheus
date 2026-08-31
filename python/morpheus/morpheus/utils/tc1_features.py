@@ -29,10 +29,16 @@ Both are cumulative, and therefore order-dependent, so the frame must be in dete
 before the schema is applied. `morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage` is the supported way to
 run this, because it establishes that order first; applying the schema through a stage that does not sort produces
 plausible values that are wrong.
+
+The counting is bucketed by period and resets at each boundary, so the period has to be chosen against the span of
+the frames the schema is applied to rather than against anything about the estate: a boundary can only hide a change
+if it falls inside a frame. The default is monthly on that reasoning. See `build_tc1_feature_schema`.
 """
 
 import typing
 from datetime import datetime
+
+import pandas as pd
 
 from morpheus.utils.column_info import ColumnInfo
 from morpheus.utils.column_info import DataFrameInputSchema
@@ -50,8 +56,14 @@ DEFAULT_ENTITY_KEY_COLUMN = "entity_key"
 DEFAULT_TIMESTAMP_COLUMN = "event_time"
 """Column the novelty period is derived from."""
 
-DEFAULT_PERIOD = "D"
-"""Period over which distinct values are counted, as a pandas offset alias."""
+DEFAULT_PERIOD = "M"
+"""Period over which distinct values are counted, as a pandas period alias.
+
+Monthly rather than daily because the count resets at each boundary and a change straddling one is not seen. Layer 1
+identifiers change on the cadence of maintenance windows, not of days, so a daily bucket puts a boundary between
+almost every pair of consecutive changes for no benefit. See `build_tc1_feature_schema` for what the choice costs
+and for the rule that actually governs it.
+"""
 
 TRANSCEIVER_INCREMENT_COLUMN = "transceiver_increment"
 """Distinct `transceiver_serial` values seen on this port so far in the period."""
@@ -91,9 +103,9 @@ def build_tc1_feature_schema(
         Identifier for the installed optic.
     neighbor_column : str, default = "lldp_neighbor_chassis_id"
         Identifier for the neighbor the port sees.
-    period : str, default = "D"
-        Period over which distinct values are counted, as a pandas offset alias. See the note below on what the
-        choice costs.
+    period : str, default = "M"
+        Period over which distinct values are counted, as a pandas period alias. Note that these are period aliases,
+        not offset aliases: `"M"` is monthly and `"ME"` is rejected. See the note below on how to choose one.
     preserve_columns : list of str, default = ()
         Additional input columns to carry through to the output frame, as regular expressions.
 
@@ -101,18 +113,39 @@ def build_tc1_feature_schema(
     -------
     `morpheus.utils.column_info.DataFrameInputSchema`
 
+    Raises
+    ------
+    ValueError
+        If `period` is empty or is not a period alias pandas accepts, or if the two identifier columns are the same.
+
     Notes
     -----
-    The count resets at each period boundary, which bounds what the feature can detect. With the daily default, a
-    transceiver swapped at 23:59 and first polled at 00:01 is one distinct value on each of two days, so the
-    substitution is invisible: both days read 1. Nothing in the primitive can see across the boundary. A longer
-    period narrows that window at the cost of a feature that drifts upward over its span, since a port that
-    legitimately changes optics twice in a quarter reads 3 for the rest of the quarter under `period="Q"`. Choose
-    the period against the cadence of legitimate change on the estate, and treat the boundary as a known blind spot
-    rather than assuming coverage the primitive does not provide.
+    The count resets at each period boundary, and a change straddling one is not seen: a transceiver swapped just
+    before a boundary and first polled just after is one distinct value on each side, so both read 1. Lengthening
+    the period makes boundaries rarer but never removes them, so it narrows the blind spot rather than closing it.
+
+    What actually governs this is the relationship between the period and the frame the schema is applied to. A
+    boundary can only hide a change if it falls *inside* a frame, so a period longer than the span of one frame
+    leaves no boundary for a change to hide behind. With daily windows, a monthly period puts a live boundary in
+    roughly one window in thirty instead of in every one.
+    `morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage` warns when it sees a frame that straddles a
+    boundary, so the remaining exposure is reported rather than assumed absent.
+
+    The cost of a long period is drift. The count is cumulative within the period and never decays, so under
+    `period="Q"` a port that legitimately changes optics twice reads 3 for the remainder of the quarter, and a rule
+    thresholding on "greater than 1" fires for all of it. Choose the period long enough to exceed the frame span and
+    no longer.
     """
     if (not period):
         raise ValueError("period is required; it is the window over which distinct values are counted")
+
+    # Validated here so that a bad alias fails when the pipeline is built rather than on the first batch, where it
+    # would surface as an exception from inside a groupby.
+    try:
+        pd.Period("2026-01-01", freq=period)
+    except ValueError as error:
+        raise ValueError(f"period '{period}' is not a pandas period alias. Note that these are period aliases, not "
+                         f"offset aliases: use 'M' for monthly, not 'ME'. Underlying error: {error}") from error
 
     if (transceiver_column == neighbor_column):
         raise ValueError(f"transceiver_column and neighbor_column are both '{transceiver_column}'; the two features "
