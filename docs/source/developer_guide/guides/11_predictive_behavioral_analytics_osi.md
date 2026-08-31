@@ -636,6 +636,19 @@ past the last pre-step reading the deviation returns to zero, and a degradation 
 is invisible because the baseline drifts down with it. Catching that needs a commissioning value to
 compare against, which is asset context and belongs in TC-0.
 
+Link flap counting ships as {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage` over
+{py:mod}`~morpheus.utils.link_flap`, and the reason it is not a status comparison is worth stating: a
+port that drops and recovers inside one sixty-second polling gap shows the same `oper_status` at both
+polls, so a diff calls the flapping port stable. `last_change_time` is what closes that, since the
+device records the transition even though no poll saw it. Every count is consequently a lower bound,
+because the device retains only the most recent transition and a port that flapped nine times between
+polls still reports two. A floor is the right shape for this signal: an under-counted flapping port is
+still flagged, whereas an interpolated estimate would put a number nobody measured in front of an
+analyst. Devices report the field relative to their own uptime, so a Tier 1 collector has to normalize
+it to an absolute time; a value that goes backwards is read as a device restart, which is counted as a
+transition and labelled so a planned reboot can be excluded by rule rather than silently inflating the
+count.
+
 **Cadence:** 30 to 60 seconds for counters, event-driven for state transitions.
 **Cardinality:** thousands to low tens of thousands of ports. Low enough for per-port models.
 **Retention:** 13 months. Physical changes are investigated long after the fact.
@@ -2193,6 +2206,10 @@ What Morpheus provides versus what has to be built, stated plainly.
 - TC-1 optical power deviation against a per-port rolling baseline
   ({py:mod}`~morpheus.utils.optical_baseline` and
   {py:class}`~morpheus.stages.telemetry.tc1_optical_stage.TC1OpticalStage`).
+- TC-1 link flap counting, including the flaps that begin and end between two polls
+  ({py:mod}`~morpheus.utils.link_flap` and
+  {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage`). This completes the four
+  behavioral features the TC-1 section names.
 
 ### Must be built
 
