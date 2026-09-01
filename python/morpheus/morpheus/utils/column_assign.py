@@ -126,3 +126,31 @@ def assign_nullable_float_column(df: DataFrameType, column: str, values: list):
     else:
         import pandas as pd
         df[column] = pd.Series(pd.array(values, dtype="Float64"), index=df.index)
+
+
+def assign_nullable_bool_column(df: DataFrameType, column: str, values: list):
+    """
+    Write a host-side list of booleans that may contain nulls, as a nullable boolean column in both modes.
+
+    A null here means "not answerable", which is a different claim from `False`. Assigning such a list directly
+    would let pandas widen to object and store `None`, so a rule reading the column as a boolean would coerce that
+    `None` into `False` and count a question nobody could answer as a negative answer.
+
+    Parameters
+    ----------
+    df : `pandas.DataFrame` or `cudf.DataFrame`
+        Frame to write to.
+    column : str
+        Column name. Overwritten if it already exists.
+    values : list
+        One value per row. `None` entries become nulls.
+    """
+    # Imported here so that this module remains importable in CPU-only environments where cuDF is absent.
+    from morpheus.utils.type_utils import is_cudf_type
+
+    if (is_cudf_type(df)):
+        import cudf
+        df[column] = cudf.Series(values, index=df.index, dtype="bool")
+    else:
+        import pandas as pd
+        df[column] = pd.Series(pd.array(values, dtype="boolean"), index=df.index)

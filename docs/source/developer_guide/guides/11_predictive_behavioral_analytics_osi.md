@@ -631,6 +631,25 @@ readings inside a trailing window, which is the only reference that generalizes:
 loose enough not to alarm on a long span is loose enough to miss a tap on a short one. The median rather
 than the mean because optical diagnostics report an occasional wild value, and prior readings rather
 than all of them because a sample included in its own baseline damps the very step it should expose.
+
+{py:class}`~morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage`, over
+{py:mod}`~morpheus.utils.value_novelty`, is the answer to the period boundary above, and it is the one
+to reach for when the question is whether an identifier changed. It holds the previous value per port
+and compares, so there is no bucket for a change to fall across: a substitution is detected the moment
+the new value arrives, whether the samples are a minute or a year apart. It reports two things
+separately, because they are separately actionable. `<name>_changed` is whether the value differs from
+the previous sample, which is the alerting signal. `<name>_first_seen` is whether the port has ever
+reported that value before, which distinguishes an optic that has never been in this cage from one
+rotated back in after maintenance. Both are null on a port's first sample, which establishes what
+normal looks like rather than being an event, so a rule matching `== True` never fires on a port's
+first appearance. Returning to a previous value counts as a change, deliberately: A to B to A is two
+substitutions, and swapped out and swapped back is a more interesting sequence than simply changed.
+
+The period-bucketed counts remain useful as a measure of how much churn a port saw inside a period, but
+for change detection they are superseded. `changed` has no blind spot at all; the only bound left is on
+`first_seen`, whose recall set is finite, so a value evicted after many others reads as first seen
+again. That errs toward over-reporting novelty, which is the safe direction for a signal meant to
+surface the unexplained.
 Note that the baseline follows the link, so a step is a transient signal: once the window has rolled
 past the last pre-step reading the deviation returns to zero, and a degradation slower than the window
 is invisible because the baseline drifts down with it. Catching that needs a commissioning value to
@@ -2210,6 +2229,9 @@ What Morpheus provides versus what has to be built, stated plainly.
   ({py:mod}`~morpheus.utils.link_flap` and
   {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage`). This completes the four
   behavioral features the TC-1 section names.
+- Identifier change detection with no period boundary ({py:mod}`~morpheus.utils.value_novelty` and
+  {py:class}`~morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage`), which closes the blind spot
+  a period-bucketed distinct count can only narrow.
 
 ### Must be built
 
