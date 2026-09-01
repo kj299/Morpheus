@@ -692,6 +692,21 @@ hubs and switches. Count of distinct ports per MAC catches spoofing or a device 
 Ratio of gratuitous ARP replies to total ARP catches poisoning. Time-to-authorize distribution per port
 catches 802.1X bypass attempts. OUI novelty per VLAN catches unmanaged device introduction.
 
+The three cardinality features among those ship as
+{py:class}`~morpheus.stages.telemetry.tc2_cardinality_stage.TC2CardinalityStage` over
+{py:mod}`~morpheus.utils.distinct_window`, which is one primitive asked with the entity and the value
+swapped around. Two details are worth knowing before writing a rule against them. The current sample is
+counted inside its own window, so a threshold trips on the row that crosses it rather than the row
+after. And each entity has a sample cap, because a MAC flood is simultaneously the condition the
+per-port count exists to notice and the condition that would exhaust memory; when the cap binds, the
+count becomes a lower bound and the row is marked saturated, so a floor is never mistaken for the
+figure. The per-port counts key on `site_id:switch_id:port_id`, since an interface name alone repeats on
+every switch in the estate.
+
+Note that these three do not shard alike. Counts per port and per VLAN shard cleanly by switch, but
+distinct ports per MAC needs every sighting of a MAC to reach one instance, which sharding by switch
+breaks; run it unsharded or shard it by MAC.
+
 **Cadence:** event-driven, with a periodic full table snapshot every 5 minutes for reconciliation.
 **Cardinality:** tens of thousands to low hundreds of thousands of MAC addresses.
 **Retention:** 13 months for bindings, 90 days for raw ARP.
@@ -699,6 +714,24 @@ catches 802.1X bypass attempts. OUI novelty per VLAN catches unmanaged device in
 **Critical requirement:** every binding record must carry both `bind_start` and `bind_end`. A binding
 without an end time cannot be used in a time-bounded join, which makes layer 2 unusable as a lineage hop.
 Emit an explicit end record on expiry rather than relying on the next binding's start.
+
+{py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage`, over
+{py:mod}`~morpheus.utils.binding_closer`, is where that end comes from, because nothing upstream supplies
+it: a switch MAC table reports what is bound now, accounting stops go missing, and releases are advisory.
+Four things end a binding and only the first is a fact. An **explicit** stop states the end. A
+**displacement** means the key was seen elsewhere, so the binding ended somewhere between the two
+sightings. A **snapshot absence** means a reconciliation pass over a scope no longer lists the key. An
+**idle timeout** is the backstop for the stop record that never arrived. Every emitted record carries
+`bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that will act on a
+binding can insist on an end somebody actually reported.
+
+Inferred ends are placed at the earliest time consistent with the observations rather than the latest,
+which leaves gaps between consecutive bindings. That is the intended behavior: a gap resolves to nothing
+and tells an analyst the answer is unknown, whereas stretching a binding to meet the next one has it
+cover a period the device may already have left and returns a confident wrong answer. Because the
+interval is half-open, an inferred end sits one tick past the last observation, which is the shortest
+interval that actually contains what was seen; without that a key seen once would produce a zero-width
+binding covering nothing at all.
 
 ### TC-3: Network
 
@@ -2232,6 +2265,14 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Identifier change detection with no period boundary ({py:mod}`~morpheus.utils.value_novelty` and
   {py:class}`~morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage`), which closes the blind spot
   a period-bucketed distinct count can only narrow.
+- TC-2 binding closure: layer 2 observations turned into the closed, half-open intervals
+  `BindingTable` resolves against, with the reason for every inferred end recorded
+  ({py:mod}`~morpheus.utils.binding_closer` and
+  {py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage`).
+- The three TC-2 cardinality features, distinct MACs per port, ports per MAC, and OUIs per VLAN, over a
+  trailing window with saturation reported rather than hidden
+  ({py:mod}`~morpheus.utils.distinct_window` and
+  {py:class}`~morpheus.stages.telemetry.tc2_cardinality_stage.TC2CardinalityStage`).
 
 ### Must be built
 
@@ -2239,7 +2280,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 | --- | --- | --- |
 | Entity sharding router configuration | Small | `RouterStage` with a stable hash; replaces intra-stage threading |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
-| Binding table ingestion | Small | Feeding `BindingTable` from the collectors, and refreshing it on a schedule. The resolution and expansion logic ships |
+| Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |
 | Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |
 | Chained rule engine | Medium | Runs in Splunk, not in Morpheus. The `examples/splunk_lineage_app` searches are the starting set |
 | Bitemporal TC-0 context store | Medium | Valid-time and transaction-time intervals |

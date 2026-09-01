@@ -122,6 +122,7 @@ NetFlow
 [Nn]ondeterminism
 [Nn]ondeterministic
 Okta
+OUIs
 [Pp]eriodogram
 [Pp]ostprocess
 [Pp]reallocate(d|s)?
@@ -152,6 +153,7 @@ ULPs
 [Uu]nrendered
 [Uu]nmanaged
 [Uu]nsampled
+[Uu]nsharded
 [Uu]ntuned
 WAFs
 [Ww]atchlist(s?)
