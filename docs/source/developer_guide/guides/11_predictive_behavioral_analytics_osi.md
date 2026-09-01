@@ -692,6 +692,21 @@ hubs and switches. Count of distinct ports per MAC catches spoofing or a device 
 Ratio of gratuitous ARP replies to total ARP catches poisoning. Time-to-authorize distribution per port
 catches 802.1X bypass attempts. OUI novelty per VLAN catches unmanaged device introduction.
 
+The three cardinality features among those ship as
+{py:class}`~morpheus.stages.telemetry.tc2_cardinality_stage.TC2CardinalityStage` over
+{py:mod}`~morpheus.utils.distinct_window`, which is one primitive asked with the entity and the value
+swapped around. Two details are worth knowing before writing a rule against them. The current sample is
+counted inside its own window, so a threshold trips on the row that crosses it rather than the row
+after. And each entity has a sample cap, because a MAC flood is simultaneously the condition the
+per-port count exists to notice and the condition that would exhaust memory; when the cap binds, the
+count becomes a lower bound and the row is marked saturated, so a floor is never mistaken for the
+figure. The per-port counts key on `site_id:switch_id:port_id`, since an interface name alone repeats on
+every switch in the estate.
+
+Note that these three do not shard alike. Counts per port and per VLAN shard cleanly by switch, but
+distinct ports per MAC needs every sighting of a MAC to reach one instance, which sharding by switch
+breaks; run it unsharded or shard it by MAC.
+
 **Cadence:** event-driven, with a periodic full table snapshot every 5 minutes for reconciliation.
 **Cardinality:** tens of thousands to low hundreds of thousands of MAC addresses.
 **Retention:** 13 months for bindings, 90 days for raw ARP.
@@ -2254,6 +2269,10 @@ What Morpheus provides versus what has to be built, stated plainly.
   `BindingTable` resolves against, with the reason for every inferred end recorded
   ({py:mod}`~morpheus.utils.binding_closer` and
   {py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage`).
+- The three TC-2 cardinality features, distinct MACs per port, ports per MAC, and OUIs per VLAN, over a
+  trailing window with saturation reported rather than hidden
+  ({py:mod}`~morpheus.utils.distinct_window` and
+  {py:class}`~morpheus.stages.telemetry.tc2_cardinality_stage.TC2CardinalityStage`).
 
 ### Must be built
 
