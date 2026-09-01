@@ -700,6 +700,24 @@ catches 802.1X bypass attempts. OUI novelty per VLAN catches unmanaged device in
 without an end time cannot be used in a time-bounded join, which makes layer 2 unusable as a lineage hop.
 Emit an explicit end record on expiry rather than relying on the next binding's start.
 
+{py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage`, over
+{py:mod}`~morpheus.utils.binding_closer`, is where that end comes from, because nothing upstream supplies
+it: a switch MAC table reports what is bound now, accounting stops go missing, and releases are advisory.
+Four things end a binding and only the first is a fact. An **explicit** stop states the end. A
+**displacement** means the key was seen elsewhere, so the binding ended somewhere between the two
+sightings. A **snapshot absence** means a reconciliation pass over a scope no longer lists the key. An
+**idle timeout** is the backstop for the stop record that never arrived. Every emitted record carries
+`bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that will act on a
+binding can insist on an end somebody actually reported.
+
+Inferred ends are placed at the earliest time consistent with the observations rather than the latest,
+which leaves gaps between consecutive bindings. That is the intended behavior: a gap resolves to nothing
+and tells an analyst the answer is unknown, whereas stretching a binding to meet the next one has it
+cover a period the device may already have left and returns a confident wrong answer. Because the
+interval is half-open, an inferred end sits one tick past the last observation, which is the shortest
+interval that actually contains what was seen; without that a key seen once would produce a zero-width
+binding covering nothing at all.
+
 ### TC-3: Network
 
 **Entity key:** `src_ip`, and separately the directed pair `src_ip:dst_ip`
@@ -2232,6 +2250,10 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Identifier change detection with no period boundary ({py:mod}`~morpheus.utils.value_novelty` and
   {py:class}`~morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage`), which closes the blind spot
   a period-bucketed distinct count can only narrow.
+- TC-2 binding closure: layer 2 observations turned into the closed, half-open intervals
+  `BindingTable` resolves against, with the reason for every inferred end recorded
+  ({py:mod}`~morpheus.utils.binding_closer` and
+  {py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage`).
 
 ### Must be built
 
@@ -2239,7 +2261,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 | --- | --- | --- |
 | Entity sharding router configuration | Small | `RouterStage` with a stable hash; replaces intra-stage threading |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
-| Binding table ingestion | Small | Feeding `BindingTable` from the collectors, and refreshing it on a schedule. The resolution and expansion logic ships |
+| Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |
 | Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |
 | Chained rule engine | Medium | Runs in Splunk, not in Morpheus. The `examples/splunk_lineage_app` searches are the starting set |
 | Bitemporal TC-0 context store | Medium | Valid-time and transaction-time intervals |

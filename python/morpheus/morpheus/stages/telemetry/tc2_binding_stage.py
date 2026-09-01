@@ -1,0 +1,279 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Turns layer 2 binding observations into closed, resolvable intervals."""
+
+import logging
+import typing
+
+import mrc
+from mrc.core import operators as ops
+
+from morpheus.cli.register_stage import register_stage
+from morpheus.common import TypeId
+from morpheus.config import Config
+from morpheus.messages import ControlMessage
+from morpheus.messages import MessageMeta
+from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
+from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.pipeline.stage_schema import StageSchema
+from morpheus.utils.binding_closer import DEFAULT_IDLE_TIMEOUT_NS
+from morpheus.utils.binding_closer import NS_PER_SECOND
+from morpheus.utils.binding_closer import BindingCloser
+from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.column_assign import to_host_list
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_ATTRIBUTE_COLUMNS = ["switch_id", "port_id", "vlan_id"]
+"""What a MAC address is bound to in the TC-2 telemetry class."""
+
+DEFAULT_IDLE_TIMEOUT_SECONDS = DEFAULT_IDLE_TIMEOUT_NS // NS_PER_SECOND
+
+BIND_START_COLUMN = "bind_start"
+BIND_END_COLUMN = "bind_end"
+END_REASON_COLUMN = "bind_end_reason"
+END_OBSERVED_COLUMN = "bind_end_observed"
+OBSERVATIONS_COLUMN = "bind_observations"
+
+
+@register_stage("tc2-binding", ignore_args=["attribute_columns"])
+class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
+    """
+    Emit closed layer 2 bindings from a stream of observations.
+
+    Layer 2 is where the identifier ladder crosses from a physical port to a MAC address, and it carries that
+    weight only if its bindings are time-bounded. `morpheus.utils.binding_table` resolves against half-open
+    intervals, so a binding with no end resolves nothing and layer 2 stops being a usable lineage hop. The TC-2
+    telemetry class states this as a requirement: emit an explicit end on expiry rather than relying on the next
+    binding's start.
+
+    Nothing upstream provides that end. A switch MAC table says what is bound now, accounting stops go missing, and
+    releases are advisory. This stage infers ends and records how it arrived at each one, so a consumer can tell an
+    observed end from a deduced one by filtering on `bind_end_observed`.
+
+    Unlike the TC-1 stages this is not a pass-through. Its input is one row per observation and its output is one
+    row per *closed* binding, so a message in may produce no message at all, which is the normal case for a stable
+    estate where nothing moved. A binding that is still open has not been emitted yet and is held in memory until
+    something ends it.
+
+    Ends are inferred at the earliest time consistent with the observations, which leaves gaps between bindings
+    rather than stretching one to meet the next. That is the point: a gap resolves to nothing and tells an analyst
+    the answer is unknown, whereas a stretched binding covers a period the MAC may already have left and answers
+    confidently and wrongly.
+
+    The stage is stateful and must run single-engine. Shard by switch upstream for parallelism, which is
+    determinism control 4, and note that sharding by MAC would be wrong here: displacement is only detectable when
+    both sightings of a MAC reach the same instance.
+
+    Parameters
+    ----------
+    c : `morpheus.config.Config`
+        Pipeline configuration instance.
+    key_column : str, default = "mac_address"
+        Column holding what is bound.
+    time_column : str, default = "event_time"
+        Column holding the observation's event time. Event time, never ingest time.
+    time_unit : str, default = "ns"
+        Unit for numeric timestamps in `time_column`. Ignored for datetime columns.
+    attribute_columns : list of str, optional
+        Columns making up the binding target. Defaults to `["switch_id", "port_id", "vlan_id"]`. A sample whose
+        target differs from the open binding's displaces it; one whose target matches extends it. Columns outside
+        this list are ignored, so a changing signal strength does not split a binding.
+    idle_timeout_seconds : int, default = 1800
+        Silence after which an open binding is presumed aged out. Set it from the source's own aging interval where
+        that is known; switch MAC tables commonly age at five minutes.
+    emit_open_on_complete : bool, default = True
+        Close and emit every still-open binding when the stream ends. Without this, a binding that never moved is
+        never emitted at all, so a replay over a finite corpus would silently lose every stable MAC.
+    """
+
+    def __init__(self,
+                 c: Config,
+                 key_column: str = "mac_address",
+                 time_column: str = "event_time",
+                 time_unit: str = "ns",
+                 attribute_columns: list[str] = None,
+                 idle_timeout_seconds: int = DEFAULT_IDLE_TIMEOUT_SECONDS,
+                 emit_open_on_complete: bool = True):
+        super().__init__(c)
+
+        attribute_columns = list(DEFAULT_ATTRIBUTE_COLUMNS) if attribute_columns is None else list(attribute_columns)
+
+        if (idle_timeout_seconds <= 0):
+            raise ValueError(f"idle_timeout_seconds must be positive, received {idle_timeout_seconds}")
+
+        self._key_column = key_column
+        self._time_column = time_column
+        self._time_unit = time_unit
+        self._attribute_columns = attribute_columns
+        self._emit_open_on_complete = emit_open_on_complete
+
+        self._closer = BindingCloser(attribute_names=attribute_columns,
+                                     idle_timeout_ns=idle_timeout_seconds * NS_PER_SECOND)
+
+        self._needed_columns[BIND_START_COLUMN] = TypeId.INT64
+        self._needed_columns[BIND_END_COLUMN] = TypeId.INT64
+        self._needed_columns[END_REASON_COLUMN] = TypeId.STRING
+        self._needed_columns[END_OBSERVED_COLUMN] = TypeId.BOOL8
+        self._needed_columns[OBSERVATIONS_COLUMN] = TypeId.INT64
+
+        # Mark this stage to log timestamps if requested
+        self._should_log_timestamps = True
+
+    @property
+    def name(self) -> str:
+        """Stage name."""
+        return "tc2-binding"
+
+    def accepted_types(self) -> tuple:
+        """
+        Accepted input types for this stage.
+
+        Returns
+        -------
+        tuple
+            Accepted input types.
+        """
+        return (ControlMessage, MessageMeta)
+
+    def compute_schema(self, schema: StageSchema):
+        """
+        Declare the output type, which is a frame of closed bindings rather than the observations that came in.
+        """
+        schema.output_schema.set_type(MessageMeta)
+
+    def supports_cpp_node(self) -> bool:
+        """Whether this stage supports a C++ node."""
+        return False
+
+    @property
+    def open_count(self) -> int:
+        """Bindings currently open and therefore not yet emitted."""
+        return self._closer.open_count
+
+    def _records(self, closed: list) -> dict:
+        """Render closed bindings as columns, one row each."""
+        columns: dict[str, list] = {self._key_column: [record.key for record in closed]}
+
+        for name in self._attribute_columns:
+            columns[name] = [record.attributes.get(name) for record in closed]
+
+        columns[BIND_START_COLUMN] = [record.bind_start_ns for record in closed]
+        columns[BIND_END_COLUMN] = [record.bind_end_ns for record in closed]
+        columns[END_REASON_COLUMN] = [record.end_reason for record in closed]
+        columns[END_OBSERVED_COLUMN] = [record.end_observed for record in closed]
+        columns[OBSERVATIONS_COLUMN] = [record.observations for record in closed]
+
+        return columns
+
+    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]) -> list:
+        """
+        Feed a batch of observations to the closer and emit whatever bindings that ended.
+
+        Parameters
+        ----------
+        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
+            Incoming observations.
+
+        Returns
+        -------
+        list of `morpheus.messages.MessageMeta`
+            One frame of closed bindings, or an empty list when this batch ended none, which is the normal case
+            for an estate where nothing moved.
+
+        Raises
+        ------
+        KeyError
+            If the key column, the time column, or a declared attribute column is absent.
+        """
+        meta = message.payload() if isinstance(message, ControlMessage) else message
+
+        if (meta is None or meta.count == 0):
+            return []
+
+        source = meta.copy_dataframe()
+
+        required = [self._key_column, self._time_column] + self._attribute_columns
+        missing = [column for column in required if column not in source.columns]
+
+        if (len(missing) > 0):
+            raise KeyError(f"TC2BindingStage requires columns {missing} which are not present in the DataFrame. "
+                           f"Available columns: {sorted(source.columns)}")
+
+        keys = to_host_list(source, self._key_column)
+        raw_times = to_host_list(source, self._time_column)
+        attributes = {name: to_host_list(source, name) for name in self._attribute_columns}
+
+        closed = []
+        unordered = 0
+
+        for (position, key) in enumerate(keys):
+            try:
+                event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
+            except ValueError:
+                event_time_ns = None
+
+            if (event_time_ns is None or key is None):
+                unordered += 1
+                continue
+
+            result = self._closer.observe(str(key),
+                                          event_time_ns,
+                                          {name: attributes[name][position]
+                                           for name in self._attribute_columns})
+
+            closed.extend(result.closed)
+            unordered += int(result.out_of_order)
+
+        if (unordered > 0):
+            logger.warning(
+                "TC2BindingStage skipped %d of %d observations that were out of order, keyless, or without a "
+                "usable event time; they did not advance any binding. Shard by switch and preserve per-key "
+                "ordering upstream.",
+                unordered,
+                len(keys))
+
+        return self._emit(closed)
+
+    def _emit(self, closed: list) -> list:
+        """Wrap closed bindings in a frame of the execution mode's own type, or nothing when none closed."""
+        if (len(closed) == 0):
+            return []
+
+        # Imported here so that this module remains importable in CPU-only environments where cuDF is absent.
+        from morpheus.utils.type_utils import get_df_class
+
+        return [MessageMeta(get_df_class(self._config.execution_mode)(self._records(closed)))]
+
+    def on_completed(self) -> list:
+        """
+        Close whatever is still open when the stream ends.
+
+        A binding that never moved is otherwise never emitted, so a replay over a finite corpus would lose every
+        stable MAC in the estate, which is most of them.
+        """
+        if (not self._emit_open_on_complete):
+            return []
+
+        return self._emit(self._closer.drain())
+
+    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
+        node = builder.make_node(self.unique_name,
+                                 ops.map(self.on_data),
+                                 ops.filter(lambda frames: len(frames) > 0),
+                                 ops.on_completed(self.on_completed),
+                                 ops.flatten())
+        builder.make_edge(input_node, node)
+
+        return node
