@@ -2335,6 +2335,14 @@ What Morpheus provides versus what has to be built, stated plainly.
   with unpaired authorization flagged ({py:mod}`~morpheus.utils.session_timer` and
   {py:class}`~morpheus.stages.telemetry.tc2_auth_stage.TC2AuthStage`). This completes the five
   behavioral features the TC-2 section names.
+- Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
+  once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
+  repairing it, and this is what imposes the order they depend on.
+- The composed telemetry pipeline under control 13's six checks
+  (`tests/morpheus/determinism/telemetry_pipeline.py`): a snapshot-shaped layer 1 and layer 2 corpus with a
+  hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and an 802.1X bypass planted in it, run
+  through every TC-1 and TC-2 stage, with the layer 2 bindings resolving the ARP stream onto the layer 1
+  `entity_key`. Each planted anomaly is asserted as the column a rule would read, and nothing else fires.
 
 ### Must be built
 
