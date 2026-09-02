@@ -1012,7 +1012,26 @@ R-D-L2-001 without requiring an accurate port designation database, at the cost 
 
 **R-D-L2-003 - ARP anomaly.** A `arp_sender_ip` maps to more than one `arp_sender_mac` within a
 5-minute window, excluding known HSRP and VRRP virtual addresses. Explicitly maintain the exclusion list;
-this rule is unusable without it.
+this rule is unusable without it. `TC2ArpStage` emits the count as `macs_claiming_sender_ip` and marks
+excluded senders rather than dropping them.
+
+**R-D-L2-004 - MAC in two places at once.** A closed binding with `bind_end_reason = conflict`: the
+same MAC was reported on two ports at the same instant, so `TC2BindingStage` closed the earlier binding
+one tick past the sighting and the two intervals overlap. This is the direct form of the spoofing signal
+that R-B-L2-002 approximates statistically, and it needs no designation list and no baseline. Tier D1.
+Ships as a saved search in the Splunk app, reading the raw closed-binding records.
+
+**R-D-L2-005 - Authorization without authentication.** `auth_unpaired = true` from `TC2AuthStage`: an
+802.1X outcome arrived on a port with no exchange in front of it. From the switch this is what MAC
+authentication bypass looks like, and also what a device bridged behind an already authorized
+supplicant looks like. Near-zero false positives where every port runs 802.1X; on ports where MAB is
+configured deliberately, suppress by port designation rather than by loosening the rule. Tier D1. Ships
+as a saved search in the Splunk app.
+
+These two are the first rules in this part that exist as code rather than as specification, chosen
+because they read columns the shipped stages already produce and depend on nothing outside the
+pipeline. Their predicates are also asserted in Python over the determinism harness's planted corpus,
+where each fires exactly once.
 
 **R-P-L1-004 - Optical degradation forecast.** Linear extrapolation of `optical_rx_dbm` per port
 projects a crossing of the transceiver's minimum receive threshold within 14 days. This is an operations
@@ -2335,6 +2354,14 @@ What Morpheus provides versus what has to be built, stated plainly.
   with unpaired authorization flagged ({py:mod}`~morpheus.utils.session_timer` and
   {py:class}`~morpheus.stages.telemetry.tc2_auth_stage.TC2AuthStage`). This completes the five
   behavioral features the TC-2 section names.
+- Determinism control 8 as a stage
+  ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), and the composed layer 1
+  and layer 2 telemetry pipeline under all six of control 13's checks, over a snapshot-shaped corpus
+  with a hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and an 802.1X bypass planted in
+  it (`tests/morpheus/determinism/telemetry_pipeline.py`). The harness asserts that a MAC resolved
+  through a layer 2 binding lands on a layer 1 `entity_key` the same run emitted.
+- The first two detections, R-D-L2-004 and R-D-L2-005, as saved searches in the Splunk app over
+  columns the stages already produce, with their predicates asserted in Python over the planted corpus.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.

@@ -52,6 +52,7 @@ is the running ledger of what is built and what is not.
 | **Layer 2 (TC-2)** | Binding closure into the half-open intervals the resolver consumes, the three cardinality features, the gratuitous ARP proportion, and 802.1X authorization timing with unpaired authorization flagged |
 | **Determinism** | A total row order imposed before any stateful stage, frame canonicalization and digesting, score quantization, and a CI harness running control 13's six checks against both the lineage pipeline and the composed layer 1 and 2 telemetry pipeline over seeded, snapshot-shaped corpora with planted anomalies |
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
+| **First detections** | Two deterministic layer 2 rules that read shipped columns and need nothing external: a MAC in two places at once (`bind_end_reason = conflict`) and 802.1X authorization with no authentication in front of it (`auth_unpaired`). Saved searches in the app; predicates asserted in Python over the planted corpus, each firing exactly once. Not yet run on a live search head |
 
 Thirteen stages and seventeen supporting modules, covered by 725 tests.
 
