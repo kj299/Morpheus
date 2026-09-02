@@ -53,12 +53,23 @@ identifier ladder, the deterministic identifiers, `community_id`, the binding ta
 and
 [If the SIEM is not Splunk](#if-the-siem-is-not-splunk) says what a port would have to change.
 
-**What is verified versus designed.** The three shipped stages are real code with real tests, and the
-Community ID implementation was checked against the reference implementation over 46,448 flow tuples.
-Everything else here (the telemetry classes, the rules, the Splunk configuration and queries, the
-determinism controls) is a design rather than a running system. Thresholds are placeholders unless marked
-otherwise, and the SPL and the `.conf` stanzas are written from the documentation rather than executed
-against a live Splunk instance.
+**What is verified versus designed.** This document was written before any of it was built, and the
+boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
+resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
+13's CI harness. That is thirteen stages and seventeen supporting modules under 725 tests, itemized in
+[Part 6](#provided). The Community ID implementation was checked against the reference implementation
+over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
+pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
+([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)).
+
+What remains design rather than a running system: the telemetry classes for layers 3 through 7, every
+detection rule in Part 3, the chained rule engine, and the determinism controls other than 7, 8, and
+13. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
+of it does not. Thresholds are placeholders unless marked otherwise.
+
+One caveat cuts across everything shipped: GPU execution mode is unexercised. Every stage declares
+support for it and 178 `gpu_mode` test variants exist, but no GPU has been available to run them, so
+CPU mode is the tested path.
 
 **On the word "predictive."** Three of the four mechanisms in Part 1 are forward-looking in a defensible
 sense: trajectory features over reconstruction error, forecast residual from `TimeSeriesStage`, and

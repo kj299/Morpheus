@@ -21,6 +21,58 @@ limitations under the License.
 
 NVIDIA Morpheus is an open AI application framework that provides cybersecurity developers with a highly optimized AI framework and pre-trained AI capabilities that allow them to instantaneously inspect all IP traffic across their data center fabric. The Morpheus developer framework allows teams to build their own optimized pipelines that address cybersecurity and information security use cases. Bringing a new level of security to data centers, Morpheus provides development capabilities around dynamic protection, real-time telemetry, adaptive policies, and cyber defenses for detecting and remediating cybersecurity threats.
 
+## What this fork is for
+
+This fork exists to build one thing: **behavioral analytics that spans all seven OSI layers, feeds a
+SIEM, and produces output a detection engineer can reproduce and defend six months later in front of
+an auditor.**
+
+Upstream Morpheus supplies the streaming runtime, the per-entity autoencoder, and the feature DSL.
+It does not supply the substrate that makes seven layers of telemetry into one story about one entity:
+stable identifiers that survive a replay, a way to attribute an IP at layer 3 back to a physical port
+at layer 1, windows that close on event time rather than on when the data happened to arrive, and the
+per-layer features the detection rules actually need. That substrate is what this fork adds.
+
+The design was written down in full before any of it was built.
+[**Predictive Behavioral Analytics Across OSI Layers 1-7**](./docs/source/developer_guide/guides/11_predictive_behavioral_analytics_osi.md)
+analyzes the Morpheus codebase in three passes, then specifies the telemetry each layer must produce,
+the detection rules worth writing, how to chain layer 1-7 lineage in Splunk down to the configuration
+stanzas, and thirteen controls for keeping the output reproducible. Every claim about Morpheus in it
+is anchored to a file path, and where a capability does not exist the guide says so rather than
+implying the SDK already covers it. The code here implements that guide incrementally; the guide's
+[Part 6](./docs/source/developer_guide/guides/11_predictive_behavioral_analytics_osi.md#part-6-gaps-and-build-list)
+is the running ledger of what is built and what is not.
+
+### What is built so far
+
+| Area | What ships |
+| --- | --- |
+| **Lineage substrate** | Deterministic `event_uid` / `link_uid` provenance identifiers, the Community ID flow hash (verified against the reference implementation over 46,448 flow tuples), time-bounded binding resolution with a fixed tie-break, and event-time window sealing with a lateness horizon and a separate late-arrival stream |
+| **Layer 1 (TC-1)** | Interface counter normalization that tells a counter wrap from a device reboot, transceiver and neighbor novelty, optical power scored against each port's own rolling baseline, link flap counting that catches flaps between two polls, and identifier change detection with no period boundary |
+| **Layer 2 (TC-2)** | Binding closure into the half-open intervals the resolver consumes, the three cardinality features, the gratuitous ARP proportion, and 802.1X authorization timing with unpaired authorization flagged |
+| **Determinism** | A total row order imposed before any cumulative feature, frame canonicalization and digesting, score quantization, and a CI harness running control 13's six checks against a reference pipeline over a seeded golden corpus |
+| **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
+
+Thirteen stages and seventeen supporting modules, covered by 725 tests.
+
+### What this fork is not
+
+Being clear about the boundary is the point of writing it down:
+
+- **The collectors are out of scope.** The SNMP, LLDP, DHCP, and 802.1X polling that produces layer 1
+  and 2 telemetry is not Morpheus and is not here. What ships is everything downstream of it.
+- **Layers 3-7 are designed, not built.** The telemetry classes, detection rules, and Splunk queries
+  for those layers are specified in the guide. Only layers 1 and 2 have running feature stages.
+- **The rule thresholds are placeholders** unless a rule says otherwise. They are starting points for
+  tuning against an estate's own data, not calibrated values.
+- **"Predictive" is a claim the guide qualifies rather than asserts.** Three of its four mechanisms are
+  forward-looking in a defensible sense. The fourth, the premise that autoencoder reconstruction error
+  rises during reconnaissance and staging, is a hypothesis this work does not establish, and a deployment
+  should validate the lead time against its own incident history before promising prediction to
+  anyone.
+- **GPU execution mode is unexercised.** Every stage declares support for it and 178 `gpu_mode` test
+  variants exist, but no GPU has been available to run them. Treat CPU mode as the tested path.
+
 ## Documentation
 ### Using Morpheus
 * [Getting Started with Morpheus](./docs/source/getting_started.md) - Using pre-built Docker containers, building Docker containers from source, and fetching models and datasets
@@ -30,6 +82,11 @@ NVIDIA Morpheus is an open AI application framework that provides cybersecurity 
 * [Pre-built Models and Datasets](./models/README.md) - Pretrained models with corresponding training, validation scripts, and datasets
 * [Developer Guides](./docs/source/developer_guide/guides.md) - Covers extending Morpheus with custom stages
 
+
+### The behavioral analytics work in this fork
+* [Predictive Behavioral Analytics Across OSI Layers 1-7](./docs/source/developer_guide/guides/11_predictive_behavioral_analytics_osi.md) - The design guide this fork implements: codebase analysis, per-layer telemetry requirements, detection rules, Splunk lineage chaining, and the determinism controls
+* [List of available Morpheus stages](./docs/source/stages/morpheus_stages.md) - The `Lineage` and `Telemetry` sections cover the stages added here
+* [Splunk Lineage App](./examples/splunk_lineage_app/README.md) - The SIEM half, as an installable Splunk app
 
 ### Modifying Morpheus
 * [Contributing to Morpheus](./docs/source/developer_guide/contributing.md) - Covers building from source, making changes and contributing to Morpheus

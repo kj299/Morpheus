@@ -28,6 +28,26 @@ Welcome to Morpheus Documentation
 
 NVIDIA Morpheus is an open AI application framework that provides cybersecurity developers with a highly optimized AI framework and pre-trained AI capabilities that allow them to instantaneously inspect all IP traffic across their data center fabric. The Morpheus developer framework allows teams to build their own optimized pipelines that address cybersecurity and information security use cases. Bringing a new level of security to data centers, Morpheus provides development capabilities around dynamic protection, real-time telemetry, adaptive policies, and cyber defenses for detecting and remediating cybersecurity threats.
 
+What This Fork Is For
+---------------------
+
+This fork extends Morpheus toward one goal: **behavioral analytics that spans all seven OSI layers,
+feeds a SIEM, and produces output a detection engineer can reproduce and defend six months later.**
+
+Upstream Morpheus supplies the streaming runtime, the per-entity autoencoder, and the feature DSL. What
+it does not supply is the substrate that turns seven layers of telemetry into one story about one
+entity: identifiers stable across a replay, attribution from an IP at layer 3 back to a physical port at
+layer 1, windows that close on event time rather than on arrival, and the per-layer features the
+detection rules need. That substrate is what this fork adds: the lineage stages, the TC-1 and TC-2
+telemetry stages, the determinism controls, and an installable Splunk app.
+
+The design was written down in full before any of it was built. See
+:doc:`developer_guide/guides/11_predictive_behavioral_analytics_osi` for the analysis, the per-layer
+telemetry requirements, the detection rules, the Splunk configuration, and the determinism controls.
+Its Part 6 is the running ledger of what is implemented and what is still design; the short version is
+that layers 1 and 2 have running feature stages, layers 3 through 7 are specified but not built, the
+collectors themselves are out of scope, and GPU execution mode is declared but unexercised.
+
 Features
 --------
 
@@ -61,6 +81,7 @@ Using Morpheus
  * :doc:`Morpheus Examples <examples>` - Example pipelines using both the Python API and command line interface
  * :doc:`Pretrained Models <models_and_datasets>` - Pretrained models with corresponding training, validation scripts, and datasets
  * :doc:`Developer Guides <developer_guide/guides>` - Covers extending Morpheus with custom stages
+ * :doc:`Predictive Behavioral Analytics Across OSI Layers 1-7 <developer_guide/guides/11_predictive_behavioral_analytics_osi>` - The design guide this fork implements, and the ledger of what is built
 
 Modifying Morpheus
 ^^^^^^^^^^^^^^^^^^

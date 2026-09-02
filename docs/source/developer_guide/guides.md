@@ -65,4 +65,11 @@ will walk through the process of creating a custom module in Python and C++.
 
 ## Solution Design
 
+Where the guides above cover extending Morpheus, this one covers deploying it against a specific
+enterprise problem end to end: behavioral analytics spanning all seven OSI layers, feeding a SIEM, and
+producing output a detection engineer can reproduce and defend. It analyzes the codebase, specifies the
+telemetry each layer must produce and the detection rules worth writing, works the Splunk side down to
+the configuration stanzas, and gives thirteen controls for keeping the output deterministic. Its Part 6
+is the ledger of which parts are implemented and which are still design.
+
 - [Predictive Behavioral Analytics Across OSI Layers 1-7](./guides/11_predictive_behavioral_analytics_osi.md)
