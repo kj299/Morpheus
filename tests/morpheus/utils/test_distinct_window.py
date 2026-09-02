@@ -196,3 +196,25 @@ def test_constructor_validation():
 
     with pytest.raises(ValueError):
         tracker(max_entities=0)
+
+
+def test_a_snapshot_reports_every_value_at_one_instant():
+    # A MAC table snapshot lists every address on a port with the snapshot's own timestamp, and a source stamping
+    # at one-second resolution puts a whole burst on one tick. Neither is a late sample. Rejecting equal timestamps
+    # read a five-host hub as one host on every snapshot-shaped collector, which is the primary TC-2 cadence.
+    results = feed(tracker(), ["mac-a", "mac-b", "mac-c", "mac-d", "mac-e"], step=0)
+
+    assert [result.distinct for result in results] == [1, 2, 3, 4, 5]
+    assert not any(result.out_of_order for result in results)
+
+
+def test_equal_timestamps_still_expire_against_the_horizon():
+    # Admitting equal timestamps must not let a stale value linger: the horizon is judged against the new sample
+    # exactly as for a later one.
+    subject = tracker(window_ns=10 * MINUTE_NS)
+
+    subject.observe(PORT, 0, "old")
+    subject.observe(PORT, 20 * MINUTE_NS, "new-a")
+    result = subject.observe(PORT, 20 * MINUTE_NS, "new-b")
+
+    assert result.distinct == 2

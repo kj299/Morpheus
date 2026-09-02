@@ -16,6 +16,7 @@
 
 import pytest
 
+from morpheus.utils.binding_closer import CONFLICT
 from morpheus.utils.binding_closer import DISPLACED
 from morpheus.utils.binding_closer import EVICTED
 from morpheus.utils.binding_closer import EXPLICIT
@@ -284,3 +285,37 @@ def test_constructor_validation():
 
     with pytest.raises(ValueError):
         closer(max_open=0)
+
+
+def test_a_key_in_two_places_at_one_instant_is_a_conflict_not_a_late_sample():
+    # Two switches polled in the same second both report the MAC. That is the spoofing signal, and it used to be
+    # discarded as out of order, which turned the strongest evidence layer 2 produces into a data quality warning.
+    subject = closer()
+
+    subject.observe(MAC, 0, PORT_A)
+    subject.observe(MAC, 5 * MINUTE_NS, PORT_A)
+    result = subject.observe(MAC, 5 * MINUTE_NS, PORT_B)
+
+    assert result.out_of_order is False
+    assert len(result.closed) == 1
+    assert result.closed[0].end_reason == CONFLICT
+    assert CONFLICT in INFERRED_REASONS
+
+    # Neither sighting precedes the other, so the two intervals overlap by exactly the minimum tick: the honest
+    # record of one key in two places at once, rather than a guess about which came first.
+    reopened = subject.drain()[0]
+    assert result.closed[0].bind_end_ns == 5 * MINUTE_NS + MINIMUM_TICK_NS
+    assert reopened.bind_start_ns == 5 * MINUTE_NS
+    assert reopened.attributes == PORT_B
+
+
+def test_a_repeat_sighting_at_the_same_instant_extends_rather_than_conflicts():
+    # The same port reporting the same MAC twice in one snapshot is a duplicate row, not a conflict.
+    subject = closer()
+
+    subject.observe(MAC, 0, PORT_A)
+    result = subject.observe(MAC, 0, PORT_A)
+
+    assert result.out_of_order is False
+    assert result.closed == []
+    assert subject.drain()[0].observations == 2

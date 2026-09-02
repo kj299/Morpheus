@@ -151,3 +151,14 @@ def test_constructor_validation():
 
     with pytest.raises(ValueError):
         tracker(max_entities=0)
+
+
+def test_a_flood_inside_one_tick_is_counted_in_full():
+    # Many sources stamp at one-second resolution, so twenty announcements from one host land on one timestamp.
+    # Rejecting equal timestamps kept the denominator at one, the ratio below its floor, and the flood invisible,
+    # which is the one event this proportion exists to expose.
+    results = feed(tracker(min_denominator=4), [True] * 20, step=0)
+
+    assert results[-1].denominator == 20
+    assert results[-1].ratio == pytest.approx(1.0)
+    assert not any(result.out_of_order for result in results)

@@ -24,11 +24,15 @@ Nothing upstream provides it. A switch MAC table is a snapshot of what is bound 
 missing, and DHCP releases are advisory. Ends have to be inferred, and this module is where that inference lives,
 with the reason recorded on every record so a consumer can tell an observed end from a deduced one.
 
-Four things end a binding, and only the first is a fact:
+Five things end a binding, and only the first is a fact:
 
 - **Explicit.** The source said so: an accounting stop, a release, a cleared entry. The end time is known.
 - **Displacement.** The same key was observed somewhere else. The binding ended somewhere between its last
   observation and the new one, and this module closes it at the earlier bound.
+- **Conflict.** The same key was observed somewhere else *at the same instant*, so neither sighting can be said to
+  precede the other. The closed binding and the new one overlap by one tick, which is the honest record of a key in
+  two places at once; at layer 2 that is what a spoofed or duplicated MAC looks like, and the reason is recorded
+  separately from displacement so a rule can find it rather than having it read as a data quality warning.
 - **Snapshot absence.** A reconciliation snapshot of a scope no longer lists the key, so it aged out of the table
   at some point since the last one.
 - **Idle timeout.** Nothing has been heard for longer than the source's own aging interval, the safety net for the
@@ -67,12 +71,13 @@ cardinality runs to low hundreds of thousands of MAC addresses, rather than for 
 
 EXPLICIT = "explicit"
 DISPLACED = "displaced"
+CONFLICT = "conflict"
 SNAPSHOT_ABSENT = "snapshot_absent"
 IDLE_TIMEOUT = "idle_timeout"
 EVICTED = "evicted"
 DRAINED = "drained"
 
-INFERRED_REASONS = frozenset({DISPLACED, SNAPSHOT_ABSENT, IDLE_TIMEOUT, EVICTED, DRAINED})
+INFERRED_REASONS = frozenset({DISPLACED, CONFLICT, SNAPSHOT_ABSENT, IDLE_TIMEOUT, EVICTED, DRAINED})
 """Every reason but `EXPLICIT`. A consumer that only trusts observed ends filters on this."""
 
 
@@ -245,9 +250,11 @@ class BindingCloser:
         closed = []
 
         if (state is not None):
-            if (event_time_ns <= state.last_seen_ns):
+            if (event_time_ns < state.last_seen_ns):
                 # Admitting this would move a binding's end backwards, or reopen one already closed against a
-                # later observation, making the emitted intervals depend on delivery order.
+                # later observation, making the emitted intervals depend on delivery order. An equal timestamp is
+                # admitted: two switches polled in the same second both reporting one MAC is the spoofing signal,
+                # not a late sample, and turning it away would discard the strongest evidence layer 2 produces.
                 return ObserveResult(closed=[], out_of_order=True)
 
             if (state.attributes == target):
@@ -257,9 +264,12 @@ class BindingCloser:
 
                 return ObserveResult(closed=[], out_of_order=False)
 
-            # Seen somewhere else. The move happened between the two observations; closing at the earlier bound
-            # leaves the interval between them uncovered rather than claiming the key was still here.
-            closed.append(self._close(state, state.last_seen_ns, DISPLACED))
+            # Seen somewhere else. When the new sighting is later, the move happened between the two observations
+            # and closing at the earlier bound leaves the interval between them uncovered rather than claiming the
+            # key was still here. When it is simultaneous, nothing can be said about order, the two intervals
+            # overlap by one tick, and the reason says so.
+            reason = CONFLICT if event_time_ns == state.last_seen_ns else DISPLACED
+            closed.append(self._close(state, state.last_seen_ns, reason))
 
         self._open[key] = _OpenBinding(key=key,
                                        attributes=target,

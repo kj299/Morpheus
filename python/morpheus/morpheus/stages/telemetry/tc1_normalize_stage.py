@@ -92,7 +92,8 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Column holding device uptime, in `uptime_unit`. Strongly recommended: it is the only thing that
         distinguishes a counter wrap from a reboot.
     uptime_unit : str, default = "s"
-        Unit of `uptime_column`.
+        Unit of `uptime_column`. SNMP `sysUpTime` is `TimeTicks`, hundredths of a second: pass `"cs"` for it, since
+        leaving it at seconds inflates every uptime a hundredfold and reboots stop being detected.
     delta_suffix : str, default = "_delta"
         Suffix for the emitted delta columns.
     entity_key_column : str, default = "entity_key"

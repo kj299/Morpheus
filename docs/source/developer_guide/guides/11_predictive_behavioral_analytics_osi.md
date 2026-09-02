@@ -756,12 +756,15 @@ Emit an explicit end record on expiry rather than relying on the next binding's 
 {py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage`, over
 {py:mod}`~morpheus.utils.binding_closer`, is where that end comes from, because nothing upstream supplies
 it: a switch MAC table reports what is bound now, accounting stops go missing, and releases are advisory.
-Four things end a binding and only the first is a fact. An **explicit** stop states the end. A
-**displacement** means the key was seen elsewhere, so the binding ended somewhere between the two
-sightings. A **snapshot absence** means a reconciliation pass over a scope no longer lists the key. An
-**idle timeout** is the backstop for the stop record that never arrived. Every emitted record carries
-`bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that will act on a
-binding can insist on an end somebody actually reported.
+Five things end a binding and only the first is a fact. An **explicit** stop states the end. A
+**displacement** means the key was seen elsewhere later, so the binding ended somewhere between the two
+sightings. A **conflict** means the key was seen elsewhere *at the same instant*, so neither sighting
+precedes the other and the two bindings overlap by one tick; that is what a spoofed or duplicated MAC
+looks like from the switches, and it gets its own reason so R-D-L2 rules can find it instead of reading
+it as a data quality warning. A **snapshot absence** means a reconciliation pass over a scope no longer
+lists the key. An **idle timeout** is the backstop for the stop record that never arrived. Every emitted
+record carries `bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that
+will act on a binding can insist on an end somebody actually reported.
 
 Inferred ends are placed at the earliest time consistent with the observations rather than the latest,
 which leaves gaps between consecutive bindings. That is the intended behavior: a gap resolves to nothing

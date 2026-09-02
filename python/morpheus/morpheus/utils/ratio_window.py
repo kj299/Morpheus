@@ -161,8 +161,10 @@ class RatioWindowTracker:
 
         self._windows.move_to_end(entity_key)
 
-        if (window.started and event_time_ns <= window.last_seen_ns):
-            # A late event would be expired against the wrong horizon and would change what a later ratio sees.
+        if (window.started and event_time_ns < window.last_seen_ns):
+            # A late event would be expired against the wrong horizon and would change what a later ratio sees. An
+            # equal timestamp is not late: a source stamping at one-second resolution puts an entire flood on one
+            # tick, and rejecting all but the first packet would hide exactly the burst this proportion exists to see.
             return RatioResult(numerator=window.numerator,
                                denominator=len(window.history),
                                ratio=None,

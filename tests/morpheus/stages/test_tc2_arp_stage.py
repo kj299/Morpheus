@@ -299,3 +299,13 @@ def test_constructor_validation(config: Config):
 
     with pytest.raises(ValueError):
         TC2ArpStage(config, min_denominator=0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_flood_stamped_at_one_second_resolution_is_counted_in_full(config: Config):
+    # Twenty gratuitous announcements from one MAC inside one second, as a syslog or sFlow source would stamp them.
+    # This stage saw one of them and published no ratio at all.
+    meta = run(config, gratuitous(20, times=[NS_PER_SECOND] * 20))
+
+    assert _as_list(meta, "arp_count_in_window")[-1] == 20
+    assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
