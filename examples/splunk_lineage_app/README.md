@@ -34,7 +34,7 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored to `event_time` |
 | `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings and the unbucketed L1 bindings, with accelerated fields |
 | `default/transforms.conf` | Search heads | The `binding_l2_l3` and `binding_l1` lookups |
-| `default/savedsearches.conf` | Search heads | Lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, and a binding health alert |
+| `default/savedsearches.conf` | Search heads | Lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the R-D-L2-004 and R-D-L2-005 layer 2 detections, and a binding health alert |
 
 ## Installation
 
@@ -116,6 +116,13 @@ Three levels, strongest last:
    IP through both lookups to a physical port and site, the chain assembly search emits the seeded
    cross-layer chain with the expected span and risk, and R-C-002 detects its ordered sequence with
    the expected gap.
+
+Two things were added after that validation and have **not** been run against a live instance: the
+`binding:l2` sourcetype and the two layer 2 detections, `R-D-L2-004` and `R-D-L2-005`. Their SPL follows
+the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
+Python over the determinism harness's planted corpus (`tests/morpheus/determinism/test_first_detections.py`),
+where each fires exactly once. That is evidence the columns and conditions are right; it is not evidence
+the stanzas parse on a search head. Run `btool savedsearches list` after installing.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields
