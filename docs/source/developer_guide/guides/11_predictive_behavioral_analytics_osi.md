@@ -766,6 +766,15 @@ lists the key. An **idle timeout** is the backstop for the stop record that neve
 record carries `bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that
 will act on a binding can insist on an end somebody actually reported.
 
+The binding target defaults to this class's own entity key, `site_id`, `switch_id`, `port_id` and
+`vlan_id`, and every closed binding also carries `port_key` as `site_id:switch_id:port_id`. That string
+is byte for byte the layer 1 `entity_key` that `TC1NormalizeStage` writes for the same port, which is
+the join the ladder's first arrow depends on; `switch_id` here and `device_id` at layer 1 are one
+identifier under two names, and nothing renames anything. Every telemetry stage composes its keys with
+{py:mod}`~morpheus.utils.entity_key`, and a key with a missing part is null rather than a string with
+`None` in it, so a collector that omits the site does not pool every port with no site under one
+fabricated site. Rows with a null key pass through with their per-entity features null, and the stage logs how many.
+
 Inferred ends are placed at the earliest time consistent with the observations rather than the latest,
 which leaves gaps between consecutive bindings. That is the intended behavior: a gap resolves to nothing
 and tells an analyst the answer is unknown, whereas stretching a binding to meet the next one has it
@@ -1214,6 +1223,12 @@ L6  ja4_client : certificate_fingerprint
               v
 L7  trace_id : request_id : operation
 ```
+
+One naming note before the joins. Layer 1 calls the device `device_id` and layer 2 calls it `switch_id`.
+They are the same identifier under two names: both layers compose the port as `site_id:<device>:port_id`
+through {py:mod}`~morpheus.utils.entity_key`, so the strings are identical, and the Splunk `binding_l1`
+lookup below keys the layer 1 side on `switch_id` for the same reason. The join is on the composed key,
+and nothing renames a column to make it.
 
 Every arrow is a join, and every join is one of two kinds.
 

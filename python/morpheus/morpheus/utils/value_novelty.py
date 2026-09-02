@@ -165,7 +165,9 @@ class ValueNoveltyTracker:
 
         if (previous_time is not None and event_time_ns <= previous_time):
             # Admitting this would make the next sample's comparison run against a value that arrived late, so the
-            # answer would depend on delivery order rather than on the estate.
+            # answer would depend on delivery order rather than on the estate. An equal timestamp is rejected on
+            # purpose: a port has one transceiver and one neighbor at any instant, so two values at one time is a
+            # duplicate poll, and "changed" has no meaning between simultaneous samples.
             return NoveltyResult(changed={name: None
                                           for name in self._field_names},
                                  first_seen={name: None

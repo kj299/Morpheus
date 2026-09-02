@@ -278,3 +278,28 @@ def test_a_snapshot_lists_every_mac_on_a_port_at_one_instant(config: Config):
     meta = run(config, frame(macs, times=[MINUTE_NS] * 5))
 
     assert _as_list(meta, "macs_per_port") == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_null_port_yields_null_counts_rather_than_a_fabricated_key(config: Config):
+    # Two observations with no port. Pooled under the string "None:..." they would read as two MACs on one very
+    # busy port; they are nothing of the kind.
+    payload = frame(["00:11:22:33:44:55", "00:11:22:33:44:66", "00:11:22:33:44:77"],
+                    ports=[None, None, "Gi1/0/1"],
+                    times=[0, MINUTE_NS, 2 * MINUTE_NS])
+    meta = run(config, payload)
+
+    assert _as_list(meta, "port_key") == [None, None, "hq:sw1:Gi1/0/1"]
+    assert _as_list(meta, "macs_per_port") == [None, None, 1]
+    assert _as_list(meta, "ports_per_mac") == [None, None, 1]
+    # The VLAN count does not depend on the port and still runs; all three MACs share one OUI.
+    assert _as_list(meta, "ouis_per_vlan") == [1, 1, 1]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_port_key_is_composed_like_the_layer_1_entity_key(config: Config):
+    from morpheus.utils.entity_key import compose_key
+
+    meta = run(config, frame(["00:11:22:33:44:55"]))
+
+    assert _as_list(meta, "port_key") == [compose_key(("hq", "sw1", "Gi1/0/1"))]

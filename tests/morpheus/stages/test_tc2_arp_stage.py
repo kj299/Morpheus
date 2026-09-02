@@ -309,3 +309,16 @@ def test_a_flood_stamped_at_one_second_resolution_is_counted_in_full(config: Con
 
     assert _as_list(meta, "arp_count_in_window")[-1] == 20
     assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_null_sender_mac_yields_no_ratio_and_a_null_sender_ip_no_claimant_count(config: Config):
+    # Each measure keys on its own value. Pooling keyless packets under "None" would build one phantom sender out
+    # of every packet a collector failed to decode.
+    payload = frame([GATEWAY, None, GATEWAY], [GATEWAY, GATEWAY, GATEWAY], macs=[None, ATTACKER_MAC, ATTACKER_MAC])
+    meta = run(config, payload, min_denominator=1)
+
+    assert _as_list(meta, "arp_count_in_window") == [None, 1, 2]
+    # A claim needs both an address and a MAC. The first packet has no MAC, so it claims nothing; counting it would
+    # make the gateway look contested by a phantom.
+    assert _as_list(meta, "macs_claiming_sender_ip") == [None, None, 1]

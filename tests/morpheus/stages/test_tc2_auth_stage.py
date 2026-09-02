@@ -242,3 +242,15 @@ def test_missing_column_raises(config: Config):
 def test_constructor_validation(config: Config):
     with pytest.raises(ValueError):
         TC2AuthStage(config, timeout_seconds=0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_null_port_carries_no_timing_and_pairs_with_nothing(config: Config):
+    # A start with no port followed by a success with no port. Keyed on the string "None:..." the second would be
+    # timed against the first, pairing an exchange nobody can locate.
+    payload = frame(["started", "success"], times=[0, NS_PER_SECOND], ports=[None, None])
+    meta = run(config, payload)
+
+    assert _as_list(meta, "auth_port_key") == [None, None]
+    assert _as_list(meta, "auth_elapsed_seconds") == [None, None]
+    assert _as_list(meta, "auth_unpaired") == [None, None]

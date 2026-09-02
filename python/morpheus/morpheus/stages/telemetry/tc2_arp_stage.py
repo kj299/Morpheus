@@ -237,6 +237,7 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             claimants: list = []
             excluded: list = []
             unordered = 0
+            keyless = 0
 
             for (position, raw_sender_ip) in enumerate(sender_ips):
                 sender_ip = self._text(raw_sender_ip)
@@ -265,14 +266,29 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 counts = is_gratuitous and (self._include_requests or not has_operation
                                             or self._is_reply(operations[position]))
 
-                ratio = self._ratio.observe(str(sender_mac), event_time_ns, counts)
-                claim = self._claimants.observe(str(sender_ip), event_time_ns, sender_mac)
+                # Each measure keys on its own value, and a missing key means no measure rather than every keyless
+                # packet in the estate being pooled under the string "None".
+                if (sender_mac is None):
+                    ratios.append(None)
+                    numerators.append(None)
+                    denominators.append(None)
+                    keyless += 1
+                else:
+                    ratio = self._ratio.observe(sender_mac, event_time_ns, counts)
+                    ratios.append(ratio.ratio)
+                    numerators.append(ratio.numerator)
+                    denominators.append(ratio.denominator)
+                    unordered += int(ratio.out_of_order)
 
-                ratios.append(ratio.ratio)
-                numerators.append(ratio.numerator)
-                denominators.append(ratio.denominator)
-                claimants.append(claim.distinct)
-                unordered += int(ratio.out_of_order or claim.out_of_order)
+                # A claim needs both an address and a MAC. A packet with no MAC claims nothing, and counting it would
+                # make the address look contested by a phantom.
+                if (sender_ip is None or sender_mac is None):
+                    claimants.append(None)
+                    keyless += int(sender_ip is None and sender_mac is not None)
+                else:
+                    claim = self._claimants.observe(sender_ip, event_time_ns, sender_mac)
+                    claimants.append(claim.distinct)
+                    unordered += int(claim.out_of_order)
 
             df[GRATUITOUS_COLUMN] = gratuitous
             df[EXCLUDED_COLUMN] = excluded
@@ -280,6 +296,13 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_int_column(df, NUMERATOR_COLUMN, numerators)
             assign_nullable_int_column(df, DENOMINATOR_COLUMN, denominators)
             assign_nullable_int_column(df, CLAIMANTS_COLUMN, claimants)
+
+        if (keyless > 0):
+            logger.warning(
+                "TC2ArpStage saw %d of %d packets with a null sender MAC or sender IP; the measure keyed on the "
+                "missing value is null for those rows.",
+                keyless,
+                len(sender_ips))
 
         if (unordered > 0):
             logger.warning(

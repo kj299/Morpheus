@@ -34,14 +34,18 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.counter_delta import NS_PER_SECOND
 from morpheus.utils.counter_delta import CounterTracker
+from morpheus.utils.entity_key import KEY_SEPARATOR
+from morpheus.utils.entity_key import compose_key
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_COUNTER_COLUMNS = ["crc_errors", "symbol_errors", "input_discards", "output_discards"]
 """Counters the TC-1 telemetry class requires as deltas."""
 
-ENTITY_KEY_SEPARATOR = ":"
-"""Separator for the `site_id:device_id:port_id` entity key."""
+ENTITY_KEY_SEPARATOR = KEY_SEPARATOR
+"""Separator for the `site_id:device_id:port_id` entity key. Shared with the layer 2 stages, whose `port_key` is
+the same three values composed the same way, so a resolved MAC lands on exactly this string.
+"""
 
 
 @register_stage("tc1-normalize")
@@ -218,7 +222,8 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                f"DataFrame. Available columns: {sorted(df.columns)}")
 
             key_parts = [to_host_list(df, column) for column in self._key_columns]
-            entity_keys = [ENTITY_KEY_SEPARATOR.join(str(part) for part in row) for row in zip(*key_parts)]
+            # A missing part yields a null key rather than the string "None": half an identity is not an identity.
+            entity_keys = [compose_key(row) for row in zip(*key_parts)]
 
             raw_times = to_host_list(df, self._time_column)
             counters = {name: to_host_list(df, name) for name in self._counter_columns}
@@ -232,8 +237,22 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             intervals: list[typing.Optional[float]] = []
             flags: dict[str, list[bool]] = {"counter_reset": [], "counter_wrapped": [], "sample_out_of_order": []}
             unordered = 0
+            keyless = 0
 
             for (position, entity_key) in enumerate(entity_keys):
+                if (entity_key is None):
+                    # No identity, so no previous sample to difference against. The row passes through with the
+                    # deltas null rather than being attributed to a fabricated port.
+                    for name in self._counter_columns:
+                        deltas[name].append(None)
+
+                    intervals.append(None)
+                    flags["counter_reset"].append(False)
+                    flags["counter_wrapped"].append(False)
+                    flags["sample_out_of_order"].append(False)
+                    keyless += 1
+                    continue
+
                 try:
                     event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
                 except ValueError:
@@ -274,6 +293,13 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             for (flag, values) in flags.items():
                 df[flag] = values
+
+        if (keyless > 0):
+            logger.warning(
+                "TC1NormalizeStage saw %d of %d samples with a null site, device, or port; they carry no entity key "
+                "and no deltas. A collector that omits any of the three cannot anchor the lineage ladder.",
+                keyless,
+                len(entity_keys))
 
         if (unordered > 0):
             logger.warning(
