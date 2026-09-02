@@ -369,3 +369,20 @@ def test_bucketed_frame(leases: BindingTable):
 
     assert list(frame.columns) == ["ip", "bucket", "mac", "hostname", "binding_uid"]
     assert len(frame) == len(leases.to_bucketed_records(bucket_seconds=1800, key_name="ip"))
+
+
+def test_to_epoch_ns_understands_snmp_timeticks():
+    # sysUpTime and ifLastChange are TimeTicks, hundredths of a second. One day is 8,640,000 of them.
+    assert to_epoch_ns(8_640_000, time_unit="cs") == 24 * HOUR_NS
+    assert to_epoch_ns(pd.Series([8_640_000], dtype="int64").iloc[0], time_unit="cs") == 24 * HOUR_NS
+
+
+def test_tie_break_direction_is_pinned():
+    # Two bindings identical in every respect but their attributes. The choice must be a function of the data, and
+    # the documented direction, the greater tuple compared as strings, is the one the code actually takes. This
+    # existed undocumented and the docstring said the opposite.
+    lower = Binding(key="k", start_ns=0, end_ns=100, values=("aaa", ), uid="1")
+    higher = Binding(key="k", start_ns=0, end_ns=100, values=("zzz", ), uid="2")
+
+    assert BindingTable("t", ["v"], [lower, higher]).resolve("k", 50).values == ("zzz", )
+    assert BindingTable("t", ["v"], [higher, lower]).resolve("k", 50).values == ("zzz", )

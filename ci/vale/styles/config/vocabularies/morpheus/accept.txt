@@ -31,6 +31,7 @@ Databricks
 [Dd]ocstring(s?)
 [Ee]ngineerable
 [Ee]xplainability
+[Ff]ailover
 [Gg]eneratable
 glog
 GPU(s?)

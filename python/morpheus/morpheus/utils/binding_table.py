@@ -99,7 +99,9 @@ def to_epoch_ns(value: typing.Any, time_unit: str = "ns") -> typing.Optional[int
         `time_unit`, which is why that parameter exists: an integer timestamp carries no indication of its own scale
         and guessing produces bindings that are wrong by three orders of magnitude.
     time_unit : str, default = "ns"
-        Unit for numeric input. One of `s`, `ms`, `us`, `ns`.
+        Unit for numeric input. One of `s`, `ms`, `us`, `ns`, or `cs` for hundredths of a second, which is what SNMP
+        reports `sysUpTime` and `ifLastChange` in (`TimeTicks`). Passing those through as `s` inflates them a
+        hundredfold and silently defeats every check that compares an uptime against a sampling gap.
 
     Returns
     -------
@@ -124,7 +126,11 @@ def to_epoch_ns(value: typing.Any, time_unit: str = "ns") -> typing.Optional[int
         # `numbers.Number` rather than `int` so that NumPy scalars, which a DataFrame column yields and which do not
         # subclass the builtin types, still honor `time_unit` instead of silently defaulting to nanoseconds.
         if (isinstance(value, numbers.Number) and not isinstance(value, bool)):
-            stamp = pd.Timestamp(value, unit=time_unit)
+            if (time_unit == "cs"):
+                # pandas has no name for hundredths of a second, so scale to the unit it does have.
+                stamp = pd.Timestamp(value * 10, unit="ms")
+            else:
+                stamp = pd.Timestamp(value, unit=time_unit)
         else:
             stamp = pd.Timestamp(value)
     except (TypeError, ValueError) as exc:
@@ -143,9 +149,9 @@ def _sort_key(binding: Binding) -> tuple:
     """
     Total order used to pick a winner when several bindings cover the same instant.
 
-    Most recent start wins, then the longer interval, then the lexicographically smaller attribute tuple. The last
+    Most recent start wins, then the longer interval, then the greater attribute tuple compared as strings. The last
     component only breaks a tie between records that are identical in every other respect, and exists so the choice is
-    a function of the data rather than of input order.
+    a function of the data rather than of input order. Callers take the maximum of this key.
     """
     return (binding.start_ns, binding.end_ns, tuple(str(value) for value in binding.values))
 
@@ -156,8 +162,8 @@ class BindingTable:
 
     Overlapping intervals for one key are a fact of life -- a DHCP server hands out a lease before the previous
     client's release is observed, a MAC moves between ports mid-poll. Rather than rejecting them, the table resolves
-    them deterministically: the binding with the most recent start wins, then the longer interval, then the
-    lexicographically smaller attribute tuple. Overlaps are counted at construction and logged, because a high overlap
+    them deterministically: the binding with the most recent start wins, then the longer interval, then the greater
+    attribute tuple compared as strings. Overlaps are counted at construction and logged, because a high overlap
     rate means the upstream collector is losing expiry records and every resolution it produces is suspect.
 
     Parameters

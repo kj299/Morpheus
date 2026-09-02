@@ -92,7 +92,8 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         invisible. Devices report this relative to their own uptime, so the collector must normalize it; a value
         that goes backwards is read as a device restart, which is itself a transition.
     last_change_unit : str, default = "ns"
-        Unit for numeric timestamps in `last_change_column`.
+        Unit for numeric timestamps in `last_change_column`. Where the collector passes SNMP `ifLastChange` through
+        unconverted it is `TimeTicks`, hundredths of a second, and `"cs"` is the unit to give.
     window_seconds : int, default = 3600
         Interval the windowed count covers.
     """

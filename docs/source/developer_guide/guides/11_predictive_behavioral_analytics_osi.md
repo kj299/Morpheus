@@ -53,12 +53,23 @@ identifier ladder, the deterministic identifiers, `community_id`, the binding ta
 and
 [If the SIEM is not Splunk](#if-the-siem-is-not-splunk) says what a port would have to change.
 
-**What is verified versus designed.** The three shipped stages are real code with real tests, and the
-Community ID implementation was checked against the reference implementation over 46,448 flow tuples.
-Everything else here (the telemetry classes, the rules, the Splunk configuration and queries, the
-determinism controls) is a design rather than a running system. Thresholds are placeholders unless marked
-otherwise, and the SPL and the `.conf` stanzas are written from the documentation rather than executed
-against a live Splunk instance.
+**What is verified versus designed.** This document was written before any of it was built, and the
+boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
+resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
+13's CI harness. That is thirteen stages and seventeen supporting modules under 725 tests, itemized in
+[Part 6](#provided). The Community ID implementation was checked against the reference implementation
+over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
+pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
+([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)).
+
+What remains design rather than a running system: the telemetry classes for layers 3 through 7, every
+detection rule in Part 3, the chained rule engine, and the determinism controls other than 7, 8, and
+13. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
+of it does not. Thresholds are placeholders unless marked otherwise.
+
+One caveat cuts across everything shipped: GPU execution mode is unexercised. Every stage declares
+support for it and 178 `gpu_mode` test variants exist, but no GPU has been available to run them, so
+CPU mode is the tested path.
 
 **On the word "predictive."** Three of the four mechanisms in Part 1 are forward-looking in a defensible
 sense: trajectory features over reconstruction error, forecast residual from `TimeSeriesStage`, and
@@ -685,7 +696,8 @@ wireless controller association logs, spanning-tree topology change notification
 
 **Required fields:** `mac_address`, `oui`, `vlan_id`, `switch_id`, `port_id`, `bind_start`, `bind_end`,
 `dot1x_identity`, `dot1x_result`, `eap_method`, `auth_vlan_assigned`, `wireless_ssid`, `wireless_bssid`,
-`wireless_rssi`, `stp_topology_change_count`, `arp_sender_ip`, `arp_sender_mac`, `arp_operation`.
+`wireless_rssi`, `stp_topology_change_count`, `arp_sender_ip`, `arp_sender_mac`, `arp_target_ip`,
+`arp_operation`.
 
 **Behavioral features:** count of distinct MAC addresses per port over a window catches unauthorized
 hubs and switches. Count of distinct ports per MAC catches spoofing or a device physically moving.
@@ -707,6 +719,32 @@ Note that these three do not shard alike. Counts per port and per VLAN shard cle
 distinct ports per MAC needs every sighting of a MAC to reach one instance, which sharding by switch
 breaks; run it unsharded or shard it by MAC.
 
+The remaining two ship as {py:class}`~morpheus.stages.telemetry.tc2_arp_stage.TC2ArpStage` and
+{py:class}`~morpheus.stages.telemetry.tc2_auth_stage.TC2AuthStage`.
+
+ARP is scored as a *proportion* rather than a count ({py:mod}`~morpheus.utils.ratio_window`), because a
+count of gratuitous replies mostly measures how chatty a host is. The share of one sender's ARP that is
+gratuitous does not, and it is what separates a device announcing itself after a failover from one
+flooding announcements to overwrite a neighbor's cache. No ratio is published until the window holds
+`min_denominator` events, since one gratuitous packet out of one reads as 1.0 and means nothing. The
+same stage computes the distinct MACs claiming each sender address, which is the condition R-D-L2-003
+names; it marks rows whose sender is in the HSRP and VRRP exclusion list rather than dropping them, so
+the exclusion is visible to the rule rather than silently applied.
+
+**A correction to the field list above:** it previously omitted `arp_target_ip`. A gratuitous ARP is
+defined by the sender and target protocol addresses being equal, so the feature this section asks for
+was not computable from the fields it required. The field has been added.
+
+Authorization timing ({py:mod}`~morpheus.utils.session_timer`) pairs each exchange's start with its
+outcome per port. Both tails of the distribution mean something: slow is a supplicant retrying, a RADIUS
+server under load, or credentials being guessed, and very fast can be a replayed success. The most
+useful case is neither tail, though. An outcome arriving with *no exchange in front of it* is what a
+bypass looks like from the switch, since MAC authentication bypass and a device bridged behind an
+already authorized supplicant both produce authorization without anybody authenticating; that row is
+flagged `auth_unpaired` rather than left as a null elapsed time, which would read as missing data
+instead of as an event. The attempt count travels with the timing, because a success after three
+retries is not a first-time one and timing from the last attempt alone would hide the two before it.
+
 **Cadence:** event-driven, with a periodic full table snapshot every 5 minutes for reconciliation.
 **Cardinality:** tens of thousands to low hundreds of thousands of MAC addresses.
 **Retention:** 13 months for bindings, 90 days for raw ARP.
@@ -718,12 +756,15 @@ Emit an explicit end record on expiry rather than relying on the next binding's 
 {py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage`, over
 {py:mod}`~morpheus.utils.binding_closer`, is where that end comes from, because nothing upstream supplies
 it: a switch MAC table reports what is bound now, accounting stops go missing, and releases are advisory.
-Four things end a binding and only the first is a fact. An **explicit** stop states the end. A
-**displacement** means the key was seen elsewhere, so the binding ended somewhere between the two
-sightings. A **snapshot absence** means a reconciliation pass over a scope no longer lists the key. An
-**idle timeout** is the backstop for the stop record that never arrived. Every emitted record carries
-`bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that will act on a
-binding can insist on an end somebody actually reported.
+Five things end a binding and only the first is a fact. An **explicit** stop states the end. A
+**displacement** means the key was seen elsewhere later, so the binding ended somewhere between the two
+sightings. A **conflict** means the key was seen elsewhere *at the same instant*, so neither sighting
+precedes the other and the two bindings overlap by one tick; that is what a spoofed or duplicated MAC
+looks like from the switches, and it gets its own reason so R-D-L2 rules can find it instead of reading
+it as a data quality warning. A **snapshot absence** means a reconciliation pass over a scope no longer
+lists the key. An **idle timeout** is the backstop for the stop record that never arrived. Every emitted
+record carries `bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that
+will act on a binding can insist on an end somebody actually reported.
 
 Inferred ends are placed at the earliest time consistent with the observations rather than the latest,
 which leaves gaps between consecutive bindings. That is the intended behavior: a gap resolves to nothing
@@ -2273,6 +2314,12 @@ What Morpheus provides versus what has to be built, stated plainly.
   trailing window with saturation reported rather than hidden
   ({py:mod}`~morpheus.utils.distinct_window` and
   {py:class}`~morpheus.stages.telemetry.tc2_cardinality_stage.TC2CardinalityStage`).
+- The remaining two TC-2 behavioral features: the gratuitous ARP proportion with the multi-claimant
+  count R-D-L2-003 needs ({py:mod}`~morpheus.utils.ratio_window` and
+  {py:class}`~morpheus.stages.telemetry.tc2_arp_stage.TC2ArpStage`), and 802.1X authorization timing
+  with unpaired authorization flagged ({py:mod}`~morpheus.utils.session_timer` and
+  {py:class}`~morpheus.stages.telemetry.tc2_auth_stage.TC2AuthStage`). This completes the five
+  behavioral features the TC-2 section names.
 
 ### Must be built
 

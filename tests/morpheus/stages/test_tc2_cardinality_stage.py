@@ -268,3 +268,13 @@ def test_constructor_validation(config: Config):
 
     with pytest.raises(ValueError):
         TC2CardinalityStage(config, max_samples=0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_snapshot_lists_every_mac_on_a_port_at_one_instant(config: Config):
+    # A MAC table snapshot reports every address on a port with the snapshot's own timestamp. Five hosts behind a
+    # hub arrive as five rows at one instant, and every one must count; this stage read them as one host.
+    macs = [f"00:11:22:33:44:{index:02x}" for index in range(5)]
+    meta = run(config, frame(macs, times=[MINUTE_NS] * 5))
+
+    assert _as_list(meta, "macs_per_port") == [1, 2, 3, 4, 5]

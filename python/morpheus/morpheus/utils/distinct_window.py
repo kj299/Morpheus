@@ -167,9 +167,11 @@ class DistinctWindowTracker:
 
         self._windows.move_to_end(entity_key)
 
-        if (window.started and event_time_ns <= window.last_seen_ns):
+        if (window.started and event_time_ns < window.last_seen_ns):
             # A late sample would be evicted against the wrong horizon and would change what a later count sees,
-            # making the result depend on delivery order rather than on the segment.
+            # making the result depend on delivery order rather than on the segment. An equal timestamp is not late:
+            # a MAC table snapshot reports every address on a port at one instant, and a source stamping at one-second
+            # resolution puts a whole burst on one tick. Rejecting those would read a five-host hub as one host.
             return DistinctWindowResult(distinct=len(window.occurrences),
                                         total=len(window.history),
                                         first_in_window=False,
