@@ -685,7 +685,8 @@ wireless controller association logs, spanning-tree topology change notification
 
 **Required fields:** `mac_address`, `oui`, `vlan_id`, `switch_id`, `port_id`, `bind_start`, `bind_end`,
 `dot1x_identity`, `dot1x_result`, `eap_method`, `auth_vlan_assigned`, `wireless_ssid`, `wireless_bssid`,
-`wireless_rssi`, `stp_topology_change_count`, `arp_sender_ip`, `arp_sender_mac`, `arp_operation`.
+`wireless_rssi`, `stp_topology_change_count`, `arp_sender_ip`, `arp_sender_mac`, `arp_target_ip`,
+`arp_operation`.
 
 **Behavioral features:** count of distinct MAC addresses per port over a window catches unauthorized
 hubs and switches. Count of distinct ports per MAC catches spoofing or a device physically moving.
@@ -706,6 +707,32 @@ every switch in the estate.
 Note that these three do not shard alike. Counts per port and per VLAN shard cleanly by switch, but
 distinct ports per MAC needs every sighting of a MAC to reach one instance, which sharding by switch
 breaks; run it unsharded or shard it by MAC.
+
+The remaining two ship as {py:class}`~morpheus.stages.telemetry.tc2_arp_stage.TC2ArpStage` and
+{py:class}`~morpheus.stages.telemetry.tc2_auth_stage.TC2AuthStage`.
+
+ARP is scored as a *proportion* rather than a count ({py:mod}`~morpheus.utils.ratio_window`), because a
+count of gratuitous replies mostly measures how chatty a host is. The share of one sender's ARP that is
+gratuitous does not, and it is what separates a device announcing itself after a failover from one
+flooding announcements to overwrite a neighbor's cache. No ratio is published until the window holds
+`min_denominator` events, since one gratuitous packet out of one reads as 1.0 and means nothing. The
+same stage computes the distinct MACs claiming each sender address, which is the condition R-D-L2-003
+names; it marks rows whose sender is in the HSRP and VRRP exclusion list rather than dropping them, so
+the exclusion is visible to the rule rather than silently applied.
+
+**A correction to the field list above:** it previously omitted `arp_target_ip`. A gratuitous ARP is
+defined by the sender and target protocol addresses being equal, so the feature this section asks for
+was not computable from the fields it required. The field has been added.
+
+Authorization timing ({py:mod}`~morpheus.utils.session_timer`) pairs each exchange's start with its
+outcome per port. Both tails of the distribution mean something: slow is a supplicant retrying, a RADIUS
+server under load, or credentials being guessed, and very fast can be a replayed success. The most
+useful case is neither tail, though. An outcome arriving with *no exchange in front of it* is what a
+bypass looks like from the switch, since MAC authentication bypass and a device bridged behind an
+already authorized supplicant both produce authorization without anybody authenticating; that row is
+flagged `auth_unpaired` rather than left as a null elapsed time, which would read as missing data
+instead of as an event. The attempt count travels with the timing, because a success after three
+retries is not a first-time one and timing from the last attempt alone would hide the two before it.
 
 **Cadence:** event-driven, with a periodic full table snapshot every 5 minutes for reconciliation.
 **Cardinality:** tens of thousands to low hundreds of thousands of MAC addresses.
@@ -2273,6 +2300,12 @@ What Morpheus provides versus what has to be built, stated plainly.
   trailing window with saturation reported rather than hidden
   ({py:mod}`~morpheus.utils.distinct_window` and
   {py:class}`~morpheus.stages.telemetry.tc2_cardinality_stage.TC2CardinalityStage`).
+- The remaining two TC-2 behavioral features: the gratuitous ARP proportion with the multi-claimant
+  count R-D-L2-003 needs ({py:mod}`~morpheus.utils.ratio_window` and
+  {py:class}`~morpheus.stages.telemetry.tc2_arp_stage.TC2ArpStage`), and 802.1X authorization timing
+  with unpaired authorization flagged ({py:mod}`~morpheus.utils.session_timer` and
+  {py:class}`~morpheus.stages.telemetry.tc2_auth_stage.TC2AuthStage`). This completes the five
+  behavioral features the TC-2 section names.
 
 ### Must be built
 
