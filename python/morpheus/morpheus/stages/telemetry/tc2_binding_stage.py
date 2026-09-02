@@ -31,12 +31,21 @@ from morpheus.utils.binding_closer import DEFAULT_IDLE_TIMEOUT_NS
 from morpheus.utils.binding_closer import NS_PER_SECOND
 from morpheus.utils.binding_closer import BindingCloser
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import compose_key
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ATTRIBUTE_COLUMNS = ["switch_id", "port_id", "vlan_id"]
-"""What a MAC address is bound to in the TC-2 telemetry class."""
+DEFAULT_ATTRIBUTE_COLUMNS = ["site_id", "switch_id", "port_id", "vlan_id"]
+"""What a MAC address is bound to in the TC-2 telemetry class: the class's own `site_id:switch_id:port_id:vlan_id`."""
+
+PORT_KEY_COLUMN = "port_key"
+PORT_KEY_ATTRIBUTES = ("site_id", "switch_id", "port_id")
+"""The attributes that compose `port_key`, in the order layer 1 composes `entity_key`. When every one of them is a
+binding attribute, each closed binding carries the port as the same string the TC-1 stages key on, which is the join
+the identifier ladder's first arrow depends on. `switch_id` here and `device_id` at layer 1 name the same thing.
+"""
 
 DEFAULT_IDLE_TIMEOUT_SECONDS = DEFAULT_IDLE_TIMEOUT_NS // NS_PER_SECOND
 
@@ -87,9 +96,11 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
     time_unit : str, default = "ns"
         Unit for numeric timestamps in `time_column`. Ignored for datetime columns.
     attribute_columns : list of str, optional
-        Columns making up the binding target. Defaults to `["switch_id", "port_id", "vlan_id"]`. A sample whose
-        target differs from the open binding's displaces it; one whose target matches extends it. Columns outside
-        this list are ignored, so a changing signal strength does not split a binding.
+        Columns making up the binding target. Defaults to `["site_id", "switch_id", "port_id", "vlan_id"]`, the
+        telemetry class's own entity key. A sample whose target differs from the open binding's displaces it; one
+        whose target matches extends it. Columns outside this list are ignored, so a changing signal strength does
+        not split a binding. When `site_id`, `switch_id` and `port_id` are all present, each emitted binding also
+        carries `port_key`, the port as `site_id:switch_id:port_id`, identical to the layer 1 `entity_key`.
     idle_timeout_seconds : int, default = 1800
         Silence after which an open binding is presumed aged out. Set it from the source's own aging interval where
         that is known; switch MAC tables commonly age at five minutes.
@@ -127,6 +138,9 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         self._needed_columns[END_REASON_COLUMN] = TypeId.STRING
         self._needed_columns[END_OBSERVED_COLUMN] = TypeId.BOOL8
         self._needed_columns[OBSERVATIONS_COLUMN] = TypeId.INT64
+        self._needed_columns[PORT_KEY_COLUMN] = TypeId.STRING
+
+        self._emits_port_key = all(name in attribute_columns for name in PORT_KEY_ATTRIBUTES)
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -254,7 +268,17 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         # Imported here so that this module remains importable in CPU-only environments where cuDF is absent.
         from morpheus.utils.type_utils import get_df_class
 
-        return [MessageMeta(get_df_class(self._config.execution_mode)(self._records(closed)))]
+        df = get_df_class(self._config.execution_mode)(self._records(closed))
+
+        # The port as layer 1 spells it, so a MAC resolved through this binding lands on a TC-1 `entity_key`. Null
+        # when the target does not name a full port, or when any part of it was missing.
+        port_keys = [
+            compose_key([record.attributes.get(name) for name in PORT_KEY_ATTRIBUTES]) if self._emits_port_key else None
+            for record in closed
+        ]
+        assign_str_column(df, PORT_KEY_COLUMN, port_keys)
+
+        return [MessageMeta(df)]
 
     def on_completed(self) -> list:
         """

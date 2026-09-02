@@ -181,7 +181,9 @@ class LinkFlapTracker:
                               out_of_order=False)
 
         if (event_time_ns <= previous.event_time_ns):
-            # Accepting this would let a late sample rewrite the state a later one was already compared against.
+            # Accepting this would let a late sample rewrite the state a later one was already compared against. An
+            # equal timestamp is rejected on purpose: operational state is polled per port, and two states for one
+            # port at one instant is a duplicate poll, not a transition.
             return FlapResult(flaps=None,
                               flaps_in_window=None,
                               last_change_advanced=False,

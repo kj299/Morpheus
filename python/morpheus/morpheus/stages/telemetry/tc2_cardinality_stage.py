@@ -35,6 +35,8 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import NS_PER_SECOND
 from morpheus.utils.distinct_window import DistinctWindowTracker
+from morpheus.utils.entity_key import KEY_SEPARATOR
+from morpheus.utils.entity_key import compose_key
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ OUIS_PER_VLAN = "ouis_per_vlan"
 COUNTS = (MACS_PER_PORT, PORTS_PER_MAC, OUIS_PER_VLAN)
 """The three cardinality questions the TC-2 telemetry class asks."""
 
-PORT_KEY_SEPARATOR = ":"
+PORT_KEY_SEPARATOR = KEY_SEPARATOR
 """Separator for the `site_id:switch_id:port_id` key the per-port counts group on."""
 
 
@@ -247,11 +249,18 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             first: dict[str, list] = {name: [] for name in COUNTS}
             saturated: dict[str, list] = {name: [] for name in COUNTS}
             unordered = 0
+            keyless = 0
+
+            has_site = self._site_column in df.columns
 
             for (position, raw_mac) in enumerate(macs):
                 mac = self._text(raw_mac)
-                port_key = PORT_KEY_SEPARATOR.join(
-                    str(self._text(part)) for part in (sites[position], switches[position], ports[position]))
+                # The same composition the layer 1 stages use for `entity_key`, so a MAC resolved to this port lands
+                # on the identical string. Without a site column the key is `switch:port`, which still counts per
+                # port but cannot join to layer 1. A null part yields a null key, never the string "None".
+                location = (sites[position], switches[position], ports[position]) if has_site else (switches[position],
+                                                                                                    ports[position])
+                port_key = compose_key(location)
                 port_keys.append(port_key)
 
                 try:
@@ -275,15 +284,27 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 }
 
                 out_of_order = False
+                row_keyless = False
 
                 for (name, (entity, value)) in observations.items():
-                    result = self._trackers[name].observe(str(entity), event_time_ns, value)
+                    if (entity is None or value is None):
+                        # Nothing to count per, or nothing to count. Pooling these under a fabricated key would make
+                        # every keyless row in the estate look like one very busy port, and counting an unknown port
+                        # as a distinct port would make a MAC with one bad sample look like it moved.
+                        counts[name].append(None)
+                        first[name].append(None)
+                        saturated[name].append(False)
+                        row_keyless = True
+                        continue
+
+                    result = self._trackers[name].observe(entity, event_time_ns, value)
                     counts[name].append(result.distinct)
                     first[name].append(result.first_in_window)
                     saturated[name].append(result.saturated)
                     out_of_order = out_of_order or result.out_of_order
 
                 unordered += int(out_of_order)
+                keyless += int(row_keyless)
 
             assign_str_column(df, "port_key", port_keys)
 
@@ -291,6 +312,13 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 assign_nullable_int_column(df, name, counts[name])
                 assign_nullable_bool_column(df, f"{name}_first_in_window", first[name])
                 df[f"{name}_saturated"] = saturated[name]
+
+        if (keyless > 0):
+            logger.warning(
+                "TC2CardinalityStage saw %d of %d observations with a null MAC, port, or VLAN; the affected counts "
+                "are null rather than pooled under a fabricated key.",
+                keyless,
+                len(macs))
 
         if (unordered > 0):
             logger.warning(

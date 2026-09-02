@@ -187,7 +187,9 @@ class OpticalBaselineTracker:
 
         if (previous_time is not None and event_time_ns <= previous_time):
             # Admitting this would let a late reading rewrite a baseline that later samples were already scored
-            # against, which would make the result depend on arrival order.
+            # against, which would make the result depend on arrival order. An equal timestamp is rejected on
+            # purpose: optical power is polled per port, so a second reading at the same instant is a duplicate
+            # poll, and admitting it would count one measurement twice in the median.
             return BaselineResult(baselines={name: None
                                              for name in self._channel_names},
                                   deviations={name: None

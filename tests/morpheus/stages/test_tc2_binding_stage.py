@@ -43,6 +43,7 @@ def frame(macs: list, ports: list, times: list = None, switches: list = None, vl
     return {
         "mac_address": macs,
         "event_time": [index * MINUTE_NS for index in range(count)] if times is None else times,
+        "site_id": ["hq"] * count,
         "switch_id": ["sw1"] * count if switches is None else switches,
         "port_id": ports,
         "vlan_id": ["10"] * count if vlans is None else vlans,
@@ -279,3 +280,47 @@ def test_missing_column_raises(config: Config):
 def test_constructor_validation(config: Config):
     with pytest.raises(ValueError):
         TC2BindingStage(config, idle_timeout_seconds=0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_closed_binding_carries_the_port_as_layer_1_spells_it(config: Config):
+    # The ladder's first arrow: a MAC resolved through this binding must land on the string the TC-1 stages key on.
+    # Layer 1 calls the middle segment device_id and layer 2 calls it switch_id; the composed key is what joins.
+    from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
+
+    (_, stage) = feed(config, frame([MAC_A], ["Gi1/0/1"]))
+    binding = stage.on_completed()[0]
+
+    layer_1 = MessageMeta(
+        get_df_class(config.execution_mode)({
+            "site_id": ["hq"],
+            "device_id": ["sw1"],
+            "port_id": ["Gi1/0/1"],
+            "event_time": [0],
+            "crc_errors": [0],
+            "symbol_errors": [0],
+            "input_discards": [0],
+            "output_discards": [0],
+        }))
+    TC1NormalizeStage(config).on_data(layer_1)
+
+    assert _as_list(binding, "port_key") == _as_list(layer_1, "entity_key") == ["hq:sw1:Gi1/0/1"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_site_is_part_of_the_default_binding_target(config: Config):
+    # The telemetry class's entity key is site:switch:port:vlan. A target without the site cannot join to layer 1.
+    payload = frame([MAC_A], ["Gi1/0/1"])
+    del payload["site_id"]
+
+    with pytest.raises(KeyError, match="site_id"):
+        feed(config, payload)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_port_key_is_null_when_the_target_does_not_name_a_full_port(config: Config):
+    # A caller binding MACs to VLANs alone gets bindings, but no port key, rather than a partial one.
+    (_, stage) = feed(config, frame([MAC_A], ["Gi1/0/1"]), attribute_columns=["switch_id", "vlan_id"])
+    binding = stage.on_completed()[0]
+
+    assert _as_list(binding, "port_key") == [None]

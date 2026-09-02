@@ -310,3 +310,22 @@ def test_constructor_validation(config: Config):
 
     with pytest.raises(ValueError, match="not in counter_columns"):
         make_stage(config, counter32_columns=["nope"])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_missing_key_part_yields_a_null_key_not_the_string_none(config: Config):
+    # The envelope's rule: an unavailable field is explicitly null, never defaulted to something plausible. The
+    # string "None:sw1:Gi1/0/1" would pool every siteless port in the estate under one fabricated site.
+    payload = dict(SAMPLES)
+    payload["site_id"] = [None, "hq", "hq"]
+
+    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
+    make_stage(config).on_data(meta)
+
+    keys = _as_list(meta, "entity_key")
+    assert keys[0] is None
+    assert keys[1] == "hq:sw1:Gi1/0/1"
+    # The keyless row differenced nothing, and the keyed rows are not confused by it: the second row is the first
+    # sighting of its own key, so it carries no delta either, and the third differences against the second.
+    assert _as_list(meta, "crc_errors_delta")[0] is None
+    assert _as_list(meta, "sample_out_of_order")[0] is False

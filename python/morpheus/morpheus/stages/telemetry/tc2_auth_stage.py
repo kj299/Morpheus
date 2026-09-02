@@ -34,6 +34,8 @@ from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import KEY_SEPARATOR
+from morpheus.utils.entity_key import compose_key
 from morpheus.utils.session_timer import NS_PER_SECOND
 from morpheus.utils.session_timer import SessionTimer
 
@@ -45,7 +47,7 @@ DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_PENDING_VALUES = ["started", "start", "in-progress", "in_progress", "pending", "request"]
 """Result values that mean the exchange is still running rather than finished."""
 
-PORT_KEY_SEPARATOR = ":"
+PORT_KEY_SEPARATOR = KEY_SEPARATOR
 
 ELAPSED_COLUMN = "auth_elapsed_seconds"
 ATTEMPTS_COLUMN = "auth_attempts"
@@ -221,11 +223,24 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             attempts: list = []
             unpaired: list = []
             unordered = 0
+            keyless = 0
+            has_site = self._site_column in df.columns
 
             for (position, raw_port) in enumerate(ports):
-                port_key = PORT_KEY_SEPARATOR.join(
-                    str(self._text(part)) for part in (sites[position], switches[position], raw_port))
+                # The same composition the layer 1 stages use for `entity_key`. A null part yields a null key.
+                location = (sites[position], switches[position], raw_port) if has_site else (switches[position],
+                                                                                             raw_port)
+                port_key = compose_key(location)
                 port_keys.append(port_key)
+
+                if (port_key is None):
+                    # No port to time an exchange for. Pairing this against a fabricated key would let one port's
+                    # start close another port's outcome.
+                    elapsed.append(None)
+                    attempts.append(None)
+                    unpaired.append(None)
+                    keyless += 1
+                    continue
 
                 result = self._text(results[position])
 
@@ -261,6 +276,11 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_float_column(df, ELAPSED_COLUMN, elapsed)
             assign_nullable_int_column(df, ATTEMPTS_COLUMN, attempts)
             assign_nullable_bool_column(df, UNPAIRED_COLUMN, unpaired)
+
+        if (keyless > 0):
+            logger.warning("TC2AuthStage saw %d of %d events with a null site, switch, or port; they carry no timing.",
+                           keyless,
+                           len(ports))
 
         if (unordered > 0):
             logger.warning(

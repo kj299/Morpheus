@@ -186,7 +186,10 @@ class CounterTracker:
             return self._none_result()
 
         if (event_time_ns <= previous.event_time_ns):
-            # Leave state on the later sample: accepting this one would make the next delta span backwards.
+            # Leave state on the later sample: accepting this one would make the next delta span backwards. An
+            # equal timestamp is rejected here on purpose, unlike in the trailing-window trackers: this is polled
+            # per-port state, two samples at one instant are a duplicate poll, and a delta over a zero interval
+            # has no rate. The row is flagged out of order because that is the only flag the result carries.
             return self._none_result(out_of_order=True)
 
         interval_ns = event_time_ns - previous.event_time_ns
