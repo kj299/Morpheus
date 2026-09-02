@@ -324,3 +324,87 @@ def test_port_key_is_null_when_the_target_does_not_name_a_full_port(config: Conf
     binding = stage.on_completed()[0]
 
     assert _as_list(binding, "port_key") == [None]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_open_bindings_are_not_emitted_by_default(config: Config):
+    (emitted, _) = feed(config, frame([MAC_A], ["Gi1/0/1"]))
+
+    assert emitted == []
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_provisional_record_is_emitted_the_moment_a_binding_opens(config: Config):
+    # Live attribution: a device plugged in now is answerable now, not after the idle timeout.
+    (emitted, _) = feed(config, frame([MAC_A, MAC_A], ["Gi1/0/1", "Gi1/0/1"]), emit_open_bindings=True)
+
+    assert len(emitted) == 1
+    record = emitted[0]
+    assert _as_list(record, "mac_address") == [MAC_A]
+    assert _as_list(record, "bind_provisional") == [True]
+    assert _as_list(record, "bind_end_reason") == ["open"]
+    assert _as_list(record, "bind_end_observed") == [False]
+    assert _as_list(record, "port_key") == ["hq:sw1:Gi1/0/1"]
+    # One record per binding, not per sample: the second sighting extended it and emitted nothing more. The record
+    # describes the binding as it stands at the end of the batch, so it already counts both sightings.
+    assert _as_list(record, "bind_observations") == [2]
+
+    ends = record.get_data("bind_end")
+    assert int(ends.isna().sum()) == 1
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_closed_record_supersedes_the_provisional_one(config: Config):
+    # Batch one: the device appears, a provisional record goes out. Batch two: it moves, and the closed record for
+    # the first port carries the same mac and bind_start as the provisional, which is how a consumer supersedes it.
+    df_class = get_df_class(config.execution_mode)
+    stage = TC2BindingStage(config, emit_open_bindings=True)
+
+    first = stage.on_data(MessageMeta(df_class(frame([MAC_A], ["Gi1/0/1"], times=[0]))))
+    second = stage.on_data(MessageMeta(df_class(frame([MAC_A], ["Gi1/0/2"], times=[MINUTE_NS]))))
+
+    assert [(p, prov, start) for (p, prov, start) in zip(_as_list(first[0], "port_id"), _as_list(
+        first[0], "bind_provisional"), _as_list(first[0], "bind_start"))] == [("Gi1/0/1", True, 0)]
+
+    rows = set(
+        zip(_as_list(second[0], "port_id"), _as_list(second[0], "bind_provisional"), _as_list(second[0], "bind_start")))
+    assert rows == {("Gi1/0/1", False, 0), ("Gi1/0/2", True, MINUTE_NS)}
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_binding_opened_and_closed_in_one_batch_is_emitted_only_as_closed(config: Config):
+    # There is nothing provisional left to say about it by the time the batch is rendered.
+    (emitted, _) = feed(config, frame([MAC_A, MAC_A], ["Gi1/0/1", "Gi1/0/2"]), emit_open_bindings=True)
+
+    rows = set(zip(_as_list(emitted[0], "port_id"), _as_list(emitted[0], "bind_provisional")))
+    assert rows == {("Gi1/0/1", False), ("Gi1/0/2", True)}
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_provisional_record_resolves_with_an_explicit_assumed_duration(config: Config):
+    # The whole point of emitting it: an address can be attributed inside the idle window, and the cap on how long
+    # the guess is trusted is the consumer's, stated explicitly, never invented by this stage.
+    (emitted, _) = feed(config, frame([MAC_A], ["Gi1/0/1"], times=[10 * MINUTE_NS]), emit_open_bindings=True)
+
+    import pandas as pd
+    records = emitted[0].copy_dataframe()
+    records = records.to_pandas() if hasattr(records, "to_pandas") else records
+
+    table = BindingTable.from_dataframe(pd.DataFrame(records),
+                                        name="mac_table_live",
+                                        key_column="mac_address",
+                                        value_columns=["port_key"],
+                                        start_column="bind_start",
+                                        end_column="bind_end",
+                                        open_end_duration_ns=30 * MINUTE_NS)
+
+    assert table.resolve(MAC_A, 25 * MINUTE_NS).values == ("hq:sw1:Gi1/0/1", )
+    assert table.resolve(MAC_A, 45 * MINUTE_NS) is None
+
+    with pytest.raises(ValueError, match="no end"):
+        BindingTable.from_dataframe(pd.DataFrame(records),
+                                    name="mac_table_live",
+                                    key_column="mac_address",
+                                    value_columns=["port_key"],
+                                    start_column="bind_start",
+                                    end_column="bind_end")

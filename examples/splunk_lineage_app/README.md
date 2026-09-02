@@ -34,7 +34,8 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored to `event_time` |
 | `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings and the unbucketed L1 bindings, with accelerated fields |
 | `default/transforms.conf` | Search heads | The `binding_l2_l3` and `binding_l1` lookups |
-| `default/savedsearches.conf` | Search heads | Lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the R-D-L2-004 and R-D-L2-005 layer 2 detections, and a binding health alert |
+| `default/savedsearches.conf` | Search heads | Lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the four layer 2 detections R-D-L2-001, 003, 004 and 005, and a binding health alert |
+| `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
 
 ## Installation
 
@@ -61,7 +62,7 @@ $SPLUNK_HOME/bin/splunk btool savedsearches list "Chain assembly - cross-layer r
 
 ## Settings that must match the pipeline
 
-Three values are shared contracts between this app and the Morpheus pipeline. Changing either
+These values are shared contracts between this app and the Morpheus pipeline. Changing either
 side alone breaks the joins silently.
 
 1. **Bucket width, 300 seconds.** The pipeline expands bindings with
@@ -81,6 +82,19 @@ side alone breaks the joins silently.
    source it inherits *that* event's timestamp, which looks plausible and is wrong.
    `tests/morpheus/utils/test_siem_wire.py` reads this app's `props.conf` directly and fails if the
    two sides drift.
+
+5. **The two lists the layer 2 rules depend on.** R-D-L2-001 reads `lookups/port_designations.csv`,
+   one row per port as `site_id:switch_id:port_id` with a `designation` (`single-host` is what the rule
+   matches) and `max_macs`. R-D-L2-003 honours the HSRP and VRRP exclusion list, but that list lives in
+   the pipeline, as `TC2ArpStage(excluded_sender_ips=[...])`; the stage marks excluded rows and the
+   search reads the mark. Both rules fire on nothing until their list is populated, which is the guide's
+   own statement that they are unusable without one.
+6. **Provisional bindings, if enabled.** `TC2BindingStage(emit_open_bindings=True)` emits a record on
+   sourcetype `binding:l2:open` the moment a binding opens, with a null `bind_end`. Whatever builds the
+   live lookup from those must cap the open interval with an explicit assumed duration
+   (`BindingTable.from_dataframe(open_end_duration_ns=...)`, the source's own aging interval is the
+   right value) and let the closed record on `binding:l2`, same `mac_address` and `bind_start`,
+   supersede it.
 
 ## What to expect once data flows
 
@@ -117,8 +131,9 @@ Three levels, strongest last:
    cross-layer chain with the expected span and risk, and R-C-002 detects its ordered sequence with
    the expected gap.
 
-Two things were added after that validation and have **not** been run against a live instance: the
-`binding:l2` sourcetype and the two layer 2 detections, `R-D-L2-004` and `R-D-L2-005`. Their SPL follows
+Several things were added after that validation and have **not** been run against a live instance: the
+`binding:l2` and `binding:l2:open` sourcetypes, the `port_designations` lookup, and the four layer 2
+detections `R-D-L2-001`, `R-D-L2-003`, `R-D-L2-004` and `R-D-L2-005`. Their SPL follows
 the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
 Python over the determinism harness's planted corpus (`tests/morpheus/determinism/test_first_detections.py`),
 where each fires exactly once. That is evidence the columns and conditions are right; it is not evidence

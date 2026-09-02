@@ -45,9 +45,17 @@ PROPS = os.path.join(APP_DEFAULT, "props.conf")
 NS = tp.NS_PER_SECOND
 
 RULES = {
+    "R-D-L2-001": "R-D-L2-001 - MAC address count exceeded on an access port",
+    "R-D-L2-003": "R-D-L2-003 - ARP anomaly",
     "R-D-L2-004": "R-D-L2-004 - MAC in two places at once",
     "R-D-L2-005": "R-D-L2-005 - Authorization without authentication",
 }
+LOOKUP = os.path.join(REPO_ROOT,
+                      "examples",
+                      "splunk_lineage_app",
+                      "TA-morpheus-lineage",
+                      "lookups",
+                      "port_designations.csv")
 
 
 def read_conf(path: str) -> dict[str, dict[str, str]]:
@@ -131,6 +139,43 @@ def test_r_d_l2_005_fires_exactly_once_on_the_bypass(result: pd.DataFrame):
     assert (outcomes["auth_unpaired"] == False).sum() == len(outcomes) - 1  # noqa: E712  pylint: disable=singleton-comparison
 
 
+@pytest.mark.cpu_mode
+def test_r_d_l2_001_fires_once_per_offending_mac_on_designated_ports(result: pd.DataFrame):
+    # The search: first-in-window rows on ports the inventory designates single-host, where the count exceeds the
+    # permitted number. The corpus's own designation list stands in for the lookup.
+    rows = result[result["telemetry_class"] == "tc2_mac"]
+    designated = rows[rows["port_key"].isin(tp.SINGLE_HOST_PORTS)]
+    detections = designated[(designated["macs_per_port_first_in_window"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                            & (designated["macs_per_port"] > 1)]
+
+    hub_port = f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"
+    spoofed_port = f"{tp.SITE}:{tp.SWITCH}:Gi1/0/2"
+
+    # Four hub MACs, each once as it appears; and the spoofed MAC once, when it shows up on a second port.
+    assert set(detections["port_key"]) == {hub_port, spoofed_port}
+    assert sorted(detections[detections["port_key"] == hub_port]["mac_address"]) == sorted(tp.HUB_MACS)
+    assert list(detections[detections["port_key"] == spoofed_port]["mac_address"]) == [tp.MAC_A]
+    # Nothing saturated: the counts are exact, not lower bounds.
+    assert not detections["macs_per_port_saturated"].any()
+
+
+@pytest.mark.cpu_mode
+def test_r_d_l2_003_fires_on_the_flooded_gateway_and_not_on_the_redundancy_pair(result: pd.DataFrame):
+    arp = result[result["telemetry_class"] == "tc2_arp"]
+    candidates = arp[(arp["macs_claiming_sender_ip"].fillna(0) > 1) & (arp["arp_sender_ip_excluded"] == False)]  # noqa: E712  pylint: disable=singleton-comparison
+
+    # The search groups by address within the window; here, one contested address in the whole corpus.
+    assert set(candidates["arp_sender_ip"]) == {tp.GATEWAY_IP}
+    assert set(candidates["arp_sender_mac"]) == {tp.MAC_A, tp.ROUTER_MAC}
+    assert candidates["macs_claiming_sender_ip"].max() == 2
+
+    # The VRRP pair is contested by design, marked excluded, and therefore not a candidate. Without the exclusion
+    # this would be a second detection, and a wrong one.
+    vrrp = arp[arp["arp_sender_ip"] == tp.VRRP_IP]
+    assert vrrp["macs_claiming_sender_ip"].max() == 2
+    assert (vrrp["arp_sender_ip_excluded"] == True).all()  # noqa: E712  pylint: disable=singleton-comparison
+
+
 # --- The stanzas, read from the app itself ------------------------------------------------------------------------
 
 
@@ -144,6 +189,12 @@ def test_the_search_reads_the_column_the_stage_emits(rule_id: str, searches: dic
     spl = searches[RULES[rule_id]]["search"]
 
     expected = {
+        "R-D-L2-001": ("sourcetype=morpheus:score:l2",
+                       "macs_per_port_first_in_window=true",
+                       "lookup port_designations port_key",
+                       'designation="single-host"',
+                       "macs_per_port_saturated"),
+        "R-D-L2-003": ("sourcetype=morpheus:score:l2", "macs_claiming_sender_ip>1", "arp_sender_ip_excluded=false"),
         "R-D-L2-004": ("sourcetype=binding:l2", f"bind_end_reason={CONFLICT}", "port_key"),
         "R-D-L2-005": ("sourcetype=morpheus:score:l2", "auth_unpaired=true", "auth_port_key", "event_uid"),
     }[rule_id]
@@ -180,3 +231,24 @@ def test_the_binding_sourcetype_is_timed_on_the_end():
     assert "binding:l2" in props
     assert '"bind_end"' in props["binding:l2"]["TIME_PREFIX"]
     assert props["binding:l2"]["TIME_FORMAT"] == props["morpheus:score:l2"]["TIME_FORMAT"]
+
+
+def test_the_designation_lookup_ships_with_its_schema_and_no_guesses():
+    # A designation list is a fact about one estate. The file defines the columns the search reads and nothing else,
+    # so the rule fires on nothing until the inventory populates it.
+    with open(LOOKUP, encoding="utf-8") as handle:
+        lines = [line.strip() for line in handle if line.strip()]
+
+    assert lines == ["port_key,designation,max_macs"]
+
+    transforms = read_conf(os.path.join(APP_DEFAULT, "transforms.conf"))
+    assert transforms["port_designations"]["filename"] == os.path.basename(LOOKUP)
+
+
+def test_the_open_binding_sourcetype_is_timed_on_the_start():
+    # A provisional record has no end yet; its only time is when the binding opened.
+    props = read_conf(PROPS)
+
+    assert "binding:l2:open" in props
+    assert '"bind_start"' in props["binding:l2:open"]["TIME_PREFIX"]
+    assert props["binding:l2:open"]["TIME_FORMAT"] == props["binding:l2"]["TIME_FORMAT"]

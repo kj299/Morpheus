@@ -783,6 +783,17 @@ interval is half-open, an inferred end sits one tick past the last observation, 
 interval that actually contains what was seen; without that a key seen once would produce a zero-width
 binding covering nothing at all.
 
+Closed bindings are the honest unit for replay, and they have a cost for live work: a device plugged in
+now is not resolvable until its binding closes, which by default is up to the idle timeout of "unknown"
+during an incident. `emit_open_bindings` addresses that without compromising the record. The moment a
+binding opens the stage emits one provisional record, `bind_provisional = true`, `bind_end_reason =
+open`, with a null end; the consumer building a live table caps that open interval with an explicit
+assumed duration (`open_end_duration_ns`, the source's own aging interval is the right value), and the
+closed record that follows, carrying the same key and `bind_start`, supersedes it. One record per
+binding rather than per sample, so a stable estate emits one row per device and then silence. The
+stage never invents the end itself: a null end fails to load without a stated duration, which is the
+guide's own rule that a soft join against an unbounded interval is a guess.
+
 ### TC-3: Network
 
 **Entity key:** `src_ip`, and separately the directed pair `src_ip:dst_ip`
@@ -1004,7 +1015,10 @@ did not transition to down. Near-zero false positive rate outside of maintenance
 change ticket, not by threshold.
 
 **R-D-L2-001 - MAC address count exceeded on an access port.** More than one non-voice MAC observed on
-a port designated as single-host. Classic unauthorized-switch detection.
+a port designated as single-host. Classic unauthorized-switch detection. Ships as a saved search over
+`macs_per_port` from `TC2CardinalityStage`, firing once per MAC new to the window, against a
+`port_designations` lookup the app ships header-only: a designation list is a fact about one estate, so
+until the inventory populates it the rule fires on nothing.
 
 **R-B-L2-002 - Port-to-MAC binding novelty.** `DistinctIncrementColumn` over `mac_address` grouped by
 `port_id` produces a step change relative to the port's 30-day baseline. Catches the same condition as
@@ -1013,7 +1027,10 @@ R-D-L2-001 without requiring an accurate port designation database, at the cost 
 **R-D-L2-003 - ARP anomaly.** A `arp_sender_ip` maps to more than one `arp_sender_mac` within a
 5-minute window, excluding known HSRP and VRRP virtual addresses. Explicitly maintain the exclusion list;
 this rule is unusable without it. `TC2ArpStage` emits the count as `macs_claiming_sender_ip` and marks
-excluded senders rather than dropping them.
+excluded senders rather than dropping them, so the exclusion list lives once, in pipeline configuration,
+and the saved search that ships for this rule reads the mark rather than holding a copy. The harness
+corpus carries a VRRP pair that legitimately shares an address, on the list, so the exclusion path is
+exercised rather than assumed.
 
 **R-D-L2-004 - MAC in two places at once.** A closed binding with `bind_end_reason = conflict`: the
 same MAC was reported on two ports at the same instant, so `TC2BindingStage` closed the earlier binding
@@ -1028,10 +1045,12 @@ supplicant looks like. Near-zero false positives where every port runs 802.1X; o
 configured deliberately, suppress by port designation rather than by loosening the rule. Tier D1. Ships
 as a saved search in the Splunk app.
 
-These two are the first rules in this part that exist as code rather than as specification, chosen
-because they read columns the shipped stages already produce and depend on nothing outside the
-pipeline. Their predicates are also asserted in Python over the determinism harness's planted corpus,
-where each fires exactly once.
+These four, R-D-L2-001, 003, 004 and 005, are the rules in this part that exist as code rather than as
+specification. 004 and 005 read columns the shipped stages produce and depend on nothing outside the
+pipeline; 001 and 003 depend on a list the estate owns, and each ships with the hook for that list and
+fires on nothing until it is populated. All four predicates are asserted in Python over the determinism
+harness's planted corpus: 004 and 005 fire exactly once, 001 once per offending MAC, and 003 on the
+flooded gateway and not on the redundancy pair.
 
 **R-P-L1-004 - Optical degradation forecast.** Linear extrapolation of `optical_rx_dbm` per port
 projects a crossing of the transceiver's minimum receive threshold within 14 days. This is an operations
@@ -2360,8 +2379,12 @@ What Morpheus provides versus what has to be built, stated plainly.
   with a hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and an 802.1X bypass planted in
   it (`tests/morpheus/determinism/telemetry_pipeline.py`). The harness asserts that a MAC resolved
   through a layer 2 binding lands on a layer 1 `entity_key` the same run emitted.
-- The first two detections, R-D-L2-004 and R-D-L2-005, as saved searches in the Splunk app over
-  columns the stages already produce, with their predicates asserted in Python over the planted corpus.
+- The four layer 2 detections, R-D-L2-001, 003, 004 and 005, as saved searches in the Splunk app, with
+  their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
+  list each depends on and fire on nothing until it is populated.
+- Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
+  answer inside the idle window, capped by a duration the consumer states rather than one the stage
+  invents.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.

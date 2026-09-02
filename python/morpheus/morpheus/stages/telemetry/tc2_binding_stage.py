@@ -31,6 +31,7 @@ from morpheus.utils.binding_closer import DEFAULT_IDLE_TIMEOUT_NS
 from morpheus.utils.binding_closer import NS_PER_SECOND
 from morpheus.utils.binding_closer import BindingCloser
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
@@ -54,6 +55,9 @@ BIND_END_COLUMN = "bind_end"
 END_REASON_COLUMN = "bind_end_reason"
 END_OBSERVED_COLUMN = "bind_end_observed"
 OBSERVATIONS_COLUMN = "bind_observations"
+PROVISIONAL_COLUMN = "bind_provisional"
+OPEN_REASON = "open"
+"""`bind_end_reason` on a provisional record: the binding has not ended, and the end is null."""
 
 
 @register_stage("tc2-binding", ignore_args=["attribute_columns"])
@@ -107,6 +111,14 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
     emit_open_on_complete : bool, default = True
         Close and emit every still-open binding when the stream ends. Without this, a binding that never moved is
         never emitted at all, so a replay over a finite corpus would silently lose every stable MAC.
+    emit_open_bindings : bool, default = False
+        Also emit a provisional record the moment a binding opens, with a null `bind_end`,
+        `bind_end_reason = "open"` and `bind_provisional = true`. Off, a device plugged in now cannot be resolved
+        until its binding closes, which is up to `idle_timeout_seconds` of "unknown" during an incident. On, live
+        attribution has an answer immediately; the consumer caps the open interval with an explicit assumed
+        duration (`BindingTable.from_dataframe(open_end_duration_ns=...)`), and the closed record that follows,
+        carrying the same key and `bind_start`, supersedes it. One record per binding, not per sample: a sample
+        that merely extends an open binding emits nothing.
     """
 
     def __init__(self,
@@ -116,7 +128,8 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
                  time_unit: str = "ns",
                  attribute_columns: list[str] = None,
                  idle_timeout_seconds: int = DEFAULT_IDLE_TIMEOUT_SECONDS,
-                 emit_open_on_complete: bool = True):
+                 emit_open_on_complete: bool = True,
+                 emit_open_bindings: bool = False):
         super().__init__(c)
 
         attribute_columns = list(DEFAULT_ATTRIBUTE_COLUMNS) if attribute_columns is None else list(attribute_columns)
@@ -129,6 +142,7 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         self._time_unit = time_unit
         self._attribute_columns = attribute_columns
         self._emit_open_on_complete = emit_open_on_complete
+        self._emit_open_bindings = emit_open_bindings
 
         self._closer = BindingCloser(attribute_names=attribute_columns,
                                      idle_timeout_ns=idle_timeout_seconds * NS_PER_SECOND)
@@ -139,6 +153,7 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         self._needed_columns[END_OBSERVED_COLUMN] = TypeId.BOOL8
         self._needed_columns[OBSERVATIONS_COLUMN] = TypeId.INT64
         self._needed_columns[PORT_KEY_COLUMN] = TypeId.STRING
+        self._needed_columns[PROVISIONAL_COLUMN] = TypeId.BOOL8
 
         self._emits_port_key = all(name in attribute_columns for name in PORT_KEY_ATTRIBUTES)
 
@@ -176,20 +191,50 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         """Bindings currently open and therefore not yet emitted."""
         return self._closer.open_count
 
-    def _records(self, closed: list) -> dict:
-        """Render closed bindings as columns, one row each."""
-        columns: dict[str, list] = {self._key_column: [record.key for record in closed]}
+    def _records(self, closed: list, opened: list) -> dict:
+        """Render closed bindings, then provisional open ones, as columns, one row each. `bind_end` is left out and
+        assigned separately so that its nulls are nulls in both execution modes."""
+        records = list(closed) + list(opened)
+        columns: dict[str, list] = {self._key_column: [record.key for record in records]}
 
         for name in self._attribute_columns:
-            columns[name] = [record.attributes.get(name) for record in closed]
+            columns[name] = [record.attributes.get(name) for record in records]
 
-        columns[BIND_START_COLUMN] = [record.bind_start_ns for record in closed]
-        columns[BIND_END_COLUMN] = [record.bind_end_ns for record in closed]
-        columns[END_REASON_COLUMN] = [record.end_reason for record in closed]
-        columns[END_OBSERVED_COLUMN] = [record.end_observed for record in closed]
-        columns[OBSERVATIONS_COLUMN] = [record.observations for record in closed]
+        columns[BIND_START_COLUMN] = [record.bind_start_ns for record in records]
+        columns[END_REASON_COLUMN] = [record.end_reason for record in closed] + [OPEN_REASON] * len(opened)
+        columns[END_OBSERVED_COLUMN] = [record.end_observed for record in closed] + [False] * len(opened)
+        columns[OBSERVATIONS_COLUMN] = [record.observations for record in records]
+        columns[PROVISIONAL_COLUMN] = [False] * len(closed) + [True] * len(opened)
 
         return columns
+
+    def _emit(self, closed: list, opened: list = ()) -> list:
+        """Wrap closed and provisional bindings in a frame of the execution mode's own type, or nothing when there
+        are none."""
+        opened = list(opened)
+
+        if (len(closed) == 0 and len(opened) == 0):
+            return []
+
+        # Imported here so that this module remains importable in CPU-only environments where cuDF is absent.
+        from morpheus.utils.type_utils import get_df_class
+
+        df = get_df_class(self._config.execution_mode)(self._records(closed, opened))
+
+        # A provisional record has no end. Null here, in both modes, is what tells the consumer to apply its own
+        # assumed duration rather than read a fabricated one.
+        ends = [record.bind_end_ns for record in closed] + [None] * len(opened)
+        assign_nullable_int_column(df, BIND_END_COLUMN, ends)
+
+        # The port as layer 1 spells it, so a MAC resolved through this binding lands on a TC-1 `entity_key`. Null
+        # when the target does not name a full port, or when any part of it was missing.
+        port_keys = [
+            compose_key([record.attributes.get(name) for name in PORT_KEY_ATTRIBUTES]) if self._emits_port_key else None
+            for record in list(closed) + opened
+        ]
+        assign_str_column(df, PORT_KEY_COLUMN, port_keys)
+
+        return [MessageMeta(df)]
 
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]) -> list:
         """
@@ -230,6 +275,7 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         attributes = {name: to_host_list(source, name) for name in self._attribute_columns}
 
         closed = []
+        opened_keys: list[str] = []
         unordered = 0
 
         for (position, key) in enumerate(keys):
@@ -250,6 +296,9 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
             closed.extend(result.closed)
             unordered += int(result.out_of_order)
 
+            if (result.opened and self._emit_open_bindings):
+                opened_keys.append(str(key))
+
         if (unordered > 0):
             logger.warning(
                 "TC2BindingStage skipped %d of %d observations that were out of order, keyless, or without a "
@@ -258,27 +307,23 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
                 unordered,
                 len(keys))
 
-        return self._emit(closed)
+        # One provisional record per binding that opened in this batch, in its current state. A key that opened
+        # twice, displaced within the batch, yields one record for the binding now open; the earlier one is among the
+        # closed records.
+        opened = []
+        seen: set[str] = set()
 
-    def _emit(self, closed: list) -> list:
-        """Wrap closed bindings in a frame of the execution mode's own type, or nothing when none closed."""
-        if (len(closed) == 0):
-            return []
+        for key in opened_keys:
+            if (key in seen):
+                continue
 
-        # Imported here so that this module remains importable in CPU-only environments where cuDF is absent.
-        from morpheus.utils.type_utils import get_df_class
+            seen.add(key)
+            record = self._closer.open_binding(key)
 
-        df = get_df_class(self._config.execution_mode)(self._records(closed))
+            if (record is not None):
+                opened.append(record)
 
-        # The port as layer 1 spells it, so a MAC resolved through this binding lands on a TC-1 `entity_key`. Null
-        # when the target does not name a full port, or when any part of it was missing.
-        port_keys = [
-            compose_key([record.attributes.get(name) for name in PORT_KEY_ATTRIBUTES]) if self._emits_port_key else None
-            for record in closed
-        ]
-        assign_str_column(df, PORT_KEY_COLUMN, port_keys)
-
-        return [MessageMeta(df)]
+        return self._emit(closed, opened)
 
     def on_completed(self) -> list:
         """
