@@ -126,6 +126,39 @@ class ClosedBinding:
 
 
 @dataclasses.dataclass(frozen=True)
+class OpenBinding:
+    """
+    A binding that is still open: what is known so far, offered provisionally.
+
+    A closed binding is the honest unit of lineage, but a device plugged in now is not resolvable until its binding
+    closes, which by default is when it moves, vanishes from a snapshot, or goes quiet for the idle timeout. For a
+    forensic replay that is correct. For an analyst asking where an address is right now, half an hour of "unknown"
+    is not. An open binding carries no end; the consumer caps it with an explicit assumed duration, which is what
+    `BindingTable.from_dataframe(open_end_duration_ns=...)` exists for, and the closed record that follows, with the
+    same key and start, supersedes it.
+
+    Attributes
+    ----------
+    key : str
+        What is bound.
+    attributes : dict
+        What it is bound to.
+    bind_start_ns : int
+        First observation. Inclusive.
+    last_seen_ns : int
+        Most recent observation. There is no end yet.
+    observations : int
+        Samples so far.
+    """
+
+    key: str
+    attributes: dict
+    bind_start_ns: int
+    last_seen_ns: int
+    observations: int
+
+
+@dataclasses.dataclass(frozen=True)
 class ObserveResult:
     """
     The outcome of observing one binding sample.
@@ -137,10 +170,15 @@ class ObserveResult:
         another, which is emitted rather than dropped so that no binding is lost silently.
     out_of_order : bool
         The sample's event time was not after the open binding's last observation. State is left untouched.
+    opened : bool
+        This observation opened a new binding, either the key's first or one that replaced a displaced or
+        conflicting binding. An observation that extends an open binding does not set this, so a consumer emitting
+        provisional records emits one per binding rather than one per sample.
     """
 
     closed: list
     out_of_order: bool
+    opened: bool = False
 
 
 @dataclasses.dataclass
@@ -209,6 +247,30 @@ class BindingCloser:
     def open_count(self) -> int:
         """Bindings currently open."""
         return len(self._open)
+
+    def open_binding(self, key: str) -> typing.Optional[OpenBinding]:
+        """
+        What is currently known about a key's open binding, or `None` if nothing is open for it.
+
+        Parameters
+        ----------
+        key : str
+            The bound key.
+
+        Returns
+        -------
+        `OpenBinding` or None
+        """
+        state = self._open.get(key)
+
+        if (state is None):
+            return None
+
+        return OpenBinding(key=state.key,
+                           attributes=dict(state.attributes),
+                           bind_start_ns=state.start_ns,
+                           last_seen_ns=state.last_seen_ns,
+                           observations=state.observations)
 
     def _target(self, attributes: dict) -> dict:
         return {name: attributes.get(name) for name in self._attribute_names}
@@ -279,7 +341,7 @@ class BindingCloser:
         self._open.move_to_end(key)
         closed.extend(self._evict())
 
-        return ObserveResult(closed=closed, out_of_order=False)
+        return ObserveResult(closed=closed, out_of_order=False, opened=True)
 
     def close(self, key: str, event_time_ns: int) -> typing.Optional[ClosedBinding]:
         """

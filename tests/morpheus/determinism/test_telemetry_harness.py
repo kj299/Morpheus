@@ -337,6 +337,13 @@ def test_nothing_else_fired(result: pd.DataFrame):
     # is ever contested.
     arp = _rows(result, "tc2_arp")
     contested = arp[arp["macs_claiming_sender_ip"].fillna(0) > 1]
-    assert set(contested["arp_sender_ip"]) == {tp.GATEWAY_IP}
-    assert contested["event_time"].min() == tp.FLOOD_AT_SECONDS * NS
-    assert contested["event_time"].max() < (tp.FLOOD_AT_SECONDS + tp.PERIOD_SECONDS) * NS
+    excluded = contested[contested["arp_sender_ip_excluded"] == True]  # noqa: E712  pylint: disable=singleton-comparison
+    live = contested[contested["arp_sender_ip_excluded"] == False]  # noqa: E712  pylint: disable=singleton-comparison
+
+    assert set(live["arp_sender_ip"]) == {tp.GATEWAY_IP}
+    assert live["event_time"].min() == tp.FLOOD_AT_SECONDS * NS
+    assert live["event_time"].max() < (tp.FLOOD_AT_SECONDS + tp.PERIOD_SECONDS) * NS
+    # The redundancy pair is contested for the whole corpus and excluded for the whole corpus: visible, marked, and
+    # not a detection.
+    assert set(excluded["arp_sender_ip"]) == {tp.VRRP_IP}
+    assert len(excluded) > 0

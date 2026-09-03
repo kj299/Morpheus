@@ -319,3 +319,33 @@ def test_a_repeat_sighting_at_the_same_instant_extends_rather_than_conflicts():
     assert result.out_of_order is False
     assert result.closed == []
     assert subject.drain()[0].observations == 2
+
+
+def test_opening_is_reported_once_per_binding_not_per_sample():
+    # A consumer emitting provisional records needs to know when a binding opened, and only then.
+    subject = closer()
+
+    first = subject.observe(MAC, 0, PORT_A)
+    extended = subject.observe(MAC, MINUTE_NS, PORT_A)
+    moved = subject.observe(MAC, 2 * MINUTE_NS, PORT_B)
+
+    assert first.opened is True
+    assert extended.opened is False
+    # A displacement closes one binding and opens another in the same observation.
+    assert moved.opened is True and len(moved.closed) == 1
+
+
+def test_an_open_binding_can_be_read_without_closing_it():
+    subject = closer()
+
+    subject.observe(MAC, 0, PORT_A)
+    subject.observe(MAC, MINUTE_NS, PORT_A)
+    record = subject.open_binding(MAC)
+
+    assert record.attributes == PORT_A
+    assert record.bind_start_ns == 0
+    assert record.last_seen_ns == MINUTE_NS
+    assert record.observations == 2
+    # Reading did not end it.
+    assert subject.open_count == 1
+    assert subject.open_binding("00:00:00:00:00:00") is None

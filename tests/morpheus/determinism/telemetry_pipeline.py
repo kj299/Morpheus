@@ -31,7 +31,9 @@ Into that corpus are planted the things the layer 1 and layer 2 features exist t
 - a **reboot**: a device whose uptime and counters restart mid-corpus;
 - a **tap**: a step loss of receive power on one port, with transmit power unchanged;
 - a **flap**: a link that went down and up between two polls, visible only through `ifLastChange`;
-- a **bypass**: an 802.1X success on a port that never started an exchange.
+- a **bypass**: an 802.1X success on a port that never started an exchange;
+- and one thing that must **not** fire: a VRRP pair whose two MACs legitimately share one address, carried on the
+  exclusion list, so the ARP rule's exclusion path is exercised rather than assumed.
 
 The pipeline is one per telemetry class, which is the deployment shape: each class arrives on its own topic and
 its stages require its own columns. They compose where the design says they must. Layer 2's binding stage emits
@@ -92,6 +94,12 @@ MAC_C = "aa:bb:cc:00:00:03"
 HUB_MACS = [f"de:ad:be:ef:00:{index:02x}" for index in range(1, 5)]
 ROUTER_MAC = "00:00:5e:00:01:01"
 GATEWAY_IP = "10.0.0.1"
+VRRP_IP = "10.0.0.254"
+VRRP_MACS = ["00:00:5e:00:01:fe", "00:00:5e:00:01:ff"]
+"""A first-hop redundancy pair. Two MACs claim one address by design, and the exclusion list says so."""
+
+SINGLE_HOST_PORTS = {f"{SITE}:{SWITCH}:{port}" for port in PORTS}
+"""The corpus's own port designations, standing in for the inventory-supplied list R-D-L2-001 reads."""
 HOST_IPS = {MAC_A: "10.0.0.11", MAC_B: "10.0.0.12", MAC_C: "10.0.0.13"}
 
 HUB_PORT = "Gi1/0/3"
@@ -239,6 +247,11 @@ def _build_arp(rng: random.Random) -> pd.DataFrame:
 
     for time_s in range(0, CORPUS_SECONDS, 60):
         events.append((time_s, GATEWAY_IP, ROUTER_MAC, GATEWAY_IP, "reply"))
+
+    # The redundancy pair announces the shared address from alternating MACs. Legitimate, and the reason the
+    # exclusion list exists: without it this reads exactly like the flood below.
+    for (index, time_s) in enumerate(range(30, CORPUS_SECONDS, 60)):
+        events.append((time_s, VRRP_IP, VRRP_MACS[index % 2], VRRP_IP, "reply"))
 
     # The flood: twenty gratuitous replies claiming the gateway, from the host on Gi1/0/1, inside one second. A
     # source stamping at one-second resolution puts all twenty on one tick.
@@ -411,7 +424,7 @@ def run_pipeline(config: Config,
         config,
         batches["tc2_arp"],
         [
-            TC2ArpStage(config, excluded_sender_ips=[]),
+            TC2ArpStage(config, excluded_sender_ips=[VRRP_IP]),
             BindingResolverStage(config,
                                  binding_table=build_binding_table(bindings),
                                  key_column="arp_sender_mac",
