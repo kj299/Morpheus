@@ -463,3 +463,77 @@ def test_idle_expiry_falls_in_the_same_place_however_the_stream_is_batched(confi
             split_rows.extend(zip(_as_list(frame_, "bind_end_reason"), _as_list(frame_, "bind_end")))
 
     assert whole_rows == split_rows == [(IDLE_TIMEOUT, 1)]
+
+
+@pytest.mark.cpu_mode
+def test_one_row_from_a_broken_clock_does_not_close_every_binding(config: Config):
+    # Expiry runs on event time, so a device whose clock is wrong by years used to drive the idle horizon past
+    # every open binding in the estate in a single call and close all of them as idle timeouts -- destroying the
+    # historical attribution for that window on the strength of one bad row. A wall-clock bound is not the fix,
+    # since it would make a replay of last week's data expire everything on sight; the bound is the stream's own
+    # progress.
+    idle = 1800
+    macs = [f"aa:bb:cc:00:00:{index:02x}" for index in range(5)]
+    ports = [f"Gi1/0/{index}" for index in range(5)]
+    stage = TC2BindingStage(config, idle_timeout_seconds=idle)
+
+    settled = stage.on_data(
+        MessageMeta(get_df_class(config.execution_mode)(frame(macs, ports, times=[1000 * NS_PER_SECOND] * 5))))
+
+    assert not settled, "a snapshot of five live MACs closes nothing"
+
+    ten_years = 10 * 365 * 24 * 3600 * NS_PER_SECOND
+    poisoned = stage.on_data(
+        MessageMeta(
+            get_df_class(config.execution_mode)(frame(["aa:bb:cc:00:00:ff"], ["Gi1/0/9"],
+                                                      times=[1000 * NS_PER_SECOND + ten_years]))))
+
+    assert not poisoned, "the row is refused, so nothing is closed by it"
+    assert stage._closer.open_count == 5, "and every binding that was open still is"
+
+
+@pytest.mark.cpu_mode
+def test_a_refused_time_does_not_disable_expiry_for_the_rest_of_the_run(config: Config):
+    # The second half of it. Expiry skips a horizon that has not advanced, which is what makes the per-row scan
+    # affordable -- so a clock left stranded in the far future would silently switch idle expiry off from that
+    # point on, and every later binding would be held open forever.
+    idle = 1800
+    stage = TC2BindingStage(config, idle_timeout_seconds=idle)
+    ten_years = 10 * 365 * 24 * 3600 * NS_PER_SECOND
+
+    stage.on_data(
+        MessageMeta(
+            get_df_class(config.execution_mode)(frame(["aa:bb:cc:00:00:01"], ["Gi1/0/1"],
+                                                      times=[1000 * NS_PER_SECOND]))))
+    stage.on_data(
+        MessageMeta(
+            get_df_class(config.execution_mode)(frame(["aa:bb:cc:00:00:ff"], ["Gi1/0/9"],
+                                                      times=[1000 * NS_PER_SECOND + ten_years]))))
+
+    emitted = stage.on_data(
+        MessageMeta(
+            get_df_class(config.execution_mode)(frame(["aa:bb:cc:00:00:02"], ["Gi1/0/2"],
+                                                      times=[(1000 + idle + 60) * NS_PER_SECOND]))))
+
+    reasons = [reason for meta in emitted for reason in _as_list(meta, "bind_end_reason")]
+
+    assert IDLE_TIMEOUT in reasons, "the quiet MAC still expires after a refused row"
+
+
+@pytest.mark.cpu_mode
+def test_a_believable_gap_is_not_mistaken_for_a_broken_clock(config: Config):
+    # The negative control. A pipeline stopped over a weekend, or a replay of an archive with holes in it, is
+    # ordinary and must still expire what went quiet. Only a jump no operational gap explains is refused.
+    idle = 1800
+    stage = TC2BindingStage(config, idle_timeout_seconds=idle)
+
+    stage.on_data(MessageMeta(
+        get_df_class(config.execution_mode)(frame(["aa:bb:cc:00:00:01"], ["Gi1/0/1"], times=[0]))))
+
+    three_days = 3 * 24 * 3600 * NS_PER_SECOND
+    emitted = stage.on_data(
+        MessageMeta(get_df_class(config.execution_mode)(frame(["aa:bb:cc:00:00:02"], ["Gi1/0/2"], times=[three_days]))))
+
+    reasons = [reason for meta in emitted for reason in _as_list(meta, "bind_end_reason")]
+
+    assert IDLE_TIMEOUT in reasons, "a three-day gap is believable and still expires the quiet binding"

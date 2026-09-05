@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and eighteen supporting modules under 892 tests, itemized in
+13's CI harness. That is fourteen stages and nineteen supporting modules under 906 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -596,6 +596,18 @@ Two rules govern the envelope. First, `ingest_time` must never appear in a detec
 Second, when a field is unavailable it must be explicitly null with a reason code, never defaulted to a
 plausible value; a defaulted value is indistinguishable from an observed one three months later during an
 investigation.
+
+The first rule needs a corollary the guide originally left out, and the omission was a real defect rather
+than a wording gap. Trusting `event_time` in a rule is right; trusting it to drive a stage's own expiry is
+not, because a stateful stage expires against it. A device whose clock is wrong by years reports a time
+years ahead, and one such row drives the idle horizon past every open binding at once, closing all of them
+and destroying the attribution for that window. The bound cannot be the wall clock: comparing event time
+against the time of day would make a replay of last week's data expire everything on sight, and would make
+one corpus produce different output depending on when it was run. The reference that keeps replay honest is
+the stream's own progress, so a time further ahead of everything seen so far than any operational gap could
+explain is refused, the row carries no per-entity features, and the stage reports how many it refused.
+{py:mod}`~morpheus.utils.event_clock` implements this, and both TC-2 stateful stages take
+`max_clock_skew_seconds`.
 
 ### TC-1: Physical
 

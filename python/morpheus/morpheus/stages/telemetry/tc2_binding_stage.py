@@ -28,6 +28,8 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stage_schema import StageSchema
 from morpheus.utils.binding_closer import DEFAULT_IDLE_TIMEOUT_NS
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
 from morpheus.utils.binding_closer import NS_PER_SECOND
 from morpheus.utils.binding_closer import BindingCloser
 from morpheus.utils.binding_table import to_epoch_ns
@@ -105,6 +107,11 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         whose target matches extends it. Columns outside this list are ignored, so a changing signal strength does
         not split a binding. When `site_id`, `switch_id` and `port_id` are all present, each emitted binding also
         carries `port_key`, the port as `site_id:switch_id:port_id`, identical to the layer 1 `entity_key`.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. Expiry runs on
+        event time, so a device whose clock is wrong by years would otherwise drive the idle horizon past every
+        open binding at once and close all of them. A refused row gets no binding and is counted, exactly as a row
+        with an unreadable time is. See `morpheus.utils.event_clock`.
     idle_timeout_seconds : int, default = 1800
         Silence after which an open binding is presumed aged out. Set it from the source's own aging interval where
         that is known; switch MAC tables commonly age at five minutes.
@@ -127,6 +134,7 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
                  time_column: str = "event_time",
                  time_unit: str = "ns",
                  attribute_columns: list[str] = None,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,
                  idle_timeout_seconds: int = DEFAULT_IDLE_TIMEOUT_SECONDS,
                  emit_open_on_complete: bool = True,
                  emit_open_bindings: bool = False):
@@ -137,12 +145,17 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         if (idle_timeout_seconds <= 0):
             raise ValueError(f"idle_timeout_seconds must be positive, received {idle_timeout_seconds}")
 
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
+
         self._key_column = key_column
         self._time_column = time_column
         self._time_unit = time_unit
         self._attribute_columns = attribute_columns
         self._emit_open_on_complete = emit_open_on_complete
         self._emit_open_bindings = emit_open_bindings
+
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
 
         self._closer = BindingCloser(attribute_names=attribute_columns,
                                      idle_timeout_ns=idle_timeout_seconds * NS_PER_SECOND)
@@ -277,6 +290,7 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         closed = []
         opened_keys: list[str] = []
         unordered = 0
+        implausible = 0
 
         for (position, key) in enumerate(keys):
             try:
@@ -286,6 +300,13 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
 
             if (event_time_ns is None or key is None):
                 unordered += 1
+                continue
+
+            # A time the stream cannot believe must not reach the horizon below. One row from a device whose clock
+            # is wrong by years would otherwise expire every open binding in the estate in a single call, and take
+            # the historical attribution with it.
+            if (not self._clock.accept(event_time_ns)):
+                implausible += 1
                 continue
 
             # A MAC that has gone quiet for longer than the idle timeout has left, and its binding has to end at
@@ -312,6 +333,14 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
                 "usable event time; they did not advance any binding. Shard by switch and preserve per-key "
                 "ordering upstream.",
                 unordered,
+                len(keys))
+
+        if (implausible > 0):
+            logger.warning(
+                "TC2BindingStage refused %d of %d rows whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they opened no binding and did not drive expiry. A device whose "
+                "clock is wrong by years is the usual cause.",
+                implausible,
                 len(keys))
 
         # One provisional record per binding that opened in this batch, in its current state. A key that opened

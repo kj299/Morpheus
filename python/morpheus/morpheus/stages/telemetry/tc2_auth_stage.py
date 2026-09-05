@@ -37,6 +37,8 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
 from morpheus.utils.session_timer import NS_PER_SECOND
 from morpheus.utils.session_timer import SessionTimer
 
@@ -122,6 +124,10 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Unit for numeric timestamps in `time_column`. Ignored for datetime columns.
     pending_values : list of str, optional
         Result values meaning the exchange is still running. Compared case-insensitively.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. Expiry runs on
+        event time, so a device whose clock is wrong by years would otherwise abandon every pending exchange at
+        once. A refused row carries no timing and is counted. See `morpheus.utils.event_clock`.
     timeout_seconds : int, default = 300
         Silence after which a pending exchange is abandoned, so a port whose result never arrived does not hold
         state forever and its next outcome is correctly reported as unpaired.
@@ -137,11 +143,15 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_unit: str = "ns",
                  pending_values: list[str] = None,
                  supplicant_columns: list[str] = None,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,
                  timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS):
         super().__init__(c)
 
         if (timeout_seconds <= 0):
             raise ValueError(f"timeout_seconds must be positive, received {timeout_seconds}")
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         pending = DEFAULT_PENDING_VALUES if pending_values is None else pending_values
 
@@ -156,6 +166,7 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._time_unit = time_unit
         self._pending_values = {str(value).strip().lower() for value in pending}
 
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
         self._timer = SessionTimer(timeout_ns=timeout_seconds * NS_PER_SECOND)
 
         self._needed_columns[PORT_KEY_COLUMN] = TypeId.STRING
@@ -272,6 +283,7 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             unordered = 0
             keyless = 0
             abandoned = 0
+            implausible = 0
             has_site = self._site_column in df.columns
 
             for (position, raw_port) in enumerate(ports):
@@ -310,6 +322,16 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 # session and the signal R-D-L2-005 exists to catch disappears. Expiry runs on this row's own
                 # event time rather than a wall clock or a batch boundary, so it falls in the same place however
                 # the stream is divided.
+                # A time the stream cannot believe must not reach the expiry below. One row from a device whose
+                # clock is wrong by years would otherwise abandon every pending exchange in the estate at once,
+                # and each of those exchanges' real outcomes would then read as an unpaired authorization.
+                if (not self._clock.accept(event_time_ns)):
+                    elapsed.append(None)
+                    attempts.append(None)
+                    unpaired.append(None)
+                    implausible += 1
+                    continue
+
                 abandoned += len(self._timer.expire(event_time_ns))
 
                 # The port is what is being authorized onto the network, but the exchange belongs to a device on
@@ -342,6 +364,14 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             logger.warning("TC2AuthStage saw %d of %d events with a null site, switch, or port; they carry no timing.",
                            keyless,
                            len(ports))
+
+        if (implausible > 0):
+            logger.warning(
+                "TC2AuthStage refused %d of %d events whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they carry no timing and did not abandon any exchange. A device "
+                "whose clock is wrong by years is the usual cause.",
+                implausible,
+                len(ports))
 
         if (unordered > 0):
             logger.warning(
