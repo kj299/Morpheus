@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and nineteen supporting modules under 909 tests, itemized in
+13's CI harness. That is fourteen stages and nineteen supporting modules under 914 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -72,9 +72,41 @@ One caveat cuts across everything shipped: GPU execution mode has been measured 
 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada Generation
 Laptop GPU (compute capability 8.9, driver 596.58) under WSL2, giving 226 passed, 2 failed, 55 skipped.
 Both failures are upstream Morpheus tests rather than anything added here. Two limits on that result are
-worth stating: it is one run on one card, and the determinism harness carries no `gpu_mode` variants at
-all, so control 13's six checks remain verified only in CPU mode. Treat CPU mode as the tested path and
-GPU mode as observed to work once.
+worth stating: it is one run on one card, and it says nothing about the determinism controls. Treat CPU
+mode as the tested path and GPU mode as observed to work once.
+
+That second limit is the more interesting one. Those 203 variants are per-stage unit tests, and a stage
+computing correctly on a device frame is not the same claim as fourteen of them in a row reaching the
+answer the golden records -- which is what control 13 asserts. Both harnesses built for CPU and nothing else, so the six
+checks had never seen a GPU and no per-stage run could change that. They now build for either mode, and
+`test_gpu_parity.py` runs the same corpus through the same composed pipelines in GPU mode and compares
+against the same golden, byte for byte for the telemetry side.
+
+It failed on the first run, which is the point of having written it. The composed telemetry pipeline
+produced `arp_count_in_window = 3.0` where the CPU golden holds `3`, while every one of the 203 per-stage
+variants passed. Nothing raised, and no stage was at fault: cuDF's `to_pandas` cannot represent a gap
+inside an integer column, so it widens the column to float64 and writes NaN. Every windowed count in this
+fork is null on the rows belonging to other telemetry classes, so the widening reaches most of the
+integer columns rather than an unlucky few.
+
+The repair is narrow and lives in the comparison path. The device frame is asked which columns were
+integers before the conversion, and any of those that came back as floats are cast to pandas `Int64`,
+which is the type the CPU path produces natively for the same column. Nothing else is touched. The cast
+is ordinary pandas arithmetic, so it is asserted on any machine rather than only on a card, with a
+negative control that an optical power reading of `3.0` stays a float. The lineage pipeline agreed across
+modes on the same run and was never affected.
+
+**The obvious repair is wrong, and that is worth writing down because the reasoning for it is sound.**
+Asking the conversion for types that can hold a gap looks like the fix: it yields pandas `Int64`,
+`Float64` and `boolean`, which is what the CPU path produces natively, so the two modes ought to agree by
+construction. It was tried and measured on the same GPU, and it turned three failures into nine. The
+request does not only affect integer columns; it changes how every gap returns to the host, so object
+columns begin yielding `pandas.NA` where they yielded `None`, and every piece of stage code testing
+`value is None` stops recognising a missing value. The failures spread across the ARP, auth,
+binding-resolver and lineage-stamp stages, all of them null-handling tests. A conversion more correct in
+isolation was less correct for the code that reads it.
+
+The repair has not itself been re-run on a GPU. Control 13 is still verified in CPU mode alone.
 
 Reproducing it requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1` under WSL2. Without that variable, Numba's
 default driver bindings read back an invalid CUDA context from the WSL driver shim: `cuCtxGetDevice`
