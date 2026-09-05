@@ -288,6 +288,13 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
                 unordered += 1
                 continue
 
+            # A MAC that has gone quiet for longer than the idle timeout has left, and its binding has to end at
+            # the point it went quiet. Without this the next sighting simply extends the old binding across the
+            # silence, so a soft join in the middle of that gap attributes an event to a port the device was not
+            # on. Expiry runs on this row's own event time, which keeps the closure in the same place however the
+            # stream is divided into batches.
+            closed.extend(self._closer.expire(event_time_ns))
+
             result = self._closer.observe(str(key),
                                           event_time_ns,
                                           {name: attributes[name][position]

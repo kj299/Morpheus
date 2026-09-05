@@ -26,6 +26,7 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
+from morpheus.utils.binding_closer import IDLE_TIMEOUT
 from morpheus.utils.binding_closer import DISPLACED
 from morpheus.utils.binding_closer import DRAINED
 from morpheus.utils.binding_closer import NS_PER_SECOND
@@ -408,3 +409,57 @@ def test_a_provisional_record_resolves_with_an_explicit_assumed_duration(config:
                                     value_columns=["port_key"],
                                     start_column="bind_start",
                                     end_column="bind_end")
+
+
+@pytest.mark.cpu_mode
+def test_a_silent_mac_has_its_binding_closed_rather_than_stretched(config: Config):
+    # A MAC seen once, gone for longer than the idle timeout, then seen again on the same port. Without expiry the
+    # second sighting simply extends the first binding, and a soft join anywhere in that silence attributes an
+    # event to a port the device had left.
+    idle = 1800
+    times = [0, (idle + 60) * NS_PER_SECOND]
+    (emitted, _) = feed(config,
+                        frame(["aa:bb:cc:00:00:01"] * 2, ["Gi1/0/1"] * 2, times=times),
+                        idle_timeout_seconds=idle)
+
+    assert len(emitted) == 1
+    assert _as_list(emitted[0], "bind_end_reason") == [IDLE_TIMEOUT]
+    # The binding ends one tick past the last time the MAC was actually seen, not at the moment it came back.
+    assert _as_list(emitted[0], "bind_end") == [1]
+    assert _as_list(emitted[0], "bind_observations") == [1]
+
+
+@pytest.mark.cpu_mode
+def test_a_mac_seen_inside_the_idle_timeout_keeps_one_binding(config: Config):
+    # The counterpart: expiry must not close a binding that is still live. One second inside the horizon extends.
+    idle = 1800
+    times = [0, (idle - 1) * NS_PER_SECOND]
+    (emitted, stage) = feed(config,
+                            frame(["aa:bb:cc:00:00:01"] * 2, ["Gi1/0/1"] * 2, times=times),
+                            idle_timeout_seconds=idle)
+
+    assert not emitted
+    record = stage._closer.open_binding("aa:bb:cc:00:00:01")
+    assert record is not None and record.observations == 2
+
+
+@pytest.mark.cpu_mode
+def test_idle_expiry_falls_in_the_same_place_however_the_stream_is_batched(config: Config):
+    # Expiry keys on each row's own event time, so dividing the stream cannot move the closure.
+    idle = 1800
+    times = [0, (idle + 60) * NS_PER_SECOND, (idle + 120) * NS_PER_SECOND]
+    payload = frame(["aa:bb:cc:00:00:01"] * 3, ["Gi1/0/1"] * 3, times=times)
+
+    (whole, _) = feed(config, payload, idle_timeout_seconds=idle)
+    whole_rows = [(reason, end) for frame_ in whole
+                  for (reason, end) in zip(_as_list(frame_, "bind_end_reason"), _as_list(frame_, "bind_end"))]
+
+    stage = TC2BindingStage(config, idle_timeout_seconds=idle)
+    split_rows = []
+
+    for start in range(len(times)):
+        piece = {name: values[start:start + 1] for (name, values) in payload.items()}
+        for frame_ in stage.on_data(MessageMeta(get_df_class(config.execution_mode)(piece))):
+            split_rows.extend(zip(_as_list(frame_, "bind_end_reason"), _as_list(frame_, "bind_end")))
+
+    assert whole_rows == split_rows == [(IDLE_TIMEOUT, 1)]

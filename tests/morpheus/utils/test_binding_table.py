@@ -367,7 +367,9 @@ def test_bucketed_records_guard_against_explosion(leases: BindingTable):
 def test_bucketed_frame(leases: BindingTable):
     frame = leases.to_bucketed_frame(bucket_seconds=1800, key_name="ip")
 
-    assert list(frame.columns) == ["ip", "bucket", "mac", "hostname", "binding_uid"]
+    # `bucket_start` sits with the key and the bucket because it is the row's identity in time, not one of the
+    # binding's values: a bucketed row's only timestamp is the bucket it stands for.
+    assert list(frame.columns) == ["ip", "bucket", "bucket_start", "mac", "hostname", "binding_uid"]
     assert len(frame) == len(leases.to_bucketed_records(bucket_seconds=1800, key_name="ip"))
 
 

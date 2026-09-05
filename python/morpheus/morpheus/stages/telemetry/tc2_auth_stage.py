@@ -224,6 +224,7 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             unpaired: list = []
             unordered = 0
             keyless = 0
+            abandoned = 0
             has_site = self._site_column in df.columns
 
             for (position, raw_port) in enumerate(ports):
@@ -255,6 +256,14 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unpaired.append(None)
                     unordered += 1
                     continue
+
+                # An exchange that never resolved has to stop being pending, or a later outcome pairs with it and
+                # is timed against an exchange it has nothing to do with. That is not merely a wrong duration: a
+                # bypass, which is an outcome with no exchange in front of it, reads as an ordinary authorized
+                # session and the signal R-D-L2-005 exists to catch disappears. Expiry runs on this row's own
+                # event time rather than a wall clock or a batch boundary, so it falls in the same place however
+                # the stream is divided.
+                abandoned += len(self._timer.expire(event_time_ns))
 
                 if (self._is_start(result)):
                     self._timer.begin(port_key, event_time_ns)
@@ -288,6 +297,13 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 "timing. Shard by switch and preserve per-port ordering upstream.",
                 unordered,
                 len(ports))
+
+        if (abandoned > 0):
+            logger.info(
+                "TC2AuthStage abandoned %d exchanges that went unresolved for longer than the timeout. An exchange "
+                "that never completes is its own signal; a later outcome on the same port is now correctly read as "
+                "unpaired rather than timed against it.",
+                abandoned)
 
         return message
 

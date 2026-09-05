@@ -254,3 +254,50 @@ def test_a_null_port_carries_no_timing_and_pairs_with_nothing(config: Config):
     assert _as_list(meta, "auth_port_key") == [None, None]
     assert _as_list(meta, "auth_elapsed_seconds") == [None, None]
     assert _as_list(meta, "auth_unpaired") == [None, None]
+
+
+@pytest.mark.cpu_mode
+def test_a_stale_exchange_does_not_swallow_a_later_bypass(config: Config):
+    # An exchange that starts and never finishes, then a success far past the timeout. The success has no
+    # authentication in front of it, which is what a MAB bypass looks like from the switch. If the abandoned
+    # exchange were still pending it would pair with this outcome and the bypass would read as authorized.
+    timeout = 300
+    times = [0, (timeout + 60) * NS_PER_SECOND]
+    meta = run(config, frame(["start", "success"], times=times), timeout_seconds=timeout)
+
+    assert _as_list(meta, "auth_unpaired") == [None, True]
+    # Nothing was measured against the abandoned start, so no duration is reported for it.
+    assert _as_list(meta, "auth_elapsed_seconds") == [None, None]
+
+
+@pytest.mark.cpu_mode
+def test_an_exchange_inside_the_timeout_still_pairs(config: Config):
+    # The counterpart: expiry must not eat a live exchange. One second inside the horizon still pairs and times.
+    timeout = 300
+    times = [0, (timeout - 1) * NS_PER_SECOND]
+    meta = run(config, frame(["start", "success"], times=times), timeout_seconds=timeout)
+
+    assert _as_list(meta, "auth_unpaired") == [None, False]
+    assert _as_list(meta, "auth_elapsed_seconds") == [None, float(timeout - 1)]
+
+
+@pytest.mark.cpu_mode
+def test_expiry_falls_in_the_same_place_however_the_stream_is_batched(config: Config):
+    # Expiry keys on each row's own event time, not on a batch boundary, so splitting the stream cannot change
+    # which exchanges were still pending when an outcome arrived.
+    timeout = 300
+    times = [0, (timeout + 60) * NS_PER_SECOND, (timeout + 61) * NS_PER_SECOND]
+    payload = frame(["start", "success", "success"], times=times)
+
+    whole = _as_list(run(config, payload, timeout_seconds=timeout), "auth_unpaired")
+
+    stage = TC2AuthStage(config, timeout_seconds=timeout)
+    split = []
+
+    for start in range(len(times)):
+        piece = {name: values[start:start + 1] for (name, values) in payload.items()}
+        meta = MessageMeta(get_df_class(config.execution_mode)(piece))
+        stage.on_data(meta)
+        split.extend(_as_list(meta, "auth_unpaired"))
+
+    assert whole == split == [None, True, True]

@@ -41,6 +41,12 @@ NS_PER_SECOND = 10**9
 DEFAULT_MAX_BUCKETS_PER_BINDING = 10_000
 """Bucket count above which `BindingTable.to_bucketed_records` refuses to expand a single binding."""
 
+BUCKET_START_COLUMN = "bucket_start"
+"""Field carrying each bucket's start time, so a SIEM can anchor `_time` on the row rather than on ingest."""
+
+TABLE_NAME_COLUMN = "binding_table"
+"""Field naming which binding source a bucketed row came from, when `to_bucketed_records` is told."""
+
 DEFAULT_BUCKET_SECONDS = 300
 """
 Canonical bucket width for the discretized binding lookups.
@@ -441,7 +447,8 @@ class BindingTable:
                             key_name: str = "key",
                             bucket_name: str = "bucket",
                             include_uid: bool = True,
-                            max_buckets_per_binding: int = DEFAULT_MAX_BUCKETS_PER_BINDING) -> list[dict]:
+                            max_buckets_per_binding: int = DEFAULT_MAX_BUCKETS_PER_BINDING,
+                            table_name: typing.Optional[str] = None) -> list[dict]:
         """
         Flatten the table into one row per key and time bucket.
 
@@ -467,11 +474,18 @@ class BindingTable:
             attribution.
         max_buckets_per_binding : int, default = 10000
             Guard against a single long-lived binding expanding into an unusable number of rows.
+        table_name : str, optional
+            What this table is, for example `dhcp_lease` or `cam_table`. Emitted as `binding_table` on every record.
+            A SIEM that indexes several binding sources under one sourcetype has no other way to tell them apart, and
+            a lookup refresh that cannot tell them apart builds the wrong lookup. Omitted when there is nothing to
+            disambiguate.
 
         Returns
         -------
         list of dict
-            Records sorted by key then bucket, so the output is byte-stable across runs.
+            Records sorted by key then bucket, so the output is byte-stable across runs. Every record carries
+            `bucket_start`, the bucket's own start time rendered the way the SIEM reads timestamps: a bucketed row
+            has no other time of its own, and a row a SIEM cannot timestamp is silently indexed at ingest time.
 
         Raises
         ------
@@ -480,6 +494,10 @@ class BindingTable:
         """
         if (bucket_seconds <= 0):
             raise ValueError(f"bucket_seconds must be positive, received {bucket_seconds}")
+
+        # Imported here because `siem_wire` reads `to_epoch_ns` from this module; at module scope the two would
+        # import each other.
+        from morpheus.utils.siem_wire import render_event_time
 
         bucket_ns = bucket_seconds * NS_PER_SECOND
         winners: dict[tuple, Binding] = {}
@@ -506,8 +524,11 @@ class BindingTable:
         records = []
 
         for ((key, bucket), binding) in sorted(winners.items()):
-            record = {key_name: key, bucket_name: bucket}
+            record = {key_name: key, bucket_name: bucket, BUCKET_START_COLUMN: render_event_time(bucket * bucket_ns)}
             record.update(dict(zip(self._value_columns, binding.values)))
+
+            if (table_name is not None):
+                record[TABLE_NAME_COLUMN] = table_name
 
             if (include_uid):
                 record["binding_uid"] = binding.uid

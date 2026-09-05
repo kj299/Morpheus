@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and eighteen supporting modules under 831 tests, itemized in
+13's CI harness. That is fourteen stages and eighteen supporting modules under 855 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -2388,6 +2388,12 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
   answer inside the idle window, capped by a duration the consumer states rather than one the stage
   invents.
+- Expiry driven by event time in both stateful layer 2 stages. `TC2AuthStage` abandons an exchange that
+  never resolved, so a later outcome is not timed against it and a bypass still reads as one;
+  `TC2BindingStage` closes a binding whose MAC has gone quiet past the idle timeout, so a soft join in
+  the middle of that silence no longer attributes an event to a port the device had left. Both run on
+  each row's own event time rather than a batch boundary, which keeps the closure in the same place
+  however the stream is divided.
 ### Must be built
 
 | Component | Effort | Notes |
