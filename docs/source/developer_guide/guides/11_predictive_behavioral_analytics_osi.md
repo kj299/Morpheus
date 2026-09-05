@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is thirteen stages and seventeen supporting modules under 725 tests, itemized in
+13's CI harness. That is fourteen stages and eighteen supporting modules under 831 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -68,7 +68,7 @@ detection rule in Part 3, the chained rule engine, and the determinism controls 
 of it does not. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode is unexercised. Every stage declares
-support for it and 178 `gpu_mode` test variants exist, but no GPU has been available to run them, so
+support for it and 198 `gpu_mode` test variants exist, but no GPU has been available to run them, so
 CPU mode is the tested path.
 
 **On the word "predictive."** Three of the four mechanisms in Part 1 are forward-looking in a defensible
@@ -2373,18 +2373,6 @@ What Morpheus provides versus what has to be built, stated plainly.
   with unpaired authorization flagged ({py:mod}`~morpheus.utils.session_timer` and
   {py:class}`~morpheus.stages.telemetry.tc2_auth_stage.TC2AuthStage`). This completes the five
   behavioral features the TC-2 section names.
-- Determinism control 8 as a stage
-  ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), and the composed layer 1
-  and layer 2 telemetry pipeline under all six of control 13's checks, over a snapshot-shaped corpus
-  with a hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and an 802.1X bypass planted in
-  it (`tests/morpheus/determinism/telemetry_pipeline.py`). The harness asserts that a MAC resolved
-  through a layer 2 binding lands on a layer 1 `entity_key` the same run emitted.
-- The four layer 2 detections, R-D-L2-001, 003, 004 and 005, as saved searches in the Splunk app, with
-  their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
-  list each depends on and fire on nothing until it is populated.
-- Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
-  answer inside the idle window, capped by a duration the consumer states rather than one the stage
-  invents.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.
@@ -2394,6 +2382,12 @@ What Morpheus provides versus what has to be built, stated plainly.
   through every TC-1 and TC-2 stage, with the layer 2 bindings resolving the ARP stream onto the layer 1
   `entity_key`. Each planted anomaly is asserted as the column a rule would read, and nothing else fires.
 
+- The four layer 2 detections, R-D-L2-001, 003, 004 and 005, as saved searches in the Splunk app, with
+  their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
+  list each depends on and fire on nothing until it is populated.
+- Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
+  answer inside the idle window, capped by a duration the consumer states rather than one the stage
+  invents.
 ### Must be built
 
 | Component | Effort | Notes |
