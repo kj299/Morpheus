@@ -202,3 +202,28 @@ def test_constructor_validation():
 
     with pytest.raises(ValueError):
         tracker(max_entities=0)
+
+
+def test_a_step_survives_for_half_the_window_not_the_whole_one():
+    # The detection horizon an operator plans around. A median turns as soon as half the retained samples sit on the
+    # new level, so a tap's step is visible for window/2, not window. The docstrings and the design guide said the
+    # whole window, which would have an operator scheduling a search at twice the interval that can still see it.
+    window_seconds = 3600
+    interval = 300
+    tracker = OpticalBaselineTracker(["rx"], window_ns=window_seconds * NS_PER_SECOND)
+
+    for index in range(window_seconds // interval):
+        tracker.observe("p", index * interval * NS_PER_SECOND, {"rx": -3.0})
+
+    step_index = window_seconds // interval
+    survived_for = None
+
+    for offset in range(0, 24):
+        index = step_index + offset
+        result = tracker.observe("p", index * interval * NS_PER_SECOND, {"rx": -4.5})
+
+        if (result.deviations["rx"] == 0.0):
+            survived_for = offset * interval
+            break
+
+    assert survived_for == window_seconds // 2

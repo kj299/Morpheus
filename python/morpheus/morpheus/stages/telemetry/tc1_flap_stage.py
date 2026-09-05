@@ -29,6 +29,7 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.link_flap import NS_PER_SECOND
@@ -215,8 +216,26 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             windowed: list = []
             flags: dict[str, list] = {name: [] for name in FLAG_COLUMNS}
             unordered = 0
+            keyless = 0
 
             for (position, entity_key) in enumerate(entity_keys):
+                # A row whose key is null has no identity to hold state against. Passing `str(None)` would pool every
+                # such row in the estate under one tracker entity named "None", where one port's transceiver becomes
+                # another's substitution and one port's optical reading becomes another's baseline. The contract in
+                # `morpheus.utils.entity_key` is that a null key gets no per-entity features and the stage says how
+                # many rows that happened to.
+                key = normalize_text(entity_key)
+
+                if (key is None):
+                    flaps.append(None)
+                    windowed.append(None)
+
+                    for name in FLAG_COLUMNS:
+                        flags[name].append(False)
+
+                    keyless += 1
+                    continue
+
                 try:
                     event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
                 except ValueError:
@@ -232,7 +251,7 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unordered += 1
                     continue
 
-                result = self._tracker.observe(str(entity_key),
+                result = self._tracker.observe(key,
                                                event_time_ns,
                                                self._status(statuses[position]),
                                                last_change_ns=changes[position])
@@ -249,6 +268,13 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             for (name, values) in flags.items():
                 df[name] = values
+
+        if (keyless > 0):
+            logger.warning(
+                "TC1FlapStage saw %d of %d rows with a null entity key; they carry no flap counts. A null key means a\n"
+                "missing site, device, or port upstream, not a port named \"None\".",
+                keyless,
+                len(entity_keys))
 
         if (unordered > 0):
             logger.warning(

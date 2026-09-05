@@ -56,15 +56,16 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and eighteen supporting modules under 861 tests, itemized in
+13's CI harness. That is fourteen stages and eighteen supporting modules under 869 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
 ([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)).
 
 What remains design rather than a running system: the telemetry classes for layers 3 through 7, every
-detection rule in Part 3, the chained rule engine, and the determinism controls other than 7, 8, and
-13. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
+detection rule in Part 3 apart from the four layer 2 rules that ship as saved searches, two of which
+fire on nothing until their lookup is populated, the chained rule engine, and the determinism controls
+other than 7, 8, and 13. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
 of it does not. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode is unexercised. Every stage declares
@@ -661,9 +662,10 @@ for change detection they are superseded. `changed` has no blind spot at all; th
 `first_seen`, whose recall set is finite, so a value evicted after many others reads as first seen
 again. That errs toward over-reporting novelty, which is the safe direction for a signal meant to
 surface the unexplained.
-Note that the baseline follows the link, so a step is a transient signal: once the window has rolled
-past the last pre-step reading the deviation returns to zero, and a degradation slower than the window
-is invisible because the baseline drifts down with it. Catching that needs a commissioning value to
+Note that the baseline follows the link, so a step is a transient signal: once half the window has
+rolled past the last pre-step reading the deviation returns to zero, because a median turns as soon as
+half the retained samples sit on the new level. A degradation slower than the window is invisible
+because the baseline drifts down with it. Catching that needs a commissioning value to
 compare against, which is asset context and belongs in TC-0.
 
 Link flap counting ships as {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage` over
@@ -1048,7 +1050,8 @@ as a saved search in the Splunk app.
 These four, R-D-L2-001, 003, 004 and 005, are the rules in this part that exist as code rather than as
 specification. 004 and 005 read columns the shipped stages produce and depend on nothing outside the
 pipeline; 001 and 003 depend on a list the estate owns, and each ships with the hook for that list and
-fires on nothing until it is populated. All four predicates are asserted in Python over the determinism
+fires on nothing until it is populated, while R-D-L2-003 fires on every first-hop redundancy address until its
+exclusion list is supplied. All four predicates are asserted in Python over the determinism
 harness's planted corpus: 004 and 005 fire exactly once, 001 once per offending MAC, and 003 on the
 flooded gateway and not on the redundancy pair.
 
@@ -2384,7 +2387,8 @@ What Morpheus provides versus what has to be built, stated plainly.
 
 - The four layer 2 detections, R-D-L2-001, 003, 004 and 005, as saved searches in the Splunk app, with
   their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
-  list each depends on and fire on nothing until it is populated.
+  list each depends on. Until that list exists R-D-L2-001 fires on nothing and R-D-L2-003 fires on every
+  redundancy gateway, so the two need the inventory for opposite reasons.
 - Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
   answer inside the idle window, capped by a duration the consumer states rather than one the stage
   invents.

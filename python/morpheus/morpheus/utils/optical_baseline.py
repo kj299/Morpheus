@@ -113,9 +113,10 @@ class OpticalBaselineTracker:
 
     Notes
     -----
-    The baseline follows the link. Once the window has rolled past the last pre-event reading, the median describes
+    The baseline follows the link. Once half the window has rolled past the last pre-event reading, the median describes
     the new level and the deviation returns to zero, so a step is a transient signal and not a persistent state: it
-    has to be caught within `window_ns` of the step that caused it. Lengthening the window holds the evidence
+    has to be caught within half of `window_ns` of the step that caused it, since a median turns once half the
+    retained samples are on the new level. Lengthening the window holds the evidence
     longer at the cost of a reference that lags a legitimate re-patch for just as long. A slow enough degradation
     is invisible for the same reason, since the baseline drifts down with it; catching that needs a comparison
     against a commissioning value, which is asset context and belongs in TC-0, not here.

@@ -90,8 +90,9 @@ side alone breaks the joins silently.
    one row per port as `site_id:switch_id:port_id` with a `designation` (`single-host` is what the rule
    matches) and `max_macs`. R-D-L2-003 honours the HSRP and VRRP exclusion list, but that list lives in
    the pipeline, as `TC2ArpStage(excluded_sender_ips=[...])`; the stage marks excluded rows and the
-   search reads the mark. Both rules fire on nothing until their list is populated, which is the guide's
-   own statement that they are unusable without one.
+   search reads the mark. The two fail in opposite directions until their lists exist: R-D-L2-001 matches
+   nothing, and R-D-L2-003 matches every redundancy gateway once per window. Both are unusable
+   without the list, which is the guide's own statement, but only one of them is quiet about it.
 6. **The name of the binding source, on bucketed rows.** `Binding lookup - L2/L3 refresh` selects
    `binding_table=dhcp_lease`, because several binding sources land on the one `binding:bucketed`
    sourcetype and a refresh that cannot tell them apart builds the wrong lookup. The producer supplies it:

@@ -51,6 +51,13 @@ DENOMINATOR_COLUMN = "arp_count_in_window"
 CLAIMANTS_COLUMN = "macs_claiming_sender_ip"
 EXCLUDED_COLUMN = "arp_sender_ip_excluded"
 
+RATIO_SATURATED_COLUMN = "gratuitous_arp_ratio_saturated"
+"""Whether the sender's sample cap bound, which makes the ratio a reading over the retained tail rather than the
+whole window."""
+
+CLAIMANTS_SATURATED_COLUMN = "macs_claiming_sender_ip_saturated"
+"""Whether the address's sample cap bound, which makes the claimant count a lower bound rather than an exact one."""
+
 
 @register_stage("tc2-arp", ignore_args=["excluded_sender_ips"])
 class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
@@ -148,6 +155,8 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._needed_columns[DENOMINATOR_COLUMN] = TypeId.INT64
         self._needed_columns[CLAIMANTS_COLUMN] = TypeId.INT64
         self._needed_columns[EXCLUDED_COLUMN] = TypeId.BOOL8
+        self._needed_columns[RATIO_SATURATED_COLUMN] = TypeId.BOOL8
+        self._needed_columns[CLAIMANTS_SATURATED_COLUMN] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -235,6 +244,8 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             numerators: list = []
             denominators: list = []
             claimants: list = []
+            claimants_saturated: list = []
+            ratio_saturated: list = []
             excluded: list = []
             unordered = 0
             keyless = 0
@@ -260,6 +271,8 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     numerators.append(None)
                     denominators.append(None)
                     claimants.append(None)
+                    ratio_saturated.append(False)
+                    claimants_saturated.append(False)
                     unordered += 1
                     continue
 
@@ -272,26 +285,38 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     ratios.append(None)
                     numerators.append(None)
                     denominators.append(None)
+                    ratio_saturated.append(False)
                     keyless += 1
                 else:
                     ratio = self._ratio.observe(sender_mac, event_time_ns, counts)
                     ratios.append(ratio.ratio)
                     numerators.append(ratio.numerator)
                     denominators.append(ratio.denominator)
+                    # The cap binding means the denominator is the retained tail, not the window. A ratio read as
+                    # exact when it is a reading over a truncated population is the failure the trackers compute
+                    # this flag to prevent, and discarding it here undoes that.
+                    ratio_saturated.append(ratio.saturated)
                     unordered += int(ratio.out_of_order)
 
                 # A claim needs both an address and a MAC. A packet with no MAC claims nothing, and counting it would
                 # make the address look contested by a phantom.
                 if (sender_ip is None or sender_mac is None):
                     claimants.append(None)
+                    claimants_saturated.append(False)
                     keyless += int(sender_ip is None and sender_mac is not None)
                 else:
                     claim = self._claimants.observe(sender_ip, event_time_ns, sender_mac)
                     claimants.append(claim.distinct)
+                    # Under a flood the cap evicts the earliest samples, and the legitimate owner's announcement can
+                    # be among them. The count is then a lower bound, and R-D-L2-003 reading it as exact would miss
+                    # a contested address rather than over-report one.
+                    claimants_saturated.append(claim.saturated)
                     unordered += int(claim.out_of_order)
 
             df[GRATUITOUS_COLUMN] = gratuitous
             df[EXCLUDED_COLUMN] = excluded
+            df[RATIO_SATURATED_COLUMN] = ratio_saturated
+            df[CLAIMANTS_SATURATED_COLUMN] = claimants_saturated
             assign_nullable_float_column(df, RATIO_COLUMN, ratios)
             assign_nullable_int_column(df, NUMERATOR_COLUMN, numerators)
             assign_nullable_int_column(df, DENOMINATOR_COLUMN, denominators)
