@@ -71,8 +71,18 @@ Being clear about the boundary is the point of writing it down:
   rises during reconnaissance and staging, is a hypothesis this work does not establish, and a deployment
   should validate the lead time against its own incident history before promising prediction to
   anyone.
-- **GPU execution mode is unexercised.** Every stage declares support for it and 203 `gpu_mode` test
-  variants exist, but no GPU has been available to run them. Treat CPU mode as the tested path.
+- **GPU execution mode now has one measured result, on one machine.** On 2026-09-05 the 203 `gpu_mode`
+  variants were run for the first time, on an NVIDIA RTX 5000 Ada Generation Laptop GPU (compute
+  capability 8.9, driver 596.58) under WSL2: **226 passed, 2 failed, 55 skipped**, and both failures are
+  in upstream Morpheus files (`test_deserialize_stage_pipe`, `test_write_to_file_stage_pipe`) rather than
+  in anything this fork adds. Every stage and utility added here passes in GPU mode.
+  That is one run on one card, not a support claim, and the determinism harness is unaffected by it:
+  those tests carry no `gpu_mode` variants, so control 13 is still only verified in CPU mode.
+- **A GPU run under WSL2 requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1`.** Without it, Numba's default
+  driver bindings read back an invalid CUDA context through the WSL driver shim: `cuCtxGetDevice` yields
+  a garbage device number and the process crashes partway through the suite. Setting the variable
+  switches Numba to NVIDIA's own bindings and the failures disappear. This is an environment defect
+  rather than a code one, but it costs a day to rediscover.
 
 ## Documentation
 ### Using Morpheus
