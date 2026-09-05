@@ -68,9 +68,19 @@ fire on nothing until their lookup is populated, the chained rule engine, and th
 other than 7, 8, and 13. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
 of it does not. Thresholds are placeholders unless marked otherwise.
 
-One caveat cuts across everything shipped: GPU execution mode is unexercised. Every stage declares
-support for it and 203 `gpu_mode` test variants exist, but no GPU has been available to run them, so
-CPU mode is the tested path.
+One caveat cuts across everything shipped: GPU execution mode has been measured exactly once. On
+2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada Generation
+Laptop GPU (compute capability 8.9, driver 596.58) under WSL2, giving 226 passed, 2 failed, 55 skipped.
+Both failures are upstream Morpheus tests rather than anything added here. Two limits on that result are
+worth stating: it is one run on one card, and the determinism harness carries no `gpu_mode` variants at
+all, so control 13's six checks remain verified only in CPU mode. Treat CPU mode as the tested path and
+GPU mode as observed to work once.
+
+Reproducing it requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1` under WSL2. Without that variable, Numba's
+default driver bindings read back an invalid CUDA context from the WSL driver shim: `cuCtxGetDevice`
+returns a garbage device number, and the run dies with `CUDA_ERROR_INVALID_CONTEXT` or a segmentation
+fault inside `libcuda`. Every `column_assign` helper and every stage was verified to work in isolation
+before that cause was found, so the symptom presents as a defect in this code and is not one.
 
 **On the word "predictive."** Three of the four mechanisms in Part 1 are forward-looking in a defensible
 sense: trajectory features over reconstruction error, forecast residual from `TimeSeriesStage`, and
