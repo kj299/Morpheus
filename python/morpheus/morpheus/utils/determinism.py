@@ -36,6 +36,8 @@ import typing
 
 import pandas as pd
 
+from morpheus.utils.column_assign import to_host
+
 DEFAULT_FLOAT_DECIMALS = 4
 """Decimal places used when quantizing float columns, matching determinism control 9's score quantum."""
 
@@ -89,8 +91,7 @@ def sort_for_cumulative_features(df: pd.DataFrame,
     ValueError
         If `order_columns` is empty, or if `require_total_order` is set and the columns leave ties.
     """
-    if (hasattr(df, "to_pandas")):
-        df = df.to_pandas()
+    df = to_host(df)
 
     order_columns = list(order_columns)
 
@@ -175,8 +176,7 @@ def canonicalize(df: pd.DataFrame,
         If a key column is absent, or if the key columns do not uniquely identify every row, which would make the
         sort order, and therefore the comparison, ambiguous.
     """
-    if (hasattr(df, "to_pandas")):
-        df = df.to_pandas()
+    df = to_host(df)
 
     if (len(key_columns) == 0):
         raise ValueError("At least one key column is required")

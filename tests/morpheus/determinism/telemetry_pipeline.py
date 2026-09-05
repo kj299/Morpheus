@@ -73,6 +73,7 @@ from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
+from morpheus.utils.column_assign import to_host
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.lineage import event_uid
@@ -371,7 +372,7 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     for message in sink.get_messages():
         meta = message.payload() if isinstance(message, ControlMessage) else message
         df = meta.copy_dataframe()
-        frames.append(df.to_pandas() if hasattr(df, "to_pandas") else df)
+        frames.append(to_host(df))
 
     if (len(frames) == 0):
         return pd.DataFrame()

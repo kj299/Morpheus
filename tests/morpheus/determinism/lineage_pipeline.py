@@ -38,6 +38,7 @@ from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
+from morpheus.utils.column_assign import to_host
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.utils.binding_table import NS_PER_SECOND
@@ -211,7 +212,7 @@ def run_pipeline(config: Config,
         df = meta.copy_dataframe()
 
         if (hasattr(df, "to_pandas")):
-            df = df.to_pandas()
+            df = to_host(df)
 
         # A cumulative, order-derived feature in the style of IncrementColumn: each row's ordinal among its
         # entity's rows within the emitted window. Canonicalization erases row *order*, so without a *value*

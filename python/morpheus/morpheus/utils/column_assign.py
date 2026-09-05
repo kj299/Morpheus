@@ -20,7 +20,40 @@ dtype does. These helpers move values across that boundary and write them back w
 both modes.
 """
 
+import typing
+
 from morpheus.utils.type_aliases import DataFrameType
+
+
+def to_host(value: typing.Any) -> typing.Any:
+    """
+    Copy a device frame or column to the host without losing the difference between a gap and a number.
+
+    cuDF's `to_pandas` defaults to `nullable=False`, which cannot represent a null inside an integer column, so it
+    widens the column to float64 and writes NaN. An `Int64` column holding 3 comes back as `3.0`. Nothing raises;
+    the number is simply a different number on the way out, and only a comparison of the whole frame notices.
+
+    That matters here because the nullable columns are not incidental. `assign_nullable_int_column` exists because
+    the two execution modes disagree about what a gap is, and `bind_end`, `bind_gap_ns` and every windowed count
+    are null on most rows by design. Asking for nullable dtypes on the way back gives pandas `Int64`, `Float64`
+    and `boolean`, which is exactly what the CPU path produces natively, so the two modes agree by construction
+    rather than by luck.
+
+    On a host frame this is a no-op, which is why the CPU path cannot be changed by it.
+
+    Parameters
+    ----------
+    value : `pandas.DataFrame`, `cudf.DataFrame`, or a Series of either
+        The frame or column to bring to the host.
+
+    Returns
+    -------
+    The pandas equivalent, or `value` unchanged when it is already a host object.
+    """
+    if (hasattr(value, "to_pandas")):
+        return value.to_pandas(nullable=True)
+
+    return value
 
 
 def to_host_list(df: DataFrameType, column: str) -> list:
@@ -39,12 +72,7 @@ def to_host_list(df: DataFrameType, column: str) -> list:
     list
         The column's values as Python objects.
     """
-    series = df[column]
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return series.tolist()
+    return to_host(df[column]).tolist()
 
 
 def assign_str_column(df: DataFrameType, column: str, values: list):

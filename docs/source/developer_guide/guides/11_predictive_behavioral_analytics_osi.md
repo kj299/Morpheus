@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and nineteen supporting modules under 912 tests, itemized in
+13's CI harness. That is fourteen stages and nineteen supporting modules under 915 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -80,12 +80,27 @@ computing correctly on a device frame is not the same claim as fourteen of them 
 answer the golden records -- which is what control 13 asserts. Both harnesses built for CPU and nothing else, so the six
 checks had never seen a GPU and no per-stage run could change that. They now build for either mode, and
 `test_gpu_parity.py` runs the same corpus through the same composed pipelines in GPU mode and compares
-against the same golden, byte for byte for the telemetry side. The columns that carry nulls are what it
-is really asking about: `bind_end` and `bind_gap_ns` are null on most rows, `assign_nullable_int_column`
-exists precisely because the two modes disagree about what a gap is, and a disagreement there would not
-crash -- it would render `3.0` against `3`, or `NaN` against an empty cell, which only a comparison of
-the whole frame catches. Those two checks have not been run, so control 13 is still verified in CPU mode
-alone; what has changed is that settling it is now one command on a machine with a GPU.
+against the same golden, byte for byte for the telemetry side.
+
+It failed on the first run, which is the point of having written it. The composed telemetry pipeline
+produced `arp_count_in_window = 3.0` where the CPU golden holds `3`, while every one of the 203 per-stage
+variants passed. Nothing raised, and no stage was at fault: cuDF's `to_pandas` defaults to
+`nullable=False`, which cannot represent a null inside an integer column, so it widens the column to
+float64 and writes NaN. Every windowed count in this fork is null on the rows belonging to other
+telemetry classes, so the widening is not an edge case, and the fork asked for that default in five
+places -- the stages' own column reads, the canonical form, the digest, and both harnesses. The digest
+one is the sharpest: a `frame_digest` taken on a device frame did not match the same digest taken on the
+host, which makes the value control 13 compares a property of the execution mode rather than of the
+data.
+
+The conversion now lives in one function that asks for types able to hold a null, giving pandas `Int64`,
+`Float64` and `boolean` -- exactly what the CPU path produces natively, so the two modes agree by construction
+rather than by luck. On a host frame it does nothing, so the CPU path cannot be moved by it. The rule
+itself is asserted against a stand-in, which needs no GPU, so removing the argument fails ordinary CI
+instead of waiting for someone to find a card. The lineage pipeline agreed across modes on the same run
+and was never affected.
+
+That fix has not itself been re-run on a GPU. Control 13 is still verified in CPU mode alone.
 
 Reproducing it requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1` under WSL2. Without that variable, Numba's
 default driver bindings read back an invalid CUDA context from the WSL driver shim: `cuCtxGetDevice`
