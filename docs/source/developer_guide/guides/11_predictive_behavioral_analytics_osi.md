@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and nineteen supporting modules under 906 tests, itemized in
+13's CI harness. That is fourteen stages and nineteen supporting modules under 909 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -785,9 +785,12 @@ it: a switch MAC table reports what is bound now, accounting stops go missing, a
 Five things end a binding and only the first is a fact. An **explicit** stop states the end. A
 **displacement** means the key was seen elsewhere later, so the binding ended somewhere between the two
 sightings. A **conflict** means the key was seen elsewhere *at the same instant*, so neither sighting
-precedes the other and the two bindings overlap by one tick; that is what a spoofed or duplicated MAC
-looks like from the switches, and it gets its own reason so R-D-L2 rules can find it instead of reading
-it as a data quality warning. A **snapshot absence** means a reconciliation pass over a scope no longer
+precedes the other and the two bindings overlap by one tick. Both of these carry `bind_gap_ns`, the
+interval between the last sighting here and the sighting elsewhere, and that number rather than the
+reason is what tells a spoofed or duplicated MAC from a device that moved: a conflict is the limiting
+case where the gap is zero, and a cross-switch spoof is a displacement whose gap is shorter than any
+real move. Every other reason leaves the gap null, because nothing was seen elsewhere to measure
+against. A **snapshot absence** means a reconciliation pass over a scope no longer
 lists the key. An **idle timeout** is the backstop for the stop record that never arrived. Every emitted
 record carries `bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that
 will act on a binding can insist on an end somebody actually reported.
@@ -1058,11 +1061,28 @@ and the saved search that ships for this rule reads the mark rather than holding
 corpus carries a VRRP pair that legitimately shares an address, on the list, so the exclusion path is
 exercised rather than assumed.
 
-**R-D-L2-004 - MAC in two places at once.** A closed binding with `bind_end_reason = conflict`: the
-same MAC was reported on two ports at the same instant, so `TC2BindingStage` closed the earlier binding
-one tick past the sighting and the two intervals overlap. This is the direct form of the spoofing signal
-that R-B-L2-002 approximates statistically, and it needs no designation list and no baseline. Tier D1.
-Ships as a saved search in the Splunk app, reading the raw closed-binding records.
+**R-D-L2-004 - MAC in two places at once.** A closed binding whose end means the key turned up
+somewhere else -- `bind_end_reason` of `conflict` or `displaced` -- with `bind_gap_ns` below a threshold:
+the two sightings are closer together than the device could have moved between them. This is the direct
+form of the spoofing signal that R-B-L2-002 approximates statistically, and it needs no designation list
+and no baseline. Tier D1. Ships as a saved search in the Splunk app, reading the raw closed-binding
+records.
+
+**The gap is the rule, and this is a correction.** The rule originally read `bind_end_reason = conflict`
+alone. A conflict is emitted only when the two sightings carry the *identical nanosecond*, which is
+produced by a single switch reporting one MAC on two ports in one snapshot and by essentially nothing
+else: an estate polls its switches in sequence, so the sightings that make up a cross-switch spoof are
+seconds apart and close the binding as `displaced`, which the rule did not read. As written it would
+have fired on a real network approximately never, and the corpus could not have revealed that because it
+carried a single switch. It now carries a second, walked two seconds after the first.
+
+What separates a spoof from a device that simply moved is not the reason but the interval: a roaming
+device is absent from the first port for however long the move took, while a MAC claimed in two places
+at once is not absent at all. `bind_gap_ns` is that interval, null on every close that does not mean the
+key was seen elsewhere -- null rather than zero, since zero is the strongest possible evidence of a
+spoof and a binding that merely went quiet must not report it. The threshold is a placeholder to tune
+against the time one sweep of the estate takes, not against the poll cadence; the corpus plants one
+spoof inside it and one legitimate move outside it, so both directions are asserted.
 
 **R-D-L2-005 - Authorization without authentication.** `auth_unpaired = true` from `TC2AuthStage`: an
 802.1X outcome arrived on a port with no exchange in front of it. From the switch this is what MAC

@@ -145,7 +145,8 @@ Several things were added after that validation and have **not** been run agains
 detections `R-D-L2-001`, `R-D-L2-003`, `R-D-L2-004` and `R-D-L2-005`. Their SPL follows
 the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
 Python over the determinism harness's planted corpus (`tests/morpheus/determinism/test_first_detections.py`),
-where each fires exactly once. That is evidence the columns and conditions are right; it is not evidence
+where each fires on exactly the planted cases and nothing else -- twice for `R-D-L2-004`, which the corpus
+plants both a simultaneous and a cross-switch spoof for, alongside a legitimate move it must not fire on. That is evidence the columns and conditions are right; it is not evidence
 the stanzas parse on a search head. Run `btool savedsearches list` after installing.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare

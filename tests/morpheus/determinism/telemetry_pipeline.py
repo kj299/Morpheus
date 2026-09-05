@@ -27,6 +27,10 @@ Into that corpus are planted the things the layer 1 and layer 2 features exist t
 
 - a **hub**: five MAC addresses behind one access port from the seventh snapshot onward;
 - a **spoof**: one MAC reported on two ports in the same snapshot;
+- a **cross-switch spoof**: one MAC claimed on a second switch two seconds after it was seen on its own, which is
+  the shape a sequentially polled estate actually produces and the one the simultaneous case cannot stand in for;
+- a **legitimate move**: one MAC that changes port between snapshots, so a whole cadence separates its two
+  sightings and the rule that catches the spoof has something it must not fire on;
 - a **flood**: twenty gratuitous ARP replies from one host in one second, claiming the gateway;
 - a **reboot**: a device whose uptime and counters restart mid-corpus;
 - a **tap**: a step loss of receive power on one port, with transmit power unchanged;
@@ -86,11 +90,21 @@ IGNORE_COLUMNS: list[str] = []
 SITE = "hq"
 SWITCH = "sw1"
 REBOOTING_SWITCH = "sw2"
+PEER_SWITCH = "sw3"
 PORTS = ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"]
+PEER_PORTS = ["Gi3/0/1", "Gi3/0/2", "Gi3/0/3"]
+"""A second switch in the MAC-table feed. Without one the corpus could only produce a MAC in two places on a single
+switch at a single instant, which is the one shape R-D-L2-004 could already detect and the one shape a real estate
+never produces: a poller walks its switches in sequence, so two sightings of a spoofed MAC are seconds apart, not
+simultaneous. The peer switch's ports are deliberately outside `SINGLE_HOST_PORTS`, so planting MACs on them says
+nothing to R-D-L2-001."""
 
 MAC_A = "aa:bb:cc:00:00:01"
 MAC_B = "aa:bb:cc:00:00:02"
 MAC_C = "aa:bb:cc:00:00:03"
+ROAM_MAC = "aa:bb:cc:00:00:04"
+"""A device that legitimately moves ports. The negative control for R-D-L2-004: it is displaced like a spoof, but a
+whole poll cadence separates the two sightings, so the gap says it moved rather than that it was in two places."""
 HUB_MACS = [f"de:ad:be:ef:00:{index:02x}" for index in range(1, 5)]
 ROUTER_MAC = "00:00:5e:00:01:01"
 GATEWAY_IP = "10.0.0.1"
@@ -113,6 +127,14 @@ TAP_LOSS_DB = 3.0
 FLAP_AT_MINUTE = 20
 BYPASS_AT_SECONDS = 1500
 BYPASS_PORT = "Gi1/0/2"
+
+SWEEP_OFFSET_SECONDS = 2
+"""How long after the first switch the poller reaches the peer. This is the whole point of the second switch: the
+sightings that make up a cross-switch spoof are this far apart, never simultaneous."""
+CROSS_SPOOF_AT_SECONDS = 900
+"""MAC_B is claimed on the peer switch while it is still live on its own port, inside a single sweep."""
+ROAM_AT_SECONDS = 2100
+"""ROAM_MAC changes port between two snapshots, so its two sightings are a full cadence apart."""
 
 CS_PER_SECOND = 100
 
@@ -229,6 +251,23 @@ def _build_mac_snapshots(rng: random.Random) -> pd.DataFrame:
                 "mac_address": mac,
                 "site_id": SITE,
                 "switch_id": SWITCH,
+                "port_id": port,
+                "vlan_id": "10",
+                **_envelope(rng, "mac-table", "TC-2/1.0.0", seq),
+            })
+
+        # The poller reaches the peer switch a couple of seconds after the first, which is what makes the spoof
+        # below `displaced` with a small gap rather than a `conflict`. Emitted here, inside the same snapshot, so
+        # the frame stays monotonic in event time the way a collector's stream is: a frame that jumped backwards
+        # would make the output depend on where the batch boundaries fell, which control 13 checks for.
+        for (mac, port) in ([(ROAM_MAC, PEER_PORTS[2] if time_s >= ROAM_AT_SECONDS else PEER_PORTS[1])] +
+                            ([(MAC_B, PEER_PORTS[0])] if time_s == CROSS_SPOOF_AT_SECONDS else [])):
+            seq += 1
+            rows.append({
+                "event_time": (time_s + SWEEP_OFFSET_SECONDS) * NS_PER_SECOND,
+                "mac_address": mac,
+                "site_id": SITE,
+                "switch_id": PEER_SWITCH,
                 "port_id": port,
                 "vlan_id": "10",
                 **_envelope(rng, "mac-table", "TC-2/1.0.0", seq),

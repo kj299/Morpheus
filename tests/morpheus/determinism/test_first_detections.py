@@ -31,6 +31,7 @@ import pandas as pd
 import pytest
 
 from morpheus.utils.binding_closer import CONFLICT
+from morpheus.utils.binding_closer import DISPLACED
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -50,6 +51,20 @@ RULES = {
     "R-D-L2-004": "R-D-L2-004 - MAC in two places at once",
     "R-D-L2-005": "R-D-L2-005 - Authorization without authentication",
 }
+
+
+def _gap_threshold_ns() -> int:
+    """The threshold R-D-L2-004 ships with, read from the search itself.
+
+    Hard-coding it here would let the rule be tuned in the app while the test went on asserting the old value, and
+    the corpus is planted either side of it deliberately: one spoof inside, one legitimate move outside.
+    """
+    with open(SAVED_SEARCHES, encoding="utf-8") as handle:
+        return int(re.search(r"gap_threshold\s*=\s*(\d+)", handle.read()).group(1))
+
+
+GAP_THRESHOLD_NS = _gap_threshold_ns()
+
 LOOKUP = os.path.join(REPO_ROOT,
                       "examples",
                       "splunk_lineage_app",
@@ -97,16 +112,31 @@ def searches_fixture() -> dict[str, dict[str, str]]:
 
 
 @pytest.mark.cpu_mode
-def test_r_d_l2_004_fires_exactly_once_on_the_spoof(result: pd.DataFrame):
+def test_r_d_l2_004_fires_on_both_spoofs_and_not_on_the_move(result: pd.DataFrame):
+    # The rule's own predicate, applied to the frame the pipeline produced: a close that means the MAC turned up
+    # somewhere else, with the two sightings closer together than the device could have moved.
     bindings = result[result["telemetry_class"] == "tc2_binding"]
-    detections = bindings[bindings["bind_end_reason"] == CONFLICT]
+    elsewhere = bindings[bindings["bind_end_reason"].isin([CONFLICT, DISPLACED])]
+    detections = elsewhere[elsewhere["bind_gap_ns"] <= GAP_THRESHOLD_NS].sort_values("bind_gap_ns")
 
-    assert len(detections) == 1
-    hit = detections.iloc[0]
-    assert hit["mac_address"] == tp.MAC_A
-    assert hit["port_key"] == f"{tp.SITE}:{tp.SWITCH}:Gi1/0/1"
+    assert len(detections) == 2, "the simultaneous spoof and the cross-switch one, and nothing else"
+
+    # The original spoof: two ports on one switch at one instant, so the gap is zero.
+    simultaneous = detections.iloc[0]
+    assert simultaneous["mac_address"] == tp.MAC_A
+    assert simultaneous["bind_end_reason"] == CONFLICT
+    assert simultaneous["bind_gap_ns"] == 0
+    assert simultaneous["port_key"] == f"{tp.SITE}:{tp.SWITCH}:Gi1/0/1"
     # The detection is about the closing, and the closing is one tick past the conflicting sighting.
-    assert hit["bind_end"] == tp.SPOOF_AT_SECONDS * NS + 1
+    assert simultaneous["bind_end"] == tp.SPOOF_AT_SECONDS * NS + 1
+
+    # The one the old rule could never have caught: a second switch claiming the MAC one sweep later.
+    cross_switch = detections.iloc[1]
+    assert cross_switch["mac_address"] == tp.MAC_B
+    assert cross_switch["bind_end_reason"] == DISPLACED
+    assert cross_switch["bind_gap_ns"] == tp.SWEEP_OFFSET_SECONDS * NS
+    assert cross_switch["port_key"] == f"{tp.SITE}:{tp.SWITCH}:Gi1/0/2"
+
     # Everything the search's `table` names is present, so an analyst can trace it without a second query.
     for column in ("mac_address",
                    "port_key",
@@ -116,8 +146,22 @@ def test_r_d_l2_004_fires_exactly_once_on_the_spoof(result: pd.DataFrame):
                    "vlan_id",
                    "bind_start",
                    "bind_end",
+                   "bind_gap_ns",
                    "bind_observations"):
-        assert pd.notna(hit[column]), column
+        assert pd.notna(simultaneous[column]), column
+
+
+@pytest.mark.cpu_mode
+def test_a_legitimate_move_is_displaced_but_does_not_fire(result: pd.DataFrame):
+    # The negative control, and the reason the rule is a gap rather than a reason. A device that changes port
+    # between snapshots is displaced exactly as a spoofed MAC is; only the gap tells them apart. Without this the
+    # rule would be a MAC-moved alarm, and every roaming laptop in the estate would be a notable.
+    bindings = result[result["telemetry_class"] == "tc2_binding"]
+    moved = bindings[(bindings["mac_address"] == tp.ROAM_MAC) & (bindings["bind_end_reason"] == DISPLACED)]
+
+    assert len(moved) == 1
+    assert moved.iloc[0]["bind_gap_ns"] == tp.PERIOD_SECONDS * NS
+    assert moved.iloc[0]["bind_gap_ns"] > GAP_THRESHOLD_NS, "a whole cadence apart is a move, not a spoof"
 
 
 @pytest.mark.cpu_mode
@@ -195,7 +239,11 @@ def test_the_search_reads_the_column_the_stage_emits(rule_id: str, searches: dic
                        'designation="single-host"',
                        "macs_per_port_saturated"),
         "R-D-L2-003": ("sourcetype=morpheus:score:l2", "macs_claiming_sender_ip>1", "arp_sender_ip_excluded=false"),
-        "R-D-L2-004": ("sourcetype=binding:l2", f"bind_end_reason={CONFLICT}", "port_key"),
+        "R-D-L2-004": ("sourcetype=binding:l2",
+                       f"bind_end_reason={CONFLICT}",
+                       f"bind_end_reason={DISPLACED}",
+                       "bind_gap_ns",
+                       "port_key"),
         "R-D-L2-005": ("sourcetype=morpheus:score:l2", "auth_unpaired=true", "auth_port_key", "event_uid"),
     }[rule_id]
 
