@@ -371,3 +371,35 @@ def test_one_supplicant_on_two_ports_is_two_exchanges(config: Config):
     meta = run(config, payload)
 
     assert _as_list(meta, "auth_unpaired") == [None, True]
+
+
+@pytest.mark.cpu_mode
+def test_one_row_from_a_broken_clock_does_not_abandon_every_pending_exchange(config: Config):
+    # Same defect as the binding stage's, with a worse consequence. Abandoning a pending exchange means the real
+    # outcome, when it arrives, pairs with nothing and is written auth_unpaired=true -- so one row from a device
+    # whose clock is wrong by years would make R-D-L2-005 fire on every legitimate supplicant in the estate.
+    stage = TC2AuthStage(config, timeout_seconds=300)
+    ten_years = 10 * 365 * 24 * 3600 * NS_PER_SECOND
+
+    started = frame(["started"] * 3, times=[0, 0, 0], ports=["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"])
+    started["mac_address"] = ["00:00:00:00:00:01", "00:00:00:00:00:02", "00:00:00:00:00:03"]
+    stage.on_data(MessageMeta(get_df_class(config.execution_mode)(started)))
+
+    assert stage._timer.pending_count == 3
+
+    poisoned = frame(["started"], times=[ten_years], ports=["Gi1/0/9"])
+    poisoned["mac_address"] = ["00:00:00:00:00:ff"]
+    meta = MessageMeta(get_df_class(config.execution_mode)(poisoned))
+    stage.on_data(meta)
+
+    assert stage._timer.pending_count == 3, "the refused row abandons nothing and opens nothing"
+    assert _as_list(meta, "auth_unpaired") == [None], "and carries no timing of its own"
+
+    # The legitimate outcome still pairs with its own start rather than reading as a bypass.
+    finished = frame(["success"], times=[2 * NS_PER_SECOND], ports=["Gi1/0/1"])
+    finished["mac_address"] = ["00:00:00:00:00:01"]
+    meta = MessageMeta(get_df_class(config.execution_mode)(finished))
+    stage.on_data(meta)
+
+    assert _as_list(meta, "auth_unpaired") == [False]
+    assert _as_list(meta, "auth_elapsed_seconds") == [2.0]
