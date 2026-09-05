@@ -32,6 +32,8 @@ import typing
 
 import pandas as pd
 
+from morpheus.utils.entity_key import normalize_text
+
 from morpheus.utils.lineage import event_uid
 
 logger = logging.getLogger(__name__)
@@ -158,8 +160,13 @@ def _sort_key(binding: Binding) -> tuple:
     Most recent start wins, then the longer interval, then the greater attribute tuple compared as strings. The last
     component only breaks a tie between records that are identical in every other respect, and exists so the choice is
     a function of the data rather than of input order. Callers take the maximum of this key.
+
+    The attributes are rendered by the shared entity-key rule, not by `str`, for that last reason: a column widened
+    to float because some row in the batch was null would otherwise order `10.0` against `10` and pick a different
+    winner depending on how the input happened to be divided. A missing attribute sorts as the empty string, which
+    is below every real value and, unlike `None`, is comparable with one.
     """
-    return (binding.start_ns, binding.end_ns, tuple(str(value) for value in binding.values))
+    return (binding.start_ns, binding.end_ns, tuple(normalize_text(value) or "" for value in binding.values))
 
 
 class BindingTable:

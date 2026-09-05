@@ -303,3 +303,38 @@ def test_port_key_is_composed_like_the_layer_1_entity_key(config: Config):
     meta = run(config, frame(["00:11:22:33:44:55"]))
 
     assert _as_list(meta, "port_key") == [compose_key(("hq", "sw1", "Gi1/0/1"))]
+
+
+@pytest.mark.cpu_mode
+def test_a_vlan_stays_one_vlan_when_its_column_widens(config: Config):
+    # `vlan_id` is an entity here, so the rendering rule that protects `entity_key` has to reach it too. pandas
+    # widens the column to float as soon as one row in the batch has no VLAN, and rendering that as "10.0" forks
+    # VLAN 10 into a second VLAN whose OUI history starts empty -- so a flood sits under the threshold because
+    # some unrelated row was null. Which batch the null lands in depends on where the stream was divided, so this
+    # is the batch-split invariance control 13 checks, not only a counting error.
+    stage = TC2CardinalityStage(config)
+
+    complete = pd.DataFrame(frame(["00:aa:aa:00:00:01", "00:bb:bb:00:00:01"], vlans=[10, 10], times=[0, MINUTE_NS]))
+    stage.on_data(MessageMeta(complete))
+
+    widened = pd.DataFrame(
+        frame(["00:cc:cc:00:00:01", "00:dd:dd:00:00:01"], vlans=[10, None], times=[2 * MINUTE_NS, 3 * MINUTE_NS]))
+    stage.on_data(MessageMeta(widened))
+
+    assert complete["vlan_id"].dtype != widened["vlan_id"].dtype, "pandas no longer widens; this proves nothing"
+
+    # Three OUIs have now been seen on VLAN 10. The fourth row has no VLAN and so has no count at all.
+    assert list(complete["ouis_per_vlan"]) == [1, 2]
+    assert list(widened["ouis_per_vlan"])[0] == 3
+
+
+def test_the_stage_renders_keys_by_the_shared_rule_not_its_own():
+    # This stage used to carry a private copy of the normalization rule, and the copy drifted. Delegation is the
+    # fix; this pins it, because a reimplementation that looks equivalent is how the drift happened the first time.
+    from morpheus.utils.entity_key import normalize_text
+
+    for value in (10, 10.0, "10", " 10 "):
+        assert TC2CardinalityStage._text(value) == normalize_text(value) == "10"
+
+    for missing in (None, float("nan"), ""):
+        assert TC2CardinalityStage._text(missing) is normalize_text(missing) is None

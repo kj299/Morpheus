@@ -388,3 +388,19 @@ def test_tie_break_direction_is_pinned():
 
     assert BindingTable("t", ["v"], [lower, higher]).resolve("k", 50).values == ("zzz", )
     assert BindingTable("t", ["v"], [higher, lower]).resolve("k", 50).values == ("zzz", )
+
+
+def test_the_tie_break_does_not_depend_on_how_the_input_was_batched():
+    # The tie-break exists so the winner is a function of the data rather than of input order. Rendering attributes
+    # with bare `str` broke exactly that: the same attribute arriving as 10 in one batch and 10.0 in the next --
+    # which is all it takes for one row elsewhere in the batch to be null -- ordered differently and could pick a
+    # different winner.
+    from morpheus.utils.binding_table import _sort_key
+
+    def binding(vlan):
+        return Binding(key="10.0.0.1", start_ns=0, end_ns=NS_PER_SECOND, values=(vlan, "a"), uid="u")
+
+    assert _sort_key(binding(10)) == _sort_key(binding(10.0))
+
+    # A missing attribute has to stay comparable with a present one, or the sort raises rather than choosing.
+    assert _sort_key(binding(None)) < _sort_key(binding(10))
