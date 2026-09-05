@@ -36,6 +36,7 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.session_timer import NS_PER_SECOND
 from morpheus.utils.session_timer import SessionTimer
 
@@ -46,6 +47,10 @@ DEFAULT_TIMEOUT_SECONDS = 300
 
 DEFAULT_PENDING_VALUES = ["started", "start", "in-progress", "in_progress", "pending", "request"]
 """Result values that mean the exchange is still running rather than finished."""
+
+DEFAULT_SUPPLICANT_COLUMNS = ["mac_address", "dot1x_identity"]
+"""Columns naming the device being authorized, in preference order. The MAC comes first because it is present on
+both halves of an exchange, while an identity is often unknown until the supplicant has answered."""
 
 PORT_KEY_SEPARATOR = KEY_SEPARATOR
 
@@ -76,8 +81,20 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     anything else stops it. That matches how the common sources report, with a RADIUS Access-Request or an EAPOL
     start preceding an Accept or Reject.
 
-    The stage is stateful across messages and must run single-engine. Shard by switch upstream, which keeps both
-    halves of a port's exchange on one instance; sharding by identity would not, since the same supplicant can
+    An exchange is timed per supplicant on a port, not per port. A port is routinely shared: Cisco multi-domain
+    seats a phone and a workstation on one interface, multi-auth seats more, and a switch reload restarts every
+    session on every port at once. Keyed on the port alone, one device's outcome closes another device's exchange,
+    and the rule inverts in both directions at once -- the second legitimate supplicant is reported as authorized
+    without authentication, while a genuine bypass arriving mid-exchange takes the pending slot of the device it is
+    bridged behind and reads as an ordinary timed session. That second direction is the one that matters: it is
+    exactly the signal R-D-L2-005 exists to catch, and it disappears silently.
+
+    Where no supplicant column is present the key falls back to the port, which is the old behavior and the best a
+    source that does not report the device can support. The stage says so once, because on a shared port that
+    fallback mispairs.
+
+    The stage is stateful across messages and must run single-engine. Shard by switch upstream, which keeps every
+    supplicant on a port together on one instance; sharding by identity would not, since the same supplicant can
     appear on several ports.
 
     Parameters
@@ -93,6 +110,11 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         authorized onto the network.
     result_column : str, default = "dot1x_result"
         Column holding the outcome. Nulls and `pending_values` start the clock; anything else stops it.
+    supplicant_columns : list of str, optional
+        Columns identifying the device being authorized, in preference order; the first one present in the frame
+        with a value for that row is used. An exchange is paired per supplicant per port, so that two devices
+        authenticating on one interface do not close each other's exchanges. Defaults to
+        `DEFAULT_SUPPLICANT_COLUMNS`. Pass an empty list to time per port alone.
     time_column : str, default = "event_time"
         Column holding the event time. Event time, never ingest time: an elapsed time measured against ingest
         order describes the collector's queue rather than the exchange.
@@ -114,6 +136,7 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_column: str = "event_time",
                  time_unit: str = "ns",
                  pending_values: list[str] = None,
+                 supplicant_columns: list[str] = None,
                  timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS):
         super().__init__(c)
 
@@ -126,6 +149,9 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._switch_column = switch_column
         self._port_column = port_column
         self._result_column = result_column
+        self._supplicant_columns = (DEFAULT_SUPPLICANT_COLUMNS
+                                    if supplicant_columns is None else list(supplicant_columns))
+        self._warned_portwise = False
         self._time_column = time_column
         self._time_unit = time_unit
         self._pending_values = {str(value).strip().lower() for value in pending}
@@ -180,6 +206,24 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         """Whether this row opens an exchange rather than closing one."""
         return result is None or result.lower() in self._pending_values
 
+    def _exchange_key(self, port_key: str, supplicant_sources: list[list], position: int) -> str:
+        """The key an exchange is paired on: the port, extended with the device being authorized on it."""
+        for source in supplicant_sources:
+            supplicant = normalize_text(source[position])
+
+            if (supplicant is not None):
+                return compose_key([port_key, supplicant])
+
+        if (not self._warned_portwise):
+            self._warned_portwise = True
+            logger.warning(
+                "TC2AuthStage found no supplicant in columns %s, so exchanges are timed per port. On a port "
+                "carrying more than one supplicant -- a phone and a workstation, or anything behind a hub -- one "
+                "device's outcome will close another device's exchange.",
+                self._supplicant_columns)
+
+        return port_key
+
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
         Write the elapsed time, the attempt count, and the unpaired flag.
@@ -218,12 +262,16 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             sites = to_host_list(df, self._site_column) if self._site_column in df.columns else [None] * len(ports)
 
+            # In preference order, so a row missing its identity still pairs on its MAC.
+            supplicant_sources = [to_host_list(df, name) for name in self._supplicant_columns if name in df.columns]
+
             port_keys: list = []
             elapsed: list = []
             attempts: list = []
             unpaired: list = []
             unordered = 0
             keyless = 0
+            abandoned = 0
             has_site = self._site_column in df.columns
 
             for (position, raw_port) in enumerate(ports):
@@ -256,8 +304,21 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unordered += 1
                     continue
 
+                # An exchange that never resolved has to stop being pending, or a later outcome pairs with it and
+                # is timed against an exchange it has nothing to do with. That is not merely a wrong duration: a
+                # bypass, which is an outcome with no exchange in front of it, reads as an ordinary authorized
+                # session and the signal R-D-L2-005 exists to catch disappears. Expiry runs on this row's own
+                # event time rather than a wall clock or a batch boundary, so it falls in the same place however
+                # the stream is divided.
+                abandoned += len(self._timer.expire(event_time_ns))
+
+                # The port is what is being authorized onto the network, but the exchange belongs to a device on
+                # it. Extending the key with the supplicant is what keeps two devices on one interface from
+                # closing each other's exchanges; without a supplicant this is the port key unchanged.
+                exchange_key = self._exchange_key(port_key, supplicant_sources, position)
+
                 if (self._is_start(result)):
-                    self._timer.begin(port_key, event_time_ns)
+                    self._timer.begin(exchange_key, event_time_ns)
                     # A start is not itself an event to score; it establishes what the outcome will be measured
                     # against. Nulls rather than zeros, so a rule reading "authorized instantly" cannot match here.
                     elapsed.append(None)
@@ -265,7 +326,7 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unpaired.append(None)
                     continue
 
-                timing = self._timer.complete(port_key, event_time_ns, outcome=result)
+                timing = self._timer.complete(exchange_key, event_time_ns, outcome=result)
 
                 elapsed.append(None if timing.elapsed_ns is None else timing.elapsed_ns / NS_PER_SECOND)
                 attempts.append(timing.attempts)
@@ -288,6 +349,13 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 "timing. Shard by switch and preserve per-port ordering upstream.",
                 unordered,
                 len(ports))
+
+        if (abandoned > 0):
+            logger.info(
+                "TC2AuthStage abandoned %d exchanges that went unresolved for longer than the timeout. An exchange "
+                "that never completes is its own signal; a later outcome on the same port is now correctly read as "
+                "unpaired rather than timed against it.",
+                abandoned)
 
         return message
 

@@ -67,7 +67,10 @@ side alone breaks the joins silently.
 
 1. **Bucket width, 300 seconds.** The pipeline expands bindings with
    `BindingTable.to_bucketed_frame(bucket_seconds=300)`, and every query in the guide computes
-   `bucket=floor(_time/300)`. The expiry saved search also assumes it.
+   `bucket=floor(_time/300)`. The expiry saved search also assumes it. Each bucketed row carries
+   `bucket_start`, the bucket's own start time, which is what `[binding:bucketed]` anchors `_time` on. A
+   bucketed row has no other time of its own: it stands for a key in a bucket, not for a single binding
+   record, so it carries neither `bind_start` nor `bind_end`.
 2. **Binding retention, 400 days.** `frozenTimePeriodInSecs` on `behavior_bindings` and the cutoff
    in the `Binding lookup - L2/L3 expiry` search must move together. A lookup that expires before
    its index produces unattributable events.
@@ -87,9 +90,15 @@ side alone breaks the joins silently.
    one row per port as `site_id:switch_id:port_id` with a `designation` (`single-host` is what the rule
    matches) and `max_macs`. R-D-L2-003 honours the HSRP and VRRP exclusion list, but that list lives in
    the pipeline, as `TC2ArpStage(excluded_sender_ips=[...])`; the stage marks excluded rows and the
-   search reads the mark. Both rules fire on nothing until their list is populated, which is the guide's
-   own statement that they are unusable without one.
-6. **Provisional bindings, if enabled.** `TC2BindingStage(emit_open_bindings=True)` emits a record on
+   search reads the mark. The two fail in opposite directions until their lists exist: R-D-L2-001 matches
+   nothing, and R-D-L2-003 matches every redundancy gateway once per window. Both are unusable
+   without the list, which is the guide's own statement, but only one of them is quiet about it.
+6. **The name of the binding source, on bucketed rows.** `Binding lookup - L2/L3 refresh` selects
+   `binding_table=dhcp_lease`, because several binding sources land on the one `binding:bucketed`
+   sourcetype and a refresh that cannot tell them apart builds the wrong lookup. The producer supplies it:
+   `BindingTable.to_bucketed_records(table_name="dhcp_lease")`. Leave it unset and the refresh matches
+   nothing and the KV Store stays empty, which is the same posture as the two lists above.
+7. **Provisional bindings, if enabled.** `TC2BindingStage(emit_open_bindings=True)` emits a record on
    sourcetype `binding:l2:open` the moment a binding opens, with a null `bind_end`. Whatever builds the
    live lookup from those must cap the open interval with an explicit assumed duration
    (`BindingTable.from_dataframe(open_end_duration_ns=...)`, the source's own aging interval is the

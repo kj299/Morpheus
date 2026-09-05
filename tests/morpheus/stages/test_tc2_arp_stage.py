@@ -27,6 +27,7 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
+from morpheus.utils.distinct_window import DEFAULT_MAX_SAMPLES
 from morpheus.utils.ratio_window import NS_PER_SECOND
 from morpheus.utils.type_utils import get_df_class
 
@@ -322,3 +323,42 @@ def test_a_null_sender_mac_yields_no_ratio_and_a_null_sender_ip_no_claimant_coun
     # A claim needs both an address and a MAC. The first packet has no MAC, so it claims nothing; counting it would
     # make the gateway look contested by a phantom.
     assert _as_list(meta, "macs_claiming_sender_ip") == [None, None, 1]
+
+
+@pytest.mark.cpu_mode
+def test_a_saturated_claimant_count_is_marked_as_a_lower_bound(config: Config):
+    # Under a flood the sample cap evicts the earliest packets, and the legitimate owner's announcement can be among
+    # them. The count is then a lower bound. Published as if exact, R-D-L2-003 reads a contested address as
+    # uncontested and the detection it exists to raise never fires.
+    # The cap is the tracker's own default, so this drives the real shipped path rather than a test-only setting.
+    count = DEFAULT_MAX_SAMPLES + 16
+    payload = {
+        "event_time": [index * NS_PER_SECOND for index in range(count)],
+        "arp_sender_ip": ["10.0.0.1"] * count,
+        "arp_target_ip": ["10.0.0.1"] * count,
+        "arp_sender_mac": ["aa:bb:cc:00:00:01"] + ["de:ad:be:ef:00:01"] * (count - 1),
+    }
+    meta = run(config, payload, window_seconds=count * 2)
+
+    saturated = _as_list(meta, "macs_claiming_sender_ip_saturated")
+
+    # Nothing is saturated until the cap actually binds, and once it does the flag says so rather than the count
+    # quietly becoming a floor.
+    assert saturated[0] is False
+    assert any(saturated)
+    assert len(saturated) == count
+
+
+@pytest.mark.cpu_mode
+def test_an_unsaturated_measure_says_so_rather_than_carrying_a_null(config: Config):
+    # A row with no measure at all is not a saturated row; the flag has to be a definite answer either way.
+    payload = {
+        "event_time": [0, NS_PER_SECOND],
+        "arp_sender_ip": ["10.0.0.1", None],
+        "arp_target_ip": ["10.0.0.1", None],
+        "arp_sender_mac": ["aa:bb:cc:00:00:01", None],
+    }
+    meta = run(config, payload)
+
+    assert _as_list(meta, "macs_claiming_sender_ip_saturated") == [False, False]
+    assert _as_list(meta, "gratuitous_arp_ratio_saturated") == [False, False]

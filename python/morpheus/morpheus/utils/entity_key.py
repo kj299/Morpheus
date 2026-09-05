@@ -22,6 +22,12 @@ A key with a missing part is null, not a string with `None` in it. The universal
 unavailable field must be explicitly null rather than defaulted to something plausible, because a defaulted value
 is indistinguishable from an observed one three months later during an investigation. A row with a null key gets
 no per-entity features, and the stage says how many rows that happened to.
+
+A part's rendering depends on its value, never on the dtype of the column it arrived in. This matters because
+pandas widens an integer column to float the moment one row in the batch is missing: without the rule, port `5`
+composes to `hq:sw1:5` in a batch where every port is present and `hq:sw1:5.0` in the next batch, where some
+unrelated row had no port. One entity would become two, its baseline would restart under the new name, and
+control 13's batch-split sweep would disagree with itself purely on where the corpus was cut.
 """
 
 import math
@@ -31,6 +37,30 @@ import pandas as pd
 
 KEY_SEPARATOR = ":"
 """Joins the parts of a composite key. The same character at every layer, so keys compare across layers."""
+
+
+def _render_integral(value: typing.Any) -> typing.Optional[str]:
+    """
+    Render a whole number as an integer, whatever numeric type is carrying it, or `None` for anything else.
+
+    `bool` is excluded deliberately: it satisfies every test for a whole number, but rendering `True` as `1`
+    would change an existing key for a type that is not part of the identifier ladder in the first place.
+    """
+    if (isinstance(value, bool)):
+        return None
+
+    is_integer = getattr(value, "is_integer", None)
+
+    if (is_integer is None):
+        return None
+
+    try:
+        if (not is_integer()):
+            return None
+
+        return str(int(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def normalize_text(value: typing.Any) -> typing.Optional[str]:
@@ -45,7 +75,9 @@ def normalize_text(value: typing.Any) -> typing.Optional[str]:
     Returns
     -------
     str or None
-        The value as text with surrounding whitespace removed, or `None` if it was missing or blank.
+        The value as text with surrounding whitespace removed, or `None` if it was missing or blank. A whole
+        number renders as an integer whatever numeric type is carrying it, so that a column widened to float
+        by a missing sibling row does not rename the entities in it.
     """
     if (value is None):
         return None
@@ -59,7 +91,10 @@ def normalize_text(value: typing.Any) -> typing.Optional[str]:
     except (TypeError, ValueError):
         pass
 
-    text = str(value).strip()
+    text = _render_integral(value)
+
+    if (text is None):
+        text = str(value).strip()
 
     return text if len(text) > 0 else None
 

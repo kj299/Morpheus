@@ -56,19 +56,20 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is thirteen stages and seventeen supporting modules under 725 tests, itemized in
+13's CI harness. That is fourteen stages and eighteen supporting modules under 892 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
 ([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)).
 
 What remains design rather than a running system: the telemetry classes for layers 3 through 7, every
-detection rule in Part 3, the chained rule engine, and the determinism controls other than 7, 8, and
-13. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
+detection rule in Part 3 apart from the four layer 2 rules that ship as saved searches, two of which
+fire on nothing until their lookup is populated, the chained rule engine, and the determinism controls
+other than 7, 8, and 13. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
 of it does not. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode is unexercised. Every stage declares
-support for it and 178 `gpu_mode` test variants exist, but no GPU has been available to run them, so
+support for it and 203 `gpu_mode` test variants exist, but no GPU has been available to run them, so
 CPU mode is the tested path.
 
 **On the word "predictive."** Three of the four mechanisms in Part 1 are forward-looking in a defensible
@@ -661,9 +662,10 @@ for change detection they are superseded. `changed` has no blind spot at all; th
 `first_seen`, whose recall set is finite, so a value evicted after many others reads as first seen
 again. That errs toward over-reporting novelty, which is the safe direction for a signal meant to
 surface the unexplained.
-Note that the baseline follows the link, so a step is a transient signal: once the window has rolled
-past the last pre-step reading the deviation returns to zero, and a degradation slower than the window
-is invisible because the baseline drifts down with it. Catching that needs a commissioning value to
+Note that the baseline follows the link, so a step is a transient signal: once half the window has
+rolled past the last pre-step reading the deviation returns to zero, because a median turns as soon as
+half the retained samples sit on the new level. A degradation slower than the window is invisible
+because the baseline drifts down with it. Catching that needs a commissioning value to
 compare against, which is asset context and belongs in TC-0.
 
 Link flap counting ships as {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage` over
@@ -736,7 +738,9 @@ defined by the sender and target protocol addresses being equal, so the feature 
 was not computable from the fields it required. The field has been added.
 
 Authorization timing ({py:mod}`~morpheus.utils.session_timer`) pairs each exchange's start with its
-outcome per port. Both tails of the distribution mean something: slow is a supplicant retrying, a RADIUS
+outcome per supplicant on a port, rather than per port. A port is routinely shared -- multi-domain seats
+a phone and a workstation on one interface -- and pairing per port lets one device's outcome close
+another device's exchange. Both tails of the distribution mean something: slow is a supplicant retrying, a RADIUS
 server under load, or credentials being guessed, and very fast can be a replayed success. The most
 useful case is neither tail, though. An outcome arriving with *no exchange in front of it* is what a
 bypass looks like from the switch, since MAC authentication bypass and a device bridged behind an
@@ -1041,14 +1045,19 @@ Ships as a saved search in the Splunk app, reading the raw closed-binding record
 **R-D-L2-005 - Authorization without authentication.** `auth_unpaired = true` from `TC2AuthStage`: an
 802.1X outcome arrived on a port with no exchange in front of it. From the switch this is what MAC
 authentication bypass looks like, and also what a device bridged behind an already authorized
-supplicant looks like. Near-zero false positives where every port runs 802.1X; on ports where MAB is
-configured deliberately, suppress by port designation rather than by loosening the rule. Tier D1. Ships
-as a saved search in the Splunk app.
+supplicant looks like. Near-zero false positives where every port runs 802.1X **and the source reports
+which device each exchange belongs to**: pairing exchanges per port alone inverts the rule in both
+directions on a shared port, reporting the second legitimate supplicant as unauthenticated while a real
+bypass takes the pending slot of the device it is bridged behind and reads as an ordinary session.
+`TC2AuthStage` pairs per supplicant for that reason, and falls back to the port only when no supplicant
+is reported. On ports where MAB is configured deliberately, suppress by port designation rather than by
+loosening the rule. Tier D1. Ships as a saved search in the Splunk app.
 
 These four, R-D-L2-001, 003, 004 and 005, are the rules in this part that exist as code rather than as
 specification. 004 and 005 read columns the shipped stages produce and depend on nothing outside the
 pipeline; 001 and 003 depend on a list the estate owns, and each ships with the hook for that list and
-fires on nothing until it is populated. All four predicates are asserted in Python over the determinism
+fires on nothing until it is populated, while R-D-L2-003 fires on every first-hop redundancy address until its
+exclusion list is supplied. All four predicates are asserted in Python over the determinism
 harness's planted corpus: 004 and 005 fire exactly once, 001 once per offending MAC, and 003 on the
 flooded gateway and not on the redundancy pair.
 
@@ -1358,9 +1367,19 @@ the reference implementation:
 The 16x spread on Community ID is the tuple memoization, and it is why the stage belongs *after* the
 flow rollup rather than on raw packets: rolled-up telemetry repeats tuples heavily, unaggregated
 telemetry does not. `event_uid` cannot benefit from memoization at all, because the identifiers are
-unique by construction, so its ~590k rows/s is the harder ceiling and the one to plan against. At
+unique by construction, so its ~590k rows/s is the harder ceiling **among the stateless hashes**. At
 layer 5 and layer 7 event volumes that is ample. At raw layer 3 and 4 packet rates it is not, and the
 lineage stamp has to sit downstream of aggregation.
+
+These are the two cheapest things the pipeline does, and quoting them alone was misleading about where
+the cost is. The stateful stages hold per-entity state and are the real ceiling: `TC2BindingStage`
+carries one open binding per MAC in the estate and `TC2AuthStage` one pending exchange per supplicant,
+and both run their expiry on every row so that expiry lands on event time rather than on a batch
+boundary. Measured on one MAC-table snapshot, a naive per-row scan of that state was quadratic in the
+snapshot -- 8,000 rows took 2.0s, a 50,000-entry snapshot would take roughly 80s in one stage, and on
+the five-minute snapshot cadence this section recommends a large estate would never catch up. Both
+stages now skip a scan whose horizon has not advanced, which is exact and returns the snapshot path to
+linear, at about 200k rows/s. Plan against that number, not against the hashes.
 
 Where the host ceiling still binds, `LineageStampStage` offers an opt-in device path
 (`use_gpu_hashing=True`) that computes the same SHA-256 digests through cuDF's `hash_values`. The
@@ -2373,18 +2392,6 @@ What Morpheus provides versus what has to be built, stated plainly.
   with unpaired authorization flagged ({py:mod}`~morpheus.utils.session_timer` and
   {py:class}`~morpheus.stages.telemetry.tc2_auth_stage.TC2AuthStage`). This completes the five
   behavioral features the TC-2 section names.
-- Determinism control 8 as a stage
-  ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), and the composed layer 1
-  and layer 2 telemetry pipeline under all six of control 13's checks, over a snapshot-shaped corpus
-  with a hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and an 802.1X bypass planted in
-  it (`tests/morpheus/determinism/telemetry_pipeline.py`). The harness asserts that a MAC resolved
-  through a layer 2 binding lands on a layer 1 `entity_key` the same run emitted.
-- The four layer 2 detections, R-D-L2-001, 003, 004 and 005, as saved searches in the Splunk app, with
-  their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
-  list each depends on and fire on nothing until it is populated.
-- Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
-  answer inside the idle window, capped by a duration the consumer states rather than one the stage
-  invents.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.
@@ -2394,6 +2401,19 @@ What Morpheus provides versus what has to be built, stated plainly.
   through every TC-1 and TC-2 stage, with the layer 2 bindings resolving the ARP stream onto the layer 1
   `entity_key`. Each planted anomaly is asserted as the column a rule would read, and nothing else fires.
 
+- The four layer 2 detections, R-D-L2-001, 003, 004 and 005, as saved searches in the Splunk app, with
+  their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
+  list each depends on. Until that list exists R-D-L2-001 fires on nothing and R-D-L2-003 fires on every
+  redundancy gateway, so the two need the inventory for opposite reasons.
+- Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
+  answer inside the idle window, capped by a duration the consumer states rather than one the stage
+  invents.
+- Expiry driven by event time in both stateful layer 2 stages. `TC2AuthStage` abandons an exchange that
+  never resolved, so a later outcome is not timed against it and a bypass still reads as one;
+  `TC2BindingStage` closes a binding whose MAC has gone quiet past the idle timeout, so a soft join in
+  the middle of that silence no longer attributes an event to a port the device had left. Both run on
+  each row's own event time rather than a batch boundary, which keeps the closure in the same place
+  however the stream is divided.
 ### Must be built
 
 | Component | Effort | Notes |

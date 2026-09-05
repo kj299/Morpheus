@@ -254,3 +254,18 @@ def test_constructor_validation(config: Config):
 
     with pytest.raises(ValueError):
         TC1OpticalStage(config, min_samples=0)
+
+
+@pytest.mark.cpu_mode
+def test_null_entity_keys_do_not_share_a_baseline(config: Config):
+    # A baseline is a statement about one port's own recent readings. Pooled under `str(None)`, unrelated ports feed
+    # each other's baselines and a deviation appears where no port degraded.
+    payload = {
+        "entity_key": [None] * 5,
+        "event_time": [index * 300 * NS_PER_SECOND for index in range(5)],
+        "rx_power_dbm": [-3.0, -3.0, -3.0, -3.0, -20.0],
+    }
+    meta = run(config, payload, channel_columns=["rx_power_dbm"])
+
+    assert _as_list(meta, "rx_power_dbm_baseline") == [None] * 5
+    assert _as_list(meta, "rx_power_dbm_deviation") == [None] * 5

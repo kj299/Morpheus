@@ -29,6 +29,7 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
@@ -95,8 +96,9 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     Notes
     -----
     The baseline follows the link, so a step is a transient signal rather than a standing state: once the window
-    has rolled past the last pre-step reading, the median describes the new level and the deviation returns to
-    zero. It has to be caught within `window_seconds` of the step. Lengthening the window holds the evidence longer
+    is half rolled past the last pre-step reading, the median describes the new level and the deviation returns to
+    zero. It has to be caught within half of `window_seconds` of the step, since a median turns
+    once half the retained samples are on the new level. Lengthening the window holds the evidence longer
     at the cost of a reference that lags a legitimate re-patch for just as long. A degradation slower than the
     window is invisible for the same reason, since the baseline drifts down with it; catching that needs a
     comparison against a commissioning value, which is asset context and belongs in TC-0.
@@ -210,8 +212,25 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             deviations: dict[str, list] = {name: [] for name in self._channel_columns}
             counts: dict[str, list] = {name: [] for name in self._channel_columns}
             unordered = 0
+            keyless = 0
 
             for (position, entity_key) in enumerate(entity_keys):
+                # A row whose key is null has no identity to hold state against. Passing `str(None)` would pool every
+                # such row in the estate under one tracker entity named "None", where one port's transceiver becomes
+                # another's substitution and one port's optical reading becomes another's baseline. The contract in
+                # `morpheus.utils.entity_key` is that a null key gets no per-entity features and the stage says how
+                # many rows that happened to.
+                key = normalize_text(entity_key)
+
+                if (key is None):
+                    for name in self._channel_columns:
+                        baselines[name].append(None)
+                        deviations[name].append(None)
+                        counts[name].append(0)
+
+                    keyless += 1
+                    continue
+
                 try:
                     event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
                 except ValueError:
@@ -227,7 +246,7 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     continue
 
                 result = self._tracker.observe(
-                    str(entity_key),
+                    key,
                     event_time_ns, {name: self._reading(channels[name][position])
                                     for name in self._channel_columns})
 
@@ -242,6 +261,14 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 assign_nullable_float_column(df, f"{name}{BASELINE_SUFFIX}", baselines[name])
                 assign_nullable_float_column(df, f"{name}{DEVIATION_SUFFIX}", deviations[name])
                 assign_nullable_int_column(df, f"{name}{SAMPLES_SUFFIX}", counts[name])
+
+        if (keyless > 0):
+            logger.warning(
+                "TC1OpticalStage saw %d of %d rows with a null entity key; they carry no baseline or "
+                "deviation. A null key means a missing site, device, or port upstream, not a port named "
+                "\"None\".",
+                keyless,
+                len(entity_keys))
 
         if (unordered > 0):
             logger.warning(

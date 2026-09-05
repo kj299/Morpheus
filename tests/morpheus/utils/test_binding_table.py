@@ -367,7 +367,9 @@ def test_bucketed_records_guard_against_explosion(leases: BindingTable):
 def test_bucketed_frame(leases: BindingTable):
     frame = leases.to_bucketed_frame(bucket_seconds=1800, key_name="ip")
 
-    assert list(frame.columns) == ["ip", "bucket", "mac", "hostname", "binding_uid"]
+    # `bucket_start` sits with the key and the bucket because it is the row's identity in time, not one of the
+    # binding's values: a bucketed row's only timestamp is the bucket it stands for.
+    assert list(frame.columns) == ["ip", "bucket", "bucket_start", "mac", "hostname", "binding_uid"]
     assert len(frame) == len(leases.to_bucketed_records(bucket_seconds=1800, key_name="ip"))
 
 
@@ -386,3 +388,19 @@ def test_tie_break_direction_is_pinned():
 
     assert BindingTable("t", ["v"], [lower, higher]).resolve("k", 50).values == ("zzz", )
     assert BindingTable("t", ["v"], [higher, lower]).resolve("k", 50).values == ("zzz", )
+
+
+def test_the_tie_break_does_not_depend_on_how_the_input_was_batched():
+    # The tie-break exists so the winner is a function of the data rather than of input order. Rendering attributes
+    # with bare `str` broke exactly that: the same attribute arriving as 10 in one batch and 10.0 in the next --
+    # which is all it takes for one row elsewhere in the batch to be null -- ordered differently and could pick a
+    # different winner.
+    from morpheus.utils.binding_table import _sort_key
+
+    def binding(vlan):
+        return Binding(key="10.0.0.1", start_ns=0, end_ns=NS_PER_SECOND, values=(vlan, "a"), uid="u")
+
+    assert _sort_key(binding(10)) == _sort_key(binding(10.0))
+
+    # A missing attribute has to stay comparable with a present one, or the sort raises rather than choosing.
+    assert _sort_key(binding(None)) < _sort_key(binding(10))

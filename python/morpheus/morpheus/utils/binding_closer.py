@@ -237,6 +237,7 @@ class BindingCloser:
         self._max_open = max_open
 
         self._open: collections.OrderedDict[str, _OpenBinding] = collections.OrderedDict()
+        self._expired_through_ns: typing.Optional[int] = None
 
     @property
     def attribute_names(self) -> list[str]:
@@ -409,6 +410,16 @@ class BindingCloser:
         """
         Close bindings that have gone quiet for longer than `idle_timeout_ns`.
 
+        The callers run this once per row, on that row's own event time, because expiring on a batch boundary or a
+        wall clock would make the output depend on how the stream was divided. A scan of every open binding per row
+        is quadratic in batch size, and the input this stage is built for is a MAC-table snapshot in which every row
+        carries one instant -- so the scan repeats, finding the same nothing, once per MAC in the estate.
+
+        Re-running at a horizon that has not advanced cannot find anything, which is what makes skipping it exact
+        rather than an approximation: everything stale at this horizon was closed by the first call, and any binding
+        opened or refreshed since was stamped at an event time at or after it. A row arriving out of order lowers
+        the horizon, where the same argument applies to the higher one already reached.
+
         Parameters
         ----------
         now_ns : int
@@ -419,6 +430,11 @@ class BindingCloser:
         list of `ClosedBinding`
         """
         horizon = now_ns - self._idle_timeout_ns
+
+        if (self._expired_through_ns is not None and horizon <= self._expired_through_ns):
+            return []
+
+        self._expired_through_ns = horizon
         stale = [key for (key, state) in self._open.items() if state.last_seen_ns < horizon]
 
         return [self._close(self._open.pop(key), 0, IDLE_TIMEOUT) for key in stale]

@@ -14,7 +14,6 @@
 """Counts distinct layer 2 identifiers per entity over a trailing window."""
 
 import logging
-import math
 import typing
 
 import mrc
@@ -37,6 +36,7 @@ from morpheus.utils.distinct_window import NS_PER_SECOND
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -175,14 +175,14 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
     @staticmethod
     def _text(value: typing.Any) -> typing.Optional[str]:
-        """Normalize a host value, collapsing every flavour of missing to `None`."""
-        if (value is None):
-            return None
+        """
+        Normalize a host value, collapsing every flavour of missing to `None`.
 
-        if (isinstance(value, float) and math.isnan(value)):
-            return None
-
-        return str(value)
+        Delegated rather than reimplemented. `vlan_id` is an entity here, and a private copy of this rule drifted
+        from the shared one: rendering a widened float VLAN as `10.0` forked VLAN 10 into two entities and restarted
+        its OUI count, so a flood could sit under the threshold because some unrelated row had a null VLAN.
+        """
+        return normalize_text(value)
 
     @classmethod
     def _oui(cls, supplied: typing.Any, mac: typing.Optional[str]) -> typing.Optional[str]:

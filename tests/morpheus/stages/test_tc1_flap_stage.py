@@ -254,3 +254,13 @@ def test_missing_column_raises(config: Config):
 def test_constructor_validation(config: Config):
     with pytest.raises(ValueError):
         TC1FlapStage(config, window_seconds=0)
+
+
+@pytest.mark.cpu_mode
+def test_null_entity_keys_do_not_share_a_flap_count(config: Config):
+    # Flaps are counted per port. Pooled under `str(None)`, every keyless row in the estate transitions against
+    # every other one, and a segment of stable ports reports a storm that no port had.
+    meta = run(config, frame(["up", "down", "up", "down"], entity=None))
+
+    assert _as_list(meta, "link_flaps") == [None, None, None, None]
+    assert _as_list(meta, "link_flaps_in_window") == [None, None, None, None]

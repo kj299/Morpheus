@@ -27,6 +27,7 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
+from morpheus.utils.link_flap import NS_PER_SECOND
 from morpheus.utils.type_utils import get_df_class
 
 DAY_NS = 24 * 3600 * 10**9
@@ -264,3 +265,36 @@ def test_constructor_validation(config: Config):
 
     with pytest.raises(ValueError):
         TC1ChangeStage(config, max_values=0)
+
+
+@pytest.mark.cpu_mode
+def test_null_entity_keys_are_not_pooled_into_one_port(config: Config):
+    # Two rows whose key is null because a site, device, or port was missing upstream. Held against `str(None)` they
+    # would share one tracker entity, and the second row's transceiver would read as a substitution on the first
+    # row's port. A null key means no identity, so it gets no per-entity features.
+    payload = {
+        "entity_key": [None, None],
+        "event_time": [0, 300 * NS_PER_SECOND],
+        "transceiver_serial": ["SN-AAA", "SN-BBB"],
+    }
+    meta = run(config, payload, novelty_columns=["transceiver_serial"])
+
+    assert _as_list(meta, "transceiver_serial_changed") == [None, None]
+    assert _as_list(meta, "transceiver_serial_first_seen") == [None, None]
+
+
+@pytest.mark.cpu_mode
+def test_a_null_key_does_not_disturb_a_real_ones_state(config: Config):
+    # The keyless rows must not leak into a real port's history either.
+    payload = {
+        "entity_key": ["hq:sw1:Gi1/0/1", None, "hq:sw1:Gi1/0/1"],
+        "event_time": [0, 150 * NS_PER_SECOND, 300 * NS_PER_SECOND],
+        "transceiver_serial": ["SN-AAA", "SN-ZZZ", "SN-AAA"],
+    }
+    meta = run(config, payload, novelty_columns=["transceiver_serial"])
+
+    # The real port saw one serial twice. Its first sighting has nothing to compare against, so `changed` is null
+    # there; the second is a comparison against the same value, so it is False. Had the keyless row leaked into this
+    # port's history, the third row would have compared SN-AAA against SN-ZZZ and reported a substitution.
+    assert _as_list(meta, "transceiver_serial_changed") == [None, None, False]
+    assert _as_list(meta, "transceiver_serial_first_seen") == [None, None, False]

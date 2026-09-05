@@ -32,12 +32,15 @@ import pytest
 
 from morpheus.io import serializers
 from morpheus.utils.siem_wire import SPLUNK_TIME_FORMAT
+from morpheus.utils.binding_table import TABLE_NAME_COLUMN
+from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.siem_wire import render_event_time
 from morpheus.utils.siem_wire import render_event_time_series
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 PROPS_PATH = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheus-lineage", "default", "props.conf")
 
+SAVEDSEARCHES_PATH = PROPS_PATH.replace("props.conf", "savedsearches.conf")
 # A timestamp with a non-zero microsecond component and sub-microsecond digits that must be discarded.
 SAMPLE_NS = 1788114300123456789
 SAMPLE_RENDERED = "2026-08-30T18:25:00.123456UTC"
@@ -148,3 +151,111 @@ def test_render_is_utc_regardless_of_host_zone():
 def test_render_passes_nulls_through():
     assert render_event_time(None) is None
     assert render_event_time_series([None, SAMPLE_NS]) == [None, SAMPLE_RENDERED]
+
+
+def timestamped_stanzas() -> list[str]:
+    """Every stanza that anchors `_time` on a field, whatever that field is called."""
+    parser = load_props()
+
+    return [name for name in parser.sections() if parser[name].get("TIME_PREFIX")]
+
+
+# The field each sourcetype's TIME_PREFIX names, and what in this repo is responsible for emitting it. A stanza
+# anchored on a field its producer never writes is silently severe: Splunk falls back to ingest time, or inherits the
+# previous event's timestamp, and the row lands at a time that looks plausible and is wrong.
+TIMESTAMP_FIELD_OWNERS = {
+    "event_time": "morpheus.utils.siem_wire.render_event_time_series, before the sink",
+    "bind_start": "TC2BindingStage, on every closed and provisional binding record",
+    "bind_end": "TC2BindingStage, on closed binding records",
+    "bucket_start": "BindingTable.to_bucketed_records, on every bucketed row",
+    # The TC-0 context store is in Part 6's "Must be built" table. These two stanzas are the contract it will have to
+    # meet, deliberately shipped ahead of it. Listing the field here keeps this test honest about the difference
+    # between "nothing emits it yet, by design" and "nothing will ever emit it, by mistake".
+    "valid_from": "not built: the bitemporal TC-0 context store, per Part 6",
+}
+
+UNBUILT_TIMESTAMP_FIELDS = {"valid_from"}
+
+
+@pytest.mark.parametrize("stanza", timestamped_stanzas())
+def test_every_stanza_is_timed_on_a_field_something_actually_emits(stanza: str):
+    settings = load_props()[stanza]
+    field = re.match(r'"([a-z_]+)"', settings["TIME_PREFIX"])
+
+    assert field is not None, f"{stanza} has a TIME_PREFIX this test cannot read: {settings['TIME_PREFIX']}"
+    name = field.group(1)
+
+    assert name in TIMESTAMP_FIELD_OWNERS, (
+        f"{stanza} anchors _time on {name!r}, which nothing in this repo is known to emit. Either the producer "
+        f"gained the field and this map needs it, or the stanza is timed on a field that will never arrive.")
+
+    # Whatever the field is called, it is rendered by the one shared renderer, so the format must be the shared one.
+    assert settings["TIME_FORMAT"] == SPLUNK_TIME_FORMAT
+    assert settings["TIME_PREFIX"].endswith('"')
+
+
+def test_the_unbuilt_timestamp_fields_are_still_unbuilt():
+    # A tripwire on the exemption above: when the TC-0 store lands and starts writing `valid_from`, this fails and
+    # the field moves from the unbuilt set to an owner, rather than the exemption quietly outliving its reason.
+    for field in UNBUILT_TIMESTAMP_FIELDS:
+        assert "not built" in TIMESTAMP_FIELD_OWNERS[field]
+
+
+def test_the_bucketed_stanza_is_timed_on_the_field_the_expansion_writes():
+    # The specific pairing that was wrong: bucketed rows carry no bind_start, only the bucket's own start.
+    settings = load_props()["binding:bucketed"]
+
+    assert '"bucket_start"' in settings["TIME_PREFIX"]
+
+    table = BindingTable.from_dataframe(
+        pd.DataFrame({
+            "key": ["10.0.0.5"],
+            "bind_start": [SAMPLE_NS],
+            "bind_end": [SAMPLE_NS + 600 * 1_000_000_000],
+            "mac": ["aa:bb:cc:dd:ee:ff"],
+        }),
+        "dhcp",
+        "key", ["mac"],
+        "bind_start",
+        "bind_end")
+    record = table.to_bucketed_records(bucket_seconds=300, key_name="ip")[0]
+
+    assert "bucket_start" in record
+    line = serializers.df_to_json(pd.DataFrame([record]), strip_newlines=True)[0]
+    match = re.search(settings["TIME_PREFIX"], line)
+
+    assert match is not None
+    stamp = re.match(r'[^"]+', line[match.end():]).group(0)
+    parsed = datetime.datetime.strptime(stamp, splunk_format_to_strptime(settings["TIME_FORMAT"]).replace("%Z", "UTC"))
+    epoch_seconds = (parsed - datetime.datetime(1970, 1, 1)).total_seconds()
+
+    # The bucket's start, not the binding's: the row stands for the whole bucket, so its time is a bucket boundary.
+    assert epoch_seconds % 300 == 0
+    assert epoch_seconds == (SAMPLE_NS // 1_000_000_000) // 300 * 300
+
+
+def test_the_bucketed_expansion_can_name_its_source_table():
+    # The lookup refresh discriminates on `binding_table`; several sources share the sourcetype.
+    table = BindingTable.from_dataframe(
+        pd.DataFrame({
+            "key": ["10.0.0.5"], "bind_start": [0], "bind_end": [600 * 1_000_000_000], "mac": ["aa:bb:cc:dd:ee:ff"]
+        }),
+        "dhcp",
+        "key", ["mac"],
+        "bind_start",
+        "bind_end")
+
+    named = table.to_bucketed_records(bucket_seconds=300, key_name="ip", table_name="dhcp_lease")
+    assert {record["binding_table"] for record in named} == {"dhcp_lease"}
+
+    # Unnamed tables carry no such field, so a single-source estate is not made to invent one.
+    assert all("binding_table" not in record for record in table.to_bucketed_records(bucket_seconds=300))
+
+
+def test_the_lookup_refresh_filters_on_a_field_the_expansion_can_emit():
+    # The search reads `binding_table=dhcp_lease`; the expansion must be able to write exactly that field name.
+    with open(SAVEDSEARCHES_PATH, encoding="utf-8") as handle:
+        searches = handle.read()
+
+    assert "binding_table=dhcp_lease" in searches
+    assert TABLE_NAME_COLUMN == "binding_table"

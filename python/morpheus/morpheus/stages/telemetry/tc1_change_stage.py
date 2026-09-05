@@ -29,6 +29,7 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
@@ -197,8 +198,25 @@ class TC1ChangeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             first_seen: dict[str, list] = {name: [] for name in self._novelty_columns}
             distinct: dict[str, list] = {name: [] for name in self._novelty_columns}
             unordered = 0
+            keyless = 0
 
             for (position, entity_key) in enumerate(entity_keys):
+                # A row whose key is null has no identity to hold state against. Passing `str(None)` would pool every
+                # such row in the estate under one tracker entity named "None", where one port's transceiver becomes
+                # another's substitution and one port's optical reading becomes another's baseline. The contract in
+                # `morpheus.utils.entity_key` is that a null key gets no per-entity features and the stage says how
+                # many rows that happened to.
+                key = normalize_text(entity_key)
+
+                if (key is None):
+                    for name in self._novelty_columns:
+                        changed[name].append(None)
+                        first_seen[name].append(None)
+                        distinct[name].append(None)
+
+                    keyless += 1
+                    continue
+
                 try:
                     event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
                 except ValueError:
@@ -214,7 +232,7 @@ class TC1ChangeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     continue
 
                 result = self._tracker.observe(
-                    str(entity_key),
+                    key,
                     event_time_ns, {name: self._value(identifiers[name][position])
                                     for name in self._novelty_columns})
 
@@ -229,6 +247,13 @@ class TC1ChangeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 assign_nullable_bool_column(df, f"{name}{CHANGED_SUFFIX}", changed[name])
                 assign_nullable_bool_column(df, f"{name}{FIRST_SEEN_SUFFIX}", first_seen[name])
                 assign_nullable_int_column(df, f"{name}{DISTINCT_SUFFIX}", distinct[name])
+
+        if (keyless > 0):
+            logger.warning(
+                "TC1ChangeStage saw %d of %d rows with a null entity key; they carry no novelty features. A "
+                "null key means a missing site, device, or port upstream, not a port named \"None\".",
+                keyless,
+                len(entity_keys))
 
         if (unordered > 0):
             logger.warning(

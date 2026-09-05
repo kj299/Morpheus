@@ -53,3 +53,36 @@ def test_normalize_text_collapses_every_flavor_of_missing():
 
     assert normalize_text(" x ") == "x"
     assert normalize_text(0) == "0"
+
+
+def test_a_widened_column_does_not_rename_the_entities_in_it():
+    # pandas widens an integer column to float as soon as one row in the batch is missing. Port 5 must compose to
+    # the same key in both batches; otherwise a single unrelated null renames an entity, its baseline restarts
+    # under the new name, and control 13's batch-split sweep disagrees with itself on where the corpus was cut.
+    complete = pd.DataFrame({"site": ["hq", "hq"], "switch": ["sw1", "sw1"], "port": [5, 6]})
+    widened = pd.DataFrame({"site": ["hq", "hq"], "switch": ["sw1", "sw1"], "port": [5, None]})
+
+    assert complete["port"].dtype != widened["port"].dtype, "pandas no longer widens; this test proves nothing"
+
+    def keys(frame):
+        return [compose_key(row) for row in zip(frame["site"], frame["switch"], frame["port"])]
+
+    assert keys(complete)[0] == keys(widened)[0] == "hq:sw1:5"
+    assert keys(widened)[1] is None
+
+
+@pytest.mark.parametrize("five", [5, np.int64(5), 5.0, np.float32(5.0), np.float64(5.0)])
+def test_a_whole_number_renders_the_same_from_every_numeric_type(five):
+    # Layer 1 composes `site_id:device_id:port_id` and layer 2 composes the same three values under different
+    # column names. The two halves of the ladder join on the rendered string, so the storage type each pipeline
+    # happened to read must not survive into it.
+    assert normalize_text(five) == "5"
+
+
+def test_only_numbers_are_renumbered():
+    # The negative control for the rule above: it reads values, never text. Reinterpreting a string would strip
+    # the leading zeros off a port named "007" and rewrite an identifier the estate chose.
+    assert normalize_text(5.5) == "5.5"
+    assert normalize_text("5.0") == "5.0"
+    assert normalize_text("007") == "007"
+    assert normalize_text(True) == "True"

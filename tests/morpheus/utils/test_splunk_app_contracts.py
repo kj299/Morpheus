@@ -113,3 +113,28 @@ def test_community_id_seed_defaults_to_zero():
         default = inspect.signature(callable_under_test).parameters["seed"].default
 
         assert default == 0, f"{callable_under_test.__qualname__} defaults its seed to {default}"
+
+
+def test_kvstore_lookups_expose_the_key_they_are_written_by():
+    # A KV Store lookup can only address a specific record when `_key` is in its fields_list. Without it the refresh
+    # jobs' `key_field=_key` matches nothing, every overlapping window appends duplicates instead of overwriting,
+    # and determinism control 11's idempotent sink does not hold at the SIEM boundary.
+    transforms = configparser.ConfigParser(interpolation=None)
+    transforms.read(os.path.join(APP_ROOT, "default", "transforms.conf"))
+
+    for lookup in ("binding_l2_l3", "binding_l1"):
+        fields = [field.strip() for field in transforms[lookup]["fields_list"].split(",")]
+
+        assert "_key" in fields, f"{lookup} cannot be written by key without _key in fields_list"
+
+    # Every job that writes a KV Store lookup writes it by key, the refresh jobs and the expiry job alike. The conf
+    # is read as text because a saved search's `search` spans continuation lines.
+    with open(SAVEDSEARCHES_PATH, encoding="utf-8") as handle:
+        searches = handle.read()
+
+    writes = re.findall(r"outputlookup\s+binding_\S+(.*)", searches)
+
+    assert len(writes) == 3, writes
+
+    for tail in writes:
+        assert "key_field=_key" in tail, f"a lookup is written without a key: {tail!r}"

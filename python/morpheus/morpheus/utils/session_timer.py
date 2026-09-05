@@ -108,6 +108,7 @@ class SessionTimer:
         self._max_pending = max_pending
 
         self._pending: collections.OrderedDict[str, _Pending] = collections.OrderedDict()
+        self._expired_through_ns: typing.Optional[int] = None
 
     @property
     def pending_count(self) -> int:
@@ -199,6 +200,14 @@ class SessionTimer:
             told which rather than the state simply disappearing.
         """
         horizon = now_ns - self._timeout_ns
+
+        # Called once per row on that row's own event time, so a per-row scan of every pending exchange is
+        # quadratic in batch size. A horizon that has not advanced cannot abandon anything the previous call did
+        # not already abandon, since every exchange begun since was stamped at or after it, so the skip is exact.
+        if (self._expired_through_ns is not None and horizon <= self._expired_through_ns):
+            return []
+
+        self._expired_through_ns = horizon
         stale = [key for (key, state) in self._pending.items() if state.started_ns < horizon]
 
         for key in stale:
