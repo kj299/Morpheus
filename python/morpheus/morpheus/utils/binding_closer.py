@@ -104,6 +104,15 @@ class ClosedBinding:
         once.
     last_seen_ns : int
         The last observation, which is where an inferred end was derived from.
+    gap_ns : int or None
+        How long passed between the last sighting here and the sighting elsewhere that ended this binding, for the
+        two reasons that mean the key turned up somewhere else: `DISPLACED` and `CONFLICT`. `None` for every other
+        reason, because nothing was seen elsewhere to measure against.
+
+        This is the number that separates a move from a spoof. A device that roams between switches is absent from
+        the first for however long the move took; a MAC claimed in two places at once is not absent at all. Without
+        it a consumer can only ask whether the two sightings shared a timestamp exactly, which no estate polling
+        its switches sequentially will ever produce.
     """
 
     key: str
@@ -113,6 +122,7 @@ class ClosedBinding:
     end_reason: str
     observations: int
     last_seen_ns: int
+    gap_ns: typing.Optional[int] = None
 
     @property
     def duration_ns(self) -> int:
@@ -277,7 +287,7 @@ class BindingCloser:
         return {name: attributes.get(name) for name in self._attribute_names}
 
     @staticmethod
-    def _close(state: _OpenBinding, end_ns: int, reason: str) -> ClosedBinding:
+    def _close(state: _OpenBinding, end_ns: int, reason: str, gap_ns: typing.Optional[int] = None) -> ClosedBinding:
         # The interval is half-open, so an end at the last observation would exclude it, and a key seen once would
         # produce a zero-width interval covering nothing. One tick past is the shortest honest interval.
         floor_ns = state.last_seen_ns + MINIMUM_TICK_NS
@@ -288,7 +298,8 @@ class BindingCloser:
                              bind_end_ns=max(end_ns, floor_ns),
                              end_reason=reason,
                              observations=state.observations,
-                             last_seen_ns=state.last_seen_ns)
+                             last_seen_ns=state.last_seen_ns,
+                             gap_ns=gap_ns)
 
     def observe(self, key: str, event_time_ns: int, attributes: dict) -> ObserveResult:
         """
@@ -332,7 +343,7 @@ class BindingCloser:
             # key was still here. When it is simultaneous, nothing can be said about order, the two intervals
             # overlap by one tick, and the reason says so.
             reason = CONFLICT if event_time_ns == state.last_seen_ns else DISPLACED
-            closed.append(self._close(state, state.last_seen_ns, reason))
+            closed.append(self._close(state, state.last_seen_ns, reason, gap_ns=event_time_ns - state.last_seen_ns))
 
         self._open[key] = _OpenBinding(key=key,
                                        attributes=target,

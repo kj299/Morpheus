@@ -396,3 +396,34 @@ def test_a_snapshot_does_not_cost_a_scan_per_row():
         subject.observe(f"10.0.0.{index}", snapshot_at, PORT_A)
 
     assert scans == 1, f"the open set was walked {scans} times for one snapshot"
+
+
+def test_the_gap_measures_how_long_the_key_was_absent_before_it_appeared_elsewhere():
+    # The number that separates a move from a spoof. R-D-L2-004 fires on it rather than on the end reason, because
+    # `conflict` requires two sightings at the identical nanosecond and a poller walking switches in sequence never
+    # produces that -- so a rule keyed on the reason alone fires on a real estate approximately never.
+    for (gap_ns, expected_reason) in ((0, CONFLICT), (MINIMUM_TICK_NS, DISPLACED), (2 * NS_PER_SECOND, DISPLACED)):
+        subject = closer()
+        subject.observe("aa:bb:cc:00:00:01", 1000 * NS_PER_SECOND, PORT_A)
+        result = subject.observe("aa:bb:cc:00:00:01", 1000 * NS_PER_SECOND + gap_ns, PORT_B)
+
+        assert [record.end_reason for record in result.closed] == [expected_reason]
+        assert [record.gap_ns for record in result.closed] == [gap_ns]
+
+
+def test_a_close_that_is_not_a_move_elsewhere_carries_no_gap():
+    # Null rather than zero, and the distinction matters: zero is the strongest possible evidence of a spoof, so a
+    # binding that merely went quiet must not report it. Every inferred reason other than the two that mean the key
+    # turned up somewhere else has nothing to measure against.
+    subject = closer(idle_timeout_ns=10 * NS_PER_SECOND)
+    subject.observe("aa:bb:cc:00:00:01", 0, PORT_A)
+
+    expired = subject.expire(100 * NS_PER_SECOND)
+
+    assert [record.end_reason for record in expired] == [IDLE_TIMEOUT]
+    assert expired[0].gap_ns is None
+
+    subject = closer()
+    subject.observe("aa:bb:cc:00:00:02", 0, PORT_A)
+
+    assert all(record.gap_ns is None for record in subject.drain())

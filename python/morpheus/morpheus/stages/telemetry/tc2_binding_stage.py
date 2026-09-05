@@ -58,6 +58,7 @@ END_REASON_COLUMN = "bind_end_reason"
 END_OBSERVED_COLUMN = "bind_end_observed"
 OBSERVATIONS_COLUMN = "bind_observations"
 PROVISIONAL_COLUMN = "bind_provisional"
+GAP_COLUMN = "bind_gap_ns"
 OPEN_REASON = "open"
 """`bind_end_reason` on a provisional record: the binding has not ended, and the end is null."""
 
@@ -167,6 +168,7 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         self._needed_columns[OBSERVATIONS_COLUMN] = TypeId.INT64
         self._needed_columns[PORT_KEY_COLUMN] = TypeId.STRING
         self._needed_columns[PROVISIONAL_COLUMN] = TypeId.BOOL8
+        self._needed_columns[GAP_COLUMN] = TypeId.INT64
 
         self._emits_port_key = all(name in attribute_columns for name in PORT_KEY_ATTRIBUTES)
 
@@ -238,6 +240,14 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         # assumed duration rather than read a fabricated one.
         ends = [record.bind_end_ns for record in closed] + [None] * len(opened)
         assign_nullable_int_column(df, BIND_END_COLUMN, ends)
+
+        # How long the key was absent from here before it turned up elsewhere, on the two reasons that mean it did.
+        # Null on every other reason, and on a provisional record, because there is no sighting elsewhere to measure
+        # against. This is what separates a device that moved from a MAC claimed in two places at once, and it has
+        # to be null rather than zero where it does not apply: a zero would read as the strongest possible evidence
+        # of a spoof on a binding that simply went quiet.
+        gaps = [record.gap_ns for record in closed] + [None] * len(opened)
+        assign_nullable_int_column(df, GAP_COLUMN, gaps)
 
         # The port as layer 1 spells it, so a MAC resolved through this binding lands on a TC-1 `entity_key`. Null
         # when the target does not name a full port, or when any part of it was missing.
