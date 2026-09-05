@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and eighteen supporting modules under 876 tests, itemized in
+13's CI harness. That is fourteen stages and eighteen supporting modules under 886 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -69,7 +69,7 @@ other than 7, 8, and 13. Control 9 is a partial exception, since `determinism.qu
 of it does not. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode is unexercised. Every stage declares
-support for it and 198 `gpu_mode` test variants exist, but no GPU has been available to run them, so
+support for it and 203 `gpu_mode` test variants exist, but no GPU has been available to run them, so
 CPU mode is the tested path.
 
 **On the word "predictive."** Three of the four mechanisms in Part 1 are forward-looking in a defensible
@@ -738,7 +738,9 @@ defined by the sender and target protocol addresses being equal, so the feature 
 was not computable from the fields it required. The field has been added.
 
 Authorization timing ({py:mod}`~morpheus.utils.session_timer`) pairs each exchange's start with its
-outcome per port. Both tails of the distribution mean something: slow is a supplicant retrying, a RADIUS
+outcome per supplicant on a port, rather than per port. A port is routinely shared -- multi-domain seats
+a phone and a workstation on one interface -- and pairing per port lets one device's outcome close
+another device's exchange. Both tails of the distribution mean something: slow is a supplicant retrying, a RADIUS
 server under load, or credentials being guessed, and very fast can be a replayed success. The most
 useful case is neither tail, though. An outcome arriving with *no exchange in front of it* is what a
 bypass looks like from the switch, since MAC authentication bypass and a device bridged behind an
@@ -1043,9 +1045,13 @@ Ships as a saved search in the Splunk app, reading the raw closed-binding record
 **R-D-L2-005 - Authorization without authentication.** `auth_unpaired = true` from `TC2AuthStage`: an
 802.1X outcome arrived on a port with no exchange in front of it. From the switch this is what MAC
 authentication bypass looks like, and also what a device bridged behind an already authorized
-supplicant looks like. Near-zero false positives where every port runs 802.1X; on ports where MAB is
-configured deliberately, suppress by port designation rather than by loosening the rule. Tier D1. Ships
-as a saved search in the Splunk app.
+supplicant looks like. Near-zero false positives where every port runs 802.1X **and the source reports
+which device each exchange belongs to**: pairing exchanges per port alone inverts the rule in both
+directions on a shared port, reporting the second legitimate supplicant as unauthenticated while a real
+bypass takes the pending slot of the device it is bridged behind and reads as an ordinary session.
+`TC2AuthStage` pairs per supplicant for that reason, and falls back to the port only when no supplicant
+is reported. On ports where MAB is configured deliberately, suppress by port designation rather than by
+loosening the rule. Tier D1. Ships as a saved search in the Splunk app.
 
 These four, R-D-L2-001, 003, 004 and 005, are the rules in this part that exist as code rather than as
 specification. 004 and 005 read columns the shipped stages produce and depend on nothing outside the

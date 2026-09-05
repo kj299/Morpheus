@@ -54,7 +54,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Four deterministic layer 2 rules as saved searches in the app: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Fourteen stages and eighteen supporting modules, covered by 876 tests.
+Fourteen stages and eighteen supporting modules, covered by 886 tests.
 
 ### What this fork is not
 
@@ -71,7 +71,7 @@ Being clear about the boundary is the point of writing it down:
   rises during reconnaissance and staging, is a hypothesis this work does not establish, and a deployment
   should validate the lead time against its own incident history before promising prediction to
   anyone.
-- **GPU execution mode is unexercised.** Every stage declares support for it and 198 `gpu_mode` test
+- **GPU execution mode is unexercised.** Every stage declares support for it and 203 `gpu_mode` test
   variants exist, but no GPU has been available to run them. Treat CPU mode as the tested path.
 
 ## Documentation

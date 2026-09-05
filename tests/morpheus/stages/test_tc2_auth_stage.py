@@ -301,3 +301,73 @@ def test_expiry_falls_in_the_same_place_however_the_stream_is_batched(config: Co
         split.extend(_as_list(meta, "auth_unpaired"))
 
     assert whole == split == [None, True, True]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_two_supplicants_on_one_port_do_not_close_each_others_exchanges(config: Config):
+    # Cisco multi-domain seats a phone and a workstation on one interface, and both run their own 802.1X. Keyed on
+    # the port alone the second one to finish finds its slot already taken, so a routine authorization is written
+    # as authorization-without-authentication and R-D-L2-005 fires on every phone port in the estate, forever.
+    payload = frame(["started", "started", "success", "success"], times=[t * NS_PER_SECOND for t in (0, 1, 3, 5)])
+    payload["mac_address"] = ["00:00:00:00:0a:aa", "00:00:00:00:0b:bb", "00:00:00:00:0a:aa", "00:00:00:00:0b:bb"]
+
+    meta = run(config, payload)
+
+    assert _as_list(meta, "auth_unpaired") == [None, None, False, False]
+    # Each device is timed against its own start -- 0s to 3s and 1s to 5s -- not against whichever start came last.
+    assert _as_list(meta, "auth_elapsed_seconds") == [None, None, 3.0, 4.0]
+    assert _as_list(meta, "auth_attempts") == [None, None, 1, 1]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_bypass_beside_a_live_exchange_is_still_reported(config: Config):
+    # The direction that matters. A device authorized with nothing in front of it -- MAB, or one bridged behind an
+    # already authorized supplicant -- is exactly what R-D-L2-005 exists to catch. Keyed on the port alone it took
+    # the pending slot of the device it is bridged behind, reported an ordinary elapsed time, and the alert that
+    # did fire named the legitimate supplicant instead.
+    payload = frame(["started", "success", "success"], times=[t * NS_PER_SECOND for t in (0, 2, 6)])
+    payload["mac_address"] = ["00:00:00:00:1e:61", "de:ad:be:ef:00:01", "00:00:00:00:1e:61"]
+
+    meta = run(config, payload)
+
+    unpaired = _as_list(meta, "auth_unpaired")
+
+    assert unpaired[1] is True, "the bypass must be flagged"
+    assert unpaired[2] is False, "the legitimate supplicant must not be"
+    assert _as_list(meta, "auth_elapsed_seconds") == [None, None, 6.0]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_identity_pairs_an_exchange_when_no_mac_is_reported(config: Config):
+    # Not every source reports a MAC on both halves. `dot1x_identity` is in the TC-2 required-field list, so it is
+    # the documented fallback rather than a guess.
+    payload = frame(["started", "started", "success", "success"], times=[t * NS_PER_SECOND for t in (0, 1, 3, 5)])
+    payload["dot1x_identity"] = ["host/a.corp", "host/b.corp", "host/a.corp", "host/b.corp"]
+
+    meta = run(config, payload)
+
+    assert _as_list(meta, "auth_unpaired") == [None, None, False, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_source_with_no_supplicant_still_times_per_port(config: Config):
+    # The fallback, and the reason the golden corpus is unchanged by supplicant keying: a frame carrying no
+    # supplicant column behaves exactly as it did when the key was the port.
+    payload = frame(["started", "success"], times=[t * NS_PER_SECOND for t in (0, 4)])
+
+    meta = run(config, payload)
+
+    assert _as_list(meta, "auth_unpaired") == [None, False]
+    assert _as_list(meta, "auth_elapsed_seconds") == [None, 4.0]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_one_supplicant_on_two_ports_is_two_exchanges(config: Config):
+    # The key is the port extended with the supplicant, not the supplicant alone: a laptop moving between two
+    # ports has two exchanges, and the second must not be paired against the first port's start.
+    payload = frame(["started", "success"], times=[t * NS_PER_SECOND for t in (0, 4)], ports=["Gi1/0/1", "Gi1/0/2"])
+    payload["mac_address"] = ["00:00:00:00:0a:aa"] * 2
+
+    meta = run(config, payload)
+
+    assert _as_list(meta, "auth_unpaired") == [None, True]
