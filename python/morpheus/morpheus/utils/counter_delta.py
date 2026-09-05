@@ -46,6 +46,12 @@ DEFAULT_COUNTER_BITS = 64
 DEFAULT_MAX_ENTITIES = 100_000
 """Entities tracked before the least recently seen are forgotten. Layer 1 port counts sit far below this."""
 
+INT64_MAX = (1 << 63) - 1
+"""Largest delta a downstream nullable-integer column can carry. A wrap correction above this is not a measurement."""
+
+TIMETICKS_CEILING_NS = (1 << 32) * 10**7
+"""SNMP `TimeTicks` roll over at 2**32 centiseconds, about 497 days, expressed here in nanoseconds."""
+
 
 @dataclasses.dataclass(frozen=True)
 class DeltaResult:
@@ -105,7 +111,8 @@ class CounterTracker:
     def __init__(self,
                  counter_names: typing.Sequence[str],
                  counter_bits: typing.Union[int, dict[str, int]] = DEFAULT_COUNTER_BITS,
-                 max_entities: int = DEFAULT_MAX_ENTITIES):
+                 max_entities: int = DEFAULT_MAX_ENTITIES,
+                 uptime_ceiling_ns: typing.Optional[int] = None):
         if (len(counter_names) == 0):
             raise ValueError("At least one counter name is required")
 
@@ -123,7 +130,11 @@ class CounterTracker:
             if (bits <= 0):
                 raise ValueError(f"Counter width for {name!r} must be positive, received {bits}")
 
+        if (uptime_ceiling_ns is not None and uptime_ceiling_ns <= 0):
+            raise ValueError(f"uptime_ceiling_ns must be positive, received {uptime_ceiling_ns}")
+
         self._ceilings = {name: 1 << bits for (name, bits) in widths.items()}
+        self._uptime_ceiling_ns = uptime_ceiling_ns
         self._max_entities = max_entities
         self._states: collections.OrderedDict[str, _EntityState] = collections.OrderedDict()
 
@@ -218,15 +229,45 @@ class CounterTracker:
 
     def _is_reset(self, previous: _EntityState, current: _EntityState, interval_ns: int) -> bool:
         """Whether the device restarted between the two samples."""
-        if (current.uptime_ns is None or previous.uptime_ns is None):
-            # Without uptime a decrease is unresolvable; `_delta_for` reports it as a reset with no delta.
+        if (current.uptime_ns is None):
+            # Without this sample's uptime a decrease is unresolvable; `_delta_for` reports it with no delta.
             return any(
                 current.counters.get(name) is not None and previous.counters.get(name) is not None
                 and current.counters[name] < previous.counters[name] for name in self._counter_names)
 
+        if (self._is_uptime_rollover(previous, current, interval_ns)):
+            # The uptime counter reached its own ceiling and restarted. The device did not: it has been up longer
+            # than the counter can express. Reading this as a reboot would emit the port's entire lifetime of
+            # errors as one interval's delta.
+            return False
+
+        if (previous.uptime_ns is None):
+            # Only the earlier uptime is missing, which does not make this unresolvable: an uptime shorter than the
+            # sampling gap still shows the device came up inside it, and a longer one still shows it did not.
+            return current.uptime_ns < interval_ns
+
         # An uptime that went backwards is unambiguous. An uptime that advanced by less than the sampling gap means
         # the device came up during it, which a plain comparison of uptimes would miss.
         return current.uptime_ns < previous.uptime_ns or current.uptime_ns < interval_ns
+
+    def _is_uptime_rollover(self, previous: _EntityState, current: _EntityState, interval_ns: int) -> bool:
+        """Whether a low uptime is its counter rolling over rather than the device restarting.
+
+        Both look identical in one sample: a small uptime where a large one stood. They differ in what they imply
+        about the elapsed time. A rollover implies the uptime advanced from just under the ceiling, around it, and
+        on to its current value, which should account for the sampling gap. A restart implies the device has simply
+        been up for the current uptime. Whichever of the two better explains the gap is the one taken, so no
+        threshold has to be guessed.
+        """
+        if (self._uptime_ceiling_ns is None or previous.uptime_ns is None):
+            return False
+
+        if (current.uptime_ns >= previous.uptime_ns):
+            return False
+
+        rollover_elapsed = (self._uptime_ceiling_ns - previous.uptime_ns) + current.uptime_ns
+
+        return abs(rollover_elapsed - interval_ns) < abs(current.uptime_ns - interval_ns)
 
     def _delta_for(self,
                    name: str,
@@ -247,7 +288,20 @@ class CounterTracker:
         if (current_value >= previous_value):
             return (current_value - previous_value, False)
 
-        return (current_value + self._ceilings[name] - previous_value, True)
+        corrected = current_value + self._ceilings[name] - previous_value
+
+        if (corrected > INT64_MAX):
+            # A wide counter did not wrap. Reaching the ceiling of a 64-bit counter takes longer than any estate has
+            # been running, so a decrease in one is an operator clearing it, and the wrap arithmetic would produce a
+            # number no downstream column can hold: the assignment raises and takes the whole node down with it.
+            #
+            # What is left is a decrease this tracker cannot attribute. `current_value` would be a defensible lower
+            # bound, but nothing in `DeltaResult` can mark it as one, and an unlabelled lower bound reported as a
+            # measurement is the failure this module exists to avoid. Report no delta, which is what the tracker
+            # already says when a sample cannot be resolved.
+            return (None, False)
+
+        return (corrected, True)
 
     def _remember(self, entity_key: str, state: _EntityState) -> None:
         self._states[entity_key] = state

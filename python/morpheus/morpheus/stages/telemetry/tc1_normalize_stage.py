@@ -34,6 +34,7 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.counter_delta import NS_PER_SECOND
 from morpheus.utils.counter_delta import CounterTracker
+from morpheus.utils.counter_delta import TIMETICKS_CEILING_NS
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
 
@@ -97,7 +98,9 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         distinguishes a counter wrap from a reboot.
     uptime_unit : str, default = "s"
         Unit of `uptime_column`. SNMP `sysUpTime` is `TimeTicks`, hundredths of a second: pass `"cs"` for it, since
-        leaving it at seconds inflates every uptime a hundredfold and reboots stop being detected.
+        leaving it at seconds inflates every uptime a hundredfold and reboots stop being detected. Passing `"cs"`
+        also tells the tracker that the uptime counter itself rolls over at 2**32 centiseconds, about 497 days, so a
+        device that has been up longer than that is not mistaken for one that just restarted.
     delta_suffix : str, default = "_delta"
         Suffix for the emitted delta columns.
     entity_key_column : str, default = "entity_key"
@@ -143,10 +146,15 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._delta_suffix = delta_suffix
         self._entity_key_column = entity_key_column
 
+        # SNMP reports `sysUpTime` as `TimeTicks`, which is a 32-bit counter of centiseconds and rolls over after
+        # about 497 days. Telling the tracker where that ceiling is lets it separate a rollover, where the device has
+        # been up longer than the counter can express, from a genuine restart. Without it a rollover reads as a
+        # reboot and the port's whole accumulated error total is emitted as one interval's delta.
         self._tracker = CounterTracker(
             counter_names=counter_columns,
             counter_bits={name: 32 if name in counter32_columns else 64
-                          for name in counter_columns})
+                          for name in counter_columns},
+            uptime_ceiling_ns=TIMETICKS_CEILING_NS if uptime_unit == "cs" else None)
 
         self._needed_columns[entity_key_column] = TypeId.STRING
         self._needed_columns["interval_seconds"] = TypeId.FLOAT64

@@ -18,6 +18,7 @@ import pytest
 
 from morpheus.utils.counter_delta import NS_PER_SECOND
 from morpheus.utils.counter_delta import CounterTracker
+from morpheus.utils.counter_delta import TIMETICKS_CEILING_NS
 
 MINUTE_NS = 60 * NS_PER_SECOND
 COUNTER32_CEILING = 1 << 32
@@ -213,3 +214,74 @@ def test_constructor_validation():
 
     with pytest.raises(ValueError):
         CounterTracker(["a"], counter_bits=0)
+
+
+def test_a_cleared_wide_counter_reports_no_delta_rather_than_an_impossible_one():
+    # An operator runs `clear counters` on a device that stays up. A 64-bit counter cannot have wrapped: reaching
+    # its ceiling takes longer than any estate has existed. The wrap arithmetic would produce a number no downstream
+    # nullable-integer column can hold, and the assignment raises out of the pipeline node rather than the message.
+    tracker = CounterTracker(["crc"], counter_bits=64)
+    tracker.observe("p1", 0, {"crc": 5_000_000_000_000_000_000}, uptime_ns=100_000 * NS_PER_SECOND)
+    result = tracker.observe("p1", 300 * NS_PER_SECOND, {"crc": 1_000}, uptime_ns=100_300 * NS_PER_SECOND)
+
+    assert result.deltas["crc"] is None
+    assert not result.counter_wrapped
+
+
+def test_a_genuine_narrow_wrap_is_still_corrected():
+    # The counterpart: 32-bit counters do wrap in normal operation, and that correction must survive.
+    tracker = CounterTracker(["crc"], counter_bits=32)
+    tracker.observe("p1", 0, {"crc": (1 << 32) - 100}, uptime_ns=100_000 * NS_PER_SECOND)
+    result = tracker.observe("p1", 300 * NS_PER_SECOND, {"crc": 50}, uptime_ns=100_300 * NS_PER_SECOND)
+
+    assert result.deltas["crc"] == 150
+    assert result.counter_wrapped
+
+
+def test_an_uptime_rollover_is_not_a_reboot():
+    # `sysUpTime` is 32-bit centiseconds and rolls over after about 497 days. The device did not restart; its uptime
+    # counter did. Read as a reboot, the port's entire accumulated error total lands as one interval's delta.
+    tracker = CounterTracker(["crc"], counter_bits=64, uptime_ceiling_ns=TIMETICKS_CEILING_NS)
+    tracker.observe("p1", 0, {"crc": 5_000_000}, uptime_ns=TIMETICKS_CEILING_NS - 10 * NS_PER_SECOND)
+    result = tracker.observe("p1", 300 * NS_PER_SECOND, {"crc": 5_000_002}, uptime_ns=290 * NS_PER_SECOND)
+
+    assert result.deltas["crc"] == 2
+    assert not result.counter_reset
+    # The interval is the sampling gap, not the post-rollover uptime.
+    assert result.interval_ns == 300 * NS_PER_SECOND
+
+
+def test_a_real_reboot_is_still_a_reboot_when_the_ceiling_is_known():
+    # The discriminator must not swallow genuine restarts: here the rollover reading would require 492 days to have
+    # passed in a 300 second gap, and the restart reading explains it exactly.
+    tracker = CounterTracker(["crc"], counter_bits=64, uptime_ceiling_ns=TIMETICKS_CEILING_NS)
+    tracker.observe("p1", 0, {"crc": 5_000_000}, uptime_ns=5 * 86400 * NS_PER_SECOND)
+    result = tracker.observe("p1", 300 * NS_PER_SECOND, {"crc": 12}, uptime_ns=290 * NS_PER_SECOND)
+
+    assert result.deltas["crc"] == 12
+    assert result.counter_reset
+    assert result.interval_ns == 290 * NS_PER_SECOND
+
+
+def test_a_missing_earlier_uptime_does_not_fabricate_a_reboot():
+    # Only the previous sample's uptime is absent. That does not make the decrease unresolvable: this sample says
+    # the device has been up ten days, so it plainly did not restart inside a five minute gap, and the decrease is
+    # a wrap. Reporting a reset here both fabricates the delta and asserts a restart that did not happen.
+    tracker = CounterTracker(["crc"], counter_bits=32)
+    tracker.observe("p1", 0, {"crc": 1_000}, uptime_ns=None)
+    result = tracker.observe("p1", 300 * NS_PER_SECOND, {"crc": 700}, uptime_ns=10 * 86400 * NS_PER_SECOND)
+
+    assert not result.counter_reset
+    assert result.counter_wrapped
+    assert result.deltas["crc"] == 700 + (1 << 32) - 1_000
+
+
+def test_a_missing_current_uptime_still_reports_the_decrease_unresolvable():
+    # The genuinely unresolvable case is the other one: without this sample's uptime there is nothing to rule a
+    # restart in or out, and the tracker must not guess.
+    tracker = CounterTracker(["crc"], counter_bits=32)
+    tracker.observe("p1", 0, {"crc": 1_000}, uptime_ns=10 * 86400 * NS_PER_SECOND)
+    result = tracker.observe("p1", 300 * NS_PER_SECOND, {"crc": 700}, uptime_ns=None)
+
+    assert result.counter_reset
+    assert result.deltas["crc"] is None
