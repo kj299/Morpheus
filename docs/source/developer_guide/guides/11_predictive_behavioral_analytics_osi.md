@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and eighteen supporting modules under 889 tests, itemized in
+13's CI harness. That is fourteen stages and eighteen supporting modules under 892 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -1367,9 +1367,19 @@ the reference implementation:
 The 16x spread on Community ID is the tuple memoization, and it is why the stage belongs *after* the
 flow rollup rather than on raw packets: rolled-up telemetry repeats tuples heavily, unaggregated
 telemetry does not. `event_uid` cannot benefit from memoization at all, because the identifiers are
-unique by construction, so its ~590k rows/s is the harder ceiling and the one to plan against. At
+unique by construction, so its ~590k rows/s is the harder ceiling **among the stateless hashes**. At
 layer 5 and layer 7 event volumes that is ample. At raw layer 3 and 4 packet rates it is not, and the
 lineage stamp has to sit downstream of aggregation.
+
+These are the two cheapest things the pipeline does, and quoting them alone was misleading about where
+the cost is. The stateful stages hold per-entity state and are the real ceiling: `TC2BindingStage`
+carries one open binding per MAC in the estate and `TC2AuthStage` one pending exchange per supplicant,
+and both run their expiry on every row so that expiry lands on event time rather than on a batch
+boundary. Measured on one MAC-table snapshot, a naive per-row scan of that state was quadratic in the
+snapshot -- 8,000 rows took 2.0s, a 50,000-entry snapshot would take roughly 80s in one stage, and on
+the five-minute snapshot cadence this section recommends a large estate would never catch up. Both
+stages now skip a scan whose horizon has not advanced, which is exact and returns the snapshot path to
+linear, at about 200k rows/s. Plan against that number, not against the hashes.
 
 Where the host ceiling still binds, `LineageStampStage` offers an opt-in device path
 (`use_gpu_hashing=True`) that computes the same SHA-256 digests through cuDF's `hash_values`. The

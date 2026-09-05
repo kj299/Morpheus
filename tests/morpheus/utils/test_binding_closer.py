@@ -349,3 +349,50 @@ def test_an_open_binding_can_be_read_without_closing_it():
     # Reading did not end it.
     assert subject.open_count == 1
     assert subject.open_binding("00:00:00:00:00:00") is None
+
+
+def test_expiring_again_at_one_horizon_finds_nothing_and_expiring_later_still_works():
+    # `expire` runs once per row, on that row's own event time, so a scan of every open binding per row is
+    # quadratic in batch size -- and a MAC-table snapshot is exactly the shape that pays it, since every row in it
+    # carries one instant. The scan is skipped when the horizon has not advanced. This pins the property that makes
+    # the skip exact rather than approximate: a second call at one horizon has nothing left to find, so skipping it
+    # cannot lose a closure.
+    subject = closer(idle_timeout_ns=10 * NS_PER_SECOND)
+
+    subject.observe("10.0.0.1", 0, PORT_A)
+    now = 60 * NS_PER_SECOND
+
+    first = subject.expire(now)
+
+    assert [record.end_reason for record in first] == [IDLE_TIMEOUT]
+    assert subject.expire(now) == []
+
+    # And the guard must not wedge the closer: a binding that goes quiet after it still expires.
+    subject.observe("10.0.0.2", now, PORT_B)
+
+    assert subject.expire(now + 5 * NS_PER_SECOND) == []
+    assert [record.end_reason for record in subject.expire(now + 60 * NS_PER_SECOND)] == [IDLE_TIMEOUT]
+
+
+def test_a_snapshot_does_not_cost_a_scan_per_row():
+    # The regression this guards. Every row of one snapshot shares an instant, so only the first can advance the
+    # horizon; counting how often the open set is actually walked is the cheapest way to say so without timing
+    # anything, which would be flaky.
+    subject = closer(idle_timeout_ns=10 * NS_PER_SECOND)
+    scans = 0
+    original = subject._open.items
+
+    def counted():
+        nonlocal scans
+        scans += 1
+
+        return original()
+
+    subject._open.items = counted
+    snapshot_at = 600 * NS_PER_SECOND
+
+    for index in range(500):
+        subject.expire(snapshot_at)
+        subject.observe(f"10.0.0.{index}", snapshot_at, PORT_A)
+
+    assert scans == 1, f"the open set was walked {scans} times for one snapshot"

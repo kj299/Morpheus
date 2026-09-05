@@ -126,3 +126,21 @@ def test_constructor_validation():
 
     with pytest.raises(ValueError):
         SessionTimer(max_pending=0)
+
+
+def test_expiring_again_at_one_horizon_finds_nothing_and_expiring_later_still_works():
+    # The same per-row scan the binding closer pays, for the same reason: `expire` runs once per row on that row's
+    # own event time. Skipping a horizon that has not advanced is exact because every exchange begun since the last
+    # call was stamped at or after it, so a second call has nothing left to abandon.
+    timer = SessionTimer(timeout_ns=10 * NS_PER_SECOND)
+
+    timer.begin("hq:sw1:Gi1/0/1", 0)
+    now = 60 * NS_PER_SECOND
+
+    assert timer.expire(now) == ["hq:sw1:Gi1/0/1"]
+    assert timer.expire(now) == []
+
+    timer.begin("hq:sw1:Gi1/0/2", now)
+
+    assert timer.expire(now + 5 * NS_PER_SECOND) == []
+    assert timer.expire(now + 60 * NS_PER_SECOND) == ["hq:sw1:Gi1/0/2"]
