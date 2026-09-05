@@ -106,3 +106,32 @@ def test_the_lineage_pipeline_reaches_the_same_answer_on_a_gpu():
     # The substrate the telemetry pipeline resolves through: event_uid and link_uid provenance, the Community ID
     # hash, binding resolution, and event-time window sealing.
     _lineage_matches_golden(ExecutionMode.GPU)
+
+
+@pytest.mark.cpu_mode
+def test_a_widened_count_is_restored_to_an_integer():
+    # What the GPU parity run actually caught: cuDF cannot put a null inside an integer column, so it hands back
+    # float64 with NaN and a count of 3 renders as `3.0` against a golden holding `3`. The repair is asserted here
+    # rather than only on a GPU, because the arithmetic is ordinary pandas and needs no device.
+    from host_frame import restore_integer_columns
+
+    widened = pd.DataFrame({"arp_count_in_window": [3.0, float("nan"), 5.0]})
+    restored = restore_integer_columns(widened.copy(), {"arp_count_in_window": True})
+
+    native = pd.DataFrame({"arp_count_in_window": pd.array([3, None, 5], dtype="Int64")})
+
+    assert restored.to_csv(index=False) == native.to_csv(index=False), \
+        "the restored column must render exactly as the CPU path renders it natively"
+
+
+@pytest.mark.cpu_mode
+def test_a_column_that_was_never_an_integer_is_left_alone():
+    # The negative control, and the reason the repair is keyed on the device frame's own dtypes rather than on
+    # "looks like a whole number". An optical reading of 3.0 dBm is a float and must stay one.
+    from host_frame import restore_integer_columns
+
+    readings = pd.DataFrame({"optical_rx_dbm": [3.0, float("nan"), 5.0]})
+    left = restore_integer_columns(readings.copy(), {"optical_rx_dbm": False})
+
+    assert left["optical_rx_dbm"].dtype.kind == "f"
+    assert left.to_csv(index=False) == readings.to_csv(index=False)

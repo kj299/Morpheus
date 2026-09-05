@@ -73,7 +73,6 @@ from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
-from morpheus.utils.column_assign import to_host
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.lineage import event_uid
@@ -367,12 +366,15 @@ def build_pipeline_config(execution_mode=None) -> Config:
 
 
 def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
+    # Sibling module; imported here because this file's own directory is put on the path by whoever imports it.
+    from host_frame import to_host_frame
+
     frames = []
 
     for message in sink.get_messages():
         meta = message.payload() if isinstance(message, ControlMessage) else message
         df = meta.copy_dataframe()
-        frames.append(to_host(df))
+        frames.append(to_host_frame(df))
 
     if (len(frames) == 0):
         return pd.DataFrame()
