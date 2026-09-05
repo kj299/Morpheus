@@ -136,8 +136,19 @@ def build_corpus() -> pd.DataFrame:
     return df
 
 
-def build_pipeline_config(use_cpp: bool = False) -> Config:
-    """A CPU-mode pipeline configuration, importable without a GPU."""
+def build_pipeline_config(use_cpp: bool = False, execution_mode=None) -> Config:
+    """
+    A pipeline configuration, defaulting to CPU mode and importable without a GPU.
+
+    Parameters
+    ----------
+    use_cpp : bool, default = False
+        Whether stages may use their C++ implementations.
+    execution_mode : `morpheus.config.ExecutionMode`, optional
+        Mode to build for. Defaults to CPU. See `telemetry_pipeline.build_pipeline_config` for why the parameter
+        exists: the composed pipeline is the only thing that can say whether the two modes agree, and the
+        per-stage variants cannot.
+    """
     # Imported here so the module can be inspected without a full Morpheus runtime.
     from morpheus.config import CppConfig
     from morpheus.config import ExecutionMode
@@ -145,7 +156,7 @@ def build_pipeline_config(use_cpp: bool = False) -> Config:
     CppConfig.set_should_use_cpp(use_cpp)
 
     config = Config()
-    config.execution_mode = ExecutionMode.CPU
+    config.execution_mode = ExecutionMode.CPU if execution_mode is None else execution_mode
 
     return config
 

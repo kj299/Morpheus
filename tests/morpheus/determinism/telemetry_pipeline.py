@@ -339,15 +339,28 @@ def _build_auth(rng: random.Random) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_pipeline_config() -> Config:
-    """A CPU-mode pipeline configuration, importable without a GPU."""
+def build_pipeline_config(execution_mode=None) -> Config:
+    """
+    A pipeline configuration, defaulting to CPU mode and importable without a GPU.
+
+    Parameters
+    ----------
+    execution_mode : `morpheus.config.ExecutionMode`, optional
+        Mode to build for. Defaults to CPU, which is what every check in this harness has ever run in: the golden
+        is a CPU artifact and control 13 has only ever been asserted there. The parameter exists so the same
+        corpus and the same golden can be driven in GPU mode and the two compared, since the per-stage `gpu_mode`
+        variants are unit tests and none of them composes the pipeline.
+
+        Resolved inside the function rather than as a default argument so that importing this module still does
+        not require a GPU.
+    """
     from morpheus.config import CppConfig
     from morpheus.config import ExecutionMode
 
     CppConfig.set_should_use_cpp(False)
 
     config = Config()
-    config.execution_mode = ExecutionMode.CPU
+    config.execution_mode = ExecutionMode.CPU if execution_mode is None else execution_mode
 
     return config
 

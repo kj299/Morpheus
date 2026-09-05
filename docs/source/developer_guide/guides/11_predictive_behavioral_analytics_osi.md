@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and nineteen supporting modules under 909 tests, itemized in
+13's CI harness. That is fourteen stages and nineteen supporting modules under 912 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -72,9 +72,20 @@ One caveat cuts across everything shipped: GPU execution mode has been measured 
 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada Generation
 Laptop GPU (compute capability 8.9, driver 596.58) under WSL2, giving 226 passed, 2 failed, 55 skipped.
 Both failures are upstream Morpheus tests rather than anything added here. Two limits on that result are
-worth stating: it is one run on one card, and the determinism harness carries no `gpu_mode` variants at
-all, so control 13's six checks remain verified only in CPU mode. Treat CPU mode as the tested path and
-GPU mode as observed to work once.
+worth stating: it is one run on one card, and it says nothing about the determinism controls. Treat CPU
+mode as the tested path and GPU mode as observed to work once.
+
+That second limit is the more interesting one. Those 203 variants are per-stage unit tests, and a stage
+computing correctly on a device frame is not the same claim as fourteen of them in a row reaching the
+answer the golden records -- which is what control 13 asserts. Both harnesses built for CPU and nothing else, so the six
+checks had never seen a GPU and no per-stage run could change that. They now build for either mode, and
+`test_gpu_parity.py` runs the same corpus through the same composed pipelines in GPU mode and compares
+against the same golden, byte for byte for the telemetry side. The columns that carry nulls are what it
+is really asking about: `bind_end` and `bind_gap_ns` are null on most rows, `assign_nullable_int_column`
+exists precisely because the two modes disagree about what a gap is, and a disagreement there would not
+crash -- it would render `3.0` against `3`, or `NaN` against an empty cell, which only a comparison of
+the whole frame catches. Those two checks have not been run, so control 13 is still verified in CPU mode
+alone; what has changed is that settling it is now one command on a machine with a GPU.
 
 Reproducing it requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1` under WSL2. Without that variable, Numba's
 default driver bindings read back an invalid CUDA context from the WSL driver shim: `cuCtxGetDevice`

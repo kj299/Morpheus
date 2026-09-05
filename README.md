@@ -54,7 +54,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Four deterministic layer 2 rules as saved searches in the app: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Fourteen stages and nineteen supporting modules, covered by 909 tests.
+Fourteen stages and nineteen supporting modules, covered by 912 tests.
 
 ### What this fork is not
 
@@ -76,8 +76,13 @@ Being clear about the boundary is the point of writing it down:
   capability 8.9, driver 596.58) under WSL2: **226 passed, 2 failed, 55 skipped**, and both failures are
   in upstream Morpheus files (`test_deserialize_stage_pipe`, `test_write_to_file_stage_pipe`) rather than
   in anything this fork adds. Every stage and utility added here passes in GPU mode.
-  That is one run on one card, not a support claim, and the determinism harness is unaffected by it:
-  those tests carry no `gpu_mode` variants, so control 13 is still only verified in CPU mode.
+  That is one run on one card, not a support claim. It also said nothing about the determinism controls:
+  the harness had no `gpu_mode` variants at all, and a per-stage variant cannot speak for thirteen stages
+  in a row. Both harnesses now build their configuration for either mode, and two parity checks run the
+  same corpus through the same pipelines in GPU mode and compare against the same checked-in golden the
+  CPU checks use. Those two have not been run yet, so **control 13 remains verified in CPU mode only** --
+  the difference is that establishing otherwise is now one command on a machine with a GPU rather than a
+  gap with nothing behind it.
 - **A GPU run under WSL2 requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1`.** Without it, Numba's default
   driver bindings read back an invalid CUDA context through the WSL driver shim: `cuCtxGetDevice` yields
   a garbage device number and the process crashes partway through the suite. Setting the variable
