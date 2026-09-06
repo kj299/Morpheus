@@ -181,3 +181,40 @@ def assign_nullable_bool_column(df: DataFrameType, column: str, values: list):
         df[column] = cudf.Series(values, index=df.index, dtype="bool")
     else:
         df[column] = pd.Series(pd.array(values, dtype="boolean"), index=df.index)
+
+
+def to_host_frame(df: DataFrameType) -> pd.DataFrame:
+    """
+    Return a whole frame on the host, keeping integer columns integral across the copy.
+
+    A stage that has to do its work in pandas has to bring the frame across the device boundary and then send the
+    result back, and that round trip is not type-preserving in one direction. A device integer column that holds a
+    null cannot be represented by a plain host integer column, so the copy widens it to a float and turns the null
+    into a NaN; converting the result back to a device frame keeps the float. Nothing in the round trip announces
+    the change, and what surfaces at the far end is a count that reads `2.0` on a GPU run and `2` on a CPU one.
+
+    Naming the nullable host integer type on the way across keeps the column integral, so the frame that goes back
+    to the device holds the type it left with. A frame that is already on the host is returned as a shallow copy,
+    untouched: it never lost the type in the first place, and coercing it would move the CPU mode instead of
+    meeting it.
+
+    Parameters
+    ----------
+    df : `pandas.DataFrame` or `cudf.DataFrame`
+        Frame to copy to the host.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        The frame on the host, with every integer column readable as an integer.
+    """
+    if (not hasattr(df, "to_pandas")):
+        return df.copy(deep=False)
+
+    integer_columns = [name for (name, dtype) in df.dtypes.items() if getattr(dtype, "kind", "O") in ("i", "u")]
+    host = df.to_pandas()
+
+    for name in integer_columns:
+        host[name] = host[name].astype("Int64")
+
+    return host

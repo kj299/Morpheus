@@ -30,6 +30,7 @@ from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.column_assign import to_host_frame
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.window_seal import SEALED_BY_FLUSH
 from morpheus.utils.window_seal import SEALED_BY_WATERMARK
@@ -248,7 +249,7 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 raise KeyError(f"WindowSealStage requires column {self._time_column!r} which is not present in the "
                                f"DataFrame. Available columns: {sorted(df.columns)}")
 
-            pdf = df.to_pandas() if hasattr(df, "to_pandas") else df.copy(deep=False)
+            pdf = to_host_frame(df)
             raw_times = to_host_list(df, self._time_column)
 
         times = []
