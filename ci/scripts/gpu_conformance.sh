@@ -43,17 +43,41 @@ ARTIFACT="${1:-${REPO_ROOT}/gpu_conformance.json}"
 # it costs a day to rediscover, so it is set here rather than documented.
 export NUMBA_CUDA_USE_NVIDIA_BINDING="${NUMBA_CUDA_USE_NVIDIA_BINDING:-1}"
 
-# Every gpu_mode variant this fork adds, plus the files whose GPU coverage carries no mode marker and would
-# otherwise be deselected without anyone noticing.
+# What this fork added, which is the verdict this script exists to render. Every one of these builds its corpus
+# in code rather than reading a checked-in fixture -- a deliberate choice the guide argues for, and the reason
+# this tier needs no Git LFS objects and cannot be blocked by a checkout that lacks them.
 TARGETS=(
     tests/morpheus/determinism
-    tests/morpheus/stages
-    tests/morpheus/utils
+    tests/morpheus/stages/test_binding_resolver_stage.py
+    tests/morpheus/stages/test_lineage_stamp_stage.py
+    tests/morpheus/stages/test_siem_wire_stage.py
+    tests/morpheus/stages/test_tc1_change_stage.py
+    tests/morpheus/stages/test_tc1_feature_stage.py
+    tests/morpheus/stages/test_tc1_flap_stage.py
+    tests/morpheus/stages/test_tc1_normalize_stage.py
+    tests/morpheus/stages/test_tc1_optical_stage.py
+    tests/morpheus/stages/test_tc2_arp_stage.py
+    tests/morpheus/stages/test_tc2_auth_stage.py
+    tests/morpheus/stages/test_tc2_binding_stage.py
+    tests/morpheus/stages/test_tc2_cardinality_stage.py
+    tests/morpheus/stages/test_total_order_stage.py
+    tests/morpheus/stages/test_window_seal_stage.py
+    tests/morpheus/utils/test_binding_table.py
+    tests/morpheus/utils/test_entity_key.py
+    tests/morpheus/utils/test_lineage.py
+    tests/morpheus/utils/test_siem_wire.py
+    tests/morpheus/utils/test_siem_sourcetypes.py
 )
 UNMARKED=(
     tests/morpheus/utils/test_lineage_cudf.py
 )
-MINIMUM_SELECTED=200
+# The wider suite, which is context rather than this fork's verdict: upstream stages, upstream fixtures. It reads
+# files stored in Git LFS, so it is skipped rather than failed on a checkout without them.
+WIDER=(
+    tests/morpheus/stages
+    tests/morpheus/utils
+)
+MINIMUM_SELECTED=120
 
 fail() {
     echo ""
@@ -92,9 +116,18 @@ POINTERS=$(git ls-files tests/tests_data 2>/dev/null | while read -r f; do
 done | wc -l)
 
 if [[ "${POINTERS}" -gt 0 ]]; then
-    fail "${POINTERS} test fixtures under tests/tests_data are unfetched Git LFS pointers, so every test that reads one fails on content that is not what it claims to be. Run 'git lfs install && git lfs pull' and try again -- both, in that order: on a clone where LFS was never set up, 'git lfs pull' alone prints 'Skipping object checkout' and exits zero having done nothing. This is a checkout problem, not a GPU one, and it fails identically on a CPU."
+    # Not fatal. This fork's own tests build their corpora in code and read none of these, so the verdict below
+    # is unaffected; what is lost is the wider upstream suite, which reads them and would otherwise report a wall
+    # of failures whose common cause is a checkout rather than a GPU.
+    echo "${POINTERS} fixtures under tests/tests_data are unfetched Git LFS pointers."
+    echo "The wider upstream suite will be skipped. It reads those files; this fork's own tests do not."
+    echo "To include it: git lfs install && git lfs pull -- both, in that order, because on a clone where LFS was"
+    echo "never set up 'git lfs pull' alone prints 'Skipping object checkout' and exits zero having done nothing."
+    RUN_WIDER=0
+else
+    echo "test fixtures are real files; the wider upstream suite will run too"
+    RUN_WIDER=1
 fi
-echo "test fixtures are real files, not LFS pointers"
 
 echo ""
 echo "=== gpu_mode variants ==="
@@ -120,14 +153,25 @@ python -m pytest --run_slow -v --tb=short "${UNMARKED[@]}" 2>&1 | tee /tmp/gpu_c
 UNMARKED_STATUS=${PIPESTATUS[0]}
 
 echo ""
+echo "=== wider upstream suite ==="
+WIDER_STATUS=0
+if [[ "${RUN_WIDER}" -eq 1 ]]; then
+    python -m pytest -m gpu_mode --run_slow -v --tb=short "${WIDER[@]}" 2>&1 | tee /tmp/gpu_conformance_wider.log
+    WIDER_STATUS=${PIPESTATUS[0]}
+else
+    echo "skipped: see the test data note above"
+    : > /tmp/gpu_conformance_wider.log
+fi
+
+echo ""
 echo "=== artifact ==="
-python - "$ARTIFACT" "$DEVICE" "$SELECTED" "$MARKED_STATUS" "$UNMARKED_STATUS" <<'PY'
+python - "$ARTIFACT" "$DEVICE" "$SELECTED" "$MARKED_STATUS" "$UNMARKED_STATUS" "$RUN_WIDER" "$WIDER_STATUS" <<'PY'
 import datetime
 import json
 import re
 import sys
 
-(path, device, selected, marked_status, unmarked_status) = sys.argv[1:6]
+(path, device, selected, marked_status, unmarked_status, run_wider, wider_status) = sys.argv[1:8]
 
 
 def summarize(log: str) -> dict:
@@ -186,6 +230,10 @@ report = {
     "device": device,
     "gpu_mode": {"collected": int(selected), "outcome": describe(marked_status), **marked},
     "unmarked_gpu_coverage": {"outcome": describe(unmarked_status), **unmarked},
+    # Context, not verdict. Upstream stages reading upstream fixtures; a failure here is a report to make
+    # upstream, not a reason to hold this fork.
+    "wider_upstream_suite": ({"outcome": describe(wider_status), **summarize("/tmp/gpu_conformance_wider.log")}
+                             if run_wider == "1" else {"skipped": "test fixtures are unfetched Git LFS pointers"}),
 }
 
 with open(path, "w", encoding="utf-8") as handle:
