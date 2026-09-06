@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fourteen stages and nineteen supporting modules under 914 tests, itemized in
+13's CI harness. That is fifteen stages and twenty supporting modules under 1,202 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -68,15 +68,23 @@ fire on nothing until their lookup is populated, the chained rule engine, and th
 other than 7, 8, and 13. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
 of it does not. Thresholds are placeholders unless marked otherwise.
 
-One caveat cuts across everything shipped: GPU execution mode has been measured exactly once. On
-2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada Generation
-Laptop GPU (compute capability 8.9, driver 596.58) under WSL2, giving 226 passed, 2 failed, 55 skipped.
-Both failures are upstream Morpheus tests rather than anything added here. The suite was re-run on
-2026-09-06 with the parity repairs described below in place, giving 231 passed, 2 failed, 55 skipped --
-the same two upstream failures, and five more passes for the guards those repairs added. One limit on
-that result is worth stating: it is one card. The other limit that used to sit here -- that per-stage
-runs say nothing about the determinism controls -- has since been closed, and how is the subject of the
-next few paragraphs.
+One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
+nowhere else. On 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada
+Generation Laptop GPU (compute capability 8.9, driver 596.58) under WSL2, giving 226 passed, 2 failed, 55
+skipped. Both failures are upstream Morpheus tests rather than anything added here. The suite was re-run
+on 2026-09-06 with the parity repairs described below in place, giving 231 passed, 2 failed, 55 skipped --
+the same two upstream failures, and five more passes for the guards those repairs added.
+
+Later on 2026-09-06, at 17:32 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the
+artifact it exists to produce: 227 of 227 of this fork's own `gpu_mode` variants passed, 10 of 10 of the
+GPU coverage carrying no mode marker passed, nothing failed, and the process exited cleanly rather than
+dying partway through. That artifact is narrower than the two runs before it, deliberately: the runner
+selects this fork's own test files, so the two upstream failures sit outside its scope rather than having
+been fixed by it, and its wider upstream tier skipped itself because that checkout's `tests/tests_data`
+fixtures were unfetched Git LFS pointers. Nothing here is a claim about the upstream suite on a GPU. The
+limit none of it moves is the one worth repeating: one card, and not CI. The other limit that used to sit
+here -- that per-stage runs say nothing about the determinism controls -- has since been closed, and how
+is the subject of the next few paragraphs.
 
 That second limit is the more interesting one. Those 203 variants are per-stage unit tests, and a stage
 computing correctly on a device frame is not the same claim as fourteen of them in a row reaching the
@@ -2647,6 +2655,20 @@ What Morpheus provides versus what has to be built, stated plainly.
   rogue and reports the phone -- and because the corpus previously carried no supplicant at all, which left
   `TC2AuthStage` running in its documented degraded mode for every composed check.
 
+- The two verdicts this repository cannot render itself, packaged so each costs minutes and yields an artifact.
+  `ci/scripts/gpu_conformance.sh` is one command that runs every `gpu_mode` variant plus the GPU coverage that
+  carries no mode marker, and writes a JSON artifact naming the card, the driver, the date and the counts. It
+  guards the three ways a GPU run has silently reported success here before: no device, so everything deselects
+  and pytest exits zero; a marker filter quietly dropping a file, which is how the digest equivalence gate went
+  unchecked after the host digest changed; and `--run_slow` omitted, so the cross-restart checks report skipped among
+  a wall of passes. Without a device it exits non-zero saying so, because a silent skip must never read as a pass.
+  It has since been run, and the verdict it rendered is the one recorded at the top of this guide.
+  [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
+  the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
+  and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Six of the
+  eleven searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
+  empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
+  is working from a rule that is broken.
 - One rule run end to end offline, from a file to bytes a SIEM parses
   ([`examples/behavioral_analytics`](../../../../examples/behavioral_analytics/README.md)): a MAC address table
   in, closed binding records out, with `tests/morpheus/determinism/test_end_to_end_mac_spoof.py` reading those

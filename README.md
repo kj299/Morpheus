@@ -54,7 +54,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Four deterministic layer 2 rules as saved searches in the app: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Fourteen stages and nineteen supporting modules, covered by 914 tests.
+Fifteen stages and twenty supporting modules, covered by 1,202 tests.
 
 ### What this fork is not
 
@@ -71,13 +71,21 @@ Being clear about the boundary is the point of writing it down:
   rises during reconnaissance and staging, is a hypothesis this work does not establish, and a deployment
   should validate the lead time against its own incident history before promising prediction to
   anyone.
-- **GPU execution mode now has one measured result, on one machine.** On 2026-09-05 the 203 `gpu_mode`
-  variants were run for the first time, on an NVIDIA RTX 5000 Ada Generation Laptop GPU (compute
-  capability 8.9, driver 596.58) under WSL2: **226 passed, 2 failed, 55 skipped**, and both failures are
-  in upstream Morpheus files (`test_deserialize_stage_pipe`, `test_write_to_file_stage_pipe`) rather than
-  in anything this fork adds. Every stage and utility added here passes in GPU mode. The suite was re-run
-  on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55 skipped**, the
-  same two upstream failures and nothing else. That is two runs on one card, not a support claim.
+- **GPU execution mode has been measured on one machine and nowhere else.** On 2026-09-05 the 203
+  `gpu_mode` variants were run for the first time, on an NVIDIA RTX 5000 Ada Generation Laptop GPU
+  (compute capability 8.9, driver 596.58) under WSL2: **226 passed, 2 failed, 55 skipped**, and both
+  failures are in upstream Morpheus files (`test_deserialize_stage_pipe`, `test_write_to_file_stage_pipe`)
+  rather than in anything this fork adds. Every stage and utility added here passes in GPU mode. The suite
+  was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
+  skipped**, the same two upstream failures and nothing else.
+- **The conformance runner has now rendered its verdict.** On 2026-09-06 at 17:32 UTC,
+  `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the artifact it exists to produce:
+  **227 of 227 of this fork's own `gpu_mode` variants passed, and 10 of 10 of the GPU coverage that
+  carries no mode marker**, nothing failed, and the process exited cleanly rather than dying partway.
+  Read the scope exactly as measured. That runner selects this fork's own test files, so the two upstream
+  failures above sit outside what it covers rather than having been fixed by it, and its wider upstream
+  tier **skipped itself** because that checkout's `tests/tests_data` fixtures were unfetched Git LFS
+  pointers. One card, three runs, no CI. It is a reproducible measurement, not a support claim.
 - **The two modes did not agree, and the per-stage runs could not have told us.** Every one of those 203
   variants passes, and the composed telemetry pipeline still produced `arp_count_in_window = 3.0` on a GPU
   where the CPU golden holds `3`. Nothing raised. cuDF's `to_pandas` cannot put a null inside an integer
@@ -125,7 +133,7 @@ Being clear about the boundary is the point of writing it down:
 
 ### The behavioral analytics work in this fork
 * [Predictive Behavioral Analytics Across OSI Layers 1-7](./docs/source/developer_guide/guides/11_predictive_behavioral_analytics_osi.md) - The design guide this fork implements: codebase analysis, per-layer telemetry requirements, detection rules, Splunk lineage chaining, and the determinism controls
-* [List of available Morpheus stages](./docs/source/stages/morpheus_stages.md) - The `Lineage` and `Telemetry` sections cover the stages added here
+* [List of available Morpheus stages](./docs/source/stages/morpheus_stages.md) - The `Lineage` and `Telemetry` sections cover the stages added here, along with the SIEM wire stage under `Output`
 * [Splunk Lineage App](./examples/splunk_lineage_app/README.md) - The SIEM half, as an installable Splunk app
 
 ### Modifying Morpheus
