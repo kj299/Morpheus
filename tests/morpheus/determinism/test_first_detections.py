@@ -165,22 +165,30 @@ def test_a_legitimate_move_is_displaced_but_does_not_fire(result: pd.DataFrame):
 
 
 @pytest.mark.cpu_mode
-def test_r_d_l2_005_fires_exactly_once_on_the_bypass(result: pd.DataFrame):
+def test_r_d_l2_005_fires_on_both_bypasses_and_nothing_else(result: pd.DataFrame):
     auth = result[result["telemetry_class"] == "tc2_auth"]
-    detections = auth[auth["auth_unpaired"] == True]  # noqa: E712  pylint: disable=singleton-comparison
+    detections = auth[auth["auth_unpaired"] == True].sort_values("event_time")  # noqa: E712  pylint: disable=singleton-comparison
 
-    assert len(detections) == 1
-    hit = detections.iloc[0]
-    assert hit["event_time"] == tp.BYPASS_AT_SECONDS * NS
-    assert hit["auth_port_key"] == f"{tp.SITE}:{tp.SWITCH}:{tp.BYPASS_PORT}"
-    assert hit["dot1x_result"] == "success"
+    # Two planted bypasses: one on a quiet port, one that arrived while a legitimate exchange on its own port was
+    # still open. The second only shows up because exchanges are keyed by device; timed per port it would have
+    # paired with the innocent device's request and read as an ordinary authorized session.
+    assert len(detections) == 2
+    assert list(detections["event_time"]) == [tp.BYPASS_AT_SECONDS * NS, (tp.CONCURRENT_BYPASS_AT_SECONDS + 10) * NS]
+    assert list(detections["auth_port_key"]) == [
+        f"{tp.SITE}:{tp.SWITCH}:{tp.BYPASS_PORT}",
+        f"{tp.SITE}:{tp.SWITCH}:{tp.CONCURRENT_BYPASS_PORT}",
+    ]
+    assert set(detections["dot1x_result"]) == {"success"}
 
-    for column in ("auth_port_key", "site_id", "switch_id", "port_id", "dot1x_result", "event_uid"):
-        assert pd.notna(hit[column]), column
+    # Every field the saved search puts on the alert, including the ones that say which device: on a shared port
+    # the port key alone cannot distinguish the bypass from the legitimate session beside it.
+    for (_, hit) in detections.iterrows():
+        for column in ("auth_port_key", "site_id", "switch_id", "port_id", "dot1x_result", "event_uid", "mac_address"):
+            assert pd.notna(hit[column]), column
 
     # Every paired exchange in the corpus reads False, not null: the rule's negative is an answer, not an absence.
     outcomes = auth[auth["dot1x_result"] == "success"]
-    assert (outcomes["auth_unpaired"] == False).sum() == len(outcomes) - 1  # noqa: E712  pylint: disable=singleton-comparison
+    assert (outcomes["auth_unpaired"] == False).sum() == len(outcomes) - 2  # noqa: E712  pylint: disable=singleton-comparison
 
 
 @pytest.mark.cpu_mode

@@ -115,6 +115,11 @@ def test_corpus_is_shaped_like_the_network(corpus: dict[str, pd.DataFrame]):
     rebooting = layer_1[layer_1["device_id"] == tp.REBOOTING_SWITCH]["uptime"]
     assert (rebooting.diff().dropna() < 0).any()
 
+    # Every 802.1X event names the device being authorized. Without it the stage falls back to timing exchanges
+    # per port, which is the degraded mode this corpus ran in and the reason the keying went uncovered.
+    assert corpus["tc2_auth"]["mac_address"].notna().all()
+    assert corpus["tc2_auth"].groupby("port_id")["mac_address"].nunique().max() > 1, "no port carries two devices"
+
     # Every class carries the envelope the identifiers derive from, with a monotonic sequence.
     for frame in corpus.values():
         assert set(tp.ID_COLUMNS) <= set(frame.columns)
@@ -331,9 +336,50 @@ def test_the_bypass_is_an_unpaired_authorization(result: pd.DataFrame):
     auth = _rows(result, "tc2_auth")
     unpaired = auth[auth["auth_unpaired"] == True]  # noqa: E712  pylint: disable=singleton-comparison
 
-    assert len(unpaired) == 1
-    assert unpaired.iloc[0]["event_time"] == tp.BYPASS_AT_SECONDS * NS
-    assert unpaired.iloc[0]["auth_port_key"] == f"{tp.SITE}:{tp.SWITCH}:{tp.BYPASS_PORT}"
+    # Two authorizations with no exchange of their own: the one on a quiet port, and the one that arrived while a
+    # legitimate exchange on its port was still open. The second is the harder case and the reason exchanges are
+    # keyed by device: timed per port it would have paired with the innocent device's request and vanished.
+    assert len(unpaired) == 2
+
+    by_time = unpaired.sort_values("event_time")
+
+    assert list(by_time["event_time"]) == [tp.BYPASS_AT_SECONDS * NS, (tp.CONCURRENT_BYPASS_AT_SECONDS + 10) * NS]
+    assert list(by_time["auth_port_key"]) == [
+        f"{tp.SITE}:{tp.SWITCH}:{tp.BYPASS_PORT}",
+        f"{tp.SITE}:{tp.SWITCH}:{tp.CONCURRENT_BYPASS_PORT}",
+    ]
+    # The alert has to say which device, or an analyst cannot tell a bypass from the legitimate session beside it.
+    assert list(by_time["mac_address"]) == [tp.BYPASS_MAC, tp.CONCURRENT_BYPASS_MAC]
+
+
+@pytest.mark.cpu_mode
+def test_the_legitimate_device_beside_a_bypass_is_timed_against_its_own_request(result: pd.DataFrame):
+    # The other half of the same claim. The rogue's authorization must not become the legitimate device's outcome,
+    # so the exchange that opened before it still closes correctly, twenty seconds later, on its own request.
+    auth = _rows(result, "tc2_auth")
+    legitimate = auth[(auth["mac_address"] == tp.LEGIT_SUPPLICANT_MAC) & (auth["dot1x_result"] == "success")]
+
+    assert len(legitimate) == 1
+    assert legitimate.iloc[0]["auth_unpaired"] == False  # noqa: E712  pylint: disable=singleton-comparison
+    assert legitimate.iloc[0]["auth_elapsed_seconds"] == 20.0
+
+
+@pytest.mark.cpu_mode
+def test_a_shared_port_does_not_report_its_own_devices_as_bypasses(result: pd.DataFrame):
+    # A phone with a workstation behind it is a standard access configuration, not an anomaly. Their outcomes
+    # arrive in the other order, and each must be timed against its own request: the workstation's twelve-second
+    # exchange is not the phone's, and neither one is unpaired. Keyed by port this fired once per reauthentication.
+    auth = _rows(result, "tc2_auth")
+    shared = auth[auth["port_id"] == tp.MULTI_DOMAIN_PORT]
+    outcomes = shared[shared["dot1x_result"] == "success"].sort_values("mac_address")
+
+    assert len(shared) == 4
+    assert (shared["auth_unpaired"] != True).all()  # noqa: E712  pylint: disable=singleton-comparison
+    assert list(outcomes["mac_address"]) == [tp.PHONE_MAC, tp.DESK_MAC]
+    # The phone requested first and was authorized last: twelve seconds for it, ten for the workstation. Swapping
+    # these is the defect, so they are asserted per device rather than as a set.
+    assert list(outcomes["auth_elapsed_seconds"]) == [12.0, 10.0]
+    assert list(outcomes["auth_attempts"]) == [1, 1]
 
 
 @pytest.mark.cpu_mode

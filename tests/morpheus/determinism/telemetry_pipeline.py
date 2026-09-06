@@ -133,6 +133,32 @@ TAP_LOSS_DB = 3.0
 FLAP_AT_MINUTE = 20
 BYPASS_AT_SECONDS = 1500
 BYPASS_PORT = "Gi1/0/2"
+BYPASS_MAC = "de:ad:be:ef:01:01"
+
+AUTH_SUPPLICANTS = {PORTS[0]: MAC_A, PORTS[1]: MAC_B, PORTS[2]: MAC_C}
+"""Which device authenticates on each port, matching the MAC table the same corpus reports.
+
+The guide's TC-2 required-field list mandates a supplicant identifier, and without one `TC2AuthStage` falls back to
+timing exchanges per port -- a documented degraded mode this corpus used to run in, which meant no composed check
+ever exercised the keying that a shared port depends on."""
+
+MULTI_DOMAIN_PORT = "Gi1/0/4"
+PHONE_MAC = "aa:bb:cc:00:00:05"
+DESK_MAC = "aa:bb:cc:00:00:06"
+MULTI_DOMAIN_AT_SECONDS = 1200
+"""A Cisco multi-domain access port: a phone with a workstation behind it, which is a standard configuration and
+not an anomaly. Both authenticate and their outcomes arrive in the other order. Timed per port, the workstation's
+accept closes the phone's exchange and the phone's own accept then has nothing to pair with, so R-D-L2-005 fires on
+a legitimate device once per reauthentication."""
+
+CONCURRENT_BYPASS_PORT = "Gi1/0/5"
+CONCURRENT_BYPASS_MAC = "de:ad:be:ef:01:02"
+LEGIT_SUPPLICANT_MAC = "aa:bb:cc:00:00:07"
+CONCURRENT_BYPASS_AT_SECONDS = 2100
+"""The harder bypass, and the one that matters more: a rogue authorized while a legitimate exchange on the same
+port is still open. Timed per port it pairs with the innocent device's request, reads as an ordinary authorized
+session, and the signal the rule exists for disappears. Neither of these ports is in `SINGLE_HOST_PORTS`, so they
+say nothing to R-D-L2-001."""
 
 SWEEP_OFFSET_SECONDS = 2
 """How long after the first switch the poller reaches the peer. This is the whole point of the second switch: the
@@ -320,24 +346,48 @@ def _build_arp(rng: random.Random) -> pd.DataFrame:
 
 
 def _build_auth(rng: random.Random) -> pd.DataFrame:
-    """802.1X exchanges per port, plus one success that nothing preceded."""
-    events: list[tuple[int, str, str]] = []
+    """
+    802.1X exchanges, every one naming the device being authorized.
+
+    Four shapes: the routine exchange on a single-host port, one authorization nothing preceded, a multi-domain
+    port carrying two supplicants whose outcomes interleave, and a bypass that lands while a legitimate exchange
+    on the same port is still open. The last two are the cases where timing an exchange per port rather than per
+    device is wrong in each direction -- a false positive on the phone, and a false negative on the rogue.
+    """
+    events: list[tuple[int, str, str, str]] = []
 
     for (index, port) in enumerate(PORTS):
-        for time_s in range(60 + index * 7, CORPUS_SECONDS, 900):
-            events.append((time_s, port, "started"))
-            events.append((time_s + 3 + index, port, "success"))
+        supplicant = AUTH_SUPPLICANTS[port]
 
-    events.append((BYPASS_AT_SECONDS, BYPASS_PORT, "success"))
+        for time_s in range(60 + index * 7, CORPUS_SECONDS, 900):
+            events.append((time_s, port, "started", supplicant))
+            events.append((time_s + 3 + index, port, "success", supplicant))
+
+    # An authorization with nothing in front of it, on a port whose own exchanges are long finished.
+    events.append((BYPASS_AT_SECONDS, BYPASS_PORT, "success", BYPASS_MAC))
+
+    # The phone authenticates first and is authorized last, because the workstation behind it answered quicker.
+    events.append((MULTI_DOMAIN_AT_SECONDS, MULTI_DOMAIN_PORT, "started", PHONE_MAC))
+    events.append((MULTI_DOMAIN_AT_SECONDS + 1, MULTI_DOMAIN_PORT, "started", DESK_MAC))
+    events.append((MULTI_DOMAIN_AT_SECONDS + 11, MULTI_DOMAIN_PORT, "success", DESK_MAC))
+    events.append((MULTI_DOMAIN_AT_SECONDS + 12, MULTI_DOMAIN_PORT, "success", PHONE_MAC))
+
+    # The rogue is authorized mid-exchange; the legitimate device is authorized afterwards and must still be timed
+    # against its own request rather than against whatever happened in between.
+    events.append((CONCURRENT_BYPASS_AT_SECONDS, CONCURRENT_BYPASS_PORT, "started", LEGIT_SUPPLICANT_MAC))
+    events.append((CONCURRENT_BYPASS_AT_SECONDS + 10, CONCURRENT_BYPASS_PORT, "success", CONCURRENT_BYPASS_MAC))
+    events.append((CONCURRENT_BYPASS_AT_SECONDS + 20, CONCURRENT_BYPASS_PORT, "success", LEGIT_SUPPLICANT_MAC))
+
     events.sort(key=lambda event: event[0])
     rows = []
 
-    for (seq, (time_s, port, result)) in enumerate(events, start=1):
+    for (seq, (time_s, port, result, supplicant)) in enumerate(events, start=1):
         rows.append({
             "event_time": time_s * NS_PER_SECOND,
             "site_id": SITE,
             "switch_id": SWITCH,
             "port_id": port,
+            "mac_address": supplicant,
             "dot1x_result": result,
             **_envelope(rng, "radius", "TC-2/1.0.0", seq),
         })

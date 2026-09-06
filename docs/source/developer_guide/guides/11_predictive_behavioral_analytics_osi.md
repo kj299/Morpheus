@@ -2563,9 +2563,14 @@ What Morpheus provides versus what has to be built, stated plainly.
   repairing it, and this is what imposes the order they depend on.
 - The composed telemetry pipeline under control 13's six checks
   (`tests/morpheus/determinism/telemetry_pipeline.py`): a snapshot-shaped layer 1 and layer 2 corpus with a
-  hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and an 802.1X bypass planted in it, run
+  hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and two 802.1X bypasses planted in it, run
   through every TC-1 and TC-2 stage, with the layer 2 bindings resolving the ARP stream onto the layer 1
   `entity_key`. Each planted anomaly is asserted as the column a rule would read, and nothing else fires.
+  The second bypass arrives while a legitimate exchange on its own port is still open, and beside it sits a
+  multi-domain port carrying a phone and a workstation whose outcomes interleave. Those two exist because
+  timing an exchange per port rather than per device is wrong in both directions at once -- it hides the
+  rogue and reports the phone -- and because the corpus previously carried no supplicant at all, which left
+  `TC2AuthStage` running in its documented degraded mode for every composed check.
 
 - The four layer 2 detections, R-D-L2-001, 003, 004 and 005, as saved searches in the Splunk app, with
   their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
