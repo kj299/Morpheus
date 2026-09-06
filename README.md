@@ -95,10 +95,12 @@ Being clear about the boundary is the point of writing it down:
   by the same helper on the same line shape, and differs only in having a value on every row. The
   confirming detail was the one telemetry class that skips sealing, whose own gap-bearing integer columns
   were the only ones never flagged.
-- **Control 13's golden check is now verified in both execution modes.** On 2026-09-06, on the same
-  laptop GPU, both composed pipelines ran in GPU mode against the same corpus and matched the same
-  golden. Its other five checks -- the double run, the cross-restart, the batch-split sweep and both
-  permutation checks -- still run in CPU mode alone. One card, and not CI.
+- **Control 13 is now verified in both execution modes.** On 2026-09-06, on the same laptop GPU, both
+  composed pipelines ran in GPU mode against the same corpus and matched the same golden. The rest of
+  control 13 followed: check 1 is a property of the corpus builder and has no execution mode, and checks
+  2 through 6 -- the double run, the cross-restart, the golden, the batch-split sweep, and the
+  permutation check with its negative control -- now run against both pipelines in either mode.
+  **Fifteen GPU variants where there had been two, all passing.** One card, and not CI.
 - **The obvious repair was tried first and was worse.** Asking the conversion for types that can hold a
   gap fixes integer columns and breaks every other kind: object columns start yielding `pandas.NA` where
   they yielded `None`, and stage code testing `value is None` stops recognising a missing value. Measured
