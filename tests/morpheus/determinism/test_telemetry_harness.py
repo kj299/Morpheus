@@ -51,11 +51,26 @@ def corpus_fixture() -> dict[str, pd.DataFrame]:
     yield tp.build_corpus()
 
 
-@pytest.fixture(name="result", scope="module")
-def result_fixture(corpus: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    config = tp.build_pipeline_config()
+# One composed run per execution mode, reused by every check in that mode. The fixture cannot be module-scoped any
+# more, because which mode a test wants is a function-scoped decision, so the caching moves here instead.
+_RESULTS: dict = {}
 
-    yield tp.run_pipeline(config, corpus)
+
+@pytest.fixture(name="pipeline_config")
+def pipeline_config_fixture(execution_mode) -> Config:
+    # The harness's own configuration rather than the shared `config` fixture, so the only thing the mode markers
+    # vary is the execution mode: everything else about the pipeline stays what the golden was produced under.
+    yield tp.build_pipeline_config(execution_mode)
+
+
+@pytest.fixture(name="result")
+def result_fixture(pipeline_config: Config, corpus: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    mode = pipeline_config.execution_mode
+
+    if (mode not in _RESULTS):
+        _RESULTS[mode] = tp.run_pipeline(pipeline_config, corpus)
+
+    yield _RESULTS[mode]
 
 
 def _rows(result: pd.DataFrame, telemetry_class: str) -> pd.DataFrame:
@@ -109,16 +124,20 @@ def test_corpus_is_shaped_like_the_network(corpus: dict[str, pd.DataFrame]):
 # --- Checks 2 through 6: determinism ----------------------------------------------------------------------------
 
 
-@pytest.mark.cpu_mode
-def test_double_run_diff(config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    second = tp.run_pipeline(config, corpus)
+@pytest.mark.gpu_and_cpu_mode
+def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
+    second = tp.run_pipeline(pipeline_config, corpus)
 
     assert diff_frames(result, second) is None
     assert frame_digest(result) == frame_digest(second)
 
 
 @pytest.mark.slow
-def test_cross_restart_diff(tmp_path):
+@pytest.mark.gpu_and_cpu_mode
+def test_cross_restart_diff(execution_mode, tmp_path):
+    # The driver takes the mode as an argument, because this check is the one that cannot share a process with the
+    # test that asks for it: a fresh interpreter is the whole point, so the mode has to travel on the command line.
+    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
     outputs = []
 
     for (label, hash_seed) in (("a", "0"), ("b", "4242")):
@@ -126,13 +145,13 @@ def test_cross_restart_diff(tmp_path):
         env = dict(os.environ)
         env["PYTHONHASHSEED"] = hash_seed
 
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path)], env=env, check=True, timeout=900)
+        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
         outputs.append(out_path.read_bytes())
 
     assert outputs[0] == outputs[1]
 
 
-@pytest.mark.cpu_mode
+@pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
     # The rendering is compared byte for byte, the same way the cross-restart check compares it, so the nullable
     # integer and boolean columns never pass through a CSV-to-dtype round trip. On a mismatch, both sides are read
@@ -152,8 +171,8 @@ def test_against_golden(result: pd.DataFrame):
                     f"regenerate the golden file with {os.path.basename(DRIVER_PATH)} and review the diff.")
 
 
-@pytest.mark.cpu_mode
-def test_batch_split_sweep(config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
+@pytest.mark.gpu_and_cpu_mode
+def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     # Control 5, batching must be irrelevant: one frame, three frames, and one frame per row, per class.
     def split(frame: pd.DataFrame, parts: int) -> list[pd.DataFrame]:
         size = max(1, len(frame) // parts)
@@ -162,27 +181,28 @@ def test_batch_split_sweep(config: Config, corpus: dict[str, pd.DataFrame], resu
     thirds = {name: split(frame, 3) for (name, frame) in corpus.items()}
     by_row = {name: split(frame, len(frame)) for (name, frame) in corpus.items()}
 
-    assert diff_frames(result, tp.run_pipeline(config, corpus, batches=thirds)) is None
-    assert diff_frames(result, tp.run_pipeline(config, corpus, batches=by_row)) is None
+    assert diff_frames(result, tp.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
+    assert diff_frames(result, tp.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
 
 
-@pytest.mark.cpu_mode
-def test_permutation_check_has_teeth(config: Config, corpus: dict[str, pd.DataFrame]):
+@pytest.mark.gpu_and_cpu_mode
+def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict[str, pd.DataFrame]):
     # The negative control for check 6. Remove the total-order stage and the counter deltas, the binding intervals
     # and the distinct counts all become functions of arrival order. If this test ever passes without a diff, the
     # permutation check has stopped proving anything.
-    unsorted_baseline = tp.run_pipeline(config, corpus, impose_order=False)
+    unsorted_baseline = tp.run_pipeline(pipeline_config, corpus, impose_order=False)
 
     detected = False
     for seed in (1, 2, 3):
         detected = detected or (diff_frames(
-            unsorted_baseline, tp.run_pipeline(config, _permuted(corpus, seed), impose_order=False)) is not None)
+            unsorted_baseline, tp.run_pipeline(pipeline_config, _permuted(corpus, seed), impose_order=False))
+                                is not None)
 
     assert detected, "Removing the total-order stage did not change any output under permutation."
 
 
-@pytest.mark.cpu_mode
-def test_permutation_within_windows(config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
+@pytest.mark.gpu_and_cpu_mode
+def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     # Check 6, and the direct test for control 8 on the telemetry stages: shuffling rows within a window must not
     # change the output once the total-order stage is in front of them.
     for seed in (1, 2, 3):
@@ -191,7 +211,7 @@ def test_permutation_within_windows(config: Config, corpus: dict[str, pd.DataFra
         assert any(not shuffled[name]["collector_seq"].equals(corpus[name]["collector_seq"])
                    for name in corpus), "permutation was a no-op"
 
-        difference = diff_frames(result, tp.run_pipeline(config, shuffled))
+        difference = diff_frames(result, tp.run_pipeline(pipeline_config, shuffled))
         assert difference is None, f"seed {seed}: {difference}"
 
 

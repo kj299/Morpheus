@@ -73,9 +73,10 @@ One caveat cuts across everything shipped: GPU execution mode has been measured 
 Laptop GPU (compute capability 8.9, driver 596.58) under WSL2, giving 226 passed, 2 failed, 55 skipped.
 Both failures are upstream Morpheus tests rather than anything added here. The suite was re-run on
 2026-09-06 with the parity repairs described below in place, giving 231 passed, 2 failed, 55 skipped --
-the same two upstream failures, and five more passes for the guards those repairs added. Two limits on
-that result are worth stating: it is one card, and per-stage runs say nothing about the determinism
-controls. Treat CPU mode as the tested path and GPU mode as observed to work.
+the same two upstream failures, and five more passes for the guards those repairs added. One limit on
+that result is worth stating: it is one card. The other limit that used to sit here -- that per-stage
+runs say nothing about the determinism controls -- has since been closed, and how is the subject of the
+next few paragraphs.
 
 That second limit is the more interesting one. Those 203 variants are per-stage unit tests, and a stage
 computing correctly on a device frame is not the same claim as fourteen of them in a row reaching the
@@ -137,9 +138,20 @@ binding-resolver and lineage-stamp stages, all of them null-handling tests. A co
 isolation was less correct for the code that reads it.
 
 On 2026-09-06, on the same laptop GPU, both composed pipelines ran in GPU mode against the same corpus and
-matched the same golden records. Control 13's golden check is therefore verified in both execution modes;
-its other five checks -- the double run, the cross-restart, the batch-split sweep and both permutation
-checks -- still run in CPU mode alone. It remains one card and it is not CI.
+matched the same golden records. That settled the golden check, and the rest of control 13 followed it
+across. Check 1 is a property of the corpus builder and has no execution mode; checks 2 through 6 -- the
+double run, the cross-restart, the golden, the batch-split sweep, and the permutation check with its
+negative control -- now run against both composed pipelines in either mode. Fifteen GPU variants where
+there had been two, all passing.
+
+Two of them were worth being nervous about, and neither broke. The cross-restart check is the only one
+that cannot share a process with the test that asks for it, since a fresh interpreter is the whole point,
+so the mode has to travel on the driver's command line and four more CUDA contexts get built from
+nothing. And the `CompareDataFrameStage` form of the golden check feeds a host golden to a stage that
+does its own conversion back to the host -- the conversion behind both defects above, on a path neither
+repair touches.
+
+Control 13 is therefore verified in both execution modes. It remains one card and it is not CI.
 
 Reproducing it requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1` under WSL2. Without that variable, Numba's
 default driver bindings read back an invalid CUDA context from the WSL driver shim: `cuCtxGetDevice`
