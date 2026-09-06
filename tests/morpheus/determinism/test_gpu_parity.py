@@ -58,6 +58,42 @@ TELEMETRY_GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gol
 LINEAGE_GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_lineage_expected.csv")
 
 
+def _every_difference(rendered: str, golden_text: str) -> list[str]:
+    """
+    Every column whose rendering differs, not merely the first.
+
+    `diff_frames` names the first difference it finds, which is the right answer when a frame has drifted and the
+    wrong one when two execution modes disagree about a whole class of column: the canonical form is alphabetical,
+    so one early column masks all the rest and each repair costs another run on a machine with a GPU. This reports
+    the lot in one pass.
+    """
+    from io import StringIO
+    as_text = {"dtype": str, "keep_default_na": False}
+    left = pd.read_csv(StringIO(rendered), **as_text)
+    right = pd.read_csv(StringIO(golden_text), **as_text)
+
+    if (list(left.columns) != list(right.columns)):
+        return [
+            f"columns differ: only in output {sorted(set(left.columns) - set(right.columns))}, "
+            f"only in golden {sorted(set(right.columns) - set(left.columns))}"
+        ]
+
+    if (len(left) != len(right)):
+        return [f"row counts differ: {len(left)} versus {len(right)}"]
+
+    differences = []
+
+    for column in left.columns:
+        unequal = left[column] != right[column]
+
+        if (unequal.any()):
+            row = int(unequal.idxmax())
+            differences.append(f"{column}: {int(unequal.sum())} rows, first at {row} "
+                               f"{left[column][row]!r} versus {right[column][row]!r}")
+
+    return differences
+
+
 def _telemetry_matches_golden(execution_mode) -> None:
     """Run the telemetry pipeline in one mode and compare its canonical rendering with the golden, byte for byte."""
     config = tp.build_pipeline_config(execution_mode=execution_mode)
@@ -67,13 +103,11 @@ def _telemetry_matches_golden(execution_mode) -> None:
         golden_text = handle.read()
 
     if (rendered != golden_text):
-        from io import StringIO
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
+        differences = _every_difference(rendered, golden_text)
 
-        pytest.fail(f"{execution_mode} output differs from the golden: {difference}. The golden is a CPU artifact, "
-                    f"so a difference here is the two execution modes disagreeing, not drift.")
+        pytest.fail(f"{execution_mode} output differs from the golden in {len(differences)} column(s). The golden "
+                    f"is a CPU artifact, so a difference here is the two execution modes disagreeing, not drift.\n" +
+                    "\n".join(f"  {line}" for line in differences))
 
 
 def _lineage_matches_golden(execution_mode) -> None:
