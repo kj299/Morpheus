@@ -90,14 +90,18 @@ if [[ "${SELECTED}" -lt "${MINIMUM_SELECTED}" ]]; then
     fail "only ${SELECTED} gpu_mode tests collected, expected at least ${MINIMUM_SELECTED}. A marker filter or a missing dependency has dropped part of the suite, and a run that skips what you meant to check is worth less than one that fails."
 fi
 
-python -m pytest -m gpu_mode --run_slow -q "${TARGETS[@]}" 2>&1 | tee /tmp/gpu_conformance_marked.log
+# Verbose rather than quiet, deliberately. With -q pytest names failures only in its end-of-run summary, so a
+# run that aborts -- a segfault in a device stage is exactly the kind of thing this is looking for -- takes the
+# names down with it and the artifact reports a failure it cannot describe. Streamed per-test lines survive the
+# process dying, and the last one names where it died.
+python -m pytest -m gpu_mode --run_slow -v --tb=short "${TARGETS[@]}" 2>&1 | tee /tmp/gpu_conformance_marked.log
 MARKED_STATUS=${PIPESTATUS[0]}
 
 echo ""
 echo "=== coverage that carries no mode marker ==="
 # The digest equivalence gate asserts the device and host hashing paths agree. It has no gpu_mode marker, so
 # `-m gpu_mode` deselects it -- which is exactly how it went unrun after the host digest changed.
-python -m pytest -q --run_slow "${UNMARKED[@]}" 2>&1 | tee /tmp/gpu_conformance_unmarked.log
+python -m pytest --run_slow -v --tb=short "${UNMARKED[@]}" 2>&1 | tee /tmp/gpu_conformance_unmarked.log
 UNMARKED_STATUS=${PIPESTATUS[0]}
 
 echo ""
@@ -112,33 +116,61 @@ import sys
 
 
 def summarize(log: str) -> dict:
+    """
+    Read the streamed per-test lines rather than the summary, so an aborted run still says what happened.
+
+    A summary is written once, at the end. A run that dies partway through has no end, and the first version of
+    this reported `"failures": []` for a run with dozens of them -- which is the same uselessness it was built to
+    prevent, wearing a different hat.
+    """
     try:
         with open(log, encoding="utf-8") as handle:
             text = handle.read()
     except OSError:
-        return {}
+        return {"note": f"no log at {log}"}
 
-    counts = {}
-    for word in ("passed", "failed", "skipped", "error", "errors", "deselected"):
-        found = re.search(rf"(\d+) {word}\b", text)
-        if found:
-            counts[word.rstrip("s") if word == "errors" else word] = int(found.group(1))
+    outcomes = re.findall(r"^(\S+::\S+)\s+(PASSED|FAILED|ERROR|SKIPPED)", text, flags=re.MULTILINE)
+    counts: dict = {}
 
-    failures = re.findall(r"^FAILED (\S+)", text, flags=re.MULTILINE)
+    for (_, outcome) in outcomes:
+        counts[outcome.lower()] = counts.get(outcome.lower(), 0) + 1
 
-    return {"counts": counts, "failures": failures}
+    started = re.findall(r"^(\S+::\S+)", text, flags=re.MULTILINE)
+    reported = {name for (name, _) in outcomes}
+    unfinished = [name for name in started if name not in reported]
+
+    return {
+        "counts": counts,
+        "failures": sorted({name for (name, outcome) in outcomes if outcome in ("FAILED", "ERROR")}),
+        # A test that started and never reported its outcome is where the process died.
+        "died_in": unfinished[-1] if unfinished else None,
+        "log": log,
+    }
 
 
 marked = summarize("/tmp/gpu_conformance_marked.log")
 unmarked = summarize("/tmp/gpu_conformance_unmarked.log")
 ok = marked_status == "0" and unmarked_status == "0"
 
+def describe(status: str) -> str:
+    """A shell exit code, in words. 134 is SIGABRT, which is what a device stage crashing looks like from here."""
+    code = int(status)
+
+    if (code == 0):
+        return "exited cleanly"
+
+    if (code > 128):
+        return f"killed by signal {code - 128}" + (" (SIGABRT: a crash, not a test failure)" if code == 134 else "")
+
+    return f"exited {code}"
+
+
 report = {
     "verdict": "passed" if ok else "failed",
     "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     "device": device,
-    "gpu_mode": {"collected": int(selected), **marked},
-    "unmarked_gpu_coverage": unmarked,
+    "gpu_mode": {"collected": int(selected), "outcome": describe(marked_status), **marked},
+    "unmarked_gpu_coverage": {"outcome": describe(unmarked_status), **unmarked},
 }
 
 with open(path, "w", encoding="utf-8") as handle:
