@@ -46,6 +46,13 @@ def corpus_fixture() -> pd.DataFrame:
     yield lineage_pipeline.build_corpus()
 
 
+@pytest.fixture(name="pipeline_config")
+def pipeline_config_fixture(execution_mode) -> Config:
+    # The harness's own configuration rather than the shared `config` fixture, so the only thing the mode markers
+    # vary is the execution mode: everything else about the pipeline stays what the golden was produced under.
+    yield lineage_pipeline.build_pipeline_config(execution_mode=execution_mode)
+
+
 def _run(config: Config, dataframes: list[pd.DataFrame]) -> pd.DataFrame:
     return lineage_pipeline.run_pipeline(config, dataframes)
 
@@ -74,20 +81,23 @@ def test_corpus_covers_the_required_cases(corpus: pd.DataFrame):
     assert (corpus["src_ip"] == "not-an-address").sum() == 1
 
 
-@pytest.mark.cpu_mode
-def test_double_run_diff(config: Config, corpus: pd.DataFrame):
+@pytest.mark.gpu_and_cpu_mode
+def test_double_run_diff(pipeline_config: Config, corpus: pd.DataFrame):
     # Check 2: run the pipeline twice in the same process and diff the canonical outputs.
-    first = _run(config, [corpus.copy()])
-    second = _run(config, [corpus.copy()])
+    first = _run(pipeline_config, [corpus.copy()])
+    second = _run(pipeline_config, [corpus.copy()])
 
     assert diff_frames(first, second) is None
     assert frame_digest(first) == frame_digest(second)
 
 
 @pytest.mark.slow
-def test_cross_restart_diff(tmp_path):
+@pytest.mark.gpu_and_cpu_mode
+def test_cross_restart_diff(execution_mode, tmp_path):
     # Check 3: run in two fresh interpreters with different hash seeds. Catches PYTHONHASHSEED dependence and
-    # state captured from the parent process, which the in-process double run cannot see.
+    # state captured from the parent process, which the in-process double run cannot see. The mode travels on the
+    # driver's command line, because a fresh interpreter is exactly what this check is for.
+    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
     outputs = []
 
     for (label, hash_seed) in (("a", "0"), ("b", "4242")):
@@ -95,27 +105,27 @@ def test_cross_restart_diff(tmp_path):
         env = dict(os.environ)
         env["PYTHONHASHSEED"] = hash_seed
 
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path)], env=env, check=True, timeout=600)
+        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=600)
         outputs.append(out_path.read_bytes())
 
     assert outputs[0] == outputs[1]
 
 
-@pytest.mark.cpu_mode
-def test_against_golden(config: Config, corpus: pd.DataFrame):
+@pytest.mark.gpu_and_cpu_mode
+def test_against_golden(pipeline_config: Config, corpus: pd.DataFrame):
     # Check 4a: compare against the checked-in golden output, so drift introduced by a code or dependency change
     # is caught even when the change is internally consistent. A legitimate behavior change regenerates the golden
     # file via run_lineage_pipeline.py and reviews the diff.
     golden = pd.read_csv(GOLDEN_PATH)
-    result = _run(config, [corpus.copy()])
+    result = _run(pipeline_config, [corpus.copy()])
 
     golden = golden.astype({column: result[column].dtype for column in result.columns})
 
     assert diff_frames(result, golden) is None, diff_frames(result, golden)
 
 
-@pytest.mark.cpu_mode
-def test_against_golden_via_compare_dataframe_stage(config: Config, corpus: pd.DataFrame):
+@pytest.mark.gpu_and_cpu_mode
+def test_against_golden_via_compare_dataframe_stage(pipeline_config: Config, corpus: pd.DataFrame):
     # Check 4b: the same assertion expressed with the stage the guide names, so the pattern is copyable into any
     # pipeline without a harness.
     from morpheus.pipeline import LinearPipeline
@@ -127,22 +137,24 @@ def test_against_golden_via_compare_dataframe_stage(config: Config, corpus: pd.D
 
     golden = pd.read_csv(GOLDEN_PATH)
 
-    pipe = LinearPipeline(config)
-    pipe.set_source(InMemorySourceStage(config, dataframes=[corpus.copy()]))
+    pipe = LinearPipeline(pipeline_config)
+    pipe.set_source(InMemorySourceStage(pipeline_config, dataframes=[corpus.copy()]))
     pipe.add_stage(
-        LineageStampStage(config, id_columns=["collector_id", "schema_version", "origin_hash", "collector_seq"]))
-    pipe.add_stage(CommunityIdStage(config))
+        LineageStampStage(pipeline_config,
+                          id_columns=["collector_id", "schema_version", "origin_hash", "collector_seq"]))
+    pipe.add_stage(CommunityIdStage(pipeline_config))
     pipe.add_stage(
-        BindingResolverStage(config, binding_table=lineage_pipeline.build_binding_table(), key_column="src_ip"))
+        BindingResolverStage(pipeline_config, binding_table=lineage_pipeline.build_binding_table(),
+                             key_column="src_ip"))
     pipe.add_stage(
-        WindowSealStage(config,
+        WindowSealStage(pipeline_config,
                         period_seconds=lineage_pipeline.PERIOD_SECONDS,
                         lateness_seconds=lineage_pipeline.LATENESS_SECONDS,
                         order_columns=["event_time", "collector_id", "collector_seq"]))
     # window_seq is derived by the harness after collection, not by a stage, so it is excluded from the raw
     # in-pipeline comparison; the harness-side golden check covers it.
     comp_stage = pipe.add_stage(
-        CompareDataFrameStage(config, compare_df=golden, index_col="event_uid", exclude=["window_seq"]))
+        CompareDataFrameStage(pipeline_config, compare_df=golden, index_col="event_uid", exclude=["window_seq"]))
 
     pipe.run()
 
@@ -153,11 +165,11 @@ def test_against_golden_via_compare_dataframe_stage(config: Config, corpus: pd.D
     assert len(results["missing_cols"]) == 0
 
 
-@pytest.mark.cpu_mode
-def test_batch_split_sweep(config: Config, corpus: pd.DataFrame):
+@pytest.mark.gpu_and_cpu_mode
+def test_batch_split_sweep(pipeline_config: Config, corpus: pd.DataFrame):
     # Check 5: the same rows delivered as one frame, three frames, and one frame per row must produce identical
     # output. This is determinism control 5, batching must be irrelevant, verified end to end.
-    whole = _run(config, [corpus.copy()])
+    whole = _run(pipeline_config, [corpus.copy()])
 
     thirds = [
         corpus.iloc[0:16].reset_index(drop=True),
@@ -166,41 +178,42 @@ def test_batch_split_sweep(config: Config, corpus: pd.DataFrame):
     ]
     by_row = [corpus.iloc[[i]].reset_index(drop=True) for i in range(len(corpus))]
 
-    assert diff_frames(whole, _run(config, thirds)) is None
-    assert diff_frames(whole, _run(config, by_row)) is None
+    assert diff_frames(whole, _run(pipeline_config, thirds)) is None
+    assert diff_frames(whole, _run(pipeline_config, by_row)) is None
 
 
-@pytest.mark.cpu_mode
-def test_permutation_check_has_teeth(config: Config, corpus: pd.DataFrame):
+@pytest.mark.gpu_and_cpu_mode
+def test_permutation_check_has_teeth(pipeline_config: Config, corpus: pd.DataFrame):
     # The negative control for check 6: reintroduce the exact defect control 8 targets, a removed sort, and
     # assert the harness catches it. Canonicalization erases row order, so this only works because the pipeline
     # emits window_seq, a value derived from row order; without such a value the permutation check passes
     # unconditionally and proves nothing. A harness change that makes this test fail has disarmed check 6.
     windows = [window_id_from_timestamp(int(t), lineage_pipeline.PERIOD_SECONDS * 10**9) for t in corpus["event_time"]]
 
-    unsorted_baseline = lineage_pipeline.run_pipeline(config, [corpus.copy()], order_columns=[])
+    unsorted_baseline = lineage_pipeline.run_pipeline(pipeline_config, [corpus.copy()], order_columns=[])
 
     detected = False
     for seed in (1, 2, 3):
         shuffled = permute_within_contiguous_groups(corpus, windows, seed=seed)
         detected = detected or (diff_frames(
-            unsorted_baseline, lineage_pipeline.run_pipeline(config, [shuffled], order_columns=[])) is not None)
+            unsorted_baseline, lineage_pipeline.run_pipeline(pipeline_config, [shuffled], order_columns=[]))
+                                is not None)
 
     assert detected, ("Removing the window sort did not change any output under permutation; the permutation "
                       "check has lost its teeth.")
 
 
-@pytest.mark.cpu_mode
-def test_permutation_within_windows(config: Config, corpus: pd.DataFrame):
+@pytest.mark.gpu_and_cpu_mode
+def test_permutation_within_windows(pipeline_config: Config, corpus: pd.DataFrame):
     # Check 6: shuffling row order within a window must not change the output. This is the direct test for
     # determinism control 8, and the one that catches an accidentally removed sort long after the fact.
     windows = [window_id_from_timestamp(int(t), lineage_pipeline.PERIOD_SECONDS * 10**9) for t in corpus["event_time"]]
 
-    baseline = _run(config, [corpus.copy()])
+    baseline = _run(pipeline_config, [corpus.copy()])
 
     for seed in (1, 2, 3):
         shuffled = permute_within_contiguous_groups(corpus, windows, seed=seed)
 
         assert not shuffled["collector_seq"].equals(corpus["collector_seq"]), "permutation was a no-op"
-        assert diff_frames(baseline, _run(config, [shuffled])) is None, f"seed {seed}: {'':s}" + str(
-            diff_frames(baseline, _run(config, [shuffled])))
+        assert diff_frames(baseline, _run(pipeline_config, [shuffled])) is None, f"seed {seed}: {'':s}" + str(
+            diff_frames(baseline, _run(pipeline_config, [shuffled])))

@@ -36,6 +36,11 @@ a byte comparison of the whole frame would notice.
 These tests carry the `gpu_mode` marker, so on a machine without a GPU they are deselected rather than passing
 vacuously. The comparison itself is exercised in CPU mode by `test_the_parity_check_agrees_with_itself_on_cpu`,
 so what is untested on a CPU-only machine is the GPU run, not this file's logic.
+
+Both harnesses now carry the `gpu_and_cpu_mode` marker on their own checks, so the golden comparison here is no
+longer the only one that runs in GPU mode. This file stays because it is the focused statement of the question --
+one place that says what parity means, what it found, and how the repairs are held in place by their own tests --
+and because a duplicated assertion on a five-second run is cheaper than a reader having to reconstruct the story.
 """
 
 import os

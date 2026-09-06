@@ -26,8 +26,8 @@ import sys
 
 
 def main() -> int:
-    if (len(sys.argv) != 2):
-        print(f"usage: {sys.argv[0]} OUTPUT_CSV", file=sys.stderr)
+    if (len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] not in ("cpu", "gpu"))):
+        print(f"usage: {sys.argv[0]} OUTPUT_CSV [cpu|gpu]", file=sys.stderr)
         return 2
 
     # Deferred so the usage error above does not require a Morpheus installation.
@@ -36,7 +36,12 @@ def main() -> int:
 
     import telemetry_pipeline
 
-    config = telemetry_pipeline.build_pipeline_config()
+    # Deferred with the rest, so a usage error and a CPU run never need a GPU present.
+    from morpheus.config import ExecutionMode
+
+    requested = sys.argv[2] if len(sys.argv) == 3 else "cpu"
+    config = telemetry_pipeline.build_pipeline_config(
+        execution_mode=ExecutionMode.GPU if requested == "gpu" else ExecutionMode.CPU)
     result = telemetry_pipeline.run_pipeline(config, telemetry_pipeline.build_corpus())
 
     with open(sys.argv[1], "w", encoding="utf-8", newline="") as handle:
