@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is twenty stages and twenty-three supporting modules
-under 1,593 tests, itemized in
+under 1,612 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -84,18 +84,26 @@ on 2026-09-06 with the parity repairs described below in place, giving 231 passe
 the same two upstream failures, and five more passes for the guards those repairs added.
 
 Later on 2026-09-06, at 17:32 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the
-artifact it exists to produce: 227 of 227 of the `gpu_mode` variants it selected passed, 10 of 10 of the
-GPU coverage carrying no mode marker passed, nothing failed, and the process exited cleanly rather than
-dying partway through. That artifact is narrower than the two runs before it, and narrower again than it
-appeared: the runner selects from a list, and the list was not total. It omitted two files then and five
-more once the TC-5 stages landed, so the layer 5 work went unmeasured while the runner reported a clean
-verdict on everything else. The tiers now select 353 marked variants and 513 unmarked ones, and a test
-derives this fork's own test files from their copyright header and fails if one is in neither tier.
-Nothing has been measured on a card since that repair. The two upstream failures also sit outside the
-runner's scope rather than having been fixed by it, and its wider upstream tier skipped itself because
-that checkout's `tests/tests_data` fixtures were unfetched Git LFS pointers. Nothing here is a claim
-about the upstream suite on a GPU, and the limit none of it moves is the one worth repeating: one card,
-and not CI. The other limit that used to sit
+artifact it exists to produce, and it took two further repairs to that runner before the artifact could be
+believed. The run that stands is 2026-09-06 at 23:25 UTC on the same card: 353 collected, 353 passed,
+nothing failed, exited cleanly, and the count reconciled exactly against what was collected -- every
+stage, all three composed pipelines, and control 13's six checks, in GPU mode. The tier carrying no mode
+marker exited cleanly with no failures in the same run.
+
+Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
+less than it claimed. The runner selected from a list that was not total: two files were outside it from
+the start and the five TC-5 stage files joined them, so the layer 5 work went unmeasured while the
+verdict read clean. Then the counter read streamed output with a pattern that stopped at the first
+space, so fifteen tests whose parametrized identifiers contain one ran, passed, went uncounted, and the
+last of them was named as where the run had died. The tiers are now kept total by a test that identifies
+this fork's files by their copyright header, and the counts are reconciled against what pytest
+collected, so a total that does not add up is a failed verdict rather than a quiet one. A better pattern
+was not the repair; the reconciliation is, because a counter that can silently drop a test is
+untrustworthy however carefully its pattern is written.
+
+The wider upstream tier skipped itself, because that checkout's `tests/tests_data` fixtures were
+unfetched Git LFS pointers. Nothing here is a claim about the upstream suite on a GPU, and the limit
+none of it moves is the one worth repeating: one card, and not CI. The other limit that used to sit
 here -- that per-stage runs say nothing about the determinism controls -- has since been closed, and how
 is the subject of the next few paragraphs.
 
