@@ -92,7 +92,7 @@ POINTERS=$(git ls-files tests/tests_data 2>/dev/null | while read -r f; do
 done | wc -l)
 
 if [[ "${POINTERS}" -gt 0 ]]; then
-    fail "${POINTERS} test fixtures under tests/tests_data are unfetched Git LFS pointers, so every test that reads one fails on content that is not what it claims to be. Run 'git lfs pull' and try again. This is a checkout problem, not a GPU one, and it fails identically on a CPU."
+    fail "${POINTERS} test fixtures under tests/tests_data are unfetched Git LFS pointers, so every test that reads one fails on content that is not what it claims to be. Run 'git lfs install && git lfs pull' and try again -- both, in that order: on a clone where LFS was never set up, 'git lfs pull' alone prints 'Skipping object checkout' and exits zero having done nothing. This is a checkout problem, not a GPU one, and it fails identically on a CPU."
 fi
 echo "test fixtures are real files, not LFS pointers"
 
