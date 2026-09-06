@@ -46,6 +46,17 @@ CLASS_SOURCETYPES = {
     "tc2_binding": "binding:l2",
 }
 
+SESSION_CLASS_SOURCETYPES = {
+    "tc5_auth": "morpheus:score:l5",
+    "tc5_session": "morpheus:score:l5",
+}
+"""The layer 5 classes, which come from their own corpus and their own pipeline.
+
+Both go on one sourcetype. A deployment could split them, and the app's stanza does not care -- but the two
+layer 5 rules read only the authentication columns, and sending the session records on the same sourcetype is
+what proves those rules stay quiet on rows that carry none of the fields they filter on.
+"""
+
 
 def _render(frame, sourcetype: str) -> list:
     """Put a frame through the wire stage exactly as a pipeline would, and return the lines a sink would write."""
@@ -68,6 +79,7 @@ def _render(frame, sourcetype: str) -> list:
 
 def main() -> int:
     import lineage_pipeline  # pylint: disable=import-outside-toplevel
+    import session_pipeline as sp  # pylint: disable=import-outside-toplevel
     import telemetry_pipeline as tp  # pylint: disable=import-outside-toplevel
 
     EVENTS.mkdir(parents=True, exist_ok=True)
@@ -83,6 +95,14 @@ def main() -> int:
             continue
 
         by_sourcetype.setdefault(sourcetype, []).extend(_render(rows, sourcetype))
+
+    sessions = sp.run_pipeline(sp.build_pipeline_config(), sp.build_corpus())
+
+    for (name, sourcetype) in SESSION_CLASS_SOURCETYPES.items():
+        rows = sessions[sessions["telemetry_class"] == name]
+
+        if (len(rows) > 0):
+            by_sourcetype.setdefault(sourcetype, []).extend(_render(rows, sourcetype))
 
     lineage = lineage_pipeline.run_pipeline(lineage_pipeline.build_pipeline_config(), [lineage_pipeline.build_corpus()])
     by_sourcetype["morpheus:edge"] = _render(lineage, "morpheus:edge")

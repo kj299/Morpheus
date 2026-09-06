@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Whether the composed pipelines produce the same output in GPU mode as in CPU mode.
+Whether the three composed pipelines produce the same output in GPU mode as in CPU mode.
 
 Every stage declares support for both execution modes, and 203 `gpu_mode` variants assert that per stage. None of
 them composes a pipeline. Both determinism harnesses built their configuration in CPU mode and nothing else, so
@@ -57,10 +57,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import lineage_pipeline as lp  # noqa: E402
+import session_pipeline as sp  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 
 TELEMETRY_GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_telemetry_expected.csv")
 LINEAGE_GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_lineage_expected.csv")
+SESSION_GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_session_expected.csv")
 
 
 def _every_difference(rendered: str, golden_text: str) -> list[str]:
@@ -101,11 +103,21 @@ def _every_difference(rendered: str, golden_text: str) -> list[str]:
 
 def _telemetry_matches_golden(execution_mode) -> None:
     """Run the telemetry pipeline in one mode and compare its canonical rendering with the golden, byte for byte."""
-    config = tp.build_pipeline_config(execution_mode=execution_mode)
-    result = tp.run_pipeline(config, tp.build_corpus())
-    rendered = tp.render(result)
+    _matches_golden(execution_mode, tp, TELEMETRY_GOLDEN)
 
-    with open(TELEMETRY_GOLDEN, encoding="utf-8") as handle:
+
+def _session_matches_golden(execution_mode) -> None:
+    """The same comparison for the composed layer 5 pipeline, which renders canonically for the same reason."""
+    _matches_golden(execution_mode, sp, SESSION_GOLDEN)
+
+
+def _matches_golden(execution_mode, module, golden_path: str) -> None:
+    """Run one composed pipeline in one mode and compare its canonical rendering with its golden, byte for byte."""
+    config = module.build_pipeline_config(execution_mode=execution_mode)
+    result = module.run_pipeline(config, module.build_corpus())
+    rendered = module.render(result)
+
+    with open(golden_path, encoding="utf-8") as handle:
         golden_text = handle.read()
 
     if (rendered != golden_text):
@@ -118,9 +130,9 @@ def _telemetry_matches_golden(execution_mode) -> None:
             carried = result[column].dtype if column in result.columns else "not a column"
             annotated.append(f"{line}  [carried as: {carried}]")
 
-        pytest.fail(f"{execution_mode} output differs from the golden in {len(annotated)} column(s). The golden "
-                    f"is a CPU artifact, so a difference here is the two execution modes disagreeing, not drift.\n" +
-                    "\n".join(f"  {line}" for line in annotated))
+        pytest.fail(f"{execution_mode} output differs from {os.path.basename(golden_path)} in {len(annotated)} "
+                    f"column(s). The golden is a CPU artifact, so a difference here is the two execution modes "
+                    f"disagreeing, not drift.\n" + "\n".join(f"  {line}" for line in annotated))
 
 
 def _lineage_matches_golden(execution_mode) -> None:
@@ -139,6 +151,7 @@ def test_the_parity_check_agrees_with_itself_on_cpu():
     # exercised here, so a machine with a GPU is testing the GPU run rather than this file.
     _telemetry_matches_golden(ExecutionMode.CPU)
     _lineage_matches_golden(ExecutionMode.CPU)
+    _session_matches_golden(ExecutionMode.CPU)
 
 
 @pytest.mark.gpu_mode
@@ -147,6 +160,15 @@ def test_the_telemetry_pipeline_reaches_the_same_answer_on_a_gpu():
     # integer columns are what this is really asking about: `bind_end` and `bind_gap_ns` are null on most rows, and
     # the two modes have to render a null identically for the comparison to hold.
     _telemetry_matches_golden(ExecutionMode.GPU)
+
+
+@pytest.mark.gpu_mode
+def test_the_session_pipeline_reaches_the_same_answer_on_a_gpu():
+    # The five TC-5 stages composed over a week of authentications. The columns at risk here are a different set
+    # from the telemetry pipeline's: two quantized floats per row from the cadence histogram, a third from the
+    # great-circle distance, and nullable integers that are null on most rows because a record excluded from a
+    # measurement carries none of its columns.
+    _session_matches_golden(ExecutionMode.GPU)
 
 
 @pytest.mark.gpu_mode

@@ -107,6 +107,11 @@ def stage_columns() -> set:
     from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
     from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
     from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
+    from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
+    from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
+    from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
+    from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
+    from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
     from morpheus.utils.binding_table import Binding
     from morpheus.utils.binding_table import BindingTable
 
@@ -122,6 +127,11 @@ def stage_columns() -> set:
         TC2ArpStage(config),
         TC2AuthStage(config),
         TC2BindingStage(config),
+        TC5SessionStage(config),
+        TC5NoveltyStage(config),
+        TC5CadenceStage(config),
+        TC5TravelStage(config),
+        TC5RiskStage(config),
         CommunityIdStage(config),
         LineageStampStage(config, id_columns=["collector_id"]),
         BindingResolverStage(config, binding_table=table, key_column="k", uid_column="binding_uid"),
@@ -283,7 +293,7 @@ def golden_columns() -> set:
     """
     columns = set()
 
-    for name in ("golden_telemetry_expected.csv", "golden_lineage_expected.csv"):
+    for name in ("golden_telemetry_expected.csv", "golden_lineage_expected.csv", "golden_session_expected.csv"):
         path = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism", name)
 
         with open(path, encoding="utf-8") as handle:
@@ -332,7 +342,7 @@ def producible() -> set:
 def test_the_app_is_where_we_think_it_is():
     # Without this every assertion below passes over an empty parse, which is the failure mode a linter must not
     # have: it would report a clean bill of health for a file it never read.
-    assert len(searches()) == 11
+    assert len(searches()) == 13
     assert len(lookup_fields()) > 0
     assert len(stage_columns()) > 40
 

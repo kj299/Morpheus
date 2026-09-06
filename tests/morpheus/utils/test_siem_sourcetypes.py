@@ -100,11 +100,11 @@ def test_an_unproduced_sourcetype_says_what_is_missing(name: str):
 
 
 def test_the_unproduced_count_is_pinned():
-    # Eight of the fourteen stanzas are configuration for producers this fork has not built. Pinned rather than
+    # Seven of the fourteen stanzas are configuration for producers this fork has not built. Pinned rather than
     # merely recorded, so that landing a producer is a deliberate edit here and not a silent drift in what the
-    # app appears to support.
-    assert len(UNPRODUCED) == 8
-    assert len(PRODUCED) == 6
+    # app appears to support -- which is exactly what this assertion caught when layer 5 gained one.
+    assert len(UNPRODUCED) == 7
+    assert len(PRODUCED) == 7
 
 
 def test_asking_for_an_unproduced_sourcetype_says_what_would_have_to_exist():

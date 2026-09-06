@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import lineage_pipeline  # noqa: E402
+import session_pipeline  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
@@ -51,6 +52,9 @@ TELEMETRY_CLASSES = {
     "morpheus:score:l2": ("tc2_mac", "tc2_arp", "tc2_auth"),
     "binding:l2": ("tc2_binding", ),
 }
+
+# The layer 5 classes, which come from their own corpus and their own pipeline. Both go on one stanza.
+SESSION_CLASSES = ("tc5_auth", "tc5_session")
 
 
 def load_props() -> configparser.ConfigParser:
@@ -70,6 +74,13 @@ def telemetry_fixture() -> pd.DataFrame:
     # twice here would re-prove that at the cost of a second composed pipeline; what varies below is the mode the
     # wire stage itself runs in, which is what these tests are actually about.
     yield tp.run_pipeline(tp.build_pipeline_config(), tp.build_corpus())
+
+
+@pytest.fixture(name="sessions", scope="module")
+def sessions_fixture() -> pd.DataFrame:
+    config = session_pipeline.build_pipeline_config()
+
+    yield session_pipeline.run_pipeline(config, session_pipeline.build_corpus())
 
 
 @pytest.fixture(name="lineage", scope="module")
@@ -139,6 +150,21 @@ def test_the_telemetry_pipeline_produces_a_parsable_timestamp(wire_config: Confi
 
 
 @pytest.mark.gpu_and_cpu_mode
+@pytest.mark.parametrize("telemetry_class", SESSION_CLASSES)
+def test_the_session_pipeline_produces_a_parsable_timestamp(wire_config: Config,
+                                                            sessions: pd.DataFrame,
+                                                            telemetry_class: str):
+    # Both layer 5 classes go on one stanza, and each is checked on its own rather than together: the session
+    # records carry none of the columns the two layer 5 rules filter on, so a stanza that parsed only the
+    # authentication rows would look correct on a mixed sample and drop half of what a deployment sends.
+    rows = sessions[sessions["telemetry_class"] == telemetry_class].reset_index(drop=True)
+
+    assert len(rows) > 0, f"the harness emitted no rows for {telemetry_class}"
+
+    assert_parses_as_its_own_stanza(wire_config, rows, "morpheus:score:l5")
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_the_lineage_pipeline_produces_a_parsable_timestamp(wire_config: Config, lineage: pd.DataFrame):
     assert_parses_as_its_own_stanza(wire_config, lineage.copy(), "morpheus:edge")
 
@@ -178,7 +204,7 @@ def test_the_bucketed_binding_rows_already_carry_their_rendering(telemetry: pd.D
 def test_every_produced_sourcetype_is_covered_here():
     # The completeness guard. Adding a producer to siem_sourcetypes without a wire test would otherwise leave the
     # new stanza asserted only by the map that declares it.
-    covered = set(TELEMETRY_CLASSES) | {"morpheus:edge", "binding:l2:open", "binding:bucketed"}
+    covered = set(TELEMETRY_CLASSES) | {"morpheus:edge", "binding:l2:open", "binding:bucketed", "morpheus:score:l5"}
 
     assert covered == set(PRODUCED), f"not covered: {sorted(set(PRODUCED) - covered)}"
 
