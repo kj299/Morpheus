@@ -55,17 +55,26 @@ and
 
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
-resolution, window sealing), the TC-1 and TC-2 feature stages, control 8's total order, and control
-13's CI harness. That is fifteen stages and twenty supporting modules under 1,202 tests, itemized in
+resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
+8's total order, and control 13's CI harness. That is eighteen stages and twenty-one supporting modules
+under 1,377 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
 ([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)).
 
-What remains design rather than a running system: the telemetry classes for layers 3 through 7, every
+What remains design rather than a running system: the telemetry classes for layers 3, 4, 6 and 7, every
 detection rule in Part 3 apart from the four layer 2 rules that ship as saved searches, two of which
 fire on nothing until their lookup is populated, the chained rule engine, and the determinism controls
-other than 7, 8, and 13. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
+other than 7, 8, and 13. Layer 5 is a partial exception and the boundary inside it is worth stating
+exactly, because "layer 5 is built" would be a considerable overstatement: the session assembly and the
+three feature stages run and are tested, and everything downstream of them is not. There is no per-user
+model, so `mean_abs_z` and `max_abs_z` have no producer and the four behavioral and predictive rules
+that read them -- R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 -- cannot fire. The two
+deterministic layer 5 rules, R-D-L5-003 and R-D-L5-004, need features these three stages do not yet
+compute. No composed layer 5 pipeline runs under control 13, so what is proven is each stage on its own
+rather than fourteen of them in a row reaching an answer a golden file holds. And `morpheus:score:l5`
+remains an unproduced sourcetype, because nothing yet puts a layer 5 record on the wire. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
 of it does not. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
@@ -2641,6 +2650,16 @@ What Morpheus provides versus what has to be built, stated plainly.
   with unpaired authorization flagged ({py:mod}`~morpheus.utils.session_timer` and
   {py:class}`~morpheus.stages.telemetry.tc2_auth_stage.TC2AuthStage`). This completes the five
   behavioral features the TC-2 section names.
+- The deterministic half of the TC-5 telemetry class: session assembly from separate start and stop
+  records ({py:class}`~morpheus.stages.telemetry.tc5_session_stage.TC5SessionStage`), the digital
+  fingerprinting volume and novelty features the guide names as this layer's proven set
+  ({py:class}`~morpheus.stages.telemetry.tc5_novelty_stage.TC5NoveltyStage`), and hour-of-day and
+  day-of-week deviation against each principal's own histogram
+  ({py:mod}`~morpheus.utils.cyclic_histogram` and
+  {py:class}`~morpheus.stages.telemetry.tc5_cadence_stage.TC5CadenceStage`). Everything here is
+  computable without a model, which is why it comes first: the autoencoder half has to be pinned,
+  seeded and frozen under controls 1 through 4 before its output can be trusted to be reproducible, and
+  these features are what it would consume.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.

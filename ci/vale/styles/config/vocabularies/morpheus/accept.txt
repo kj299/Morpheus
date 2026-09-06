@@ -3,6 +3,7 @@
 # Regular expressions are parsed according to the Go syntax: https://golang.org/pkg/regexp/syntax/
 
 API(s?)
+ASN(s?)
 [Aa]utoencoder
 [Aa]nonymize(d?)
 [Bb]ackpressure
@@ -151,8 +152,10 @@ Suricata
 ULPs
 [Uu]naggregated
 [Uu]nattributable
+[Uu]nfetched
 [Uu]nrendered
 [Uu]nmanaged
+[Uu]nproduced
 [Uu]nsampled
 [Uu]nsharded
 [Uu]ntuned
