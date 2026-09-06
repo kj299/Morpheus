@@ -55,7 +55,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Six deterministic rules as saved searches in the app. Two at layer 5: a principal authenticated from two places faster than the journey can be made, and a run of multi-factor denials ended by an approval. The first excludes token refreshes and VPN egress ranges from the measurement *and* from becoming the location the next one is measured against, and one intrusion produces a pair of alerts rather than one. And four at layer 2: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Twenty stages and twenty-three supporting modules, covered by 1,587 tests.
+Twenty stages and twenty-three supporting modules, covered by 1,593 tests.
 
 ### What this fork is not
 
@@ -88,12 +88,16 @@ Being clear about the boundary is the point of writing it down:
   skipped**, the same two upstream failures and nothing else.
 - **The conformance runner has now rendered its verdict.** On 2026-09-06 at 17:32 UTC,
   `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the artifact it exists to produce:
-  **227 of 227 of this fork's own `gpu_mode` variants passed, and 10 of 10 of the GPU coverage that
+  **227 of 227 of the `gpu_mode` variants it selected passed, and 10 of 10 of the GPU coverage that
   carries no mode marker**, nothing failed, and the process exited cleanly rather than dying partway.
-  Read the scope exactly as measured. That runner selects this fork's own test files, so the two upstream
-  failures above sit outside what it covers rather than having been fixed by it, and its wider upstream
-  tier **skipped itself** because that checkout's `tests/tests_data` fixtures were unfetched Git LFS
-  pointers. One card, three runs, no CI. It is a reproducible measurement, not a support claim.
+  Read the scope exactly as measured, because it is narrower than it sounds. The runner selects from a
+  list, and the list was not total: it omitted `test_community_id_stage.py` and `test_column_assign.py`
+  then, and later the five TC-5 stage files as well. The same two tiers now select **353** marked
+  variants and **513** unmarked ones, and a test derives the fork's own test files from their copyright
+  header and fails if one is in neither tier, so the list cannot go stale again. Nothing has been
+  measured on a card since. The two upstream failures above also sit outside the runner's scope rather
+  than having been fixed by it, and its wider upstream tier **skipped itself** because that checkout's
+  `tests/tests_data` fixtures were unfetched Git LFS pointers. One card, three runs, no CI.
 - **The two modes did not agree, and the per-stage runs could not have told us.** Every one of those 203
   variants passes, and the composed telemetry pipeline still produced `arp_count_in_window = 3.0` on a GPU
   where the CPU golden holds `3`. Nothing raised. cuDF's `to_pandas` cannot put a null inside an integer
