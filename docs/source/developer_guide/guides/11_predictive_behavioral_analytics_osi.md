@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is eighteen stages and twenty-one supporting modules
-under 1,377 tests, itemized in
+8's total order, and control 13's CI harness. That is twenty stages and twenty-three supporting modules
+under 1,549 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -68,13 +68,15 @@ detection rule in Part 3 apart from the four layer 2 rules that ship as saved se
 fire on nothing until their lookup is populated, the chained rule engine, and the determinism controls
 other than 7, 8, and 13. Layer 5 is a partial exception and the boundary inside it is worth stating
 exactly, because "layer 5 is built" would be a considerable overstatement: the session assembly and the
-three feature stages run and are tested, and everything downstream of them is not. There is no per-user
-model, so `mean_abs_z` and `max_abs_z` have no producer and the four behavioral and predictive rules
-that read them -- R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 -- cannot fire. The two
-deterministic layer 5 rules, R-D-L5-003 and R-D-L5-004, need features these three stages do not yet
-compute. No composed layer 5 pipeline runs under control 13, so what is proven is each stage on its own
-rather than fourteen of them in a row reaching an answer a golden file holds. And `morpheus:score:l5`
-remains an unproduced sourcetype, because nothing yet puts a layer 5 record on the wire. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
+five feature stages run and are tested, and most of what is downstream of them is not. There is no
+per-user model, so `mean_abs_z` and `max_abs_z` have no producer and the four behavioral and predictive
+rules that read them -- R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 -- cannot fire. The two
+deterministic rules, R-D-L5-003 and R-D-L5-004, now have every input they read, and neither ships as a
+saved search: a rule asserted against a frame built to make it fire proves much less than one asserted
+against a corpus built to make everything else stay quiet, and that corpus is the composed layer 5
+pipeline that does not exist yet. Nothing at this layer runs under control 13 either, and what is
+proven is each stage on its own rather than a chain of them reaching an answer a golden file holds. And `morpheus:score:l5` remains an unproduced sourcetype, because nothing yet puts a layer 5
+record on the wire. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
 of it does not. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
@@ -2660,6 +2662,16 @@ What Morpheus provides versus what has to be built, stated plainly.
   computable without a model, which is why it comes first: the autoencoder half has to be pinned,
   seeded and frozen under controls 1 through 4 before its output can be trusted to be reproducible, and
   these features are what it would consume.
+- Every input the two deterministic layer 5 rules read. Implied travel speed between consecutive
+  successful authentications ({py:mod}`~morpheus.utils.geo_velocity` and
+  {py:class}`~morpheus.stages.telemetry.tc5_travel_stage.TC5TravelStage`), with token refreshes and VPN
+  egress ranges excluded both from the measurement and from becoming the location the next one is
+  measured against -- the second half being the one that matters, since a refresh carries the original
+  location and one that updated the anchor would erase the journey. And failure and denial runs with
+  the success that ends one ({py:mod}`~morpheus.utils.outcome_run` and
+  {py:class}`~morpheus.stages.telemetry.tc5_risk_stage.TC5RiskStage`), which is the same primitive
+  R-D-L5-004 and the plain failure-then-success feature both read, counted over different subsets of
+  the stream.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.
