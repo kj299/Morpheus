@@ -881,6 +881,21 @@ identifier under two names, and nothing renames anything. Every telemetry stage 
 `None` in it, so a collector that omits the site does not pool every port with no site under one
 fabricated site. Rows with a null key pass through with their per-entity features null, and the stage logs how many.
 
+Every stage, and no private copies. The rule is small enough to write out by hand, which is exactly the
+danger: a local `str(value).strip()` looks equivalent and is not, and it fails by renaming an entity
+rather than by raising. Two of its clauses cost something real. Rendering a whole number as an integer
+whatever type carries it is what keeps VLAN 10 from becoming `10.0` in the one batch where an unrelated
+row had no VLAN, forking the entity `ouis_per_vlan` counts by and restarting its OUI count, so a flood
+could sit under the threshold depending on where the batch boundary fell. And recognising `pandas.NA` as
+missing matters because a column that admits a gap yields it, and so does a device frame returning to
+the host: a private copy that
+tested only for `None` and NaN rendered a result the collector could not report as the literal string
+`"<NA>"`, which `TC2AuthStage` then read as an outcome rather than the opening of an exchange. The
+outcome closed an exchange that was never opened, `auth_unpaired` came back true on a quiet port, and
+that is R-D-L2-005's firing condition -- a collector omitting one field raised an 802.1X bypass alert.
+`tests/morpheus/utils/test_entity_key.py` asserts each site reaches the same answer as the shared rule,
+so a copy reintroduced later fails there rather than in an analyst's queue.
+
 Inferred ends are placed at the earliest time consistent with the observations rather than the latest,
 which leaves gaps between consecutive bindings. That is the intended behavior: a gap resolves to nothing
 and tells an analyst the answer is unknown, whereas stretching a binding to meet the next one has it

@@ -14,7 +14,6 @@
 """Times 802.1X authorization per port."""
 
 import logging
-import math
 import typing
 
 import mrc
@@ -204,14 +203,18 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
     @staticmethod
     def _text(value: typing.Any) -> typing.Optional[str]:
-        """Normalize a host value, collapsing every flavor of missing to `None`."""
-        if (value is None):
-            return None
+        """
+        Normalize a host value, collapsing every flavour of missing to `None`.
 
-        if (isinstance(value, float) and math.isnan(value)):
-            return None
-
-        return str(value).strip()
+        Delegated rather than reimplemented, and the private copy this replaces was not merely untidy. It
+        recognised `None` and NaN as missing but not `pandas.NA`, which is what a nullable column yields and what
+        a device frame returns to the host, so a result the collector could not report became the literal string
+        `"<NA>"`. A blank string was kept as a value for the same reason. `_is_start` treats a null result as the
+        opening of an exchange; either of those made it an outcome instead, closing an exchange that was never
+        opened, and `auth_unpaired` came back `True` on a quiet port. That is R-D-L2-005's firing condition, so a
+        collector omitting one field raised an 802.1X bypass alert.
+        """
+        return normalize_text(value)
 
     def _is_start(self, result: typing.Optional[str]) -> bool:
         """Whether this row opens an exchange rather than closing one."""

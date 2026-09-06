@@ -59,6 +59,28 @@ def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
     return meta
 
 
+@pytest.mark.gpu_and_cpu_mode
+@pytest.mark.parametrize("unreported", [None, pd.NA, "", "   "], ids=["none", "pandas_na", "blank", "whitespace"])
+def test_an_unreported_result_opens_an_exchange_rather_than_closing_one(config: Config, unreported):
+    # A result the collector could not report is not an outcome. Treating it as one closes an exchange that was
+    # never opened, and `auth_unpaired` comes back True on a quiet port -- which is R-D-L2-005's firing condition,
+    # so omitting one field raised an 802.1X bypass alert. Every flavour of missing has to reach the same answer,
+    # because which one arrives depends on the column's dtype rather than on anything the network did.
+    meta = run(config, frame([unreported]))
+
+    assert _as_list(meta, "auth_unpaired") == [None]
+    assert _as_list(meta, "auth_attempts") == [None]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_unreported_result_still_starts_the_clock(config: Config):
+    # And it is a start, not merely "not an outcome": the accept that follows must pair with it.
+    meta = run(config, frame([pd.NA, "accept"], times=[0, 4 * NS_PER_SECOND]))
+
+    assert _as_list(meta, "auth_unpaired") == [None, False]
+    assert _as_list(meta, "auth_elapsed_seconds") == [None, 4.0]
+
+
 def test_execution_modes(config: Config):
     assert issubclass(TC2AuthStage, GpuAndCpuMixin)
 

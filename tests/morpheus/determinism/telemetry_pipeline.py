@@ -90,6 +90,12 @@ IGNORE_COLUMNS: list[str] = []
 SITE = "hq"
 SWITCH = "sw1"
 REBOOTING_SWITCH = "sw2"
+# A numeric VLAN, which is what a real MAC-table feed sends. Sent as a string it could never exercise the
+# widening this corpus exists to catch: `vlan_id` is the entity `ouis_per_vlan` counts by, and one row with a
+# null VLAN widens the column to float, so VLAN 10 would render as `10.0` and fork into a second entity whose
+# OUI count restarts. Which rows are in which batch would then decide the answer.
+VLAN = 10
+
 PEER_SWITCH = "sw3"
 PORTS = ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"]
 PEER_PORTS = ["Gi3/0/1", "Gi3/0/2", "Gi3/0/3"]
@@ -252,7 +258,7 @@ def _build_mac_snapshots(rng: random.Random) -> pd.DataFrame:
                 "site_id": SITE,
                 "switch_id": SWITCH,
                 "port_id": port,
-                "vlan_id": "10",
+                "vlan_id": VLAN,
                 **_envelope(rng, "mac-table", "TC-2/1.0.0", seq),
             })
 
@@ -269,7 +275,7 @@ def _build_mac_snapshots(rng: random.Random) -> pd.DataFrame:
                 "site_id": SITE,
                 "switch_id": PEER_SWITCH,
                 "port_id": port,
-                "vlan_id": "10",
+                "vlan_id": VLAN,
                 **_envelope(rng, "mac-table", "TC-2/1.0.0", seq),
             })
 
