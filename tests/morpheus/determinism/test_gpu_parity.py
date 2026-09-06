@@ -97,17 +97,25 @@ def _every_difference(rendered: str, golden_text: str) -> list[str]:
 def _telemetry_matches_golden(execution_mode) -> None:
     """Run the telemetry pipeline in one mode and compare its canonical rendering with the golden, byte for byte."""
     config = tp.build_pipeline_config(execution_mode=execution_mode)
-    rendered = tp.render(tp.run_pipeline(config, tp.build_corpus()))
+    result = tp.run_pipeline(config, tp.build_corpus())
+    rendered = tp.render(result)
 
     with open(TELEMETRY_GOLDEN, encoding="utf-8") as handle:
         golden_text = handle.read()
 
     if (rendered != golden_text):
-        differences = _every_difference(rendered, golden_text)
+        # The type a column ended up with is the diagnosis nine times out of ten: a count rendering as `2.0`
+        # reached the renderer as a float, and the only question left is where it stopped being an integer.
+        annotated = []
 
-        pytest.fail(f"{execution_mode} output differs from the golden in {len(differences)} column(s). The golden "
+        for line in _every_difference(rendered, golden_text):
+            column = line.split(":", 1)[0]
+            carried = result[column].dtype if column in result.columns else "not a column"
+            annotated.append(f"{line}  [carried as: {carried}]")
+
+        pytest.fail(f"{execution_mode} output differs from the golden in {len(annotated)} column(s). The golden "
                     f"is a CPU artifact, so a difference here is the two execution modes disagreeing, not drift.\n" +
-                    "\n".join(f"  {line}" for line in differences))
+                    "\n".join(f"  {line}" for line in annotated))
 
 
 def _lineage_matches_golden(execution_mode) -> None:
@@ -179,3 +187,22 @@ def test_a_column_that_was_never_an_integer_is_left_alone():
 
     assert left["optical_rx_dbm"].dtype.kind == "f"
     assert left.to_csv(index=False) == readings.to_csv(index=False)
+
+
+@pytest.mark.cpu_mode
+def test_a_derived_count_carried_in_a_float_is_handed_over_as_an_integer():
+    # Where the second class of difference came from. The values reaching assign_nullable_int_column are usually
+    # derived rather than read -- a counter delta, a flap count, an attempt tally -- and whatever they were
+    # computed from may have arrived as a float, because reading a column that holds a gap gives floats on the
+    # host. pandas coerces such a list when told the target type; cuDF does not, so the column asked to be an
+    # integer became a float and the same count rendered `2` in one mode and `2.0` in the other.
+    #
+    # Asserted on the coercion itself rather than on the assigned column, because on this machine pandas would
+    # coerce anyway and the test would pass with the coercion deleted -- which is the entire failure mode.
+    from morpheus.utils.column_assign import _as_integers
+
+    coerced = _as_integers([2.0, None, 22.0, float("nan"), 7])
+
+    assert coerced == [2, None, 22, None, 7]
+    assert all(isinstance(value, int) for value in coerced if value is not None), \
+        "cuDF is handed this list verbatim and will not coerce it"

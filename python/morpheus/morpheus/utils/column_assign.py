@@ -20,7 +20,36 @@ dtype does. These helpers move values across that boundary and write them back w
 both modes.
 """
 
+import math
+
+import pandas as pd
+
 from morpheus.utils.type_aliases import DataFrameType
+
+
+def _as_integers(values: list) -> list:
+    """
+    Coerce a list bound for an integer column to integers, leaving every flavour of missing as `None`.
+
+    The values reaching this module are often derived rather than read: a counter delta, a flap count, an attempt
+    tally. Whatever they were computed from may have arrived as a float -- reading a column that holds a gap gives
+    floats on the host, because a plain integer column cannot hold one -- and a whole number that happens to be
+    carried in a float is still a whole number.
+
+    pandas coerces such a list on its own when the target type is stated. cuDF does not, so the column that was
+    asked to be an integer becomes a float, and the same count renders as `2` in one execution mode and `2.0` in
+    the other. Coercing here rather than trusting either constructor is what makes the two agree, and it is what
+    the function's own name promises.
+    """
+    coerced = []
+
+    for value in values:
+        if (value is None or (isinstance(value, float) and math.isnan(value)) or value is pd.NA):
+            coerced.append(None)
+        else:
+            coerced.append(int(value))
+
+    return coerced
 
 
 def to_host_list(df: DataFrameType, column: str) -> list:
@@ -67,7 +96,6 @@ def assign_str_column(df: DataFrameType, column: str, values: list):
         import cudf
         df[column] = cudf.Series(values, index=df.index, dtype="str")
     else:
-        import pandas as pd
         df[column] = pd.Series(values, index=df.index, dtype="object")
 
 
@@ -92,11 +120,12 @@ def assign_nullable_int_column(df: DataFrameType, column: str, values: list):
     # Imported here so that this module remains importable in CPU-only environments where cuDF is absent.
     from morpheus.utils.type_utils import is_cudf_type
 
+    values = _as_integers(values)
+
     if (is_cudf_type(df)):
         import cudf
         df[column] = cudf.Series(values, index=df.index, dtype="int64")
     else:
-        import pandas as pd
         df[column] = pd.Series(pd.array(values, dtype="Int64"), index=df.index)
 
 
@@ -124,7 +153,6 @@ def assign_nullable_float_column(df: DataFrameType, column: str, values: list):
         import cudf
         df[column] = cudf.Series(values, index=df.index, dtype="float64")
     else:
-        import pandas as pd
         df[column] = pd.Series(pd.array(values, dtype="Float64"), index=df.index)
 
 
@@ -152,5 +180,4 @@ def assign_nullable_bool_column(df: DataFrameType, column: str, values: list):
         import cudf
         df[column] = cudf.Series(values, index=df.index, dtype="bool")
     else:
-        import pandas as pd
         df[column] = pd.Series(pd.array(values, dtype="boolean"), index=df.index)
