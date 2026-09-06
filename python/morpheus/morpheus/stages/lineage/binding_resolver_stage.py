@@ -30,6 +30,7 @@ from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_str_column
+from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.column_assign import to_host_list
 
 logger = logging.getLogger(__name__)
@@ -205,9 +206,15 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             for (attribute, target) in self._output_columns.items():
                 position = attribute_index[attribute]
-                assign_str_column(df,
-                                  target,
-                                  [None if binding is None else str(binding.values[position]) for binding in resolved])
+                assign_str_column(
+                    df,
+                    target,
+                    [
+                        # The shared rule, not `str`: a binding attribute that arrived in a
+                        # widened column would otherwise be resolved onto the row as `10.0`
+                        # where the same VLAN resolves as `10` from a batch with no gaps.
+                        None if binding is None else normalize_text(binding.values[position]) for binding in resolved
+                    ])
 
             assign_str_column(df,
                               self._method_column,

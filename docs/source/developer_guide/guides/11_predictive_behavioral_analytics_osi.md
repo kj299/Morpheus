@@ -2461,6 +2461,55 @@ golden output is a checked-in CSV regenerated deliberately, never silently, via
 fresh interpreters with two different `PYTHONHASHSEED` values, which is the variation an in-process
 double run cannot see.
 
+##### Two checks the six do not make
+
+The six checks compare a pipeline against itself and against a golden. Both answer the question "did this change,"
+and both are silent about a question that turned out to matter more: is this parameter connected to anything at
+all? Four defects found by audit in this fork were that shape -- two expiry timeouts stored and never read, an
+exchange key that ignored the supplicant handed to it, and a key rendering that followed the column's dtype
+rather than the value. Each had a docstring, a constructor check, and a test asserting the constructor check.
+None of them did anything, and 831 green tests said nothing about it, because a parameter nothing consults
+produces exactly the output of one that works.
+
+`tests/morpheus/determinism/test_stage_parameter_liveness.py` closes that. It carries a registry of every
+tunable parameter of every stage in the fork, and for each one the evidence that the stage reads it: two values
+over a corpus built to make the parameter bite, whose outcomes must differ; or a renamed input column the stage
+must follow; or a refusal the parameter must cause. A parameter that can be none of those is declared inert in
+writing, with a reason, which is deliberately more effort than making it work. The registry is checked against
+each constructor's signature, so a parameter added later cannot ship without an entry.
+
+The instrument was calibrated against defects whose answer was already known: run it against the audit's own
+baseline commit and `TC2AuthStage.timeout_seconds` and `TC2BindingStage.idle_timeout_seconds` both fail, which
+is what they should have done at the time. It also found one thing on its first pass. `TC1FlapStage`'s
+`last_change_unit` is read, and provably cannot change any output: every branch of the flap counter compares
+this sample's last-change against the previous sample's and never against the event time, and a positive rescale
+preserves all three comparisons. That is not a bug today. It becomes one the moment anything compares the
+converted value against an absolute time, and it is now written down where that change would be made.
+
+`tests/morpheus/determinism/test_representation_invariance.py` is check 6 one level down. Row order must not
+decide the output; neither must the type the values arrived in. Each key-bearing column is presented as an
+integer, a float and a string, along with the shape the defect actually takes -- a column widened to float
+because one row in the batch had nothing in it -- and the answer must be the same each time, including when the
+representation changes at a batch boundary.
+
+The claim is about derived values, not echoed ones. A stage passes its input columns through, so a collector that
+sends a float gets a float back and that is not a defect; what may not vary is anything computed from the value.
+Drawing that line is what made the check say something, because it found two places where a derived value did
+vary, both on its first run.
+
+The first was in `event_uid` itself, which promises in its own docstring that "the same record produces the same
+identifier no matter how it arrives" and did not keep it: the digest joined its fields with `str`, so a collector
+sequence of `3` hashed differently from one of `3.0`, and which of those a row carried was decided by whether
+some *other* row in the batch was missing the field. One null renamed every record in the batch. The same
+rendering reached binding identifiers, which is worse, because a binding's identifier is what lets a resolution be
+traced back to the record that produced it. The second was `BindingResolverStage` writing a resolved attribute
+onto the row with `str`, so a VLAN resolved out of a widened binding arrived as `10.0` where the same VLAN
+resolved as `10` from a batch with no gaps.
+
+Both now render through the shared rule, and the fix is narrow enough to prove: only whole numbers carried in a
+float change, so every identifier computed before it is unchanged unless it was computed over a widened column,
+which is the defect. The golden did not move, because the corpus sends integers.
+
 One trap in check 6 deserves calling out, because the shipped harness initially fell into it.
 Canonicalization sorts output rows before comparing, so a permutation of the input can only be detected
 through a *value* that depends on row order. A pipeline with no cumulative features passes the

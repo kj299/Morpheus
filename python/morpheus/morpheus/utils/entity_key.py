@@ -39,7 +39,7 @@ KEY_SEPARATOR = ":"
 """Joins the parts of a composite key. The same character at every layer, so keys compare across layers."""
 
 
-def _render_integral(value: typing.Any) -> typing.Optional[str]:
+def render_integral(value: typing.Any) -> typing.Optional[str]:
     """
     Render a whole number as an integer, whatever numeric type is carrying it, or `None` for anything else.
 
@@ -91,7 +91,7 @@ def normalize_text(value: typing.Any) -> typing.Optional[str]:
     except (TypeError, ValueError):
         pass
 
-    text = _render_integral(value)
+    text = render_integral(value)
 
     if (text is None):
         text = str(value).strip()
