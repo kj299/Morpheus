@@ -64,7 +64,9 @@ from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
+from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
+from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.utils.binding_table import Binding
 from morpheus.utils.binding_table import BindingTable
 
@@ -355,6 +357,38 @@ def logins() -> dict:
     }
 
 
+def journeys() -> dict:
+    # Alice crosses the Atlantic in an hour, with a second principal measured between her two records so that
+    # evicting her is observable, then a refresh and a failure so each exclusion has something to exclude.
+    return {
+        "user_principal": [
+            "alice@example.com",
+            "bob@example.com",
+            "alice@example.com",
+            "alice@example.com",
+            "alice@example.com",
+        ],
+        "source_latitude": [51.5074, 51.5074, 40.7128, 40.7128, 51.5074],
+        "source_longitude": [-0.1278, -0.1278, -74.0060, -74.0060, -0.1278],
+        "auth_result": ["success", "success", "success", "success", "failure"],
+        "token_type": ["bearer", "bearer", "bearer", "refresh", "bearer"],
+        "source_ip": ["203.0.113.10", "203.0.113.11", "203.0.113.12", "198.51.100.7", "203.0.113.13"],
+        "event_time": [0, 30 * MINUTE, HOUR, 2 * HOUR, 3 * HOUR],
+    }
+
+
+def denials() -> dict:
+    # R-D-L5-004's shape: denials inside ten minutes and an approval at the end, with a record carrying no factor
+    # so the proportion is not one for every row, and a second principal so evicting the first is observable.
+    return {
+        "user_principal": ["alice@example.com"] * 5 + ["bob@example.com", "alice@example.com"],
+        "auth_result": ["failure", "failure", "success", "failure", "failure", "success", "success"],
+        "mfa_used": [True, True, False, True, True, True, True],
+        "mfa_result": ["denied", "denied", None, "denied", "denied", "approved", "approved"],
+        "event_time": [0, MINUTE, 2 * MINUTE, 3 * MINUTE, 4 * MINUTE, 5 * MINUTE, 6 * MINUTE],
+    }
+
+
 def _binding_table(values=("hq:sw1:Gi1/0/1", )) -> BindingTable:
     return BindingTable(
         name="dhcp_lease",
@@ -594,6 +628,49 @@ REGISTRY: dict = {
                 Knob("decimals", DIFFERS, benign=4, extreme=1),
             ),
         ),
+    "TC5TravelStage":
+        Scenario(
+            stage=TC5TravelStage,
+            frame=journeys,
+            base={},
+            knobs=(
+                Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("latitude_column", INPUT_COLUMN, benign="source_latitude"),
+                Knob("longitude_column", INPUT_COLUMN, benign="source_longitude"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("result_column", INPUT_COLUMN, benign="auth_result"),
+                Knob("success_values", DIFFERS, benign=("success", ), extreme=("failure", )),
+                Knob("refresh_column", INPUT_COLUMN, benign="token_type"),
+                Knob("refresh_values", DIFFERS, benign=("refresh", ), extreme=("bearer", )),
+                Knob("source_ip_column", INPUT_COLUMN, benign="source_ip"),
+                Knob("excluded_source_networks", DIFFERS, benign=(), extreme=("203.0.113.0/24", )),
+                Knob("min_elapsed_seconds", DIFFERS, benign=1, extreme=7200),
+                Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
+                Knob("decimals", DIFFERS, benign=4, extreme=1),
+            ),
+        ),
+    "TC5RiskStage":
+        Scenario(
+            stage=TC5RiskStage,
+            frame=denials,
+            base={"min_denominator": 1},
+            knobs=(
+                Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("result_column", INPUT_COLUMN, benign="auth_result"),
+                Knob("success_values", DIFFERS, benign=("success", ), extreme=("failure", )),
+                Knob("mfa_column", INPUT_COLUMN, benign="mfa_used"),
+                Knob("mfa_result_column", INPUT_COLUMN, benign="mfa_result"),
+                Knob("mfa_success_values", DIFFERS, benign=("approved", ), extreme=("denied", )),
+                Knob("run_window_seconds", DIFFERS, benign=600, extreme=1),
+                Knob("ratio_window_seconds", DIFFERS, benign=86400, extreme=1),
+                Knob("min_denominator", DIFFERS, benign=1, extreme=100),
+                Knob("max_samples", DIFFERS, benign=4096, extreme=1),
+                Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
+            ),
+        ),
     "WindowSealStage":
         Scenario(
             stage=WindowSealStage,
@@ -742,7 +819,7 @@ def test_every_stage_parameter_is_registered(stage_name: str):
 def test_every_stage_in_the_fork_is_covered():
     # The registry is checked against each stage's signature above; this checks the set of stages itself, so a new
     # stage cannot arrive with no entry at all.
-    assert len(REGISTRY) == 18
+    assert len(REGISTRY) == 20
     assert {scenario.stage.__name__ for scenario in REGISTRY.values()} == set(REGISTRY)
 
 
