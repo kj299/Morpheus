@@ -48,6 +48,8 @@ should return nothing:
 | R-D-L2-003, ARP anomaly | **1** | 24 contested observations aggregate to one notable on `10.0.0.1`. |
 | R-D-L2-004, MAC in two places | **2** | A conflict at zero gap and a displacement at two seconds. The roaming device, displaced a full poll cadence later, is deliberately outside the threshold. |
 | R-D-L2-005, authorization without authentication | **2** | One bypass on a quiet port, one that arrived while a legitimate exchange was open. |
+| R-D-L5-003, impossible travel | **2** | One principal in New York half an hour after her own London office login, and back in London ninety minutes later. Two rows is what one interloper produces. The eight-hour flight beside it, and the VPN user changing country twice a day, do not appear. |
+| R-D-L5-004, multi-factor fatigue | **1** | Five denials in eight minutes and then an approval. The fumbled password beside it -- two failures and a success with the factor never challenged -- does not appear. |
 | R-C-002, TLS before beaconing | **0** | Correct. Needs layer 4 and layer 7 telemetry; neither class exists. |
 | Behavior summary, per-layer scores | **0** | Correct. Reads `max_abs_z`, which no shipped stage emits. Cannot receive a row until a third layer ships. |
 | Chain assembly, cross-layer risk | **0** | Correct, and for the same reason: only two layers produce events. |
@@ -56,7 +58,7 @@ should return nothing:
 | Binding lookup, L2/L3 expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
 | Binding health, unresolved rate | **1** | An operational metric; the value matters, not whether it fired. |
 
-**Six of the eleven should return nothing.** That is the point of writing them down. An empty result is this app's
+**Six of the thirteen should return nothing.** That is the point of writing them down. An empty result is this app's
 characteristic failure, and without a list saying which emptiness is correct, a deployment cannot tell a rule that
 is working from a rule that is broken.
 

@@ -14,13 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-The first two detections, applied in Python to the harness corpus, and checked against the Splunk app's own stanzas.
+The shipped detections, applied in Python to the harness corpus, and checked against the Splunk app's own stanzas.
 
-R-D-L2-004 and R-D-L2-005 are the first rules in the design guide that exist as code. They ship as saved searches,
-and a saved search cannot run here. What can run here is the predicate each search encodes, over the same columns,
-on the corpus with the anomalies planted in it. Each must fire exactly once, on the planted row, with the fields
-an analyst needs to trace it. The stanzas are then read from the app itself, so the SPL and the Python cannot
-drift apart silently.
+A saved search cannot run here. What can run is the predicate each search encodes, over the same columns, on the
+corpus with the anomalies planted in it. Each must fire exactly where it was planted and nowhere else, with the
+fields an analyst needs to trace it. The stanzas are then read from the app itself, so the SPL and the Python
+cannot drift apart silently.
+
+The four layer 2 rules are asserted end to end here, corpus and stanza both. The two layer 5 rules are asserted
+against their own corpus in `test_session_harness.py` and against their expected row counts in
+`test_splunk_validation_package.py`, because both of those already hold the layer 5 pipeline; what they are
+checked for here is the half neither of those covers -- that the SPL names the columns the stages emit, and that
+the scheduling follows Part 5's discipline.
 """
 
 import os
@@ -50,6 +55,8 @@ RULES = {
     "R-D-L2-003": "R-D-L2-003 - ARP anomaly",
     "R-D-L2-004": "R-D-L2-004 - MAC in two places at once",
     "R-D-L2-005": "R-D-L2-005 - Authorization without authentication",
+    "R-D-L5-003": "R-D-L5-003 - Impossible travel",
+    "R-D-L5-004": "R-D-L5-004 - Multi-factor fatigue",
 }
 
 
@@ -231,7 +238,7 @@ def test_r_d_l2_003_fires_on_the_flooded_gateway_and_not_on_the_redundancy_pair(
 # --- The stanzas, read from the app itself ------------------------------------------------------------------------
 
 
-def test_both_detections_are_defined(searches: dict[str, dict[str, str]]):
+def test_every_shipped_detection_is_defined(searches: dict[str, dict[str, str]]):
     for stanza in RULES.values():
         assert stanza in searches, stanza
 
@@ -253,6 +260,19 @@ def test_the_search_reads_the_column_the_stage_emits(rule_id: str, searches: dic
                        "bind_gap_ns",
                        "port_key"),
         "R-D-L2-005": ("sourcetype=morpheus:score:l2", "auth_unpaired=true", "auth_port_key", "event_uid"),
+        # The layer 5 pair. Their predicates are asserted against the corpus in test_session_harness.py and their
+        # row counts in test_splunk_validation_package.py; what is checked here is that the SPL reads the columns
+        # the stages actually emit, which is the drift these fragments exist to catch.
+        "R-D-L5-003": ("sourcetype=morpheus:score:l5",
+                       "travel_status=measured",
+                       "travel_kmh",
+                       "travel_elapsed_ns",
+                       "user_principal"),
+        "R-D-L5-004": ("sourcetype=morpheus:score:l5",
+                       "mfa_denied_then_approved=true",
+                       "mfa_attempts_in_window",
+                       "mfa_denials_in_window",
+                       "consecutive_mfa_denials"),
     }[rule_id]
 
     for fragment in expected:

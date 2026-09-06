@@ -1,6 +1,6 @@
 {
   "description": "What each shipped saved search should return when the app is deployed against sample_events/. Generated numbers come from the same run_pipeline the determinism tests call; the expected-empty entries are stated with the reason, because a search returning nothing is the failure mode this whole app is careful about and it must be possible to tell a correct empty from a broken one.",
-  "corpus": "tests/morpheus/determinism/telemetry_pipeline.py and lineage_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
+  "corpus": "tests/morpheus/determinism/telemetry_pipeline.py, lineage_pipeline.py and session_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
   "searches": {
     "R-D-L2-001 - MAC address count exceeded on an access port": {
       "expected_rows": 0,
@@ -20,16 +20,62 @@
       "expected_rows": 2,
       "why": "One address claimed on a peer switch inside a single poll sweep (conflict, zero gap) and one displaced two seconds later. Both are inside the 60-second threshold. The roaming device, displaced a whole poll cadence later, is deliberately outside it.",
       "key_values": [
-        {"mac_address": "aa:bb:cc:00:00:01", "port_key": "hq:sw1:Gi1/0/1", "bind_end_reason": "conflict", "gap_seconds": 0.0},
-        {"mac_address": "aa:bb:cc:00:00:02", "port_key": "hq:sw1:Gi1/0/2", "bind_end_reason": "displaced", "gap_seconds": 2.0}
+        {
+          "mac_address": "aa:bb:cc:00:00:01",
+          "port_key": "hq:sw1:Gi1/0/1",
+          "bind_end_reason": "conflict",
+          "gap_seconds": 0.0
+        },
+        {
+          "mac_address": "aa:bb:cc:00:00:02",
+          "port_key": "hq:sw1:Gi1/0/2",
+          "bind_end_reason": "displaced",
+          "gap_seconds": 2.0
+        }
       ]
     },
     "R-D-L2-005 - Authorization without authentication": {
       "expected_rows": 2,
       "why": "One authorization on a port whose own exchanges were long finished, and one that arrived while a legitimate exchange on its port was still open. The second only appears because exchanges are keyed by device; keyed by port it would have paired with the innocent device's request.",
       "key_values": [
-        {"mac_address": "de:ad:be:ef:01:01", "dot1x_identity": "unknown-supplicant"},
-        {"mac_address": "de:ad:be:ef:01:02", "dot1x_identity": "unknown-supplicant"}
+        {
+          "mac_address": "de:ad:be:ef:01:01",
+          "dot1x_identity": "unknown-supplicant"
+        },
+        {
+          "mac_address": "de:ad:be:ef:01:02",
+          "dot1x_identity": "unknown-supplicant"
+        }
+      ]
+    },
+    "R-D-L5-003 - Impossible travel": {
+      "expected_rows": 2,
+      "why": "One principal is authenticated from New York half an hour after her own office login in London, and then back in London ninety minutes later. Two rows rather than one is what a single interloper produces: the jump away and the victim's next authentication from where she actually is. The traveller who makes the same crossing in eight hours is inside the threshold and does not appear, and the VPN user whose apparent location changes country twice a day is excluded by egress range rather than alerted on.",
+      "key_values": [
+        {
+          "user_principal": "alice@example.com",
+          "user_location": "us:ny:new-york",
+          "travel_distance_km": 5570.2299,
+          "elapsed_seconds": 1800.0
+        },
+        {
+          "user_principal": "alice@example.com",
+          "user_location": "gb:england:london",
+          "travel_distance_km": 5570.2299,
+          "elapsed_seconds": 5400.0
+        }
+      ]
+    },
+    "R-D-L5-004 - Multi-factor fatigue": {
+      "expected_rows": 1,
+      "why": "Five denials at ninety-second intervals and then an approval: six challenges inside eight minutes, which clears both thresholds. The fumbled password beside it -- two failed authentications and a success, with the factor never challenged -- is failure-then-success with none of the denial volume the rule requires, and does not appear.",
+      "key_values": [
+        {
+          "user_principal": "carol@example.com",
+          "mfa_attempts_in_window": 6,
+          "mfa_denials_in_window": 5,
+          "consecutive_mfa_denials": 5
+        }
       ]
     },
     "R-C-002 - TLS anomaly precedes beaconing": {

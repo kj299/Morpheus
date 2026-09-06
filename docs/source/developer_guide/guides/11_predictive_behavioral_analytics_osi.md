@@ -57,27 +57,24 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is twenty stages and twenty-three supporting modules
-under 1,549 tests, itemized in
+under 1,587 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
 ([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)).
 
 What remains design rather than a running system: the telemetry classes for layers 3, 4, 6 and 7, every
-detection rule in Part 3 apart from the four layer 2 rules that ship as saved searches, two of which
-fire on nothing until their lookup is populated, the chained rule engine, and the determinism controls
-other than 7, 8, and 13. Layer 5 is a partial exception and the boundary inside it is worth stating
-exactly, because "layer 5 is built" would be a considerable overstatement: the session assembly and the
-five feature stages run and are tested, and most of what is downstream of them is not. There is no
-per-user model, so `mean_abs_z` and `max_abs_z` have no producer and the four behavioral and predictive
-rules that read them -- R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 -- cannot fire. The two
-deterministic rules, R-D-L5-003 and R-D-L5-004, now have every input they read, and neither ships as a
-saved search: a rule asserted against a frame built to make it fire proves much less than one asserted
-against a corpus built to make everything else stay quiet, and that corpus is the composed layer 5
-pipeline that does not exist yet. Nothing at this layer runs under control 13 either, and what is
-proven is each stage on its own rather than a chain of them reaching an answer a golden file holds. And `morpheus:score:l5` remains an unproduced sourcetype, because nothing yet puts a layer 5
-record on the wire. Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half
-of it does not. Thresholds are placeholders unless marked otherwise.
+detection rule in Part 3 apart from the six that ship as saved searches, two of which fire on nothing
+until their lookup is populated, the chained rule engine, and the determinism controls other than 7, 8,
+and 13. Layer 5 is a partial exception, and the boundary inside it is now one thing rather than four:
+**there is no per-user model.** `mean_abs_z` and `max_abs_z` have no producer, so the four behavioral
+and predictive rules that read them -- R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 -- cannot
+fire, and neither can the drift trajectory that is this document's flagship predictive claim.
+Everything else at this layer is built: the session assembly and the five feature stages run under
+control 13's six checks against a week-long corpus, the two deterministic rules ship as saved searches
+with their predicates asserted against that corpus, and `morpheus:score:l5` is a produced sourcetype.
+Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half of it
+does not. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
 nowhere else. On 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada
@@ -2662,6 +2659,19 @@ What Morpheus provides versus what has to be built, stated plainly.
   computable without a model, which is why it comes first: the autoencoder half has to be pinned,
   seeded and frozen under controls 1 through 4 before its output can be trusted to be reproducible, and
   these features are what it would consume.
+- The composed layer 5 pipeline under control 13's six checks
+  (`tests/morpheus/determinism/session_pipeline.py`): a week-long corpus of one estate's authentications,
+  with an impossible journey, a legitimate eight-hour flight, a token refresh issued from the origin
+  between the two, a VPN user whose apparent country changes twice a day, a multi-factor fatigue burst, a
+  fumbled password, an off-hours authentication and a service account for which the same hour is
+  unremarkable, and the three ways a session record goes wrong. Each planted case is asserted as the
+  column a rule would read, and each has beside it the case that must stay quiet.
+- R-D-L5-003 and R-D-L5-004 as saved searches, which makes six shipped detections rather than four. Their
+  predicates are asserted in Python over the corpus and their row counts written into the validation
+  package, so an expectation cannot go stale without a test failing. Both fire on the planted cases and
+  neither fires on the negative controls beside them. R-D-L5-003 ships with an empty egress exclusion
+  list for the same reason R-D-L2-003 does, and until an estate supplies its ranges it will alert on
+  every VPN user.
 - Every input the two deterministic layer 5 rules read. Implied travel speed between consecutive
   successful authentications ({py:mod}`~morpheus.utils.geo_velocity` and
   {py:class}`~morpheus.stages.telemetry.tc5_travel_stage.TC5TravelStage`), with token refreshes and VPN

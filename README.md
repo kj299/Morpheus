@@ -51,11 +51,11 @@ is the running ledger of what is built and what is not.
 | **Layer 1 (TC-1)** | Interface counter normalization that tells a counter wrap from a device reboot, transceiver and neighbor novelty, optical power scored against each port's own rolling baseline, link flap counting that catches flaps between two polls, and identifier change detection with no period boundary |
 | **Layer 2 (TC-2)** | Binding closure into the half-open intervals the resolver consumes, optionally emitting a provisional record the moment a binding opens so live attribution has an answer inside the idle window, the three cardinality features, the gratuitous ARP proportion, and 802.1X authorization timing with unpaired authorization flagged |
 | **Layer 5 (TC-5), deterministic half** | Session assembly from the separate start and stop records most identity providers emit, the digital fingerprinting features this layer is the sweet spot for (`logcount`, `locincrement`, `appincrement`, a device increment, distinct source ASNs per window), hour-of-day and day-of-week deviation scored against each principal's own histogram rather than a population's, implied travel speed between consecutive successful authentications, and the failure and multi-factor denial runs that end in a success. The last two are every input the two deterministic layer 5 rules read. No model, no saved searches, and no composed pipeline yet -- see below |
-| **Determinism** | A total row order imposed before any stateful stage, frame canonicalization and digesting, score quantization, and a CI harness running control 13's six checks against both the lineage pipeline and the composed layer 1 and 2 telemetry pipeline over seeded, snapshot-shaped corpora with planted anomalies |
+| **Determinism** | A total row order imposed before any stateful stage, frame canonicalization and digesting, score quantization, and a CI harness running control 13's six checks against all three composed pipelines -- lineage, layer 1 and 2 telemetry, and layer 5 sessions -- over seeded corpora with planted anomalies and the negative controls beside them |
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
-| **First detections** | Four deterministic layer 2 rules as saved searches in the app: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
+| **First detections** | Six deterministic rules as saved searches in the app. Two at layer 5: a principal authenticated from two places faster than the journey can be made, and a run of multi-factor denials ended by an approval. The first excludes token refreshes and VPN egress ranges from the measurement *and* from becoming the location the next one is measured against, and one intrusion produces a pair of alerts rather than one. And four at layer 2: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Twenty stages and twenty-three supporting modules, covered by 1,549 tests.
+Twenty stages and twenty-three supporting modules, covered by 1,587 tests.
 
 ### What this fork is not
 
@@ -65,17 +65,13 @@ Being clear about the boundary is the point of writing it down:
   and 2 telemetry is not Morpheus and is not here. What ships is everything downstream of it.
 - **Layers 3, 4, 6 and 7 are designed, not built.** The telemetry classes, detection rules, and Splunk
   queries for those layers are specified in the guide and nothing runs for them.
-- **Layer 5 has feature stages and almost nothing downstream of them, which is less than it sounds.**
-  Five stages run and are tested: session assembly, the volume and novelty features, the cadence scores,
-  implied travel speed, and the failure and denial runs. There is no per-user model, so `mean_abs_z` has
-  no producer and the four rules that read it cannot fire. The two deterministic rules now have every
-  input they read and neither ships as a saved search, because a rule asserted against a frame built to
-  make it fire proves much less than one asserted against a corpus built to make everything else stay
-  quiet -- and that corpus is the composed layer 5 pipeline, which does not exist yet. Nothing runs
-  under control 13 here either, and what is proven is each stage alone rather than a chain of them
-  reaching an answer a golden file holds. `morpheus:score:l5` is still an unproduced sourcetype. The
-  model half comes last on purpose: it has to be pinned, seeded and frozen under determinism controls
-  1 through 4 before anything it emits is reproducible, and these features are what it would consume.
+- **Layer 5 is built except for the model, and the model is what the word "predictive" rests on.** Five
+  stages run under control 13's six checks against a week-long corpus, and the two deterministic rules
+  ship as saved searches. What is missing is the per-user autoencoder: `mean_abs_z` has no producer, so
+  R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 cannot fire -- and R-P-L5-006 is the drift
+  trajectory the guide calls its flagship predictive rule. The model comes last on purpose: it has to be
+  pinned, seeded and frozen under determinism controls 1 through 4 before anything it emits is
+  reproducible, and these features are what it would consume.
 - **The rule thresholds are placeholders** unless a rule says otherwise. They are starting points for
   tuning against an estate's own data, not calibrated values.
 - **"Predictive" is a claim the guide qualifies rather than asserts.** Three of its four mechanisms are

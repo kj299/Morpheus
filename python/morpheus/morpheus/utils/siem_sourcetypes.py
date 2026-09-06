@@ -27,7 +27,7 @@ exist yet. `tests/morpheus/utils/test_siem_sourcetypes.py` asserts the two halve
 configuration file appears here, every entry here corresponds to a stanza, and each declared time column is the
 one that stanza's own `TIME_PREFIX` regex anchors on.
 
-Being unproduced is a fact worth recording rather than a gap worth hiding. Eight of the fourteen stanzas are
+Being unproduced is a fact worth recording rather than a gap worth hiding. Seven of the fourteen stanzas are
 configuration for producers this fork has not built, and saying so in one place is what keeps "the app supports
 seven layers" from reading as "seven layers are implemented".
 
@@ -112,6 +112,23 @@ PRODUCED: dict = {
                               "auth_unpaired",
                               "auth_port_key"),
         ),
+    "morpheus:score:l5":
+        Sourcetype(
+            name="morpheus:score:l5",
+            time_column="event_time",
+            time_columns=("event_time", ),
+            producer="The TC-5 stages (session, novelty, cadence, travel, risk) behind WindowSealStage; the "
+            "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`.",
+            # R-D-L5-003 and R-D-L5-004 filter on these.
+            required_columns=("event_uid",
+                              "user_principal",
+                              "travel_status",
+                              "travel_kmh",
+                              "travel_elapsed_ns",
+                              "mfa_denied_then_approved",
+                              "mfa_attempts_in_window",
+                              "mfa_denials_in_window"),
+        ),
     "morpheus:edge":
         Sourcetype(
             name="morpheus:edge",
@@ -154,20 +171,11 @@ PRODUCED: dict = {
 _LAYER_ABOVE_2 = ("A telemetry class for this layer. Layers 3, 4, 6 and 7 are design in the guide; no collector, "
                   "no stage and no scoring path for them exists here.")
 
-_LAYER_5 = ("A scoring path. Layer 5 has feature stages -- TC5SessionStage, TC5NoveltyStage and TC5CadenceStage -- "
-            "but nothing that turns their output into a score and nothing that puts a record on the wire. This "
-            "stanza anchors on the score, so it stays unproduced until the per-user model and a composed layer 5 "
-            "pipeline exist. Recording it as unproduced while the stages beneath it run is the distinction this "
-            "module exists to keep: a stanza with a producer that is not wired up parses nothing, exactly like one "
-            "with no producer at all.")
-
 UNPRODUCED: dict = {
     "morpheus:score:l3":
         Unproduced("morpheus:score:l3", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l4":
         Unproduced("morpheus:score:l4", "event_time", _LAYER_ABOVE_2),
-    "morpheus:score:l5":
-        Unproduced("morpheus:score:l5", "event_time", _LAYER_5),
     "morpheus:score:l6":
         Unproduced("morpheus:score:l6", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l7":

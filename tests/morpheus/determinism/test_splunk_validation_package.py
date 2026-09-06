@@ -48,9 +48,15 @@ SAVEDSEARCHES = os.path.join(REPO_ROOT,
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import session_pipeline as sp  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 
 GAP_THRESHOLD_NS = 60 * 10**9
+TRAVEL_KMH_THRESHOLD = 900
+MFA_CHALLENGE_THRESHOLD = 5
+MFA_DENIAL_THRESHOLD = 4
+"""The thresholds the saved searches state, repeated here so the predicate this file evaluates is the
+predicate the app ships rather than an approximation of it."""
 
 
 @pytest.fixture(name="expected", scope="module")
@@ -62,6 +68,11 @@ def expected_fixture() -> dict:
 @pytest.fixture(name="telemetry", scope="module")
 def telemetry_fixture() -> pd.DataFrame:
     yield tp.run_pipeline(tp.build_pipeline_config(), tp.build_corpus())
+
+
+@pytest.fixture(name="sessions", scope="module")
+def sessions_fixture() -> pd.DataFrame:
+    yield sp.run_pipeline(sp.build_pipeline_config(), sp.build_corpus())
 
 
 def _searches() -> set:
@@ -116,10 +127,33 @@ def test_the_detections_return_exactly_what_is_written(expected: dict, telemetry
         "candidate_rows_before_the_lookup"] == first_in_window
 
 
+def test_the_layer_5_detections_return_exactly_what_is_written(expected: dict, sessions: pd.DataFrame):
+    # The same discipline as the layer 2 rules above, and for the same reason: an expectations file that goes
+    # stale is worse than none, because it looks authoritative. Each predicate is evaluated here exactly as the
+    # saved search states it.
+    searches = expected["searches"]
+
+    travel = sessions[(sessions["travel_status"] == "measured") & (sessions["travel_kmh"] >= TRAVEL_KMH_THRESHOLD)]
+    fatigue = sessions[(sessions["mfa_denied_then_approved"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                       & (sessions["mfa_attempts_in_window"] > MFA_CHALLENGE_THRESHOLD)
+                       & (sessions["mfa_denials_in_window"] >= MFA_DENIAL_THRESHOLD)]
+
+    assert searches["R-D-L5-003 - Impossible travel"]["expected_rows"] == len(travel)
+    written = {(row["user_principal"], row["user_location"])
+               for row in searches["R-D-L5-003 - Impossible travel"]["key_values"]}
+    assert written == set(zip(travel["user_principal"], travel["user_location"]))
+
+    assert searches["R-D-L5-004 - Multi-factor fatigue"]["expected_rows"] == len(fatigue)
+    named = searches["R-D-L5-004 - Multi-factor fatigue"]["key_values"][0]
+    assert named["user_principal"] == fatigue["user_principal"].iloc[0]
+    assert named["mfa_denials_in_window"] == int(fatigue["mfa_denials_in_window"].iloc[0])
+
+
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Six of eleven. That ratio is the honest state of this app, and stating it is the package's main job.
+    # Six of thirteen. That ratio is the honest state of this app, and stating it is the package's main job. It
+    # improved by two searches rather than by two entries: the layer 5 rules ship with events to fire on.
     assert len(empty) == 6
 
     for (name, entry) in empty.items():
