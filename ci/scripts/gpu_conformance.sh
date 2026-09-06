@@ -55,6 +55,7 @@ export NUMBA_CUDA_USE_NVIDIA_BINDING="${NUMBA_CUDA_USE_NVIDIA_BINDING:-1}"
 TARGETS=(
     tests/morpheus/determinism
     tests/morpheus/stages/test_binding_resolver_stage.py
+    tests/morpheus/stages/test_determinism_stamp_stage.py
     tests/morpheus/stages/test_community_id_stage.py
     tests/morpheus/stages/test_lineage_stamp_stage.py
     tests/morpheus/stages/test_siem_wire_stage.py
@@ -88,18 +89,22 @@ UNMARKED=(
     tests/morpheus/utils/test_counter_delta.py
     tests/morpheus/utils/test_cyclic_histogram.py
     tests/morpheus/utils/test_determinism.py
+    tests/morpheus/utils/test_determinism_envelope.py
     tests/morpheus/utils/test_distinct_window.py
     tests/morpheus/utils/test_entity_key.py
     tests/morpheus/utils/test_event_clock.py
     tests/morpheus/utils/test_geo_velocity.py
+    tests/morpheus/utils/test_gpu_conformance_report.py
     tests/morpheus/utils/test_gpu_conformance_targets.py
     tests/morpheus/utils/test_lineage.py
+    tests/morpheus/utils/test_model_manifest.py
     tests/morpheus/utils/test_lineage_cudf.py
     tests/morpheus/utils/test_link_flap.py
     tests/morpheus/utils/test_optical_baseline.py
     tests/morpheus/utils/test_outcome_run.py
     tests/morpheus/utils/test_ratio_window.py
     tests/morpheus/utils/test_session_timer.py
+    tests/morpheus/utils/test_sharding.py
     tests/morpheus/utils/test_siem_sourcetypes.py
     tests/morpheus/utils/test_siem_wire.py
     tests/morpheus/utils/test_splunk_app_contracts.py
@@ -191,6 +196,12 @@ echo ""
 echo "=== coverage that carries no mode marker ==="
 # The digest equivalence gate asserts the device and host hashing paths agree. It has no gpu_mode marker, so
 # `-m gpu_mode` deselects it -- which is exactly how it went unrun after the host digest changed.
+#
+# Collected first, for the same reason the marked tier is: the artifact reconciles what it counted against what
+# pytest said it would run, and without a number to reconcile against, a parser that drops tests reports a pass.
+UNMARKED_SELECTED=$(python -m pytest --run_slow --collect-only -q "${UNMARKED[@]}" 2>/dev/null | grep -c "::") || UNMARKED_SELECTED=0
+echo "collected ${UNMARKED_SELECTED} unmarked tests"
+
 python -m pytest --run_slow -v --tb=short "${UNMARKED[@]}" 2>&1 | tee /tmp/gpu_conformance_unmarked.log
 UNMARKED_STATUS=${PIPESTATUS[0]}
 
@@ -207,85 +218,18 @@ fi
 
 echo ""
 echo "=== artifact ==="
-python - "$ARTIFACT" "$DEVICE" "$SELECTED" "$MARKED_STATUS" "$UNMARKED_STATUS" "$RUN_WIDER" "$WIDER_STATUS" <<'PY'
-import datetime
-import json
-import re
-import sys
+# The reporting lives in a module beside this script rather than in a heredoc, because it has been wrong twice
+# and a parser nobody can test is a parser that will be wrong a third time. `tests/morpheus/utils/
+# test_gpu_conformance_report.py` exercises it against the log shapes that broke it.
+python "${SCRIPT_DIR}/gpu_conformance_report.py" \
+    "$ARTIFACT" "$DEVICE" "$SELECTED" "$MARKED_STATUS" "$UNMARKED_SELECTED" "$UNMARKED_STATUS" \
+    "$RUN_WIDER" "$WIDER_STATUS"
+REPORT_STATUS=$?
 
-(path, device, selected, marked_status, unmarked_status, run_wider, wider_status) = sys.argv[1:8]
-
-
-def summarize(log: str) -> dict:
-    """
-    Read the streamed per-test lines rather than the summary, so an aborted run still says what happened.
-
-    A summary is written once, at the end. A run that dies partway through has no end, and the first version of
-    this reported `"failures": []` for a run with dozens of them -- which is the same uselessness it was built to
-    prevent, wearing a different hat.
-    """
-    try:
-        with open(log, encoding="utf-8") as handle:
-            text = handle.read()
-    except OSError:
-        return {"note": f"no log at {log}"}
-
-    outcomes = re.findall(r"^(\S+::\S+)\s+(PASSED|FAILED|ERROR|SKIPPED)", text, flags=re.MULTILINE)
-    counts: dict = {}
-
-    for (_, outcome) in outcomes:
-        counts[outcome.lower()] = counts.get(outcome.lower(), 0) + 1
-
-    started = re.findall(r"^(\S+::\S+)", text, flags=re.MULTILINE)
-    reported = {name for (name, _) in outcomes}
-    unfinished = [name for name in started if name not in reported]
-
-    return {
-        "counts": counts,
-        "failures": sorted({name for (name, outcome) in outcomes if outcome in ("FAILED", "ERROR")}),
-        # A test that started and never reported its outcome is where the process died.
-        "died_in": unfinished[-1] if unfinished else None,
-        "log": log,
-    }
-
-
-marked = summarize("/tmp/gpu_conformance_marked.log")
-unmarked = summarize("/tmp/gpu_conformance_unmarked.log")
-ok = marked_status == "0" and unmarked_status == "0"
-
-def describe(status: str) -> str:
-    """A shell exit code, in words. 134 is SIGABRT, which is what a device stage crashing looks like from here."""
-    code = int(status)
-
-    if (code == 0):
-        return "exited cleanly"
-
-    if (code > 128):
-        return f"killed by signal {code - 128}" + (" (SIGABRT: a crash, not a test failure)" if code == 134 else "")
-
-    return f"exited {code}"
-
-
-report = {
-    "verdict": "passed" if ok else "failed",
-    "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    "device": device,
-    "gpu_mode": {"collected": int(selected), "outcome": describe(marked_status), **marked},
-    "unmarked_gpu_coverage": {"outcome": describe(unmarked_status), **unmarked},
-    # Context, not verdict. Upstream stages reading upstream fixtures; a failure here is a report to make
-    # upstream, not a reason to hold this fork.
-    "wider_upstream_suite": ({"outcome": describe(wider_status), **summarize("/tmp/gpu_conformance_wider.log")}
-                             if run_wider == "1" else {"skipped": "test fixtures are unfetched Git LFS pointers"}),
-}
-
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(report, handle, indent=2)
-    handle.write("\n")
-
-print(json.dumps(report, indent=2))
-PY
-
-if [[ "${MARKED_STATUS}" -ne 0 || "${UNMARKED_STATUS}" -ne 0 ]]; then
+# The report's own verdict decides, not just the exit codes. A tier can exit zero having lost tests to a parser
+# that could not read their names, and that is not a pass -- the reconciliation in the artifact is what catches
+# it, so this has to defer to the artifact rather than to the status alone.
+if [[ "${MARKED_STATUS}" -ne 0 || "${UNMARKED_STATUS}" -ne 0 || "${REPORT_STATUS}" -ne 0 ]]; then
     echo ""
     echo "FAILED: see ${ARTIFACT} for what failed."
     exit 1

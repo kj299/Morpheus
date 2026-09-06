@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is twenty stages and twenty-three supporting modules
-under 1,593 tests, itemized in
+8's total order, and control 13's CI harness. That is twenty-one stages and twenty-six supporting modules
+under 1,701 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -73,8 +73,14 @@ fire, and neither can the drift trajectory that is this document's flagship pred
 Everything else at this layer is built: the session assembly and the five feature stages run under
 control 13's six checks against a week-long corpus, the two deterministic rules ship as saved searches
 with their predicates asserted against that corpus, and `morpheus:score:l5` is a produced sourcetype.
-Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half of it
-does not. Thresholds are placeholders unless marked otherwise.
+Controls 1, 2, 4 and 12 now ship as code, ahead of the model
+that will consume them. Control 9 is a partial exception, since `determinism.quantize_value` ships but
+the hysteresis half of it does not, and control 3 is outstanding for a concrete reason rather than an
+unexamined one: seeding beyond `manual_seed` means calling `torch.use_deterministic_algorithms`, and the
+environment this work is developed and tested in has no Torch, no `dfencoder` and no `morpheus_dfp` --
+`morpheus_dfp` requires `torch==2.4.0+cu124`. That is also why the autoencoder itself is absent rather
+than merely unfinished: a model path written where the model cannot be run would be written without ever
+having been run. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
 nowhere else. On 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada
@@ -84,18 +90,26 @@ on 2026-09-06 with the parity repairs described below in place, giving 231 passe
 the same two upstream failures, and five more passes for the guards those repairs added.
 
 Later on 2026-09-06, at 17:32 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the
-artifact it exists to produce: 227 of 227 of the `gpu_mode` variants it selected passed, 10 of 10 of the
-GPU coverage carrying no mode marker passed, nothing failed, and the process exited cleanly rather than
-dying partway through. That artifact is narrower than the two runs before it, and narrower again than it
-appeared: the runner selects from a list, and the list was not total. It omitted two files then and five
-more once the TC-5 stages landed, so the layer 5 work went unmeasured while the runner reported a clean
-verdict on everything else. The tiers now select 353 marked variants and 513 unmarked ones, and a test
-derives this fork's own test files from their copyright header and fails if one is in neither tier.
-Nothing has been measured on a card since that repair. The two upstream failures also sit outside the
-runner's scope rather than having been fixed by it, and its wider upstream tier skipped itself because
-that checkout's `tests/tests_data` fixtures were unfetched Git LFS pointers. Nothing here is a claim
-about the upstream suite on a GPU, and the limit none of it moves is the one worth repeating: one card,
-and not CI. The other limit that used to sit
+artifact it exists to produce, and it took two further repairs to that runner before the artifact could be
+believed. The run that stands is 2026-09-06 at 23:25 UTC on the same card: 353 collected, 353 passed,
+nothing failed, exited cleanly, and the count reconciled exactly against what was collected -- every
+stage, all three composed pipelines, and control 13's six checks, in GPU mode. The tier carrying no mode
+marker exited cleanly with no failures in the same run.
+
+Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
+less than it claimed. The runner selected from a list that was not total: two files were outside it from
+the start and the five TC-5 stage files joined them, so the layer 5 work went unmeasured while the
+verdict read clean. Then the counter read streamed output with a pattern that stopped at the first
+space, so fifteen tests whose parametrized identifiers contain one ran, passed, went uncounted, and the
+last of them was named as where the run had died. The tiers are now kept total by a test that identifies
+this fork's files by their copyright header, and the counts are reconciled against what pytest
+collected, so a total that does not add up is a failed verdict rather than a quiet one. A better pattern
+was not the repair; the reconciliation is, because a counter that can silently drop a test is
+untrustworthy however carefully its pattern is written.
+
+The wider upstream tier skipped itself, because that checkout's `tests/tests_data` fixtures were
+unfetched Git LFS pointers. Nothing here is a claim about the upstream suite on a GPU, and the limit
+none of it moves is the one worth repeating: one card, and not CI. The other limit that used to sit
 here -- that per-stage runs say nothing about the determinism controls -- has since been closed, and how
 is the subject of the next few paragraphs.
 
@@ -2664,6 +2678,15 @@ What Morpheus provides versus what has to be built, stated plainly.
   computable without a model, which is why it comes first: the autoencoder half has to be pinned,
   seeded and frozen under controls 1 through 4 before its output can be trusted to be reproducible, and
   these features are what it would consume.
+- The scoring path's determinism substrate: controls 1, 2, 4 and 12 as code, ahead of the model that will
+  consume them. The envelope every scored event carries and the two hashes inside it
+  ({py:mod}`~morpheus.utils.determinism_envelope`), the model manifest that is resolved once per window and
+  refuses to answer for any other ({py:mod}`~morpheus.utils.model_manifest`), the stable hash that decides an
+  entity's shard without depending on `PYTHONHASHSEED` ({py:mod}`~morpheus.utils.sharding`), and the stage that
+  stamps all of it ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`). These
+  come before the autoencoder rather than after it because this document says they must: retrofitting
+  determinism onto a running detection pipeline means re-tuning every threshold, since the scores will move.
+  What is not here is the autoencoder itself, and the boundary is exact -- see the caveat below.
 - The composed layer 5 pipeline under control 13's six checks
   (`tests/morpheus/determinism/session_pipeline.py`): a week-long corpus of one estate's authentications,
   with an impossible journey, a legitimate eight-hour flight, a token refresh issued from the origin

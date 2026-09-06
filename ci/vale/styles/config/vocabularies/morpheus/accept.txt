@@ -152,6 +152,7 @@ Suricata
 ULPs
 [Uu]naggregated
 [Uu]nattributable
+[Uu]ndercount(s|ed|ing)?
 [Uu]nfetched
 [Uu]nrendered
 [Uu]nmanaged

@@ -51,11 +51,12 @@ is the running ledger of what is built and what is not.
 | **Layer 1 (TC-1)** | Interface counter normalization that tells a counter wrap from a device reboot, transceiver and neighbor novelty, optical power scored against each port's own rolling baseline, link flap counting that catches flaps between two polls, and identifier change detection with no period boundary |
 | **Layer 2 (TC-2)** | Binding closure into the half-open intervals the resolver consumes, optionally emitting a provisional record the moment a binding opens so live attribution has an answer inside the idle window, the three cardinality features, the gratuitous ARP proportion, and 802.1X authorization timing with unpaired authorization flagged |
 | **Layer 5 (TC-5), deterministic half** | Session assembly from the separate start and stop records most identity providers emit, the digital fingerprinting features this layer is the sweet spot for (`logcount`, `locincrement`, `appincrement`, a device increment, distinct source ASNs per window), hour-of-day and day-of-week deviation scored against each principal's own histogram rather than a population's, implied travel speed between consecutive successful authentications, and the failure and multi-factor denial runs that end in a success. The last two are every input the two deterministic layer 5 rules read. No model, no saved searches, and no composed pipeline yet -- see below |
+| **Scoring determinism** | The envelope every scored event carries and the two hashes inside it, a model manifest resolved once per window that refuses to answer for any other, and entity sharding on a hash that does not change with `PYTHONHASHSEED`. Controls 1, 2, 4 and 12 of the guide's thirteen, built before the model that consumes them because retrofitting determinism onto a running pipeline means re-tuning every threshold |
 | **Determinism** | A total row order imposed before any stateful stage, frame canonicalization and digesting, score quantization, and a CI harness running control 13's six checks against all three composed pipelines -- lineage, layer 1 and 2 telemetry, and layer 5 sessions -- over seeded corpora with planted anomalies and the negative controls beside them |
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Six deterministic rules as saved searches in the app. Two at layer 5: a principal authenticated from two places faster than the journey can be made, and a run of multi-factor denials ended by an approval. The first excludes token refreshes and VPN egress ranges from the measurement *and* from becoming the location the next one is measured against, and one intrusion produces a pair of alerts rather than one. And four at layer 2: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Twenty stages and twenty-three supporting modules, covered by 1,593 tests.
+Twenty-one stages and twenty-six supporting modules, covered by 1,701 tests.
 
 ### What this fork is not
 
@@ -66,12 +67,20 @@ Being clear about the boundary is the point of writing it down:
 - **Layers 3, 4, 6 and 7 are designed, not built.** The telemetry classes, detection rules, and Splunk
   queries for those layers are specified in the guide and nothing runs for them.
 - **Layer 5 is built except for the model, and the model is what the word "predictive" rests on.** Five
-  stages run under control 13's six checks against a week-long corpus, and the two deterministic rules
-  ship as saved searches. What is missing is the per-user autoencoder: `mean_abs_z` has no producer, so
-  R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 cannot fire -- and R-P-L5-006 is the drift
-  trajectory the guide calls its flagship predictive rule. The model comes last on purpose: it has to be
-  pinned, seeded and frozen under determinism controls 1 through 4 before anything it emits is
-  reproducible, and these features are what it would consume.
+  feature stages run under control 13's six checks against a week-long corpus, the two deterministic
+  rules ship as saved searches, and the determinism controls the scoring path needs -- the envelope, the
+  pinned manifest, the stable sharding -- are built and tested ahead of it. What is missing is the
+  per-user autoencoder itself: `mean_abs_z` has no producer, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and
+  R-P-L5-006 cannot fire, and R-P-L5-006 is the drift trajectory the guide calls its flagship predictive
+  rule.
+- **The autoencoder is not built here because it cannot be built here, and that is worth saying rather
+  than implying.** `morpheus_dfp` requires `torch==2.4.0+cu124` and `dfencoder`, and the environment this
+  work is developed and tested in has none of the three. Everything above was written and verified
+  without them; a model path would be written without ever having run. The controls landed first instead,
+  which is the order the guide argues for anyway, since retrofitting determinism onto a running pipeline
+  means re-tuning every threshold. Control 3, seeding beyond `manual_seed`, is the one control still
+  outstanding, and it is outstanding for the same reason: `torch.use_deterministic_algorithms` cannot be
+  called where Torch is not installed.
 - **The rule thresholds are placeholders** unless a rule says otherwise. They are starting points for
   tuning against an estate's own data, not calibrated values.
 - **"Predictive" is a claim the guide qualifies rather than asserts.** Three of its four mechanisms are
@@ -86,18 +95,25 @@ Being clear about the boundary is the point of writing it down:
   rather than in anything this fork adds. Every stage and utility added here passes in GPU mode. The suite
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
-- **The conformance runner has now rendered its verdict.** On 2026-09-06 at 17:32 UTC,
-  `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the artifact it exists to produce:
-  **227 of 227 of the `gpu_mode` variants it selected passed, and 10 of 10 of the GPU coverage that
-  carries no mode marker**, nothing failed, and the process exited cleanly rather than dying partway.
-  Read the scope exactly as measured, because it is narrower than it sounds. The runner selects from a
-  list, and the list was not total: it omitted `test_community_id_stage.py` and `test_column_assign.py`
-  then, and later the five TC-5 stage files as well. The same two tiers now select **353** marked
-  variants and **513** unmarked ones, and a test derives the fork's own test files from their copyright
-  header and fails if one is in neither tier, so the list cannot go stale again. Nothing has been
-  measured on a card since. The two upstream failures above also sit outside the runner's scope rather
-  than having been fixed by it, and its wider upstream tier **skipped itself** because that checkout's
-  `tests/tests_data` fixtures were unfetched Git LFS pointers. One card, three runs, no CI.
+- **Every `gpu_mode` variant this fork has passes on a GPU.** On 2026-09-06 at 23:25 UTC,
+  `ci/scripts/gpu_conformance.sh` ran on that same card over the repaired tiers: **353 collected, 353
+  passed**, nothing failed, the process exited cleanly, and the count reconciles exactly against what
+  was collected. That covers all twenty stages, all three composed pipelines and control 13's six
+  checks in GPU mode. The tier that carries no mode marker -- where the default execution mode on a
+  machine with a card is the GPU -- also **exited cleanly with no failures**, though its counts in that
+  artifact undercount by fifteen: see the next bullet. The wider upstream tier **skipped itself**,
+  because that checkout's `tests/tests_data` fixtures were unfetched Git LFS pointers, so nothing here
+  is a claim about the upstream suite. One card, four runs, no CI.
+- **Two earlier verdicts were narrower than they read, and both defects were in the runner.** The first
+  selected from a list that was not total: it omitted `test_community_id_stage.py` and
+  `test_column_assign.py`, and later the five TC-5 stage files, so "227 of 227" was 227 of the variants
+  the list happened to name. The second counted from streamed output with a pattern that stopped at the
+  first space, so fifteen tests whose parametrized identifiers contain one -- a saved search called
+  `R-D-L5-004 - Multi-factor fatigue`, an entity-key case that is three spaces -- ran, passed, and were
+  not counted, while the artifact reported a pass and named the last of them as where the run died. The
+  tiers are now kept total by a test that identifies this fork's files by their copyright header, and
+  the counts are **reconciled against what pytest collected**, so a total that does not add up is a
+  failed verdict rather than a quiet one. A better pattern was not the repair; the reconciliation is.
 - **The two modes did not agree, and the per-stage runs could not have told us.** Every one of those 203
   variants passes, and the composed telemetry pipeline still produced `arp_count_in_window = 3.0` on a GPU
   where the CPU golden holds `3`. Nothing raised. cuDF's `to_pandas` cannot put a null inside an integer
