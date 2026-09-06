@@ -75,8 +75,9 @@ Being clear about the boundary is the point of writing it down:
   variants were run for the first time, on an NVIDIA RTX 5000 Ada Generation Laptop GPU (compute
   capability 8.9, driver 596.58) under WSL2: **226 passed, 2 failed, 55 skipped**, and both failures are
   in upstream Morpheus files (`test_deserialize_stage_pipe`, `test_write_to_file_stage_pipe`) rather than
-  in anything this fork adds. Every stage and utility added here passes in GPU mode.
-  That is one run on one card, not a support claim.
+  in anything this fork adds. Every stage and utility added here passes in GPU mode. The suite was re-run
+  on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55 skipped**, the
+  same two upstream failures and nothing else. That is two runs on one card, not a support claim.
 - **The two modes did not agree, and the per-stage runs could not have told us.** Every one of those 203
   variants passes, and the composed telemetry pipeline still produced `arp_count_in_window = 3.0` on a GPU
   where the CPU golden holds `3`. Nothing raised. cuDF's `to_pandas` cannot put a null inside an integer

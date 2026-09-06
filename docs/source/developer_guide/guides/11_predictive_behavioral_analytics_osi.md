@@ -71,9 +71,11 @@ of it does not. Thresholds are placeholders unless marked otherwise.
 One caveat cuts across everything shipped: GPU execution mode has been measured exactly once. On
 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada Generation
 Laptop GPU (compute capability 8.9, driver 596.58) under WSL2, giving 226 passed, 2 failed, 55 skipped.
-Both failures are upstream Morpheus tests rather than anything added here. Two limits on that result are
-worth stating: it is one run on one card, and it says nothing about the determinism controls. Treat CPU
-mode as the tested path and GPU mode as observed to work once.
+Both failures are upstream Morpheus tests rather than anything added here. The suite was re-run on
+2026-09-06 with the parity repairs described below in place, giving 231 passed, 2 failed, 55 skipped --
+the same two upstream failures, and five more passes for the guards those repairs added. Two limits on
+that result are worth stating: it is one card, and per-stage runs say nothing about the determinism
+controls. Treat CPU mode as the tested path and GPU mode as observed to work.
 
 That second limit is the more interesting one. Those 203 variants are per-stage unit tests, and a stage
 computing correctly on a device frame is not the same claim as fourteen of them in a row reaching the
