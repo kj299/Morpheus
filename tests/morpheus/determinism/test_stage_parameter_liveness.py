@@ -62,6 +62,9 @@ from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
+from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
+from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
+from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.utils.binding_table import Binding
 from morpheus.utils.binding_table import BindingTable
 
@@ -324,6 +327,34 @@ def wire_without_the_required_columns() -> dict:
     return {"event_time": [1788114300123456789], "event_uid": ["a"]}
 
 
+def sessions() -> dict:
+    # Two sessions open at once, each closing later. Overlapping is what makes max_open_sessions bite, and the gap
+    # between a start and its end is what makes the timeout bite.
+    return {
+        "session_id": ["s-a", "s-b", "s-a", "s-b"],
+        "user_principal": ["alice@example.com", "bob@example.com", "alice@example.com", "bob@example.com"],
+        "session_action": ["start", "start", "end", "end"],
+        "event_time": [0, MINUTE, 2 * MINUTE, 3 * MINUTE],
+    }
+
+
+def logins() -> dict:
+    # One principal returning to a location it has used before, with a second principal interleaved. The return is
+    # what makes max_values bite; the interleaving is what makes max_entities bite.
+    return {
+        "user_principal": [
+            "alice@example.com", "bob@example.com", "alice@example.com", "bob@example.com", "alice@example.com"
+        ],
+        "source_country": ["gb", "us", "fr", "us", "gb"],
+        "source_region": ["england", "ca", "idf", "ca", "england"],
+        "source_city": ["london", "san-jose", "paris", "san-jose", "london"],
+        "app": ["vpn", "wiki", "wiki", "wiki", "vpn"],
+        "device_id": ["laptop-1", "laptop-2", "laptop-1", "laptop-2", "phone-1"],
+        "source_asn": ["as5089", "as7018", "as3215", "as7018", "as5089"],
+        "event_time": [0, HOUR, 5 * HOUR, 30 * HOUR, 50 * HOUR],
+    }
+
+
 def _binding_table(values=("hq:sw1:Gi1/0/1", )) -> BindingTable:
     return BindingTable(
         name="dhcp_lease",
@@ -508,6 +539,61 @@ REGISTRY: dict = {
                 Knob("emit_open_bindings", DIFFERS, benign=False, extreme=True),
             ),
         ),
+    "TC5SessionStage":
+        Scenario(
+            stage=TC5SessionStage,
+            frame=sessions,
+            base={},
+            knobs=(
+                Knob("session_column", INPUT_COLUMN, benign="session_id"),
+                Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("action_column", INPUT_COLUMN, benign="session_action"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("start_actions", DIFFERS, benign=("start", ), extreme=("logon", )),
+                Knob("end_actions", DIFFERS, benign=("end", ), extreme=("logoff", )),
+                Knob("timeout_seconds", DIFFERS, benign=3600, extreme=1),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
+                Knob("max_open_sessions", DIFFERS, benign=500_000, extreme=1),
+            ),
+        ),
+    "TC5NoveltyStage":
+        Scenario(
+            stage=TC5NoveltyStage,
+            frame=logins,
+            base={},
+            knobs=(
+                Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("location_columns",
+                     DIFFERS,
+                     benign=("source_country", "source_region", "source_city"),
+                     extreme=("source_country", )),
+                Knob("app_column", INPUT_COLUMN, benign="app"),
+                Knob("device_column", INPUT_COLUMN, benign="device_id"),
+                Knob("asn_column", INPUT_COLUMN, benign="source_asn"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("window_seconds", DIFFERS, benign=86400, extreme=1),
+                Knob("max_samples", DIFFERS, benign=4096, extreme=1),
+                Knob("max_values", DIFFERS, benign=256, extreme=1),
+                Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
+            ),
+        ),
+    "TC5CadenceStage":
+        Scenario(
+            stage=TC5CadenceStage,
+            frame=logins,
+            base={},
+            knobs=(
+                Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("utc_offset_minutes", DIFFERS, benign=0, extreme=345),
+                Knob("min_samples", DIFFERS, benign=2, extreme=1000),
+                Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
+                Knob("decimals", DIFFERS, benign=4, extreme=1),
+            ),
+        ),
     "WindowSealStage":
         Scenario(
             stage=WindowSealStage,
@@ -656,7 +742,7 @@ def test_every_stage_parameter_is_registered(stage_name: str):
 def test_every_stage_in_the_fork_is_covered():
     # The registry is checked against each stage's signature above; this checks the set of stages itself, so a new
     # stage cannot arrive with no entry at all.
-    assert len(REGISTRY) == 15
+    assert len(REGISTRY) == 18
     assert {scenario.stage.__name__ for scenario in REGISTRY.values()} == set(REGISTRY)
 
 

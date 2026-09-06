@@ -50,11 +50,12 @@ is the running ledger of what is built and what is not.
 | **Lineage substrate** | Deterministic `event_uid` / `link_uid` provenance identifiers, the Community ID flow hash (verified against the reference implementation over 46,448 flow tuples), time-bounded binding resolution with a fixed tie-break, and event-time window sealing with a lateness horizon and a separate late-arrival stream |
 | **Layer 1 (TC-1)** | Interface counter normalization that tells a counter wrap from a device reboot, transceiver and neighbor novelty, optical power scored against each port's own rolling baseline, link flap counting that catches flaps between two polls, and identifier change detection with no period boundary |
 | **Layer 2 (TC-2)** | Binding closure into the half-open intervals the resolver consumes, optionally emitting a provisional record the moment a binding opens so live attribution has an answer inside the idle window, the three cardinality features, the gratuitous ARP proportion, and 802.1X authorization timing with unpaired authorization flagged |
+| **Layer 5 (TC-5), deterministic half** | Session assembly from the separate start and stop records most identity providers emit, the digital fingerprinting features this layer is the sweet spot for (`logcount`, `locincrement`, `appincrement`, a device increment, distinct source ASNs per window), and hour-of-day and day-of-week deviation scored against each principal's own histogram rather than a population's. No model, no rules, and no composed pipeline yet -- see below |
 | **Determinism** | A total row order imposed before any stateful stage, frame canonicalization and digesting, score quantization, and a CI harness running control 13's six checks against both the lineage pipeline and the composed layer 1 and 2 telemetry pipeline over seeded, snapshot-shaped corpora with planted anomalies |
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Four deterministic layer 2 rules as saved searches in the app: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Fifteen stages and twenty supporting modules, covered by 1,202 tests.
+Eighteen stages and twenty-one supporting modules, covered by 1,377 tests.
 
 ### What this fork is not
 
@@ -62,8 +63,16 @@ Being clear about the boundary is the point of writing it down:
 
 - **The collectors are out of scope.** The SNMP, LLDP, DHCP, and 802.1X polling that produces layer 1
   and 2 telemetry is not Morpheus and is not here. What ships is everything downstream of it.
-- **Layers 3-7 are designed, not built.** The telemetry classes, detection rules, and Splunk queries
-  for those layers are specified in the guide. Only layers 1 and 2 have running feature stages.
+- **Layers 3, 4, 6 and 7 are designed, not built.** The telemetry classes, detection rules, and Splunk
+  queries for those layers are specified in the guide and nothing runs for them.
+- **Layer 5 has feature stages and nothing downstream of them, which is less than it sounds.** Three
+  stages run and are tested: session assembly, the volume and novelty features, and the cadence scores.
+  There is no per-user model, so `mean_abs_z` has no producer and the four rules that read it cannot
+  fire. The two deterministic layer 5 rules need features these stages do not compute. No composed layer
+  5 pipeline runs under control 13, so what is proven is each stage alone rather than a chain of them
+  reaching an answer a golden file holds. `morpheus:score:l5` is still an unproduced sourcetype. The
+  model half comes second on purpose: it has to be pinned, seeded and frozen under determinism controls
+  1 through 4 before anything it emits is reproducible, and these features are what it would consume.
 - **The rule thresholds are placeholders** unless a rule says otherwise. They are starting points for
   tuning against an estate's own data, not calibrated values.
 - **"Predictive" is a claim the guide qualifies rather than asserts.** Three of its four mechanisms are

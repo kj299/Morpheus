@@ -151,8 +151,15 @@ PRODUCED: dict = {
 }
 """Sourcetypes something in this fork emits, keyed by stanza name."""
 
-_LAYER_ABOVE_2 = ("A telemetry class for this layer. Layers 3 through 7 are design in the guide; no collector, no "
-                  "stage and no scoring path for them exists here.")
+_LAYER_ABOVE_2 = ("A telemetry class for this layer. Layers 3, 4, 6 and 7 are design in the guide; no collector, "
+                  "no stage and no scoring path for them exists here.")
+
+_LAYER_5 = ("A scoring path. Layer 5 has feature stages -- TC5SessionStage, TC5NoveltyStage and TC5CadenceStage -- "
+            "but nothing that turns their output into a score and nothing that puts a record on the wire. This "
+            "stanza anchors on the score, so it stays unproduced until the per-user model and a composed layer 5 "
+            "pipeline exist. Recording it as unproduced while the stages beneath it run is the distinction this "
+            "module exists to keep: a stanza with a producer that is not wired up parses nothing, exactly like one "
+            "with no producer at all.")
 
 UNPRODUCED: dict = {
     "morpheus:score:l3":
@@ -160,7 +167,7 @@ UNPRODUCED: dict = {
     "morpheus:score:l4":
         Unproduced("morpheus:score:l4", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l5":
-        Unproduced("morpheus:score:l5", "event_time", _LAYER_ABOVE_2),
+        Unproduced("morpheus:score:l5", "event_time", _LAYER_5),
     "morpheus:score:l6":
         Unproduced("morpheus:score:l6", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l7":
