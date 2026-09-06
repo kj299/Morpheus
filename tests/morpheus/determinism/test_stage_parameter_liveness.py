@@ -298,6 +298,7 @@ def windows() -> dict:
     return {
         "event_time": [t * SECOND for t in times],
         "entity": ["z", "y", "x", "w", "v"],
+        "event_uid": [f"uid-{index}" for index in range(len(times))],
         "collector_id": ["poller-1"] * len(times),
         "collector_seq": list(range(len(times))),
     }
@@ -512,7 +513,7 @@ REGISTRY: dict = {
             stage=WindowSealStage,
             frame=windows,
             base={
-                "period_seconds": 100, "lateness_seconds": 30
+                "period_seconds": 100, "lateness_seconds": 30, "entity_key_column": "entity"
             },
             knobs=(
                 Knob("period_seconds", DIFFERS, benign=100, extreme=25),
@@ -522,6 +523,9 @@ REGISTRY: dict = {
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
                 Knob("order_columns", DIFFERS, benign=None, extreme=["entity"]),
                 Knob("seal_on_complete", DIFFERS, benign=True, extreme=False),
+                Knob("entity_key_column", DIFFERS, benign=None, extreme="entity"),
+                Knob("uid_column", INPUT_COLUMN, benign="event_uid"),
+                Knob("lineage_id_column", DIFFERS, benign="lineage_id", extreme="chain_id"),
                 Knob("raise_on_invalid",
                      INERT,
                      reason="Every row in this frame carries a valid event time, and a "

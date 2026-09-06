@@ -248,8 +248,12 @@ def test_the_bucketed_expansion_can_name_its_source_table():
     named = table.to_bucketed_records(bucket_seconds=300, key_name="ip", table_name="dhcp_lease")
     assert {record["binding_table"] for record in named} == {"dhcp_lease"}
 
-    # Unnamed tables carry no such field, so a single-source estate is not made to invent one.
-    assert all("binding_table" not in record for record in table.to_bucketed_records(bucket_seconds=300))
+    # Every row carries the field now, defaulting to the table's own name. This reverses an earlier choice to omit
+    # it unless asked, made when a table could exist without a name; a table has been required to have one since,
+    # so the field was never an invention. What the omission was, was a silent failure: the refresh search selects
+    # its source with `binding_table=...`, so rows from a producer that forgot the argument matched nothing, and a
+    # lookup that quietly stops being refreshed looks exactly like one with nothing to add.
+    assert {record["binding_table"] for record in table.to_bucketed_records(bucket_seconds=300)} == {"dhcp"}
 
 
 def test_the_lookup_refresh_filters_on_a_field_the_expansion_can_emit():

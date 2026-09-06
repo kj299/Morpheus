@@ -2486,6 +2486,32 @@ this sample's last-change against the previous sample's and never against the ev
 preserves all three comparisons. That is not a bug today. It becomes one the moment anything compares the
 converted value against an absolute time, and it is now written down where that change would be made.
 
+`tests/morpheus/utils/test_splunk_field_contracts.py` asks the same question of the other artifact. A search
+naming a field nothing emits does not fail: it returns no rows, or a blank column, and a detection that fires on
+nothing is indistinguishable from one with nothing to find. Three defects in the shipped app were that shape. The
+linter parses every search, resolves each field it reads against what the stages declare, what the golden files record
+the pipelines actually emitting, what the lookups define, and what the search itself creates, and requires
+anything left over to be registered as a known gap, with a reason. There is no search head in this
+repository and there will not be one in CI, so this is the largest share of search-head risk the repo can carry
+by itself.
+
+It found the gap it was written for and two more. `lineage_id` appeared in all four detections' `| table` clauses
+while {py:func}`~morpheus.utils.lineage.lineage_id` had no caller anywhere in the tree, so the column was always
+blank -- the lineage substrate was load-bearing for nothing. It is now computed by
+{py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage` as each window seals: a chain is one
+entity's events inside one window, identified by the entity, the window, and the Merkle root over the members.
+The root deduplicates and sorts, so it depends on membership rather than arrival order, which is what makes the
+identifier survive a replay that delivered the same events differently. What a chain is anchored on is a
+parameter, because it is a per-class fact: a layer 1 sample is about its port, an ARP observation about the
+address being claimed, an 802.1X exchange about the port it authorized. The binding class is not sealed into
+windows at all and carries no chain, which is the honest answer rather than a fabricated one.
+
+The other two were smaller and the same shape. `binding_table` is what the lookup refresh search selects its
+source with, and `to_bucketed_records` emitted it only when a caller passed `table_name`; nothing did, so the
+refresh matched no rows. It now defaults to the table's own name, which the table has been required to have since
+an earlier fix. And `dot1x_identity` is on R-D-L2-005's alert so an analyst can tell which device authorized, and
+the corpus sent none, so the composed pipeline never covered the identity path the stage prefers over the MAC.
+
 `tests/morpheus/determinism/test_representation_invariance.py` is check 6 one level down. Row order must not
 decide the output; neither must the type the values arrived in. Each key-bearing column is presented as an
 integer, a float and a string, along with the shape the defect actually takes -- a column widened to float

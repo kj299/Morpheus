@@ -369,7 +369,11 @@ def test_bucketed_frame(leases: BindingTable):
 
     # `bucket_start` sits with the key and the bucket because it is the row's identity in time, not one of the
     # binding's values: a bucketed row's only timestamp is the bucket it stands for.
-    assert list(frame.columns) == ["ip", "bucket", "bucket_start", "mac", "hostname", "binding_uid"]
+    # `binding_table` is on every row now, not only when a caller remembered to ask: several binding sources land
+    # on one sourcetype and the refresh search picks between them with `binding_table=...`, so a row without it is
+    # invisible to the search that exists to consume it.
+    assert list(frame.columns) == ["ip", "bucket", "bucket_start", "mac", "hostname", "binding_table", "binding_uid"]
+    assert set(frame["binding_table"]) == {"dhcp_lease"}
     assert len(frame) == len(leases.to_bucketed_records(bucket_seconds=1800, key_name="ip"))
 
 

@@ -482,6 +482,10 @@ class BindingTable:
         max_buckets_per_binding : int, default = 10000
             Guard against a single long-lived binding expanding into an unusable number of rows.
         table_name : str, optional
+            Overrides the table's own name on the emitted records. Defaults to it, because several binding sources
+            land on the one `binding:bucketed` sourcetype and the refresh search selects between them with
+            `binding_table=...`; a record that omits the field is invisible to that search, and the table has
+            always known its own name.
             What this table is, for example `dhcp_lease` or `cam_table`. Emitted as `binding_table` on every record.
             A SIEM that indexes several binding sources under one sourcetype has no other way to tell them apart, and
             a lookup refresh that cannot tell them apart builds the wrong lookup. Omitted when there is nothing to
@@ -534,8 +538,7 @@ class BindingTable:
             record = {key_name: key, bucket_name: bucket, BUCKET_START_COLUMN: render_event_time(bucket * bucket_ns)}
             record.update(dict(zip(self._value_columns, binding.values)))
 
-            if (table_name is not None):
-                record[TABLE_NAME_COLUMN] = table_name
+            record[TABLE_NAME_COLUMN] = self._name if table_name is None else table_name
 
             if (include_uid):
                 record["binding_uid"] = binding.uid

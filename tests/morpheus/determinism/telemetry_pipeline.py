@@ -135,6 +135,15 @@ BYPASS_AT_SECONDS = 1500
 BYPASS_PORT = "Gi1/0/2"
 BYPASS_MAC = "de:ad:be:ef:01:01"
 
+IDENTITIES = {
+    "aa:bb:cc:00:00:05": "phone-4021",
+    "aa:bb:cc:00:00:06": "desk-4021",
+    "de:ad:be:ef:01:01": "unknown-supplicant",
+    "de:ad:be:ef:01:02": "unknown-supplicant",
+}
+"""The identity a supplicant presented, where it presented one. A device doing MAC authentication bypass has no
+identity to present, which is what makes `unknown-supplicant` the honest value rather than a blank."""
+
 AUTH_SUPPLICANTS = {PORTS[0]: MAC_A, PORTS[1]: MAC_B, PORTS[2]: MAC_C}
 """Which device authenticates on each port, matching the MAC table the same corpus reports.
 
@@ -388,6 +397,10 @@ def _build_auth(rng: random.Random) -> pd.DataFrame:
             "switch_id": SWITCH,
             "port_id": port,
             "mac_address": supplicant,
+            # The identity half of the supplicant. R-D-L2-005 names it on the alert, and the stage prefers it to
+            # the MAC when both are present, so a corpus without one leaves both the fallback and the alert's
+            # identity column uncovered.
+            "dot1x_identity": IDENTITIES.get(supplicant, supplicant),
             "dot1x_result": result,
             **_envelope(rng, "radius", "TC-2/1.0.0", seq),
         })
@@ -438,11 +451,26 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+CHAIN_ANCHORS = {
+    "tc1": "entity_key",
+    "tc2_mac": "port_key",
+    "tc2_arp": "arp_sender_ip",
+    "tc2_auth": "auth_port_key",
+}
+"""What each class's correlation chain is rooted on.
+
+There is no single anchor across the classes, and pretending otherwise would be the fabrication the null-key rule
+exists to prevent. A layer 1 sample is about a port, so its chain is anchored on the port's `entity_key`; an ARP
+observation is about the address being claimed; an 802.1X exchange is about the port it authorized. The binding
+class has no entry because it is not sealed into windows at all."""
+
+
 def _run_class(config: Config,
                dataframes: list[pd.DataFrame],
                stages: list,
                impose_order: bool,
-               seal: bool = True) -> pd.DataFrame:
+               seal: bool = True,
+               anchor: str = None) -> pd.DataFrame:
     """Source → stamp → (total order) → the class's stages → (window seal) → sink, collected to one frame."""
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
@@ -459,7 +487,8 @@ def _run_class(config: Config,
             WindowSealStage(config,
                             period_seconds=PERIOD_SECONDS,
                             lateness_seconds=LATENESS_SECONDS,
-                            order_columns=list(DEFAULT_ORDER_COLUMNS)))
+                            order_columns=list(DEFAULT_ORDER_COLUMNS),
+                            entity_key_column=anchor))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
@@ -516,10 +545,14 @@ def run_pipeline(config: Config,
                                     TC1FlapStage(config, last_change_column="if_last_change", last_change_unit="cs"),
                                     TC1ChangeStage(config),
                                 ],
-                                impose_order)
+                                impose_order,
+                                anchor=CHAIN_ANCHORS["tc1"])
 
     # Layer 2, from the same snapshots: the cardinality features, and the closed bindings.
-    outputs["tc2_mac"] = _run_class(config, batches["tc2_mac"], [TC2CardinalityStage(config)], impose_order)
+    outputs["tc2_mac"] = _run_class(config,
+                                    batches["tc2_mac"], [TC2CardinalityStage(config)],
+                                    impose_order,
+                                    anchor=CHAIN_ANCHORS["tc2_mac"])
     bindings = _run_class(config, batches["tc2_mac"], [TC2BindingStage(config)], impose_order, seal=False)
 
     bindings["row_key"] = [
@@ -544,9 +577,13 @@ def run_pipeline(config: Config,
                                  },
                                  uid_column="binding_uid"),
         ],
-        impose_order)
+        impose_order,
+        anchor=CHAIN_ANCHORS["tc2_arp"])
 
-    outputs["tc2_auth"] = _run_class(config, batches["tc2_auth"], [TC2AuthStage(config)], impose_order)
+    outputs["tc2_auth"] = _run_class(config,
+                                     batches["tc2_auth"], [TC2AuthStage(config)],
+                                     impose_order,
+                                     anchor=CHAIN_ANCHORS["tc2_auth"])
 
     frames = []
 

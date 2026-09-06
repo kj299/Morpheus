@@ -224,6 +224,53 @@ def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, p
 
 
 @pytest.mark.cpu_mode
+def test_a_chain_is_one_entity_inside_one_window(result: pd.DataFrame):
+    # `lineage_id` is the field all four shipped detections already select, and until now nothing populated it.
+    # What it has to mean: the events that would be correlated together carry one identifier, and events that
+    # would not, do not. Anything weaker makes the column decoration.
+    for (name, anchor) in tp.CHAIN_ANCHORS.items():
+        rows = _rows(result, name)
+        chained = rows[rows["lineage_id"].notna()]
+
+        assert len(chained) > 0, name
+
+        per_window = chained.groupby([anchor, "window_id"])["lineage_id"].nunique()
+        assert per_window.max() == 1, f"{name}: one entity in one window carried more than one chain"
+
+        # And the identifier separates windows, or a rule reading it would correlate across a boundary the
+        # windowing exists to draw.
+        spanning = chained.groupby(anchor)["window_id"].nunique()
+
+        if ((spanning > 1).any()):
+            entity = spanning[spanning > 1].index[0]
+            walked = chained[chained[anchor] == entity]
+
+            assert walked["lineage_id"].nunique() == walked["window_id"].nunique(), (
+                f"{name}: {entity} carried the same chain across two windows")
+
+
+@pytest.mark.cpu_mode
+def test_the_class_that_is_not_sealed_carries_no_chain(result: pd.DataFrame):
+    # The bindings never enter a window, so there is no chain for them to belong to. A blank column is the honest
+    # answer; a fabricated one would be worse than the gap this step set out to close.
+    assert _rows(result, "tc2_binding")["lineage_id"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_a_chain_survives_a_permutation_of_its_own_events(corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
+    # The chain root is a Merkle root over the members, which deduplicates and sorts, so membership rather than
+    # arrival order decides it. Control 13's own permutation check covers the whole frame; this says the property
+    # the identifier depends on is the reason.
+    shuffled = tp.run_pipeline(tp.build_pipeline_config(), _permuted(corpus, 1))
+
+    for name in tp.CHAIN_ANCHORS:
+        before = set(_rows(result, name)["lineage_id"].dropna())
+        after = set(_rows(shuffled, name)["lineage_id"].dropna())
+
+        assert before == after, f"{name}: permuting the input changed which chains exist"
+
+
+@pytest.mark.cpu_mode
 def test_a_mac_resolves_to_the_port_layer_1_knows(result: pd.DataFrame):
     # The ladder's first arrow, end to end: layer 2 closed the binding, the table was built from it, the ARP stream
     # resolved through it, and the port it landed on is a string layer 1 actually emitted for that port.
