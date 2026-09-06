@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# One Splunk instance, the app mounted, and the sample events on disk ready to index.
+#
+# This exists so the search-head verdict costs minutes rather than an afternoon of setup. It is not a deployment
+# topology: a real estate parses on indexers or heavy forwarders and this is one container doing everything.
+
+services:
+  splunk:
+    image: splunk/splunk:10.2
+    container_name: morpheus-lineage-validate
+    environment:
+      SPLUNK_START_ARGS: --accept-license
+      SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:-changeme-please}
+      # The app is mounted rather than copied so an edit to a saved search is one restart away from being tested.
+      SPLUNK_APPS_URL: ""
+    ports:
+      - "8000:8000"   # web
+      - "8089:8089"   # management, which VALIDATION.md drives the searches through
+    volumes:
+      - ../TA-morpheus-lineage:/opt/splunk/etc/apps/TA-morpheus-lineage:ro
+      - ./sample_events:/sample_events:ro
+      - ./indexes.conf:/opt/splunk/etc/apps/TA-morpheus-lineage/local/indexes.conf:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:8089/services/server/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 30

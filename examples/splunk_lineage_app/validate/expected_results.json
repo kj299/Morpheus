@@ -1,0 +1,69 @@
+{
+  "description": "What each shipped saved search should return when the app is deployed against sample_events/. Generated numbers come from the same run_pipeline the determinism tests call; the expected-empty entries are stated with the reason, because a search returning nothing is the failure mode this whole app is careful about and it must be possible to tell a correct empty from a broken one.",
+  "corpus": "tests/morpheus/determinism/telemetry_pipeline.py and lineage_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
+  "searches": {
+    "R-D-L2-001 - MAC address count exceeded on an access port": {
+      "expected_rows": 0,
+      "expected_empty": true,
+      "why": "The rule joins port_designations, which ships header-only. Until an inventory populates it the lookup returns nothing and the join yields nothing. 11 candidate rows carry macs_per_port_first_in_window=true, so a non-zero result after populating the lookup is the signal that the join works.",
+      "candidate_rows_before_the_lookup": 11
+    },
+    "R-D-L2-003 - ARP anomaly": {
+      "expected_rows": 1,
+      "why": "The search aggregates BY arp_sender_ip, so the 24 contested observations collapse to one notable for the one address that is contested by two MACs.",
+      "contributing_rows": 24,
+      "key_values": {
+        "arp_sender_ip": "10.0.0.1"
+      }
+    },
+    "R-D-L2-004 - MAC in two places at once": {
+      "expected_rows": 2,
+      "why": "One address claimed on a peer switch inside a single poll sweep (conflict, zero gap) and one displaced two seconds later. Both are inside the 60-second threshold. The roaming device, displaced a whole poll cadence later, is deliberately outside it.",
+      "key_values": [
+        {"mac_address": "aa:bb:cc:00:00:01", "port_key": "hq:sw1:Gi1/0/1", "bind_end_reason": "conflict", "gap_seconds": 0.0},
+        {"mac_address": "aa:bb:cc:00:00:02", "port_key": "hq:sw1:Gi1/0/2", "bind_end_reason": "displaced", "gap_seconds": 2.0}
+      ]
+    },
+    "R-D-L2-005 - Authorization without authentication": {
+      "expected_rows": 2,
+      "why": "One authorization on a port whose own exchanges were long finished, and one that arrived while a legitimate exchange on its port was still open. The second only appears because exchanges are keyed by device; keyed by port it would have paired with the innocent device's request.",
+      "key_values": [
+        {"mac_address": "de:ad:be:ef:01:01", "dot1x_identity": "unknown-supplicant"},
+        {"mac_address": "de:ad:be:ef:01:02", "dot1x_identity": "unknown-supplicant"}
+      ]
+    },
+    "R-C-002 - TLS anomaly precedes beaconing": {
+      "expected_rows": 0,
+      "expected_empty": true,
+      "why": "A cross-layer rule needing layer 4 and layer 7 telemetry. Neither class exists in this fork, so no event can satisfy either half of the correlation. Empty here is correct and will stay correct until those classes ship."
+    },
+    "Behavior summary - per-layer scores": {
+      "expected_rows": 0,
+      "expected_empty": true,
+      "why": "Reads max_abs_z, which no shipped stage emits: the scoring path above layer 2 is design. This can never receive a row until a third layer ships, which is why it is listed here rather than treated as a defect."
+    },
+    "Chain assembly - cross-layer risk": {
+      "expected_rows": 0,
+      "expected_empty": true,
+      "why": "Aggregates across osi_layer and fires on a span of layers. Only layers 1 and 2 produce events, and the rule's own threshold needs more, so the same answer as Behavior summary and for the same reason."
+    },
+    "Binding lookup - L2/L3 refresh": {
+      "expected_rows": 80,
+      "why": "One row per key per five-minute bucket from binding_bucketed.jsonlines, written into the binding_l2_l3 KV Store collection. Every row carries binding_table=dhcp_lease, which is what the search filters on; a zero here means the producer stopped emitting that field and the lookup has quietly stopped being refreshed."
+    },
+    "Binding lookup - L1 refresh": {
+      "expected_rows": 0,
+      "expected_empty": true,
+      "why": "Reads sourcetype=binding:l1, which nothing in this fork produces. It needs a layer 1 inventory feed: switch port to site, transceiver and LLDP neighbour. Recorded in morpheus.utils.siem_sourcetypes as unproduced."
+    },
+    "Binding lookup - L2/L3 expiry": {
+      "expected_rows": 0,
+      "expected_empty": true,
+      "why": "A maintenance search that deletes buckets older than the retention window. On a freshly loaded corpus nothing is old enough to expire, so an empty result is the correct one."
+    },
+    "Binding health - unresolved rate": {
+      "expected_rows": 1,
+      "why": "One summary row over the ARP stream's resolution outcomes. This is an operational health metric rather than a detection, and it is the one search whose value is in the number rather than in whether it fired."
+    }
+  }
+}

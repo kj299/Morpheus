@@ -1,0 +1,176 @@
+#!/usr/bin/env python
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""
+The search-head validation package has to still be true when someone reads it.
+
+An expectations file goes stale silently. Someone changes a corpus, the numbers in the document stop matching what
+a deployment would see, and the next person to run the validation cannot tell a real disagreement from a document
+nobody updated -- which is worse than having no expectations at all, because it looks authoritative.
+
+So the counts are checked against what the pipeline actually produces, and the checked-in sample events against a
+fresh generation. What cannot be checked here is Splunk: this asserts the expectation is honest, not that a search
+head agrees with it.
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+import pandas as pd
+import pytest
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+VALIDATE = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "validate")
+EXPECTED = os.path.join(VALIDATE, "expected_results.json")
+EVENTS = os.path.join(VALIDATE, "sample_events")
+GENERATOR = os.path.join(VALIDATE, "make_sample_events.py")
+SAVEDSEARCHES = os.path.join(REPO_ROOT,
+                             "examples",
+                             "splunk_lineage_app",
+                             "TA-morpheus-lineage",
+                             "default",
+                             "savedsearches.conf")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# pylint: disable=wrong-import-position
+import telemetry_pipeline as tp  # noqa: E402
+
+GAP_THRESHOLD_NS = 60 * 10**9
+
+
+@pytest.fixture(name="expected", scope="module")
+def expected_fixture() -> dict:
+    with open(EXPECTED, encoding="utf-8") as handle:
+        yield json.load(handle)
+
+
+@pytest.fixture(name="telemetry", scope="module")
+def telemetry_fixture() -> pd.DataFrame:
+    yield tp.run_pipeline(tp.build_pipeline_config(), tp.build_corpus())
+
+
+def _searches() -> set:
+    import configparser
+    import re
+
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
+
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.read_string(folded)
+
+    return {name for name in parser.sections() if parser.has_option(name, "search")}
+
+
+def test_every_shipped_search_has_a_written_expectation(expected: dict):
+    # A search with no entry is one nobody has said what to expect from, which on this app means nobody can tell
+    # its correct empty result from a broken one.
+    assert set(expected["searches"]) == _searches()
+
+
+def test_the_detections_return_exactly_what_is_written(expected: dict, telemetry: pd.DataFrame):
+    scored = telemetry[telemetry["telemetry_class"].isin(["tc1", "tc2_mac", "tc2_arp", "tc2_auth"])]
+    bindings = telemetry[telemetry["telemetry_class"] == "tc2_binding"]
+
+    contested = scored[(scored["macs_claiming_sender_ip"].fillna(0) > 1) & (scored["arp_sender_ip_excluded"] == False)]  # noqa: E712  pylint: disable=singleton-comparison
+    spoofs = bindings[bindings["bind_end_reason"].isin(["conflict", "displaced"])
+                      & (bindings["bind_gap_ns"] <= GAP_THRESHOLD_NS)]
+    bypasses = scored[scored["auth_unpaired"] == True]  # noqa: E712  pylint: disable=singleton-comparison
+
+    searches = expected["searches"]
+
+    # R-D-L2-003 aggregates by sender address, so what an analyst sees is one notable per contested address.
+    assert searches["R-D-L2-003 - ARP anomaly"]["contributing_rows"] == len(contested)
+    assert searches["R-D-L2-003 - ARP anomaly"]["expected_rows"] == contested["arp_sender_ip"].nunique()
+    assert searches["R-D-L2-003 - ARP anomaly"]["key_values"]["arp_sender_ip"] in set(contested["arp_sender_ip"])
+
+    assert searches["R-D-L2-004 - MAC in two places at once"]["expected_rows"] == len(spoofs)
+    written = {(row["mac_address"], row["port_key"], row["bind_end_reason"])
+               for row in searches["R-D-L2-004 - MAC in two places at once"]["key_values"]}
+    assert written == set(zip(spoofs["mac_address"], spoofs["port_key"], spoofs["bind_end_reason"]))
+
+    assert searches["R-D-L2-005 - Authorization without authentication"]["expected_rows"] == len(bypasses)
+    named = {row["mac_address"] for row in searches["R-D-L2-005 - Authorization without authentication"]["key_values"]}
+    assert named == set(bypasses["mac_address"])
+
+    # R-D-L2-001 is gated by a lookup that ships header-only, so it must expect nothing and say how many rows are
+    # waiting behind the gate. A non-zero expectation here would be a claim the app cannot keep.
+    first_in_window = int((scored["macs_per_port_first_in_window"] == True).sum())  # noqa: E712  pylint: disable=singleton-comparison
+    assert searches["R-D-L2-001 - MAC address count exceeded on an access port"]["expected_rows"] == 0
+    assert searches["R-D-L2-001 - MAC address count exceeded on an access port"][
+        "candidate_rows_before_the_lookup"] == first_in_window
+
+
+def test_every_expected_empty_search_says_why(expected: dict):
+    empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
+
+    # Six of eleven. That ratio is the honest state of this app, and stating it is the package's main job.
+    assert len(empty) == 6
+
+    for (name, entry) in empty.items():
+        assert entry["expected_rows"] == 0, name
+        assert len(entry["why"]) > 60, f"{name}: an expected-empty search needs a reason, not a shrug"
+
+
+def _event_files() -> dict:
+    files = {}
+
+    for name in sorted(os.listdir(EVENTS)):
+        with open(os.path.join(EVENTS, name), encoding="utf-8") as handle:
+            files[name] = handle.read()
+
+    return files
+
+
+def test_the_checked_in_events_are_what_the_pipeline_produces():
+    # Regenerating must be a no-op. If it is not, what a SIEM would receive has changed and the diff belongs in a
+    # pull request rather than being discovered on a search head.
+    before = _event_files()
+    completed = subprocess.run([sys.executable, GENERATOR],
+                               capture_output=True,
+                               text=True,
+                               check=False,
+                               timeout=900,
+                               cwd=REPO_ROOT)
+
+    assert completed.returncode == 0, completed.stderr[-3000:]
+
+    after = _event_files()
+
+    assert set(before) == set(after)
+
+    for (name, content) in before.items():
+        assert content == after[name], f"{name} changed; regenerate and review the diff"
+
+
+def test_the_conformance_runner_refuses_without_a_device():
+    # The runner's own guard, asserted here because the failure it prevents is a green run that checked nothing.
+    # It must exit non-zero and say why, in this container, where there is no GPU.
+    runner = os.path.join(REPO_ROOT, "ci", "scripts", "gpu_conformance.sh")
+
+    assert os.access(runner, os.X_OK), "the runner must be executable or the one command is not one command"
+
+    completed = subprocess.run([runner, str(os.path.join(REPO_ROOT, "build", "gpu_conformance_probe.json"))],
+                               capture_output=True,
+                               text=True,
+                               check=False,
+                               timeout=600,
+                               cwd=REPO_ROOT)
+
+    assert completed.returncode != 0, "a machine with no GPU must not report a passing GPU verdict"
+    assert "no CUDA device" in completed.stdout + completed.stderr
