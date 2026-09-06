@@ -90,6 +90,12 @@ IGNORE_COLUMNS: list[str] = []
 SITE = "hq"
 SWITCH = "sw1"
 REBOOTING_SWITCH = "sw2"
+# A numeric VLAN, which is what a real MAC-table feed sends. Sent as a string it could never exercise the
+# widening this corpus exists to catch: `vlan_id` is the entity `ouis_per_vlan` counts by, and one row with a
+# null VLAN widens the column to float, so VLAN 10 would render as `10.0` and fork into a second entity whose
+# OUI count restarts. Which rows are in which batch would then decide the answer.
+VLAN = 10
+
 PEER_SWITCH = "sw3"
 PORTS = ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"]
 PEER_PORTS = ["Gi3/0/1", "Gi3/0/2", "Gi3/0/3"]
@@ -127,6 +133,41 @@ TAP_LOSS_DB = 3.0
 FLAP_AT_MINUTE = 20
 BYPASS_AT_SECONDS = 1500
 BYPASS_PORT = "Gi1/0/2"
+BYPASS_MAC = "de:ad:be:ef:01:01"
+
+IDENTITIES = {
+    "aa:bb:cc:00:00:05": "phone-4021",
+    "aa:bb:cc:00:00:06": "desk-4021",
+    "de:ad:be:ef:01:01": "unknown-supplicant",
+    "de:ad:be:ef:01:02": "unknown-supplicant",
+}
+"""The identity a supplicant presented, where it presented one. A device doing MAC authentication bypass has no
+identity to present, which is what makes `unknown-supplicant` the honest value rather than a blank."""
+
+AUTH_SUPPLICANTS = {PORTS[0]: MAC_A, PORTS[1]: MAC_B, PORTS[2]: MAC_C}
+"""Which device authenticates on each port, matching the MAC table the same corpus reports.
+
+The guide's TC-2 required-field list mandates a supplicant identifier, and without one `TC2AuthStage` falls back to
+timing exchanges per port -- a documented degraded mode this corpus used to run in, which meant no composed check
+ever exercised the keying that a shared port depends on."""
+
+MULTI_DOMAIN_PORT = "Gi1/0/4"
+PHONE_MAC = "aa:bb:cc:00:00:05"
+DESK_MAC = "aa:bb:cc:00:00:06"
+MULTI_DOMAIN_AT_SECONDS = 1200
+"""A Cisco multi-domain access port: a phone with a workstation behind it, which is a standard configuration and
+not an anomaly. Both authenticate and their outcomes arrive in the other order. Timed per port, the workstation's
+accept closes the phone's exchange and the phone's own accept then has nothing to pair with, so R-D-L2-005 fires on
+a legitimate device once per reauthentication."""
+
+CONCURRENT_BYPASS_PORT = "Gi1/0/5"
+CONCURRENT_BYPASS_MAC = "de:ad:be:ef:01:02"
+LEGIT_SUPPLICANT_MAC = "aa:bb:cc:00:00:07"
+CONCURRENT_BYPASS_AT_SECONDS = 2100
+"""The harder bypass, and the one that matters more: a rogue authorized while a legitimate exchange on the same
+port is still open. Timed per port it pairs with the innocent device's request, reads as an ordinary authorized
+session, and the signal the rule exists for disappears. Neither of these ports is in `SINGLE_HOST_PORTS`, so they
+say nothing to R-D-L2-001."""
 
 SWEEP_OFFSET_SECONDS = 2
 """How long after the first switch the poller reaches the peer. This is the whole point of the second switch: the
@@ -252,7 +293,7 @@ def _build_mac_snapshots(rng: random.Random) -> pd.DataFrame:
                 "site_id": SITE,
                 "switch_id": SWITCH,
                 "port_id": port,
-                "vlan_id": "10",
+                "vlan_id": VLAN,
                 **_envelope(rng, "mac-table", "TC-2/1.0.0", seq),
             })
 
@@ -269,7 +310,7 @@ def _build_mac_snapshots(rng: random.Random) -> pd.DataFrame:
                 "site_id": SITE,
                 "switch_id": PEER_SWITCH,
                 "port_id": port,
-                "vlan_id": "10",
+                "vlan_id": VLAN,
                 **_envelope(rng, "mac-table", "TC-2/1.0.0", seq),
             })
 
@@ -314,24 +355,52 @@ def _build_arp(rng: random.Random) -> pd.DataFrame:
 
 
 def _build_auth(rng: random.Random) -> pd.DataFrame:
-    """802.1X exchanges per port, plus one success that nothing preceded."""
-    events: list[tuple[int, str, str]] = []
+    """
+    802.1X exchanges, every one naming the device being authorized.
+
+    Four shapes: the routine exchange on a single-host port, one authorization nothing preceded, a multi-domain
+    port carrying two supplicants whose outcomes interleave, and a bypass that lands while a legitimate exchange
+    on the same port is still open. The last two are the cases where timing an exchange per port rather than per
+    device is wrong in each direction -- a false positive on the phone, and a false negative on the rogue.
+    """
+    events: list[tuple[int, str, str, str]] = []
 
     for (index, port) in enumerate(PORTS):
-        for time_s in range(60 + index * 7, CORPUS_SECONDS, 900):
-            events.append((time_s, port, "started"))
-            events.append((time_s + 3 + index, port, "success"))
+        supplicant = AUTH_SUPPLICANTS[port]
 
-    events.append((BYPASS_AT_SECONDS, BYPASS_PORT, "success"))
+        for time_s in range(60 + index * 7, CORPUS_SECONDS, 900):
+            events.append((time_s, port, "started", supplicant))
+            events.append((time_s + 3 + index, port, "success", supplicant))
+
+    # An authorization with nothing in front of it, on a port whose own exchanges are long finished.
+    events.append((BYPASS_AT_SECONDS, BYPASS_PORT, "success", BYPASS_MAC))
+
+    # The phone authenticates first and is authorized last, because the workstation behind it answered quicker.
+    events.append((MULTI_DOMAIN_AT_SECONDS, MULTI_DOMAIN_PORT, "started", PHONE_MAC))
+    events.append((MULTI_DOMAIN_AT_SECONDS + 1, MULTI_DOMAIN_PORT, "started", DESK_MAC))
+    events.append((MULTI_DOMAIN_AT_SECONDS + 11, MULTI_DOMAIN_PORT, "success", DESK_MAC))
+    events.append((MULTI_DOMAIN_AT_SECONDS + 12, MULTI_DOMAIN_PORT, "success", PHONE_MAC))
+
+    # The rogue is authorized mid-exchange; the legitimate device is authorized afterwards and must still be timed
+    # against its own request rather than against whatever happened in between.
+    events.append((CONCURRENT_BYPASS_AT_SECONDS, CONCURRENT_BYPASS_PORT, "started", LEGIT_SUPPLICANT_MAC))
+    events.append((CONCURRENT_BYPASS_AT_SECONDS + 10, CONCURRENT_BYPASS_PORT, "success", CONCURRENT_BYPASS_MAC))
+    events.append((CONCURRENT_BYPASS_AT_SECONDS + 20, CONCURRENT_BYPASS_PORT, "success", LEGIT_SUPPLICANT_MAC))
+
     events.sort(key=lambda event: event[0])
     rows = []
 
-    for (seq, (time_s, port, result)) in enumerate(events, start=1):
+    for (seq, (time_s, port, result, supplicant)) in enumerate(events, start=1):
         rows.append({
             "event_time": time_s * NS_PER_SECOND,
             "site_id": SITE,
             "switch_id": SWITCH,
             "port_id": port,
+            "mac_address": supplicant,
+            # The identity half of the supplicant. R-D-L2-005 names it on the alert, and the stage prefers it to
+            # the MAC when both are present, so a corpus without one leaves both the fallback and the alert's
+            # identity column uncovered.
+            "dot1x_identity": IDENTITIES.get(supplicant, supplicant),
             "dot1x_result": result,
             **_envelope(rng, "radius", "TC-2/1.0.0", seq),
         })
@@ -382,11 +451,26 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+CHAIN_ANCHORS = {
+    "tc1": "entity_key",
+    "tc2_mac": "port_key",
+    "tc2_arp": "arp_sender_ip",
+    "tc2_auth": "auth_port_key",
+}
+"""What each class's correlation chain is rooted on.
+
+There is no single anchor across the classes, and pretending otherwise would be the fabrication the null-key rule
+exists to prevent. A layer 1 sample is about a port, so its chain is anchored on the port's `entity_key`; an ARP
+observation is about the address being claimed; an 802.1X exchange is about the port it authorized. The binding
+class has no entry because it is not sealed into windows at all."""
+
+
 def _run_class(config: Config,
                dataframes: list[pd.DataFrame],
                stages: list,
                impose_order: bool,
-               seal: bool = True) -> pd.DataFrame:
+               seal: bool = True,
+               anchor: str = None) -> pd.DataFrame:
     """Source → stamp → (total order) → the class's stages → (window seal) → sink, collected to one frame."""
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
@@ -403,7 +487,8 @@ def _run_class(config: Config,
             WindowSealStage(config,
                             period_seconds=PERIOD_SECONDS,
                             lateness_seconds=LATENESS_SECONDS,
-                            order_columns=list(DEFAULT_ORDER_COLUMNS)))
+                            order_columns=list(DEFAULT_ORDER_COLUMNS),
+                            entity_key_column=anchor))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
@@ -460,10 +545,14 @@ def run_pipeline(config: Config,
                                     TC1FlapStage(config, last_change_column="if_last_change", last_change_unit="cs"),
                                     TC1ChangeStage(config),
                                 ],
-                                impose_order)
+                                impose_order,
+                                anchor=CHAIN_ANCHORS["tc1"])
 
     # Layer 2, from the same snapshots: the cardinality features, and the closed bindings.
-    outputs["tc2_mac"] = _run_class(config, batches["tc2_mac"], [TC2CardinalityStage(config)], impose_order)
+    outputs["tc2_mac"] = _run_class(config,
+                                    batches["tc2_mac"], [TC2CardinalityStage(config)],
+                                    impose_order,
+                                    anchor=CHAIN_ANCHORS["tc2_mac"])
     bindings = _run_class(config, batches["tc2_mac"], [TC2BindingStage(config)], impose_order, seal=False)
 
     bindings["row_key"] = [
@@ -488,9 +577,13 @@ def run_pipeline(config: Config,
                                  },
                                  uid_column="binding_uid"),
         ],
-        impose_order)
+        impose_order,
+        anchor=CHAIN_ANCHORS["tc2_arp"])
 
-    outputs["tc2_auth"] = _run_class(config, batches["tc2_auth"], [TC2AuthStage(config)], impose_order)
+    outputs["tc2_auth"] = _run_class(config,
+                                     batches["tc2_auth"], [TC2AuthStage(config)],
+                                     impose_order,
+                                     anchor=CHAIN_ANCHORS["tc2_auth"])
 
     frames = []
 

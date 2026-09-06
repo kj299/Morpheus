@@ -86,3 +86,36 @@ def test_only_numbers_are_renumbered():
     assert normalize_text("5.0") == "5.0"
     assert normalize_text("007") == "007"
     assert normalize_text(True) == "True"
+
+
+def test_every_site_that_normalizes_a_value_uses_this_rule():
+    """
+    The rule is only worth having if nothing keeps a private copy of it.
+
+    Each of these sites normalizes a value that identifies something: a VLAN that `ouis_per_vlan` counts by, an
+    802.1X outcome that decides whether an exchange opens or closes, and the attributes that break a tie between
+    two bindings covering the same instant. Each had, or could grow, its own `str(value).strip()`, and the copies
+    do not fail loudly -- they fail by renaming an entity, or by turning a missing value into the string `"<NA>"`.
+    """
+    # Imported here rather than at module scope: this file is about the rule, and only this test is about who
+    # uses it.
+    from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
+    from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
+
+    for normalize in (TC2CardinalityStage._text, TC2AuthStage._text):  # pylint: disable=protected-access
+        assert normalize(10) == normalize(10.0) == normalize("10") == "10"
+        assert normalize(pd.NA) is None
+        assert normalize("") is None
+        assert normalize("  accept  ") == "accept"
+
+
+def test_two_bindings_differing_only_in_dtype_break_ties_the_same_way():
+    # The binding table's tie-break renders attributes with the same rule, so a column widened to float by some
+    # other row cannot pick a different winner depending on where the batch was cut.
+    from morpheus.utils.binding_table import Binding
+    from morpheus.utils.binding_table import _sort_key  # pylint: disable=protected-access
+
+    integral = Binding(key="10.0.0.1", start_ns=0, end_ns=100, values=(10, ), uid="a")
+    widened = Binding(key="10.0.0.1", start_ns=0, end_ns=100, values=(10.0, ), uid="b")
+
+    assert _sort_key(integral) == _sort_key(widened)

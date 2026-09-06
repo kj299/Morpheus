@@ -26,6 +26,8 @@ a SIEM.
 import hashlib
 import typing
 
+from morpheus.utils.entity_key import render_integral
+
 UNIT_SEPARATOR = "\x1f"
 """
 Delimiter placed between fields before hashing.
@@ -41,6 +43,24 @@ _LEAF_PREFIX = b"\x00"
 _NODE_PREFIX = b"\x01"
 
 
+def _render_part(value: typing.Any) -> str:
+    """
+    Render one field of a content-addressed identifier, so the identifier does not depend on the field's dtype.
+
+    `event_uid` promises that "the same record produces the same identifier no matter how it arrives", and `str`
+    alone cannot keep that promise. A collector sequence of 3 hashes differently from one of 3.0, and which of
+    those a row carries is decided by whether some *other* row in the batch was missing the field -- one null
+    widens the column and renames every record in it. The same applies to a binding's attributes, and there the
+    identifier is what lets a resolution be traced back to the record that produced it.
+
+    Only whole numbers are affected. Every other value renders exactly as it did, so identifiers computed before
+    this existed are unchanged unless they were computed over a widened column, which is the defect.
+    """
+    rendered = render_integral(value)
+
+    return str(value) if rendered is None else rendered
+
+
 def _digest(parts: typing.Iterable[typing.Any], digest_length: int = DEFAULT_DIGEST_LENGTH) -> str:
     """
     Hash a field sequence into a truncated hexadecimal SHA-256 digest.
@@ -48,7 +68,8 @@ def _digest(parts: typing.Iterable[typing.Any], digest_length: int = DEFAULT_DIG
     Parameters
     ----------
     parts : iterable
-        Fields to hash. Each is converted with `str` and joined with `UNIT_SEPARATOR`.
+        Fields to hash, joined with `UNIT_SEPARATOR`. A whole number renders as an integer whatever
+        numeric type carries it; everything else renders with `str`.
     digest_length : int, default = 32
         Number of hexadecimal characters to retain. Must be between 1 and 64.
 
@@ -60,7 +81,7 @@ def _digest(parts: typing.Iterable[typing.Any], digest_length: int = DEFAULT_DIG
     if (not 1 <= digest_length <= 64):
         raise ValueError(f"digest_length must be between 1 and 64, received {digest_length}")
 
-    payload = UNIT_SEPARATOR.join(str(part) for part in parts)
+    payload = UNIT_SEPARATOR.join(_render_part(part) for part in parts)
 
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:digest_length]
 

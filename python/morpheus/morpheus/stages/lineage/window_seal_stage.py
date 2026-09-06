@@ -30,8 +30,12 @@ from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_frame
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.lineage import lineage_id
+from morpheus.utils.lineage import merkle_root
 from morpheus.utils.window_seal import SEALED_BY_FLUSH
 from morpheus.utils.window_seal import SEALED_BY_WATERMARK
 from morpheus.utils.window_seal import WindowSealer
@@ -98,6 +102,16 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     seal_on_complete : bool, default = True
         Whether windows still open when the stream ends are emitted with `sealed_by = "flush"`. When False they are
         discarded, which is only appropriate when a resumed pipeline will observe the same rows again.
+    entity_key_column : str, optional
+        Column anchoring a correlation chain. When given, each sealed window stamps `lineage_id_column` with the
+        identifier of the chain the row belongs to: one entity's events inside one window. Left unset, no chain
+        identifier is emitted, which is what a pipeline whose rows have no single subject should do rather than
+        inventing one.
+    uid_column : str, default = "event_uid"
+        Column holding each row's event identifier, which `LineageStampStage` writes. The chain's root is the
+        Merkle root over these, so the identifier depends on chain membership rather than arrival order.
+    lineage_id_column : str, default = "lineage_id"
+        Column the chain identifier is written to. This is the field the shipped detections already select.
     raise_on_invalid : bool, default = False
         When True a row with an uninterpretable event time fails the batch instead of being emitted flagged.
     """
@@ -111,7 +125,10 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_unit: str = "ns",
                  order_columns: list[str] = None,
                  seal_on_complete: bool = True,
-                 raise_on_invalid: bool = False):
+                 raise_on_invalid: bool = False,
+                 entity_key_column: str = None,
+                 uid_column: str = "event_uid",
+                 lineage_id_column: str = "lineage_id"):
         super().__init__(c)
 
         if (period_seconds <= 0):
@@ -133,6 +150,10 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._order_columns = list(order_columns) if order_columns is not None else None
         self._seal_on_complete = seal_on_complete
         self._raise_on_invalid = raise_on_invalid
+        self._entity_key_column = entity_key_column
+        self._uid_column = uid_column
+        self._lineage_id_column = lineage_id_column
+        self._warned_no_lineage = False
 
         # Buffered on-time rows per open window, as pandas fragments in arrival order.
         self._buffers: dict[int, list[pd.DataFrame]] = {}
@@ -149,6 +170,9 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         })
 
         # Mark this stage to log timestamps if requested
+        if (entity_key_column is not None):
+            self._needed_columns[lineage_id_column] = TypeId.STRING
+
         self._should_log_timestamps = True
 
     @property
@@ -186,6 +210,51 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         return meta
 
+    def _stamp_lineage(self, df: pd.DataFrame, window_id: int):
+        """
+        Give every row the identifier of the correlation chain it belongs to.
+
+        A chain is one entity's events inside one window, so the identifier is a function of the entity, the
+        window, and the set of event identifiers that made it up. `merkle_root` deduplicates and sorts, so the
+        root depends on chain membership alone -- not on arrival order, not on how the input was batched, and not
+        on which fragment a row arrived in. That is what lets two events on one entity in one window carry the
+        same `lineage_id` after a replay that delivered them in a different order.
+
+        The anchor column is a parameter because what a chain is rooted on is a per-class fact: a layer 1 sample
+        is anchored on its port's `entity_key`, an ARP observation on the address being claimed, an 802.1X
+        exchange on the port it authorized. A row whose anchor or event identifier is missing gets a null chain
+        identifier rather than being pooled under a fabricated one, which is the same rule the entity keys follow.
+        """
+        if (self._entity_key_column is None):
+            return
+
+        missing = [name for name in (self._entity_key_column, self._uid_column) if name not in df.columns]
+
+        if (len(missing) > 0):
+            if (not self._warned_no_lineage):
+                self._warned_no_lineage = True
+                logger.warning(
+                    "WindowSealStage cannot stamp %r because %s is absent; sealed windows carry no chain "
+                    "identifier and any detection selecting it will read a blank column.",
+                    self._lineage_id_column,
+                    " and ".join(repr(name) for name in missing))
+
+            return
+
+        keys = [normalize_text(value) for value in to_host_list(df, self._entity_key_column)]
+        uids = [normalize_text(value) for value in to_host_list(df, self._uid_column)]
+        chains: dict[str, list[str]] = {}
+
+        for (key, uid) in zip(keys, uids):
+            if (key is not None and uid is not None):
+                chains.setdefault(key, []).append(uid)
+
+        roots = {key: merkle_root(members) for (key, members) in chains.items()}
+
+        assign_str_column(df,
+                          self._lineage_id_column,
+                          [None if key not in roots else lineage_id(key, window_id, roots[key]) for key in keys])
+
     def _build_window(self,
                       window_id: typing.Optional[int],
                       fragments: list[pd.DataFrame],
@@ -200,6 +269,7 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         if (window_id is not None):
             (start_ns, end_ns) = self._sealer.window_bounds(window_id)
             revision = self._sealer.next_revision(window_id)
+            self._stamp_lineage(df, window_id)
         else:
             (window_id, start_ns, end_ns) = (-1, -1, -1)
             revision = 0

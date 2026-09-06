@@ -881,6 +881,21 @@ identifier under two names, and nothing renames anything. Every telemetry stage 
 `None` in it, so a collector that omits the site does not pool every port with no site under one
 fabricated site. Rows with a null key pass through with their per-entity features null, and the stage logs how many.
 
+Every stage, and no private copies. The rule is small enough to write out by hand, which is exactly the
+danger: a local `str(value).strip()` looks equivalent and is not, and it fails by renaming an entity
+rather than by raising. Two of its clauses cost something real. Rendering a whole number as an integer
+whatever type carries it is what keeps VLAN 10 from becoming `10.0` in the one batch where an unrelated
+row had no VLAN, forking the entity `ouis_per_vlan` counts by and restarting its OUI count, so a flood
+could sit under the threshold depending on where the batch boundary fell. And recognising `pandas.NA` as
+missing matters because a column that admits a gap yields it, and so does a device frame returning to
+the host: a private copy that
+tested only for `None` and NaN rendered a result the collector could not report as the literal string
+`"<NA>"`, which `TC2AuthStage` then read as an outcome rather than the opening of an exchange. The
+outcome closed an exchange that was never opened, `auth_unpaired` came back true on a quiet port, and
+that is R-D-L2-005's firing condition -- a collector omitting one field raised an 802.1X bypass alert.
+`tests/morpheus/utils/test_entity_key.py` asserts each site reaches the same answer as the shared rule,
+so a copy reintroduced later fails there rather than in an analyst's queue.
+
 Inferred ends are placed at the earliest time consistent with the observations rather than the latest,
 which leaves gaps between consecutive bindings. That is the intended behavior: a gap resolves to nothing
 and tells an analyst the answer is unknown, whereas stretching a binding to meet the next one has it
@@ -2446,6 +2461,81 @@ golden output is a checked-in CSV regenerated deliberately, never silently, via
 fresh interpreters with two different `PYTHONHASHSEED` values, which is the variation an in-process
 double run cannot see.
 
+##### Two checks the six do not make
+
+The six checks compare a pipeline against itself and against a golden. Both answer the question "did this change,"
+and both are silent about a question that turned out to matter more: is this parameter connected to anything at
+all? Four defects found by audit in this fork were that shape -- two expiry timeouts stored and never read, an
+exchange key that ignored the supplicant handed to it, and a key rendering that followed the column's dtype
+rather than the value. Each had a docstring, a constructor check, and a test asserting the constructor check.
+None of them did anything, and 831 green tests said nothing about it, because a parameter nothing consults
+produces exactly the output of one that works.
+
+`tests/morpheus/determinism/test_stage_parameter_liveness.py` closes that. It carries a registry of every
+tunable parameter of every stage in the fork, and for each one the evidence that the stage reads it: two values
+over a corpus built to make the parameter bite, whose outcomes must differ; or a renamed input column the stage
+must follow; or a refusal the parameter must cause. A parameter that can be none of those is declared inert in
+writing, with a reason, which is deliberately more effort than making it work. The registry is checked against
+each constructor's signature, so a parameter added later cannot ship without an entry.
+
+The instrument was calibrated against defects whose answer was already known: run it against the audit's own
+baseline commit and `TC2AuthStage.timeout_seconds` and `TC2BindingStage.idle_timeout_seconds` both fail, which
+is what they should have done at the time. It also found one thing on its first pass. `TC1FlapStage`'s
+`last_change_unit` is read, and provably cannot change any output: every branch of the flap counter compares
+this sample's last-change against the previous sample's and never against the event time, and a positive rescale
+preserves all three comparisons. That is not a bug today. It becomes one the moment anything compares the
+converted value against an absolute time, and it is now written down where that change would be made.
+
+`tests/morpheus/utils/test_splunk_field_contracts.py` asks the same question of the other artifact. A search
+naming a field nothing emits does not fail: it returns no rows, or a blank column, and a detection that fires on
+nothing is indistinguishable from one with nothing to find. Three defects in the shipped app were that shape. The
+linter parses every search, resolves each field it reads against what the stages declare, what the golden files record
+the pipelines actually emitting, what the lookups define, and what the search itself creates, and requires
+anything left over to be registered as a known gap, with a reason. There is no search head in this
+repository and there will not be one in CI, so this is the largest share of search-head risk the repo can carry
+by itself.
+
+It found the gap it was written for and two more. `lineage_id` appeared in all four detections' `| table` clauses
+while {py:func}`~morpheus.utils.lineage.lineage_id` had no caller anywhere in the tree, so the column was always
+blank -- the lineage substrate was load-bearing for nothing. It is now computed by
+{py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage` as each window seals: a chain is one
+entity's events inside one window, identified by the entity, the window, and the Merkle root over the members.
+The root deduplicates and sorts, so it depends on membership rather than arrival order, which is what makes the
+identifier survive a replay that delivered the same events differently. What a chain is anchored on is a
+parameter, because it is a per-class fact: a layer 1 sample is about its port, an ARP observation about the
+address being claimed, an 802.1X exchange about the port it authorized. The binding class is not sealed into
+windows at all and carries no chain, which is the honest answer rather than a fabricated one.
+
+The other two were smaller and the same shape. `binding_table` is what the lookup refresh search selects its
+source with, and `to_bucketed_records` emitted it only when a caller passed `table_name`; nothing did, so the
+refresh matched no rows. It now defaults to the table's own name, which the table has been required to have since
+an earlier fix. And `dot1x_identity` is on R-D-L2-005's alert so an analyst can tell which device authorized, and
+the corpus sent none, so the composed pipeline never covered the identity path the stage prefers over the MAC.
+
+`tests/morpheus/determinism/test_representation_invariance.py` is check 6 one level down. Row order must not
+decide the output; neither must the type the values arrived in. Each key-bearing column is presented as an
+integer, a float and a string, along with the shape the defect actually takes -- a column widened to float
+because one row in the batch had nothing in it -- and the answer must be the same each time, including when the
+representation changes at a batch boundary.
+
+The claim is about derived values, not echoed ones. A stage passes its input columns through, so a collector that
+sends a float gets a float back and that is not a defect; what may not vary is anything computed from the value.
+Drawing that line is what made the check say something, because it found two places where a derived value did
+vary, both on its first run.
+
+The first was in `event_uid` itself, which promises in its own docstring that "the same record produces the same
+identifier no matter how it arrives" and did not keep it: the digest joined its fields with `str`, so a collector
+sequence of `3` hashed differently from one of `3.0`, and which of those a row carried was decided by whether
+some *other* row in the batch was missing the field. One null renamed every record in the batch. The same
+rendering reached binding identifiers, which is worse, because a binding's identifier is what lets a resolution be
+traced back to the record that produced it. The second was `BindingResolverStage` writing a resolved attribute
+onto the row with `str`, so a VLAN resolved out of a widened binding arrived as `10.0` where the same VLAN
+resolved as `10` from a batch with no gaps.
+
+Both now render through the shared rule, and the fix is narrow enough to prove: only whole numbers carried in a
+float change, so every identifier computed before it is unchanged unless it was computed over a widened column,
+which is the defect. The golden did not move, because the corpus sends integers.
+
 One trap in check 6 deserves calling out, because the shipped harness initially fell into it.
 Canonicalization sorts output rows before comparing, so a permutation of the input can only be detected
 through a *value* that depends on row order. A pipeline with no cumulative features passes the
@@ -2548,10 +2638,24 @@ What Morpheus provides versus what has to be built, stated plainly.
   repairing it, and this is what imposes the order they depend on.
 - The composed telemetry pipeline under control 13's six checks
   (`tests/morpheus/determinism/telemetry_pipeline.py`): a snapshot-shaped layer 1 and layer 2 corpus with a
-  hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and an 802.1X bypass planted in it, run
+  hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and two 802.1X bypasses planted in it, run
   through every TC-1 and TC-2 stage, with the layer 2 bindings resolving the ARP stream onto the layer 1
   `entity_key`. Each planted anomaly is asserted as the column a rule would read, and nothing else fires.
+  The second bypass arrives while a legitimate exchange on its own port is still open, and beside it sits a
+  multi-domain port carrying a phone and a workstation whose outcomes interleave. Those two exist because
+  timing an exchange per port rather than per device is wrong in both directions at once -- it hides the
+  rogue and reports the phone -- and because the corpus previously carried no supplicant at all, which left
+  `TC2AuthStage` running in its documented degraded mode for every composed check.
 
+- One rule run end to end offline, from a file to bytes a SIEM parses
+  ([`examples/behavioral_analytics`](../../../../examples/behavioral_analytics/README.md)): a MAC address table
+  in, closed binding records out, with `tests/morpheus/determinism/test_end_to_end_mac_spoof.py` reading those
+  bytes back off disk, stamping `_time` by applying the shipped `props.conf`'s own regex and format to the raw
+  line, and evaluating R-D-L2-004's predicate against the parsed JSON rather than against a frame. Every other
+  test here stops one hop short of that, which is the hop both of the app's parsing defects were hiding in.
+  R-D-L2-004 is the rule it can be done for: it needs one collector and no lookup, exclusion list or context
+  store. The sample plants a spoof and an ordinary device that moved desks, and the rule separates them on the
+  gap between sightings rather than on a suppression list.
 - The four layer 2 detections, R-D-L2-001, 003, 004 and 005, as saved searches in the Splunk app, with
   their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
   list each depends on. Until that list exists R-D-L2-001 fires on nothing and R-D-L2-003 fires on every

@@ -1,0 +1,38 @@
+{
+  "rule_id": "R-D-L2-004",
+  "description": "The notables R-D-L2-004 produces from mac_table_sample.jsonlines. One, and the reason each other closed binding is not one.",
+  "predicate": "sourcetype=binding:l2 AND bind_end_reason IN (conflict, displaced) AND bind_gap_ns <= 60000000000",
+  "notables": [
+    {
+      "rule_id": "R-D-L2-004",
+      "risk_score": 60,
+      "osi_layer": 2,
+      "entity_key": "aa:bb:cc:00:00:02",
+      "mac_address": "aa:bb:cc:00:00:02",
+      "port_key": "hq:sw1:Gi1/0/2",
+      "site_id": "hq",
+      "switch_id": "sw1",
+      "port_id": "Gi1/0/2",
+      "vlan_id": 10,
+      "bind_end_reason": "conflict",
+      "gap_seconds": 0.0,
+      "bind_observations": 3,
+      "bind_start": "2026-09-05T12:00:00.000000UTC",
+      "bind_end": "2026-09-05T12:10:00.000000UTC",
+      "_time": "2026-09-05T12:10:00.000000UTC"
+    }
+  ],
+  "not_notables": [
+    {
+      "port_key": "hq:sw1:Gi1/0/9",
+      "bind_end_reason": "displaced",
+      "gap_seconds": 300.0,
+      "why": "A legitimate move, not a spoof. The address left one port and was seen on another a whole poll cadence later, which is what a device that walked to a different desk looks like. The rule's gap threshold is 60 seconds and this is 300, so it is filtered out by the predicate rather than by a suppression list."
+    },
+    {
+      "bind_end_reason": "drained",
+      "count": 4,
+      "why": "The stream ended while these bindings were open. Draining is not an observation about the network, so it is not one of the reasons the rule reads."
+    }
+  ]
+}

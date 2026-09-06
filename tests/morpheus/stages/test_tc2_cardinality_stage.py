@@ -141,6 +141,36 @@ def test_a_new_oui_on_a_vlan_is_flagged(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_a_vlan_counts_the_same_however_the_batches_fall(config: Config):
+    # `vlan_id` is the entity `ouis_per_vlan` counts by, and a real feed sends it as a number. A batch in which
+    # every row carries the VLAN holds an integer column; a batch where one unrelated row has none widens it to
+    # float on the host. If the rendering followed the dtype, VLAN 10 would become `10` in the first batch and
+    # `10.0` in the second, its OUI count would restart at one, and a flood could sit under the threshold because
+    # of where the batch boundary happened to fall. Determinism control 5 says batching must not decide an answer.
+    stage = TC2CardinalityStage(config)
+
+    def feed(payload: dict) -> MessageMeta:
+        meta = MessageMeta(get_df_class(config.execution_mode)(payload))
+        stage.on_data(meta)
+
+        return meta
+
+    first = feed(frame(["00:11:22:33:44:55"], vlans=[10], times=[0]))
+
+    assert _as_list(first, "ouis_per_vlan") == [1]
+
+    second = feed(
+        frame(["aa:bb:cc:00:00:01", "00:11:22:33:44:66"],
+              ports=["Gi1/0/2", "Gi1/0/3"],
+              vlans=[10, None],
+              times=[MINUTE_NS, 2 * MINUTE_NS]))
+
+    # The second vendor is the VLAN's second OUI, not the first OUI of a VLAN that never existed.
+    assert _as_list(second, "ouis_per_vlan") == [2, None]
+    assert _as_list(second, "ouis_per_vlan_first_in_window") == [True, None]
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_the_oui_is_derived_when_the_collector_omits_it(config: Config):
     # Without deriving it, an estate whose collectors omit the field would report one OUI per VLAN forever.
     payload = frame(["00:11:22:33:44:55", "aa:bb:cc:00:00:01"], ports=["Gi1/0/1", "Gi1/0/2"])

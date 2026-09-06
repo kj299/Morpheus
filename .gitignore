@@ -218,3 +218,4 @@ examples/digital_fingerprinting/production/benchmarks/.benchmarks/
 # vocabularies under ci/vale/styles/config/ are tracked.
 ci/vale/styles/*/
 !ci/vale/styles/config/
+examples/behavioral_analytics/notables.jsonlines
