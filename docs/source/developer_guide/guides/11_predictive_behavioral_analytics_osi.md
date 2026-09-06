@@ -1582,13 +1582,35 @@ Four options, in descending order of preference:
 anchors timestamp extraction on a prefix and applies a `strptime` format; a nineteen-digit integer
 matches neither, and the failure is silent.
 
-Render it before the sink:
+Render it before the sink. {py:class}`~morpheus.stages.output.siem_wire_stage.SiemWireStage` is what
+does it, placed last, and naming the sourcetype is its whole configuration:
 
 ```python
-from morpheus.utils.siem_wire import render_event_time_series
+from morpheus.stages.output.siem_wire_stage import SiemWireStage
 
-df["event_time"] = render_event_time_series(df["event_time"])   # 2026-08-30T18:25:00.123456UTC
+pipe.add_stage(SiemWireStage(config, sourcetype="morpheus:score:l2"))   # 2026-08-30T18:25:00.123456UTC
 ```
+
+Which columns it renders is deliberately not a parameter, because a parameter is somewhere the two
+sides can disagree. It comes from {py:mod}`~morpheus.utils.siem_sourcetypes`, which records for each of
+the app's fourteen stanzas the column its `TIME_PREFIX` anchors on, and
+`tests/morpheus/utils/test_siem_sourcetypes.py` checks that record against the configuration file
+itself. Rendering the wrong column for a stanza requires those two halves to disagree first, and they
+cannot disagree quietly.
+
+A record usually carries more than one timestamp, and every one the sourcetype names is rendered rather
+than only the anchor: a consumer reading `bind_start` off a closed binding should not find one field a
+string and its sibling a nineteen-digit integer. Columns whose names end in `_ns` are left alone on
+purpose. They are the exact values a consumer computes with -- `bind_gap_ns` is what R-D-L2-004
+compares against a threshold -- and rounding them to microseconds to fit a timestamp format would
+quietly change that arithmetic. Where a single column is all that is needed,
+{py:func}`~morpheus.utils.siem_wire.render_event_time_series` is the same rendering without a stage.
+
+That module also carries a fact the app could not previously state anywhere. Eight of the fourteen
+stanzas have no producer in this fork: five are the score sourcetypes for layers 3 through 7, one is
+the layer 1 inventory feed, and two are the TC-0 context store. Each entry says what would have to be
+built. Recording them in one place is what keeps a reader from taking "the app parses seven layers" for
+"seven layers are implemented."
 
 Measured on a live Splunk instance, ingesting the same event both ways through Morpheus's own Kafka
 serializer: the rendered form lands at its true event time, three hours in the past. The unrendered
@@ -1606,8 +1628,14 @@ Two consequences worth stating. The rendering is microsecond precision, matching
 truncates rather than rounds, so an event never crosses a window boundary it did not cross; carry the
 exact integer in a separate field where nanosecond fidelity has to survive the hop. And the
 `event_time` rendering is a fourth shared contract between the pipeline and the SIEM, alongside the
-bucket width, the binding retention, and the Community ID seed. `tests/morpheus/utils/test_siem_wire.py`
-enforces it by reading the shipped `props.conf` directly, so the two sides cannot drift apart.
+bucket width, the binding retention, and the Community ID seed. Three test files enforce it by reading
+the shipped `props.conf` directly rather than a copy of its values, so the two sides cannot drift
+apart: `test_siem_wire.py` on the rendering, `test_siem_sourcetypes.py` on which column each stanza
+anchors on, and `tests/morpheus/determinism/test_siem_wire_contract.py` on the whole path -- the frames
+the composed pipelines actually emit, through the stage, through the same serializer the Kafka sink
+uses, then parsed with each stanza's own `TIME_PREFIX` and `TIME_FORMAT` and checked against the
+nanoseconds the pipeline started with. Each carries its negative control: the unrendered frame must
+fail to parse, or the assertion proves nothing.
 
 #### Index and sourcetype layout
 
@@ -2479,6 +2507,10 @@ What Morpheus provides versus what has to be built, stated plainly.
 - The determinism CI harness: control 13's six checks running against the reference lineage pipeline
   over a seeded golden corpus ({py:mod}`~morpheus.utils.determinism` and
   `tests/morpheus/determinism/`).
+- The SIEM wire format, rendered by the stanza the SIEM will parse it with
+  ({py:class}`~morpheus.stages.output.siem_wire_stage.SiemWireStage` and
+  {py:mod}`~morpheus.utils.siem_sourcetypes`), with every one of the app's fourteen stanzas either
+  mapped to a producer or recorded as having none, with what is missing.
 - TC-1 counter normalization: monotonic interface counters turned into per-interval deltas, with a
   counter wrap distinguished from a device reboot, and the `site_id:device_id:port_id` entity key
   ({py:mod}`~morpheus.utils.counter_delta` and
