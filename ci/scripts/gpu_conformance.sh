@@ -82,6 +82,21 @@ fi
 echo "${DEVICE}"
 
 echo ""
+echo "=== test data ==="
+# Every fixture under tests/tests_data is stored in Git LFS. A checkout without the objects has 128-byte pointer
+# files in their place, and a test reading one gets "Parquet magic bytes not found" or a CSV of one line of YAML.
+# That is what 37 failures across test_file_source_stage_pipe turned out to be the first time this ran, and it
+# cost an investigation to learn. A pre-flight that names it costs a second.
+POINTERS=$(git ls-files tests/tests_data 2>/dev/null | while read -r f; do
+    head -c 40 "$f" 2>/dev/null | grep -q "git-lfs" && echo "$f"
+done | wc -l)
+
+if [[ "${POINTERS}" -gt 0 ]]; then
+    fail "${POINTERS} test fixtures under tests/tests_data are unfetched Git LFS pointers, so every test that reads one fails on content that is not what it claims to be. Run 'git lfs pull' and try again. This is a checkout problem, not a GPU one, and it fails identically on a CPU."
+fi
+echo "test fixtures are real files, not LFS pointers"
+
+echo ""
 echo "=== gpu_mode variants ==="
 SELECTED=$(python -m pytest -m gpu_mode --run_slow --collect-only -q "${TARGETS[@]}" 2>/dev/null | grep -c "::") || SELECTED=0
 echo "collected ${SELECTED} gpu_mode tests"
