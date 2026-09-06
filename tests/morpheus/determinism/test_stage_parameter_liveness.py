@@ -49,6 +49,7 @@ from morpheus.config import ExecutionMode
 from morpheus.messages import MessageMeta
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
@@ -69,6 +70,8 @@ from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.utils.binding_table import Binding
 from morpheus.utils.binding_table import BindingTable
+from morpheus.utils.determinism_envelope import DeterminismEnvelope
+from morpheus.utils.model_manifest import ModelManifest
 
 DIFFERS = "differs"
 INPUT_COLUMN = "input_column"
@@ -389,6 +392,36 @@ def denials() -> dict:
     }
 
 
+SCORED_WINDOW = 484512
+
+
+def scored() -> dict:
+    # Two principals in one window, one of which the manifest below has no model for.
+    return {
+        "user_principal": ["alice@example.com", "bob@example.com", "carol@example.com"],
+        "window_id": [SCORED_WINDOW] * 3,
+        "event_time": [0, MINUTE, 2 * MINUTE],
+    }
+
+
+def _envelope(tier: str = "D1", seed: int = 42) -> DeterminismEnvelope:
+    return DeterminismEnvelope(tier=tier,
+                               fingerprint="a3f9c2e1b8d47506",
+                               configuration="7d2e4a1f9c3b5e80",
+                               code_commit="c6a3b56",
+                               image_digest="sha256:1f0c",
+                               feature_schema_version="TC-5/2.1.0",
+                               rng_seed=seed)
+
+
+def _manifest(fallback=None) -> ModelManifest:
+    return ModelManifest(window_id=SCORED_WINDOW,
+                         models={
+                             "alice@example.com": "dfp-alice:14", "bob@example.com": "dfp-bob:3"
+                         },
+                         fallback=fallback)
+
+
 def _binding_table(values=("hq:sw1:Gi1/0/1", )) -> BindingTable:
     return BindingTable(
         name="dhcp_lease",
@@ -671,6 +704,20 @@ REGISTRY: dict = {
                 Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
             ),
         ),
+    "DeterminismStampStage":
+        Scenario(
+            stage=DeterminismStampStage,
+            frame=scored,
+            base={
+                "envelope": _envelope(), "manifest": _manifest()
+            },
+            knobs=(
+                Knob("envelope", DIFFERS, benign=_envelope(), extreme=_envelope(tier="D0", seed=7)),
+                Knob("manifest", DIFFERS, benign=_manifest(), extreme=_manifest(fallback="dfp-generic:2")),
+                Knob("entity_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("window_column", INPUT_COLUMN, benign="window_id"),
+            ),
+        ),
     "WindowSealStage":
         Scenario(
             stage=WindowSealStage,
@@ -819,7 +866,7 @@ def test_every_stage_parameter_is_registered(stage_name: str):
 def test_every_stage_in_the_fork_is_covered():
     # The registry is checked against each stage's signature above; this checks the set of stages itself, so a new
     # stage cannot arrive with no entry at all.
-    assert len(REGISTRY) == 20
+    assert len(REGISTRY) == 21
     assert {scenario.stage.__name__ for scenario in REGISTRY.values()} == set(REGISTRY)
 
 

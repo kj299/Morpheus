@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is twenty stages and twenty-three supporting modules
-under 1,612 tests, itemized in
+8's total order, and control 13's CI harness. That is twenty-one stages and twenty-six supporting modules
+under 1,701 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -73,8 +73,14 @@ fire, and neither can the drift trajectory that is this document's flagship pred
 Everything else at this layer is built: the session assembly and the five feature stages run under
 control 13's six checks against a week-long corpus, the two deterministic rules ship as saved searches
 with their predicates asserted against that corpus, and `morpheus:score:l5` is a produced sourcetype.
-Control 9 is a partial exception, since `determinism.quantize_value` ships but the hysteresis half of it
-does not. Thresholds are placeholders unless marked otherwise.
+Controls 1, 2, 4 and 12 now ship as code, ahead of the model
+that will consume them. Control 9 is a partial exception, since `determinism.quantize_value` ships but
+the hysteresis half of it does not, and control 3 is outstanding for a concrete reason rather than an
+unexamined one: seeding beyond `manual_seed` means calling `torch.use_deterministic_algorithms`, and the
+environment this work is developed and tested in has no Torch, no `dfencoder` and no `morpheus_dfp` --
+`morpheus_dfp` requires `torch==2.4.0+cu124`. That is also why the autoencoder itself is absent rather
+than merely unfinished: a model path written where the model cannot be run would be written without ever
+having been run. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
 nowhere else. On 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada
@@ -2672,6 +2678,15 @@ What Morpheus provides versus what has to be built, stated plainly.
   computable without a model, which is why it comes first: the autoencoder half has to be pinned,
   seeded and frozen under controls 1 through 4 before its output can be trusted to be reproducible, and
   these features are what it would consume.
+- The scoring path's determinism substrate: controls 1, 2, 4 and 12 as code, ahead of the model that will
+  consume them. The envelope every scored event carries and the two hashes inside it
+  ({py:mod}`~morpheus.utils.determinism_envelope`), the model manifest that is resolved once per window and
+  refuses to answer for any other ({py:mod}`~morpheus.utils.model_manifest`), the stable hash that decides an
+  entity's shard without depending on `PYTHONHASHSEED` ({py:mod}`~morpheus.utils.sharding`), and the stage that
+  stamps all of it ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`). These
+  come before the autoencoder rather than after it because this document says they must: retrofitting
+  determinism onto a running detection pipeline means re-tuning every threshold, since the scores will move.
+  What is not here is the autoencoder itself, and the boundary is exact -- see the caveat below.
 - The composed layer 5 pipeline under control 13's six checks
   (`tests/morpheus/determinism/session_pipeline.py`): a week-long corpus of one estate's authentications,
   with an impossible journey, a legitimate eight-hour flight, a token refresh issued from the origin

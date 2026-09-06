@@ -55,6 +55,7 @@ export NUMBA_CUDA_USE_NVIDIA_BINDING="${NUMBA_CUDA_USE_NVIDIA_BINDING:-1}"
 TARGETS=(
     tests/morpheus/determinism
     tests/morpheus/stages/test_binding_resolver_stage.py
+    tests/morpheus/stages/test_determinism_stamp_stage.py
     tests/morpheus/stages/test_community_id_stage.py
     tests/morpheus/stages/test_lineage_stamp_stage.py
     tests/morpheus/stages/test_siem_wire_stage.py
@@ -88,6 +89,7 @@ UNMARKED=(
     tests/morpheus/utils/test_counter_delta.py
     tests/morpheus/utils/test_cyclic_histogram.py
     tests/morpheus/utils/test_determinism.py
+    tests/morpheus/utils/test_determinism_envelope.py
     tests/morpheus/utils/test_distinct_window.py
     tests/morpheus/utils/test_entity_key.py
     tests/morpheus/utils/test_event_clock.py
@@ -95,12 +97,14 @@ UNMARKED=(
     tests/morpheus/utils/test_gpu_conformance_report.py
     tests/morpheus/utils/test_gpu_conformance_targets.py
     tests/morpheus/utils/test_lineage.py
+    tests/morpheus/utils/test_model_manifest.py
     tests/morpheus/utils/test_lineage_cudf.py
     tests/morpheus/utils/test_link_flap.py
     tests/morpheus/utils/test_optical_baseline.py
     tests/morpheus/utils/test_outcome_run.py
     tests/morpheus/utils/test_ratio_window.py
     tests/morpheus/utils/test_session_timer.py
+    tests/morpheus/utils/test_sharding.py
     tests/morpheus/utils/test_siem_sourcetypes.py
     tests/morpheus/utils/test_siem_wire.py
     tests/morpheus/utils/test_splunk_app_contracts.py
