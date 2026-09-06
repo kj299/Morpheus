@@ -2647,6 +2647,15 @@ What Morpheus provides versus what has to be built, stated plainly.
   rogue and reports the phone -- and because the corpus previously carried no supplicant at all, which left
   `TC2AuthStage` running in its documented degraded mode for every composed check.
 
+- One rule run end to end offline, from a file to bytes a SIEM parses
+  ([`examples/behavioral_analytics`](../../../../examples/behavioral_analytics/README.md)): a MAC address table
+  in, closed binding records out, with `tests/morpheus/determinism/test_end_to_end_mac_spoof.py` reading those
+  bytes back off disk, stamping `_time` by applying the shipped `props.conf`'s own regex and format to the raw
+  line, and evaluating R-D-L2-004's predicate against the parsed JSON rather than against a frame. Every other
+  test here stops one hop short of that, which is the hop both of the app's parsing defects were hiding in.
+  R-D-L2-004 is the rule it can be done for: it needs one collector and no lookup, exclusion list or context
+  store. The sample plants a spoof and an ordinary device that moved desks, and the rule separates them on the
+  gap between sightings rather than on a suppression list.
 - The four layer 2 detections, R-D-L2-001, 003, 004 and 005, as saved searches in the Splunk app, with
   their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
   list each depends on. Until that list exists R-D-L2-001 fires on nothing and R-D-L2-003 fires on every
