@@ -27,6 +27,7 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
+from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.type_utils import get_df_class
 
 SECOND_NS = 10**9
@@ -186,6 +187,24 @@ def test_on_data_emits_sealed_window(config: Config):
     assert len(frames) == 1
     assert frames[0]["entity"].tolist() == ["a"]
     assert frames[0]["window_id"].tolist() == [0]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_sealing_keeps_a_nullable_integer_integral(config: Config):
+    # Sealing does its buffering on the host, and the trip across that boundary is where an integer column holding
+    # a gap used to become a float. A count that reads 2 on one mode and 2.0 on the other is a determinism defect,
+    # so the emitted dtype is asserted here rather than left to the composed parity run to discover.
+    df_class = get_df_class(config.execution_mode)
+    stage = make_stage(config)
+
+    df = df_class({"event_time": [10 * SECOND_NS, 400 * SECOND_NS], "entity": ["a", "b"]})
+    assign_nullable_int_column(df, "count", [2, None])
+
+    frames = _frames(stage.on_data(MessageMeta(df)))
+
+    assert len(frames) == 1
+    assert frames[0]["count"].dtype.kind == "i", f"sealed count carried as {frames[0]['count'].dtype}"
+    assert frames[0]["count"].tolist() == [2]
 
 
 @pytest.mark.gpu_and_cpu_mode

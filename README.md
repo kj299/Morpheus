@@ -54,7 +54,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Four deterministic layer 2 rules as saved searches in the app: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Fourteen stages and nineteen supporting modules, covered by 909 tests.
+Fourteen stages and nineteen supporting modules, covered by 914 tests.
 
 ### What this fork is not
 
@@ -75,9 +75,36 @@ Being clear about the boundary is the point of writing it down:
   variants were run for the first time, on an NVIDIA RTX 5000 Ada Generation Laptop GPU (compute
   capability 8.9, driver 596.58) under WSL2: **226 passed, 2 failed, 55 skipped**, and both failures are
   in upstream Morpheus files (`test_deserialize_stage_pipe`, `test_write_to_file_stage_pipe`) rather than
-  in anything this fork adds. Every stage and utility added here passes in GPU mode.
-  That is one run on one card, not a support claim, and the determinism harness is unaffected by it:
-  those tests carry no `gpu_mode` variants, so control 13 is still only verified in CPU mode.
+  in anything this fork adds. Every stage and utility added here passes in GPU mode. The suite was re-run
+  on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55 skipped**, the
+  same two upstream failures and nothing else. That is two runs on one card, not a support claim.
+- **The two modes did not agree, and the per-stage runs could not have told us.** Every one of those 203
+  variants passes, and the composed telemetry pipeline still produced `arp_count_in_window = 3.0` on a GPU
+  where the CPU golden holds `3`. Nothing raised. cuDF's `to_pandas` cannot put a null inside an integer
+  column, so it widens the column to float64 and writes NaN -- and every windowed count here is null on
+  the rows belonging to other telemetry classes. The conversion is not where it happens: collecting the
+  classes fills that column with gaps for every other class's rows, and a plain integer column cannot
+  hold one, so the fill widens it. Integer columns are now carried in a type that admits a gap, in both
+  modes, before anything is joined, which also cost the golden fourteen columns' worth of trailing `.0`
+  and is the better rendering. The lineage pipeline agreed across modes throughout.
+- **Fixing that exposed a second place with the same cause.** Seven columns stayed wrong --
+  `auth_attempts`, `link_flaps`, `link_flaps_in_window` and the four interface counter deltas -- and the
+  fill was not what widened them: they were float64 before the fill saw them. `WindowSealStage` buffers
+  on the host, and a device integer column holding a gap cannot cross as an integer, so it came back to
+  the device as a float. What identified it was a column that was fine: `arp_count_in_window` is written
+  by the same helper on the same line shape, and differs only in having a value on every row. The
+  confirming detail was the one telemetry class that skips sealing, whose own gap-bearing integer columns
+  were the only ones never flagged.
+- **Control 13's golden check is now verified in both execution modes.** On 2026-09-06, on the same
+  laptop GPU, both composed pipelines ran in GPU mode against the same corpus and matched the same
+  golden. Its other five checks -- the double run, the cross-restart, the batch-split sweep and both
+  permutation checks -- still run in CPU mode alone. One card, and not CI.
+- **The obvious repair was tried first and was worse.** Asking the conversion for types that can hold a
+  gap fixes integer columns and breaks every other kind: object columns start yielding `pandas.NA` where
+  they yielded `None`, and stage code testing `value is None` stops recognising a missing value. Measured
+  on the same GPU, that turned three failures into nine, all of them null-handling tests across the ARP,
+  auth, binding-resolver and lineage-stamp stages. It is recorded here because the reasoning for it was
+  sound and the result was not.
 - **A GPU run under WSL2 requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1`.** Without it, Numba's default
   driver bindings read back an invalid CUDA context through the WSL driver shim: `cuCtxGetDevice` yields
   a garbage device number and the process crashes partway through the suite. Setting the variable
