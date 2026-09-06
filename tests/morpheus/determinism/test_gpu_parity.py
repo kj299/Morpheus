@@ -19,7 +19,7 @@ Whether the composed pipelines produce the same output in GPU mode as in CPU mod
 Every stage declares support for both execution modes, and 203 `gpu_mode` variants assert that per stage. None of
 them composes a pipeline. Both determinism harnesses built their configuration in CPU mode and nothing else, so
 control 13's six checks -- the golden, the double run, the cross-restart, the batch-split sweep, and both
-permutation checks -- have only ever been asserted on one of the two modes the fork claims to support. A GPU run
+permutation checks -- had only ever been asserted on one of the two modes the fork claims to support. A GPU run
 of the per-stage variants cannot close that: it says each stage computes correctly on a device frame, not that
 thirteen of them in a row reach the same answer the golden records.
 

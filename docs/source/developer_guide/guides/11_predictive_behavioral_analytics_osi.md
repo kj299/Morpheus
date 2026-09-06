@@ -103,6 +103,22 @@ deliberately. Columns of every other kind are untouched, and a negative control 
 power reading of `3.0` stays a float. Applying it in both modes rather than only in GPU mode is the
 point: a rule one mode follows and the other does not is the defect restated.
 
+That fixed one column and left seven: `auth_attempts`, `link_flaps`, `link_flaps_in_window`, and the four
+interface counter deltas. The fill was not widening them, because they were float64 before the fill ever
+saw them. `WindowSealStage` does its buffering on the host -- it converts each batch, holds fragments per
+window, concatenates them when a window seals, and converts the result back -- and a device integer column
+holding a gap cannot make the outbound leg as an integer. It returned to the device as a float, and what
+reached the collection was already lost.
+
+What identified it was a column that was fine. `arp_count_in_window` and `link_flaps_in_window` are
+written by the same helper on the same line shape, so what separates them cannot be the assignment; the
+ARP denominator simply has a value on every row, and an integer column with no gaps survives the
+conversion intact. The confirming detail was the binding class, the one telemetry class that skips
+sealing: its own gap-bearing integer columns, `bind_end` and `bind_gap_ns`, are the only ones the parity
+check never flagged. The sealer names the host type that admits a gap on the way across, so the frame
+returns to the device holding the type it left with, and the host path -- which never lost the type -- is
+left alone rather than coerced to meet it.
+
 It changes the CPU rendering too, and for the better. Fourteen columns lost a trailing `.0` in the
 golden -- `event_time`, `window_id`, `collector_seq`, `uptime`, the interface counters -- and every
 change in the regenerated file is that and nothing else. An event time was never a decimal. The lineage
@@ -118,7 +134,10 @@ columns begin yielding `pandas.NA` where they yielded `None`, and every piece of
 binding-resolver and lineage-stamp stages, all of them null-handling tests. A conversion more correct in
 isolation was less correct for the code that reads it.
 
-The repair has not itself been re-run on a GPU. Control 13 is still verified in CPU mode alone.
+On 2026-09-06, on the same laptop GPU, both composed pipelines ran in GPU mode against the same corpus and
+matched the same golden records. Control 13's golden check is therefore verified in both execution modes;
+its other five checks -- the double run, the cross-restart, the batch-split sweep and both permutation
+checks -- still run in CPU mode alone. It remains one card and it is not CI.
 
 Reproducing it requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1` under WSL2. Without that variable, Numba's
 default driver bindings read back an invalid CUDA context from the WSL driver shim: `cuCtxGetDevice`

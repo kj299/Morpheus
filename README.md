@@ -84,10 +84,20 @@ Being clear about the boundary is the point of writing it down:
   the rows belonging to other telemetry classes. The conversion is not where it happens: collecting the
   classes fills that column with gaps for every other class's rows, and a plain integer column cannot
   hold one, so the fill widens it. Integer columns are now carried in a type that admits a gap, in both
-  modes,
-  before anything is joined, which also cost the golden fourteen columns' worth of trailing `.0` and is
-  the better rendering. The lineage pipeline agreed across modes throughout.
-  **The repair has not itself been re-run on a GPU**, so control 13 is still verified in CPU mode alone.
+  modes, before anything is joined, which also cost the golden fourteen columns' worth of trailing `.0`
+  and is the better rendering. The lineage pipeline agreed across modes throughout.
+- **Fixing that exposed a second place with the same cause.** Seven columns stayed wrong --
+  `auth_attempts`, `link_flaps`, `link_flaps_in_window` and the four interface counter deltas -- and the
+  fill was not what widened them: they were float64 before the fill saw them. `WindowSealStage` buffers
+  on the host, and a device integer column holding a gap cannot cross as an integer, so it came back to
+  the device as a float. What identified it was a column that was fine: `arp_count_in_window` is written
+  by the same helper on the same line shape, and differs only in having a value on every row. The
+  confirming detail was the one telemetry class that skips sealing, whose own gap-bearing integer columns
+  were the only ones never flagged.
+- **Control 13's golden check is now verified in both execution modes.** On 2026-09-06, on the same
+  laptop GPU, both composed pipelines ran in GPU mode against the same corpus and matched the same
+  golden. Its other five checks -- the double run, the cross-restart, the batch-split sweep and both
+  permutation checks -- still run in CPU mode alone. One card, and not CI.
 - **The obvious repair was tried first and was worse.** Asking the conversion for types that can hold a
   gap fixes integer columns and breaks every other kind: object columns start yielding `pandas.NA` where
   they yielded `None`, and stage code testing `value is None` stops recognising a missing value. Measured
