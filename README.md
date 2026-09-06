@@ -81,9 +81,12 @@ Being clear about the boundary is the point of writing it down:
   variants passes, and the composed telemetry pipeline still produced `arp_count_in_window = 3.0` on a GPU
   where the CPU golden holds `3`. Nothing raised. cuDF's `to_pandas` cannot put a null inside an integer
   column, so it widens the column to float64 and writes NaN -- and every windowed count here is null on
-  the rows belonging to other telemetry classes. The harness now asks the device frame which columns were
-  integers and restores those, which renders exactly as the CPU path renders them natively. Nothing else
-  in the conversion is touched, and the lineage pipeline agreed across modes on the same run.
+  the rows belonging to other telemetry classes. The conversion is not where it happens: collecting the
+  classes fills that column with gaps for every other class's rows, and a plain integer column cannot
+  hold one, so the fill widens it. Integer columns are now carried in a type that admits a gap, in both
+  modes,
+  before anything is joined, which also cost the golden fourteen columns' worth of trailing `.0` and is
+  the better rendering. The lineage pipeline agreed across modes throughout.
   **The repair has not itself been re-run on a GPU**, so control 13 is still verified in CPU mode alone.
 - **The obvious repair was tried first and was worse.** Asking the conversion for types that can hold a
   gap fixes integer columns and breaks every other kind: object columns start yielding `pandas.NA` where

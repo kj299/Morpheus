@@ -213,8 +213,7 @@ def run_pipeline(config: Config,
         meta = message.payload() if isinstance(message, ControlMessage) else message
         df = meta.copy_dataframe()
 
-        if (hasattr(df, "to_pandas")):
-            df = to_host_frame(df)
+        df = to_host_frame(df)
 
         # A cumulative, order-derived feature in the style of IncrementColumn: each row's ordinal among its
         # entity's rows within the emitted window. Canonicalization erases row *order*, so without a *value*

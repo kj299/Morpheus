@@ -89,12 +89,24 @@ inside an integer column, so it widens the column to float64 and writes NaN. Eve
 fork is null on the rows belonging to other telemetry classes, so the widening reaches most of the
 integer columns rather than an unlucky few.
 
-The repair is narrow and lives in the comparison path. The device frame is asked which columns were
-integers before the conversion, and any of those that came back as floats are cast to pandas `Int64`,
-which is the type the CPU path produces natively for the same column. Nothing else is touched. The cast
-is ordinary pandas arithmetic, so it is asserted on any machine rather than only on a card, with a
-negative control that an optical power reading of `3.0` stays a float. The lineage pipeline agreed across
-modes on the same run and was never affected.
+The conversion is not where it happens, which is what made a first repair miss entirely. A telemetry
+class's frame carries only its own columns, so collecting the classes means filling this one with gaps
+for every other class's rows, and what pandas fills with depends on the type it starts from.
+`assign_nullable_int_column` gives the CPU path an `Int64` that admits a gap, and it survives the fill.
+`to_pandas` gives a plain integer type whenever that particular frame has no gaps of its own, and such a
+column cannot hold one, so the fill widens it to float64 and every count in it grows a decimal point.
+
+The repair is therefore not a better conversion; it is refusing to let the concatenation choose. Integer
+columns are carried in a type that admits a gap, in both execution modes, before anything is joined -- which is what the
+CPU path already did by accident of `assign_nullable_int_column`, and what the GPU path now does
+deliberately. Columns of every other kind are untouched, and a negative control asserts that an optical
+power reading of `3.0` stays a float. Applying it in both modes rather than only in GPU mode is the
+point: a rule one mode follows and the other does not is the defect restated.
+
+It changes the CPU rendering too, and for the better. Fourteen columns lost a trailing `.0` in the
+golden -- `event_time`, `window_id`, `collector_seq`, `uptime`, the interface counters -- and every
+change in the regenerated file is that and nothing else. An event time was never a decimal. The lineage
+pipeline agreed across modes throughout and was never affected.
 
 **The obvious repair is wrong, and that is worth writing down because the reasoning for it is sound.**
 Asking the conversion for types that can hold a gap looks like the fix: it yields pandas `Int64`,

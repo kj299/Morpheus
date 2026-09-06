@@ -14,25 +14,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Bringing a device frame to the host without turning its counts into decimals.
+Collecting a frame without letting the concatenation decide what an integer is.
 
-The two harnesses collect their output by converting whatever the sink produced into a pandas frame, then compare
-that rendering against a checked-in golden. In GPU mode the conversion loses something: cuDF's `to_pandas` cannot
-put a null inside an integer column, so it widens the column to float64 and writes NaN. A count of 3 arrives as
-`3.0`, and the byte comparison against a CPU-produced golden fails on a cell that is not wrong so much as
-differently spelled. Every windowed count in this fork is null on the rows belonging to other telemetry classes,
-so this reaches most of the integer columns rather than an unlucky few.
+Both harnesses collect their output by converting whatever each sink produced into a pandas frame and
+concatenating the lot, then comparing that rendering against a checked-in golden. In GPU mode the rendering
+differed from the CPU golden on `arp_count_in_window`: `3.0` against `3`.
 
-Asking `to_pandas` for nullable dtypes instead is the obvious repair and it is the wrong one. It changes how
-*every* null comes back, not only those in integer columns: object columns start yielding `pandas.NA` where they
-used to yield `None`, and stage code that tests `value is None` stops recognising a missing value. Measured on a
-GPU, that turned three failures into nine, all of them null-handling tests across the ARP, auth, binding-resolver
-and lineage-stamp stages. The conversion is left alone here for that reason.
+The conversion is not where it happens, which is what made the first repair miss. A telemetry class's frame carries
+only its own columns, so the concatenation has to fill that column with gaps for every other class's rows -- and
+what pandas fills with depends on the dtype it starts from. `assign_nullable_int_column` gives the CPU path a
+nullable `Int64`, which survives the fill. cuDF's `to_pandas` gives a plain numpy `int64` whenever that frame has
+no gaps of its own, and a numpy integer column cannot hold one, so the concatenation widens it to float64 and every
+count in it grows a decimal point.
 
-What is repaired is narrower and local to the comparison: the device frame is asked which columns were integers
-before the conversion, and any of those that came back as floats are cast to pandas `Int64`, which is exactly the
-dtype the CPU path produces natively for the same column. Nothing else is touched, so every other column renders
-as it did before.
+So the fix is not a better conversion, it is refusing to let the concatenation choose. Integer columns are carried
+as nullable integers in both modes, before anything is joined, which is what the CPU path already did by accident
+of `assign_nullable_int_column` and what the GPU path now does deliberately. Columns of every other kind are left
+exactly as they were.
+
+One repair was tried before this and was worse: asking `to_pandas` for types that can hold a gap. It fixes integer
+columns and changes how *every* gap returns to the host, so object columns yield `pandas.NA` where they yielded
+`None` and stage code testing `value is None` stops recognising a missing value. Measured on a GPU it turned three
+failures into nine. The conversion itself is therefore left alone.
 """
 
 import pandas as pd
@@ -42,34 +45,28 @@ INTEGER_KINDS = ("i", "u")
 
 def to_host_frame(df):
     """
-    Copy a frame to the host, restoring integer columns the conversion widened.
+    Copy a frame to the host and carry its integer columns as nullable integers.
 
     Parameters
     ----------
     df : `pandas.DataFrame` or `cudf.DataFrame`
-        The frame to bring to the host. A host frame is returned unchanged, so this cannot move the CPU path.
+        The frame to collect. A device frame is converted first; a host frame is used as it stands.
 
     Returns
     -------
     `pandas.DataFrame`
+        The same data, with every integer column held as pandas `Int64` so that a later concatenation cannot
+        widen it. Applied in both execution modes, because a rule that only one mode follows is the defect.
     """
-    if (not hasattr(df, "to_pandas")):
-        return df
+    integer_columns = [name for (name, dtype) in df.dtypes.items() if dtype.kind in INTEGER_KINDS]
+    host = df.to_pandas() if hasattr(df, "to_pandas") else df
 
-    was_integer = {name: dtype.kind in INTEGER_KINDS for (name, dtype) in df.dtypes.items()}
-    host = df.to_pandas()
-
-    for (name, integral) in was_integer.items():
-        if (integral and host[name].dtype.kind == "f"):
-            host[name] = host[name].astype("Int64")
-
-    return host
+    return as_nullable_integers(host, integer_columns)
 
 
-def restore_integer_columns(host: pd.DataFrame, was_integer: dict) -> pd.DataFrame:
-    """The cast on its own, so it can be asserted without a device frame."""
-    for (name, integral) in was_integer.items():
-        if (integral and host[name].dtype.kind == "f"):
-            host[name] = host[name].astype("Int64")
+def as_nullable_integers(host: pd.DataFrame, columns) -> pd.DataFrame:
+    """The cast on its own, so the rule can be asserted without a device frame."""
+    for name in columns:
+        host[name] = host[name].astype("Int64")
 
     return host

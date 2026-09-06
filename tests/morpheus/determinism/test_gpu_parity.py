@@ -41,6 +41,7 @@ so what is untested on a CPU-only machine is the GPU run, not this file's logic.
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -109,29 +110,38 @@ def test_the_lineage_pipeline_reaches_the_same_answer_on_a_gpu():
 
 
 @pytest.mark.cpu_mode
-def test_a_widened_count_is_restored_to_an_integer():
-    # What the GPU parity run actually caught: cuDF cannot put a null inside an integer column, so it hands back
-    # float64 with NaN and a count of 3 renders as `3.0` against a golden holding `3`. The repair is asserted here
-    # rather than only on a GPU, because the arithmetic is ordinary pandas and needs no device.
-    from host_frame import restore_integer_columns
+def test_an_integer_column_survives_a_concatenation_that_has_to_fill_it():
+    # What the GPU parity run actually caught, reproduced without a device. A telemetry class's frame carries only
+    # its own columns, so collecting them means filling this one with gaps for every other class's rows. Starting
+    # from a plain numpy integer the fill widens the column and every count in it grows a decimal point.
+    from host_frame import as_nullable_integers
 
-    widened = pd.DataFrame({"arp_count_in_window": [3.0, float("nan"), 5.0]})
-    restored = restore_integer_columns(widened.copy(), {"arp_count_in_window": True})
+    counts = pd.DataFrame({"arp_count_in_window": np.array([3], dtype="int64")})
+    other_class = pd.DataFrame({"event_time": [1, 2]})
 
-    native = pd.DataFrame({"arp_count_in_window": pd.array([3, None, 5], dtype="Int64")})
+    widened = pd.concat([counts, other_class], ignore_index=True)
 
-    assert restored.to_csv(index=False) == native.to_csv(index=False), \
-        "the restored column must render exactly as the CPU path renders it natively"
+    assert widened["arp_count_in_window"].dtype.kind == "f", "pandas no longer widens; this test proves nothing"
+    assert "3.0" in widened[["arp_count_in_window"]].to_csv(index=False)
+
+    carried = pd.concat([as_nullable_integers(counts.copy(), ["arp_count_in_window"]), other_class], ignore_index=True)
+    native = pd.concat([pd.DataFrame({"arp_count_in_window": pd.array([3], dtype="Int64")}), other_class],
+                       ignore_index=True)
+
+    rendered = carried[["arp_count_in_window"]].to_csv(index=False)
+
+    assert rendered == native[["arp_count_in_window"]].to_csv(index=False), \
+        "a carried integer column must render exactly as the CPU path renders it natively"
 
 
 @pytest.mark.cpu_mode
 def test_a_column_that_was_never_an_integer_is_left_alone():
-    # The negative control, and the reason the repair is keyed on the device frame's own dtypes rather than on
-    # "looks like a whole number". An optical reading of 3.0 dBm is a float and must stay one.
-    from host_frame import restore_integer_columns
+    # The negative control. The rule keys on the frame's own dtypes, not on whether a value looks whole, so an
+    # optical power reading of 3.0 stays a float.
+    from host_frame import to_host_frame
 
     readings = pd.DataFrame({"optical_rx_dbm": [3.0, float("nan"), 5.0]})
-    left = restore_integer_columns(readings.copy(), {"optical_rx_dbm": False})
+    left = to_host_frame(readings.copy())
 
     assert left["optical_rx_dbm"].dtype.kind == "f"
     assert left.to_csv(index=False) == readings.to_csv(index=False)
