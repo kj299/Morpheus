@@ -158,6 +158,37 @@ def test_the_summary_section_does_not_count_a_failure_twice(report):
     assert len(summary["failures"]) == 1
 
 
+def test_an_unaccounted_test_is_named_not_just_counted(report):
+    # A count says a run does not add up. The name says which test it does not add up by, which is the whole
+    # difference between a verdict and an investigation: the first run whose tiers were total came back one
+    # short, with nothing failed, nothing crashed, and no name to go looking for.
+    names = ["tests/a.py::test_one", "tests/a.py::test_two", "tests/a.py::test_three"]
+    summary = report.summarize("tests/a.py::test_one PASSED [ 33%]", collected_names=names)
+
+    assert summary["collected"] == 3
+    assert summary["unaccounted"] == 2
+    assert summary["unaccounted_names"] == ["tests/a.py::test_two", "tests/a.py::test_three"]
+
+
+def test_a_run_that_accounts_for_everything_names_nothing(report):
+    names = ["tests/a.py::test_one"]
+    summary = report.summarize("tests/a.py::test_one PASSED [100%]", collected_names=names)
+
+    assert summary["unaccounted"] == 0
+    assert summary["unaccounted_names"] == []
+
+
+def test_a_wholesale_loss_is_counted_in_full_but_not_listed_in_full(report):
+    # The list is capped; the count never is. An artifact that answers a lost tier with a thousand lines of JSON
+    # is not more informative than one that answers with the number and the first twenty.
+    names = [f"tests/a.py::test_{index}" for index in range(report.MAX_NAMED + 5)]
+    summary = report.summarize("", collected_names=names)
+
+    assert summary["unaccounted"] == report.MAX_NAMED + 5
+    assert len(summary["unaccounted_names"]) == report.MAX_NAMED + 1
+    assert summary["unaccounted_names"][-1] == "... and 5 more"
+
+
 def test_a_count_that_does_not_add_up_is_not_a_pass(report):
     # The general repair. A regex can be wrong again; a reconciliation says so out loud when it is.
     summary = report.summarize(PLAIN, collected=16)

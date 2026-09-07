@@ -45,6 +45,12 @@ import typing
 
 OUTCOMES = ("PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS")
 
+MAX_NAMED = 20
+"""Unaccounted tests named in the artifact before it stops listing them.
+
+A run that lost one test needs the name; a run that lost four hundred needs the number and a look at the log,
+not four hundred lines of JSON. The count is never truncated -- only the list is."""
+
 TEST_LINE = re.compile(r"^(?P<name>\S+::.*?)\s+(?P<outcome>" + "|".join(OUTCOMES) + r")\b")
 """One streamed verbose line.
 
@@ -71,7 +77,7 @@ direction that hides a drop, so the discriminator matters more than the convenie
 """
 
 
-def summarize(text: str, collected: typing.Optional[int] = None) -> dict:
+def summarize(text: str, collected: typing.Optional[int] = None, collected_names: typing.Optional[list] = None) -> dict:
     """
     Read the streamed per-test lines rather than the summary, so an aborted run still says what happened.
 
@@ -84,6 +90,10 @@ def summarize(text: str, collected: typing.Optional[int] = None) -> dict:
     collected : int, optional
         How many tests pytest said it would run. When given, the parsed total is checked against it and any
         difference is reported as `unaccounted`, which fails the verdict.
+    collected_names : list, optional
+        What pytest said it would run, by name. A count says a run does not add up; the names say which test it
+        does not add up by, which is the difference between a verdict and an investigation. Reported as
+        `unaccounted_names`, capped so a wholesale loss does not write a thousand-line artifact.
 
     Returns
     -------
@@ -92,10 +102,12 @@ def summarize(text: str, collected: typing.Optional[int] = None) -> dict:
     """
     counts: dict = {}
     failures = set()
+    reported = set()
     died_in = None
 
     def record(name: str, outcome: str) -> None:
         counts[outcome.lower()] = counts.get(outcome.lower(), 0) + 1
+        reported.add(name)
 
         if (outcome in ("FAILED", "ERROR")):
             failures.add(name)
@@ -128,7 +140,13 @@ def summarize(text: str, collected: typing.Optional[int] = None) -> dict:
 
     result = {"counts": counts, "failures": sorted(failures), "died_in": died_in}
 
-    if (collected is not None):
+    if (collected_names is not None):
+        missing = [name for name in collected_names if name not in reported]
+        result["collected"] = len(collected_names)
+        result["unaccounted"] = len(missing)
+        result["unaccounted_names"] = missing[:MAX_NAMED] + ([f"... and {len(missing) - MAX_NAMED} more"]
+                                                             if len(missing) > MAX_NAMED else [])
+    elif (collected is not None):
         result["collected"] = collected
         result["unaccounted"] = collected - sum(counts.values())
 
@@ -146,7 +164,19 @@ def describe(status: int) -> str:
     return f"exited {status}"
 
 
-def tier(log: str, status: int, collected: typing.Optional[int] = None) -> dict:
+def read_collected(path: str) -> typing.Optional[list]:
+    """The names pytest said it would run, from a `--collect-only` capture. `None` when there is no such file."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return [line.strip() for line in handle if "::" in line]
+    except OSError:
+        return None
+
+
+def tier(log: str,
+         status: int,
+         collected: typing.Optional[int] = None,
+         collected_path: typing.Optional[str] = None) -> dict:
     """One tier's section of the artifact, read from its log."""
     try:
         with open(log, encoding="utf-8") as handle:
@@ -154,7 +184,9 @@ def tier(log: str, status: int, collected: typing.Optional[int] = None) -> dict:
     except OSError:
         return {"outcome": describe(status), "note": f"no log at {log}"}
 
-    return {"outcome": describe(status), **summarize(text, collected), "log": log}
+    names = read_collected(collected_path) if collected_path else None
+
+    return {"outcome": describe(status), **summarize(text, collected, names), "log": log}
 
 
 def is_clean(section: dict) -> bool:
@@ -184,8 +216,14 @@ def main() -> int:
     (path, device, marked_selected, marked_status, unmarked_selected, unmarked_status, run_wider,
      wider_status) = sys.argv[1:9]
 
-    marked = tier("/tmp/gpu_conformance_marked.log", int(marked_status), int(marked_selected))
-    unmarked = tier("/tmp/gpu_conformance_unmarked.log", int(unmarked_status), int(unmarked_selected))
+    marked = tier("/tmp/gpu_conformance_marked.log",
+                  int(marked_status),
+                  int(marked_selected),
+                  "/tmp/gpu_conformance_marked_collected.txt")
+    unmarked = tier("/tmp/gpu_conformance_unmarked.log",
+                    int(unmarked_status),
+                    int(unmarked_selected),
+                    "/tmp/gpu_conformance_unmarked_collected.txt")
 
     report = {
         "verdict":

@@ -223,7 +223,12 @@ fi
 
 echo ""
 echo "=== gpu_mode variants ==="
-SELECTED=$(python -m pytest -m gpu_mode --run_slow --collect-only -q "${TARGETS[@]}" 2>/dev/null | grep -c "::") || SELECTED=0
+# Kept rather than counted and discarded. A count says a run does not add up; the names say which test it does
+# not add up by, and the first run where the tiers were total came back one short with nothing failed and no
+# name to look for. The report module reconciles against these.
+python -m pytest -m gpu_mode --run_slow --collect-only -q "${TARGETS[@]}" \
+    > /tmp/gpu_conformance_marked_collected.txt 2>/dev/null
+SELECTED=$(grep -c "::" /tmp/gpu_conformance_marked_collected.txt) || SELECTED=0
 echo "collected ${SELECTED} gpu_mode tests"
 
 if [[ "${SELECTED}" -lt "${MINIMUM_SELECTED}" ]]; then
@@ -244,7 +249,9 @@ echo "=== coverage that carries no mode marker ==="
 #
 # Collected first, for the same reason the marked tier is: the artifact reconciles what it counted against what
 # pytest said it would run, and without a number to reconcile against, a parser that drops tests reports a pass.
-UNMARKED_SELECTED=$(python -m pytest --run_slow --collect-only -q "${UNMARKED[@]}" 2>/dev/null | grep -c "::") || UNMARKED_SELECTED=0
+python -m pytest --run_slow --collect-only -q "${UNMARKED[@]}" \
+    > /tmp/gpu_conformance_unmarked_collected.txt 2>/dev/null
+UNMARKED_SELECTED=$(grep -c "::" /tmp/gpu_conformance_unmarked_collected.txt) || UNMARKED_SELECTED=0
 echo "collected ${UNMARKED_SELECTED} unmarked tests"
 
 python -m pytest --run_slow -v --tb=short "${UNMARKED[@]}" 2>&1 | tee /tmp/gpu_conformance_unmarked.log
