@@ -56,7 +56,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Six deterministic rules as saved searches in the app. Two at layer 5: a principal authenticated from two places faster than the journey can be made, and a run of multi-factor denials ended by an approval. The first excludes token refreshes and VPN egress ranges from the measurement *and* from becoming the location the next one is measured against, and one intrusion produces a pair of alerts rather than one. And four at layer 2: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Twenty-two stages and twenty-seven supporting modules, covered by 1,787 tests.
+Twenty-two stages and twenty-seven supporting modules, covered by 1,788 tests.
 
 ### What this fork is not
 
@@ -256,6 +256,60 @@ Status is what this fork does with it today, not what the guide specifies.
 - **Retention has to match across the lake and the SIEM.** The binding lookups here assume 400 days, and
   the index retention and the expiry job that prunes against it must agree; a test compares the two, because
   they fail silently when they drift apart.
+
+### Clock drift, which is three problems wearing one name
+
+Every join in this architecture is a join on time, so time is a shared coordinate across sources that do
+not share a clock. Three distinct things go wrong and only the first is what people mean by drift:
+
+- **Drift.** Two clocks disagree. An NTP-disciplined host is typically within a few milliseconds; an
+  undisciplined one is anywhere from seconds to hours out, and a device with an unset real-time clock is
+  out by years.
+- **Granularity.** Sources have different native precision. Packet capture is sub-microsecond, identity
+  provider logs are milliseconds, NetFlow exports are commonly whole seconds, and an SNMP poll is a
+  sample every 30 to 300 seconds. Joining a coarse layer to a fine one has a precision floor that no
+  amount of clock discipline removes, and a rule written as though both sides were precise is measuring
+  the polling interval.
+- **Export lag.** A NetFlow active timeout can hold a flow open for a minute before exporting it. The
+  `event_time` is right; the arrival is late. That is a watermark problem, not a clock problem, and it is
+  what `WindowSealStage`'s lateness horizon and separate late-arrival stream exist for.
+
+**What is most sensitive here, in order.** The single most fragile predicate this repository ships is
+R-C-002's `gap > 0`: the *sign* of a difference between a layer 6 event and a layer 3 event from two
+independent sensors. Sub-millisecond disagreement inverts it, and an inverted sequence is not a missed
+detection that looks missed -- the rule simply does not fire. Below that:
+
+| Feature | How drift moves it |
+| --- | --- |
+| Impossible travel (R-D-L5-003) | Speed is distance over elapsed time. The one-second floor in [`geo_velocity`](./python/morpheus/morpheus/utils/geo_velocity.py) bounds the arithmetic, but drift that makes the second authentication appear *before* the first has the row treated as out of order and not measured at all -- a real journey that silently carries no score |
+| MAC in two places (R-D-L2-004) | The gap is measured between sightings on two switches polled in sequence. Each switch's own offset adds directly to that interval and can carry it across the threshold in either direction |
+| Session duration | The start and the stop routinely come from different systems. Their disagreement is the duration's error bar |
+| 802.1X exchange timing | The switch stamps one end and RADIUS the other |
+
+**What the pipeline does about it, and what it does not.** [`event_clock`](./python/morpheus/morpheus/utils/event_clock.py) protects
+stateful stages from a single catastrophic timestamp -- a clock wrong by years driving the expiry horizon
+past every open binding at once -- by refusing a time further ahead of the stream's own progress than
+`max_clock_skew_seconds` allows. It is deliberately **not** a drift correction, and its week-long default
+will not notice a device an hour out. Nothing here silently corrects a timestamp, because a corrected
+value is a defaulted value and three months later it cannot be told from an observed one.
+
+**The burden therefore sits on collection.** Four things worth requiring:
+
+1. **`clock_source` and `clock_offset_ms` on every record**, not per host per day. They are what let an
+   investigation say whether a five-second gap was real. Records beyond a configured bound are
+   quarantined for review, never dropped.
+2. **PTP rather than NTP wherever ordering across sources decides an outcome** -- the same capture point
+   feeding layers 3, 4 and 6 is the case that matters.
+3. **Prefer a hard join to a time-window join.** The guide distinguishes the two: a hard join is exact
+   equality on a shared identifier (`flow_id` between layers 4 and 6, `session_id` between 5 and 7), and
+   it is immune to all three problems above. Reach for a time window only when no identifier is shared.
+4. **Set `max_clock_skew_seconds` to something your estate justifies.** The default is a week because it
+   is aimed at the catastrophic case; an estate that knows its clocks are disciplined to milliseconds
+   should say so, and one that cannot make that claim should know it cannot.
+
+A rule whose outcome turns on a sub-second difference between two independently clocked sources is not a
+detection, it is a coin weighted by your NTP configuration. Write it as a hard join, widen it past the
+disagreement you can actually bound, or do not ship it.
 
 ### What comes back out
 

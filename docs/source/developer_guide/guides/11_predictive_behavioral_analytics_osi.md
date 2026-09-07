@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is twenty-two stages and twenty-seven supporting modules
-under 1,787 tests, itemized in
+under 1,788 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional

@@ -932,6 +932,25 @@ def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships()
             f"the README says {row.group(1)} stages ship for TC-{prefix[-1]}; {shipped} are on disk")
 
 
+def test_the_readme_uses_links_rather_than_sphinx_roles():
+    # The guide is built by Sphinx and `{py:mod}` renders there as a cross-reference. The README is read on
+    # GitHub, which renders it as the literal text `{py:mod}`morpheus.utils.event_clock``. Two of these were
+    # written into the collection section by habit from editing the guide, and nothing but a reader opening the
+    # rendered page would have noticed.
+    import os  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+
+    for relative in ("README.md",
+                     os.path.join("examples", "layer5_model", "README.md"),
+                     os.path.join("examples", "splunk_lineage_app", "README.md")):
+        with open(os.path.join(repo_root, relative), encoding="utf-8") as handle:
+            found = re.findall(r"\{py:\w+\}`[^`]+`", handle.read())
+
+        assert found == [], f"{relative} uses Sphinx roles, which render as literal text on GitHub: {found}"
+
+
 @pytest.mark.cpu_mode
 @pytest.mark.parametrize(("stage_name", "knob"), _cases(DIFFERS))
 def test_changing_the_parameter_changes_the_output(stage_name: str, knob: Knob):
