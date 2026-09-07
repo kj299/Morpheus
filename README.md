@@ -116,15 +116,15 @@ Being clear about the boundary is the point of writing it down:
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
 - **Every `gpu_mode` variant this fork has passes on a GPU, and so does everything else it adds.** On
-  2026-09-07 at 20:09 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card over tiers that are
-  total: the marked tier **417 collected, 417 passed**; the tier carrying no mode marker -- where the
-  default execution mode on a machine with a card is the GPU -- **913 collected, 907 passed, 6
+  2026-09-07 at 22:42 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card over tiers that are
+  total: the marked tier **429 collected, 429 passed**; the tier carrying no mode marker -- where the
+  default execution mode on a machine with a card is the GPU -- **919 collected, 913 passed, 6
   skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against
   what pytest collected. Every remaining skip is a field contract for a sourcetype nothing produces yet;
   there were seven until `binding:l1` gained a producer, and that test now runs instead of skipping.
   These runs also carry `torch==2.4.0+cu124` alongside the RAPIDS stack, so they say something the
   earlier ones could not: adding Torch to this environment does not disturb cuDF, and the two coexist in
-  one process. That covers all twenty-two stages, all three composed pipelines,
+  one process. That covers all twenty-five stages, all three composed pipelines,
   control 13's six checks, the stage parameter liveness registry and the first-detection corpus, in GPU
   mode. The wider upstream tier **skipped itself**, because that checkout's `tests/tests_data` fixtures
   were unfetched Git LFS pointers, so nothing here is a claim about the upstream suite. One card, no CI.

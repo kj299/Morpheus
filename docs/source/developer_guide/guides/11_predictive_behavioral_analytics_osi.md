@@ -112,15 +112,20 @@ artifact it exists to produce. It then took four repairs to that runner before a
 believed, and each of the four is recorded below, because each produced a verdict that read `passed`
 while measuring less than it claimed.
 
-**The run that stands is 2026-09-07 at 20:09 UTC**, on the same card, over tiers that are total: the
-marked tier 417 collected and 417 passed; the tier carrying no mode marker 913 collected, 907 passed and
-6 skipped -- every skip a field contract for a sourcetype nothing produces yet. That run is the first to
-check both composed golden files against a device after the scoring path landed, so the per-feature z-scores,
-which are float divisions, are now known to agree between host and device rather than assumed to. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
-pytest collected. It is also the first such run with `torch==2.4.0+cu124` installed beside the RAPIDS
-stack, which answers a question the earlier ones could not: the two coexist in one process, and adding
-Torch does not disturb cuDF. That is every stage, all three composed pipelines, control 13's
-six checks, the stage parameter liveness registry and the first-detection corpus, in GPU mode.
+**The run that stands is 2026-09-07 at 22:42 UTC**, on the same card, over tiers that are total: the
+marked tier 429 collected and 429 passed; the tier carrying no mode marker 919 collected, 913 passed and
+6 skipped -- every skip a field contract for a sourcetype nothing produces yet. Both tiers grew with the
+envelope: twelve marked variants for `EnvelopeStampStage`, and six unmarked -- its four liveness entries
+and the two expectation tests that evaluate what the behavior summary now groups. It is the first device
+check of both composed golden files since every record started carrying `osi_layer` and `entity_key`;
+the run before it was the first since the scoring path landed, and that is where the per-feature
+z-scores -- float divisions, the arithmetic that has diverged between host and device in this project
+before -- were first shown to agree rather than assumed to. Nothing failed in either, both exited cleanly, and both counts
+reconcile exactly against what pytest collected. It is also the first such run with `torch==2.4.0+cu124`
+installed beside the RAPIDS stack, which answers a question the earlier ones could not: the two coexist
+in one process, and adding Torch does not disturb cuDF. That is every stage, all three composed
+pipelines, control 13's six checks, the stage parameter liveness registry and the first-detection
+corpus, in GPU mode.
 
 Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
 less than it claimed. The runner selected from a list that was not total: two files were outside it from
