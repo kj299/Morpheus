@@ -112,10 +112,12 @@ artifact it exists to produce. It then took four repairs to that runner before a
 believed, and each of the four is recorded below, because each produced a verdict that read `passed`
 while measuring less than it claimed.
 
-**The run that stands is 2026-09-07 at 02:27 UTC**, on the same card, over tiers that are total for the
-first time: the marked tier 379 collected and 379 passed; the tier carrying no mode marker 890 collected,
-883 passed and 7 skipped. Nothing failed in either, both exited cleanly, and both counts reconcile
-exactly against what pytest collected. That is every stage, all three composed pipelines, control 13's
+**The run that stands is 2026-09-07 at 13:20 UTC**, on the same card, over tiers that are total: the
+marked tier 379 collected and 379 passed; the tier carrying no mode marker 895 collected, 888 passed and
+7 skipped. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
+pytest collected. It is also the first such run with `torch==2.4.0+cu124` installed beside the RAPIDS
+stack, which answers a question the earlier ones could not: the two coexist in one process, and adding
+Torch does not disturb cuDF. That is every stage, all three composed pipelines, control 13's
 six checks, the stage parameter liveness registry and the first-detection corpus, in GPU mode.
 
 Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
@@ -136,7 +138,7 @@ selects the 29 tests in the five files carrying a mode marker, and the other six
 verdict from, the 353 above included. The totality test could not have caught it, because it exempted
 the directory from the marker check on the grounds that a directory has no markers to check -- excusing
 the one entry that most needed checking. Directory entries are gone, every entry is a file, nothing is
-exempt, and the tier carrying no mode marker grew from 508 tests to 890. What the 353 covered it still
+exempt, and that change alone grew the tier carrying no mode marker from 508 tests to 890. What the 353 covered it still
 covers, control 13 included; what it never covered now runs. The general form is worth stating once: an
 entry that cannot be checked is not a covered entry, and the check that excuses what it cannot inspect
 is the check that will go stale.

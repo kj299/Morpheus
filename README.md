@@ -110,11 +110,13 @@ Being clear about the boundary is the point of writing it down:
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
 - **Every `gpu_mode` variant this fork has passes on a GPU, and so does everything else it adds.** On
-  2026-09-07 at 02:27 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card over tiers that are
-  total for the first time: the marked tier **379 collected, 379 passed**; the tier carrying no mode
-  marker -- where the default execution mode on a machine with a card is the GPU -- **890 collected, 883
-  passed, 7 skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly
-  against what pytest collected. That covers all twenty-two stages, all three composed pipelines,
+  2026-09-07 at 13:20 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card over tiers that are
+  total: the marked tier **379 collected, 379 passed**; the tier carrying no mode marker -- where the
+  default execution mode on a machine with a card is the GPU -- **895 collected, 888 passed, 7
+  skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against
+  what pytest collected. That run is also the first with `torch==2.4.0+cu124` installed alongside the
+  RAPIDS stack, so it says something the earlier ones could not: adding Torch to this environment does
+  not disturb cuDF, and the two coexist in one process. That covers all twenty-two stages, all three composed pipelines,
   control 13's six checks, the stage parameter liveness registry and the first-detection corpus, in GPU
   mode. The wider upstream tier **skipped itself**, because that checkout's `tests/tests_data` fixtures
   were unfetched Git LFS pointers, so nothing here is a claim about the upstream suite. One card, no CI.
@@ -140,7 +142,7 @@ Being clear about the boundary is the point of writing it down:
   The test that keeps the tiers total could not have caught it, because it exempted the directory from
   the marker check on the grounds that a directory has no markers to check, which excused the one entry that
   most needed checking. Directory entries are gone; every entry is a file,
-  nothing is exempt, and the unmarked tier grew from 508 tests to 890. What the 353 covered it still
+  nothing is exempt, and that change alone grew the unmarked tier from 508 tests to 890. What the 353 covered it still
   covers, control 13 included; what it never covered now runs.
 - **A fourth defect, in the counting rather than the selection, and it was two errors that nearly
   cancelled.** The first run over total tiers reported 378 of 379 in the artifact while pytest's own
