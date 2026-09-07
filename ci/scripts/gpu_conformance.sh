@@ -65,6 +65,7 @@ TARGETS=(
     tests/morpheus/determinism/test_telemetry_harness.py
     tests/morpheus/stages/test_binding_resolver_stage.py
     tests/morpheus/stages/test_determinism_stamp_stage.py
+    tests/morpheus/stages/test_envelope_stamp_stage.py
     tests/morpheus/stages/test_community_id_stage.py
     tests/morpheus/stages/test_lineage_stamp_stage.py
     tests/morpheus/stages/test_siem_wire_stage.py

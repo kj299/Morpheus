@@ -63,6 +63,7 @@ from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
@@ -452,10 +453,25 @@ principal and the identifier composed together -- so a chain of session records 
 which is a narrower and more useful thing to follow than every session that principal opened in the window.
 """
 
+CLASS_ENVELOPE = {
+    "tc5_auth": (5, ["user_principal"]),
+    "tc5_session": (5, ["user_principal"]),
+}
+"""The layer and the behavioral subject Part 2 names for each layer 5 class.
 
-def _run_class(config: Config, dataframes: list[pd.DataFrame], stages: list, impose_order: bool,
-               anchor: str) -> pd.DataFrame:
-    """Source → stamp → (total order) → the class's stages → window seal → sink, collected to one frame."""
+The principal rather than the session: a session is an episode belonging to a principal, and grouping a summary
+by the episode would give one row per logon rather than one per person, which is the opposite of what a
+behavioral rollup is for. `session_id` stays on the record as its own column for the rules that join on it.
+"""
+
+
+def _run_class(config: Config,
+               dataframes: list[pd.DataFrame],
+               stages: list,
+               impose_order: bool,
+               anchor: str,
+               envelope: tuple = None) -> pd.DataFrame:
+    """Source → stamp → (total order) → the class's stages → (envelope) → window seal → sink, as one frame."""
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
@@ -465,6 +481,10 @@ def _run_class(config: Config, dataframes: list[pd.DataFrame], stages: list, imp
 
     for stage in stages:
         pipe.add_stage(stage)
+
+    if (envelope is not None):
+        (osi_layer, entity_columns) = envelope
+        pipe.add_stage(EnvelopeStampStage(config, osi_layer=osi_layer, entity_columns=entity_columns))
 
     pipe.add_stage(
         WindowSealStage(config,
@@ -601,13 +621,15 @@ def run_pipeline(config: Config,
             TC5ScoreStage(config, scorer=ReferenceScorer(), manifest=SCORING_MANIFEST, feature_columns=SCORED_FEATURES),
         ],
         impose_order,
-        anchor=CHAIN_ANCHORS["tc5_auth"])
+        anchor=CHAIN_ANCHORS["tc5_auth"],
+        envelope=CLASS_ENVELOPE["tc5_auth"])
 
     outputs["tc5_session"] = _run_class(config,
                                         batches["tc5_session"],
                                         [TC5SessionStage(config, timeout_seconds=SESSION_TIMEOUT_SECONDS)],
                                         impose_order,
-                                        anchor=CHAIN_ANCHORS["tc5_session"])
+                                        anchor=CHAIN_ANCHORS["tc5_session"],
+                                        envelope=CLASS_ENVELOPE["tc5_session"])
 
     frames = []
 

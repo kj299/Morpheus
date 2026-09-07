@@ -50,6 +50,7 @@ from morpheus.messages import MessageMeta
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
+from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
@@ -259,6 +260,21 @@ def port_inventory() -> dict:
         "event_time": [index * MINUTE for index in range(len(serials))],
         "transceiver_serial": serials,
         "lldp_neighbor_chassis_id": neighbors,
+    }
+
+
+def keyed_ports() -> dict:
+    """Ports that already carry an `entity_key`, and one that carries only whitespace.
+
+    A stage that reads `overwrite` has to have something to overwrite. The held keys deliberately disagree with
+    what the entity columns would compose, so keeping them and replacing them are visibly different outcomes --
+    if they agreed, the parameter would look inert whether the stage consulted it or not.
+    """
+    return {
+        "site_id": ["hq", "hq", "hq"],
+        "device_id": ["sw1", "sw1", "sw1"],
+        "port_id": ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"],
+        "entity_key": ["held:one", "held:two", "   "],
     }
 
 
@@ -895,6 +911,20 @@ REGISTRY: dict = {
                 Knob("use_base64", DIFFERS, benign=True, extreme=False),
                 Knob("output_column", DIFFERS, benign="community_id", extreme="flow_id"),
                 Knob("raise_on_failure", RAISES, benign=False, extreme=True),
+            ),
+        ),
+    "EnvelopeStampStage":
+        Scenario(
+            stage=EnvelopeStampStage,
+            frame=port_inventory,
+            base={
+                "osi_layer": 1,
+                "entity_columns": ["site_id", "device_id", "port_id"],
+            },
+            knobs=(
+                Knob("osi_layer", DIFFERS, benign=1, extreme=5),
+                Knob("entity_columns", DIFFERS, benign=["site_id", "device_id", "port_id"], extreme=["port_id"]),
+                Knob("overwrite", DIFFERS, benign=False, extreme=True, frame=keyed_ports),
             ),
         ),
     "LineageStampStage":

@@ -221,7 +221,7 @@ lake design usually gets wrong:
 | `event_time` vs `observed_time` vs `ingest_time` | Three distinct times. `event_time` is when it happened, `observed_time` when the sensor saw it, `ingest_time` when Morpheus received it. |
 | `clock_source`, `clock_offset_ms` | Records beyond a configured bound are quarantined rather than dropped. A device whose clock is wrong by years is a real thing, and one such record can expire every open binding at once. |
 | `sampling_policy` | `full`, `1:N` or `adaptive:<params>`. Any rate-based feature is uninterpretable without it. |
-| `entity_key` | The behavioral subject for that class. Different per layer; see the table below. |
+| `entity_key`, `osi_layer` | The behavioral subject for that class and the layer it came from. The subject differs per layer -- see the table below. Both are stamped by `EnvelopeStampStage` at the tail of each class's segment; searches that group by layer and entity drop any row missing either. |
 | `origin_hash`, `event_uid` | Deterministic identity, so a score can be traced back to the bytes that produced it. |
 
 Two rules govern it, and both are the kind that only hurt later:

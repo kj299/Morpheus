@@ -395,8 +395,8 @@ Output (`stages/output/`): `WriteToKafkaStage`, `WriteToElasticsearchStage`, `Wr
 General (`stages/general/`): `MonitorStage`, `TriggerStage`, `BufferStage`, `DelayStage`,
 `RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, `MultiPortModulesStage`.
 
-Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`. These were added to support the
-design in Part 4 and are covered in detail there.
+Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`, `EnvelopeStampStage`. These were
+added to support the design in Part 4 and are covered in detail there.
 
 There is no Splunk sink. Delivery to Splunk goes through Kafka, HTTP Event Collector via
 `HttpClientSinkStage`, or a file drop consumed by a forwarder. Part 4 covers the tradeoffs.
@@ -758,6 +758,14 @@ pipeline is how lineage silently breaks.
 | `event_uid` | hex string | Deterministic per-event identity. Construction in Part 4. |
 | `entity_key` | string | The primary behavioral subject for this telemetry class. |
 | `site_id` / `tenant_id` | string | Physical and logical scoping. |
+
+`entity_key` and `osi_layer` are stamped by
+{py:class}`~morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage`, placed at the tail of each
+class's segment. The layer is a constant for the class; the entity columns are named per class, because the
+subject differs by layer -- a port at layer 1, a MAC at layer 2, a principal at layer 5. A row missing any
+part of its key carries no key rather than a partial one, on the same rule
+{py:mod}`~morpheus.utils.entity_key` applies everywhere else. Where a class already composes `entity_key`
+for its own state, as the TC-1 stages do, the stage leaves it alone and stamps only the layer.
 
 Two rules govern the envelope. First, `ingest_time` must never appear in a detection rule or a feature.
 Second, when a field is unavailable it must be explicitly null with a reason code, never defaulted to a
@@ -2912,16 +2920,22 @@ produces, consumes or checks either of them** -- they are schema, not a control.
 `max_clock_skew_seconds` parameter on the three stateful stages is asserted to be live and to reject an
 invalid value; no test measures what a plausible offset does to a feature.
 
-**Why does no producer emit `osi_layer`, when two shipped searches group by it?** The universal envelope in
-Part 2 requires `entity_key` on every record and the summary and chain-assembly searches aggregate `by _time
-osi_layer entity_key lineage_id`. Neither field is fully supplied: nothing in this fork emits `osi_layer` at
-all, and `entity_key` reaches only the layer 1 class. `stats by` drops a row whose grouping field is absent, so
-both searches return nothing regardless of what else is on the record -- which stayed invisible while
-`max_abs_z` had no producer and the searches were empty for a reason nobody had to look past. Giving the scoring
-path a producer is what exposed it. The fix is small and belongs to the producers rather than the searches, but
-it is a decision about the envelope's contract rather than a typo, so it is recorded here rather than patched:
-either every stage stamps its own layer and entity key, or the searches stop grouping on fields the design does
-not guarantee.
+**Why does no chain span more than one layer?** The `osi_layer` half of this question is now closed:
+{py:class}`~morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage` stamps `osi_layer` and
+`entity_key` on every record from every class, and `Behavior summary - per-layer scores` went from zero rows
+to 355. That gap stayed invisible for as long as it did because both searches were also empty for a second
+reason -- nothing produced `max_abs_z` -- which gave an empty result an explanation nobody had to look past.
+Fixing the more obvious gap is what exposed the less obvious one.
+
+What it exposed next is that `Chain assembly - cross-layer risk` is still empty, and no longer for a reason
+the envelope can fix. It fires on `dc(osi_layer) >= 3` grouped by `lineage_id`, and all 296 distinct
+`lineage_id` values in the corpus span exactly one layer. Each telemetry class runs its own pipeline over its
+own corpus, and the `morpheus:edge` events carry no `lineage_id` at all, so nothing links a layer 1
+observation to the layer 2 or layer 5 activity it caused. Part 4 specifies `lineage_id` as
+`sha256(root_entity_key || window_id || chain_root)`, which is a chain identity only if the classes agree on
+a root -- and today they do not, because they never meet. Closing this needs a composed pipeline where one
+event's `entity_key` resolves to another layer's subject through the binding ladder, which is a build item
+larger than a stamping stage and is recorded here rather than estimated.
 
 **Should `binding_l1` be bucketed after all?** This document argues that the layer 2 lookup is bucketed
 because a DHCP lease moves and the layer 1 one is not because a transceiver is stable for months. Wiring

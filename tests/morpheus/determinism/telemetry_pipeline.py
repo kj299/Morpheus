@@ -59,6 +59,7 @@ from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
@@ -191,6 +192,22 @@ ROAM_AT_SECONDS = 2100
 CS_PER_SECOND = 100
 
 TELEMETRY_CLASSES = ("tc1", "tc1_binding", "tc2_mac", "tc2_binding", "tc2_arp", "tc2_auth")
+
+CLASS_ENVELOPE = {
+    "tc1": (1, ["site_id", "device_id", "port_id"]),
+    "tc1_binding": (1, ["site_id", "device_id", "port_id"]),
+    "tc2_mac": (2, ["mac_address"]),
+    "tc2_binding": (2, ["mac_address"]),
+    "tc2_arp": (2, ["arp_sender_mac"]),
+    "tc2_auth": (2, ["site_id", "switch_id", "port_id"]),
+}
+"""The layer each class came from, and the columns Part 2 names as its behavioral subject.
+
+Layer 1 keys on the port and layer 2 on the MAC, which is the guide's own split: at layer 1 the port is the
+thing that persists, and at layer 2 the MAC is the thing that moves between ports. The 802.1X class is the
+exception and keys on the port rather than the supplicant, because an exchange is a question about the port that
+authorized it -- the same reasoning that gives `TC2AuthStage` its port-keyed timing.
+"""
 
 
 def _envelope(rng: random.Random, collector: str, schema: str, seq: int) -> dict:
@@ -487,8 +504,14 @@ def _run_class(config: Config,
                stages: list,
                impose_order: bool,
                seal: bool = True,
-               anchor: str = None) -> pd.DataFrame:
-    """Source → stamp → (total order) → the class's stages → (window seal) → sink, collected to one frame."""
+               anchor: str = None,
+               envelope: tuple = None) -> pd.DataFrame:
+    """Source → stamp → (total order) → the class's stages → (envelope) → (window seal) → sink, as one frame.
+
+    The envelope stamp goes after the class's own stages rather than before them, because two of these classes
+    are produced by stages that replace the payload wholesale: a binding stage emits one row per interval, not
+    one per observation, so anything stamped upstream of it is discarded along with the observations.
+    """
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
@@ -498,6 +521,10 @@ def _run_class(config: Config,
 
     for stage in stages:
         pipe.add_stage(stage)
+
+    if (envelope is not None):
+        (osi_layer, entity_columns) = envelope
+        pipe.add_stage(EnvelopeStampStage(config, osi_layer=osi_layer, entity_columns=entity_columns))
 
     if (seal):
         pipe.add_stage(
@@ -563,13 +590,18 @@ def run_pipeline(config: Config,
                                     TC1ChangeStage(config),
                                 ],
                                 impose_order,
-                                anchor=CHAIN_ANCHORS["tc1"])
+                                anchor=CHAIN_ANCHORS["tc1"],
+                                envelope=CLASS_ENVELOPE["tc1"])
 
     # The same layer 1 snapshots, closed into port bindings. This is the ladder's last rung: the table that takes
     # a switch port to the site, optic and neighbour it held at a given moment. The stage emits its own
     # `binding_uid`, built exactly as `binding_table` builds one, so it serves as the row key directly rather than
     # having a second identifier composed beside it the way the layer 2 bindings do.
-    port_bindings = _run_class(config, batches["tc1"], [TC1BindingStage(config)], impose_order, seal=False)
+    port_bindings = _run_class(config,
+                               batches["tc1"], [TC1BindingStage(config)],
+                               impose_order,
+                               seal=False,
+                               envelope=CLASS_ENVELOPE["tc1_binding"])
     port_bindings["row_key"] = port_bindings["binding_uid"]
     outputs["tc1_binding"] = port_bindings
 
@@ -577,8 +609,13 @@ def run_pipeline(config: Config,
     outputs["tc2_mac"] = _run_class(config,
                                     batches["tc2_mac"], [TC2CardinalityStage(config)],
                                     impose_order,
-                                    anchor=CHAIN_ANCHORS["tc2_mac"])
-    bindings = _run_class(config, batches["tc2_mac"], [TC2BindingStage(config)], impose_order, seal=False)
+                                    anchor=CHAIN_ANCHORS["tc2_mac"],
+                                    envelope=CLASS_ENVELOPE["tc2_mac"])
+    bindings = _run_class(config,
+                          batches["tc2_mac"], [TC2BindingStage(config)],
+                          impose_order,
+                          seal=False,
+                          envelope=CLASS_ENVELOPE["tc2_binding"])
 
     bindings["row_key"] = [
         event_uid("binding", *values)
@@ -603,12 +640,14 @@ def run_pipeline(config: Config,
                                  uid_column="binding_uid"),
         ],
         impose_order,
-        anchor=CHAIN_ANCHORS["tc2_arp"])
+        anchor=CHAIN_ANCHORS["tc2_arp"],
+        envelope=CLASS_ENVELOPE["tc2_arp"])
 
     outputs["tc2_auth"] = _run_class(config,
                                      batches["tc2_auth"], [TC2AuthStage(config)],
                                      impose_order,
-                                     anchor=CHAIN_ANCHORS["tc2_auth"])
+                                     anchor=CHAIN_ANCHORS["tc2_auth"],
+                                     envelope=CLASS_ENVELOPE["tc2_auth"])
 
     frames = []
 
