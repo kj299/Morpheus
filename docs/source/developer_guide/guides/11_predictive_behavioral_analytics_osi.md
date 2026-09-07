@@ -2866,6 +2866,47 @@ What Morpheus provides versus what has to be built, stated plainly.
 | Chained rule engine | Medium | Runs in Splunk, not in Morpheus. The `examples/splunk_lineage_app` searches are the starting set |
 | Bitemporal TC-0 context store | Medium | Valid-time and transaction-time intervals |
 
+### Open questions this work has not answered
+
+Distinct from the table above, which lists components that are absent. These are questions the design
+raises, cannot currently answer, and should not be assumed away.
+
+**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Every join here
+is a join on time across sources that do not share a clock, and the
+[collection section](../../../../README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
+qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0` inverts on
+sub-millisecond disagreement, impossible travel silently carries no score when two authentications
+reorder, and the MAC-in-two-places interval absorbs each switch's offset directly. **None of that has
+been measured.** What is missing is an experiment rather than a component: inject a per-source offset at
+a range of magnitudes -- one millisecond, ten, one second, one minute -- into the existing seeded corpora,
+re-run the composed pipelines, and report which features move, by how much, and at what offset each
+shipped rule changes its decision. The harness for it already exists; control 13's batch-split sweep and
+permutation check are the same shape, differing only in what they perturb.
+
+Three things make this worth doing rather than reasoning about. The corpora are seeded code with planted
+anomalies and negative controls beside them, so a decision change is directly observable rather than
+inferred. The answer is a number an estate can act on -- it converts an instruction to synchronize clocks into a
+statement that this rule needs better than N milliseconds and that one tolerates a minute. And the result may well be that
+several rules are not deployable at all without a clock discipline most estates do not have, which is
+worth knowing before tuning thresholds against them rather than after.
+
+What exists today is narrower than it looks and should not be mistaken for coverage.
+{py:mod}`~morpheus.utils.event_clock` bounds a catastrophically wrong timestamp so one bad row cannot
+expire every open binding; it is not drift correction and its default would not notice a device an hour
+out. `clock_source` and `clock_offset_ms` are in the universal envelope, and **nothing in this repository
+produces, consumes or checks either of them** -- they are schema, not a control. The
+`max_clock_skew_seconds` parameter on the three stateful stages is asserted to be live and to reject an
+invalid value; no test measures what a plausible offset does to a feature.
+
+**What retention, lawful basis and minimization apply to the behavioral history this design accumulates.**
+Layer 5 alone keeps each principal's location history, last known coordinate, device and application
+history, and the binding lookups here assume a 400-day retention -- a location history of employees'
+device movements over more than a year, to which a per-user behavioral profile is added once a model is
+in the pipeline. This document specifies no retention limits, no minimization, no lawful basis and no
+treatment of the data as personal data. That is a deliberate deferral recorded here rather than an
+oversight, and it is a question for the deploying organization and its counsel rather than one this
+guide should answer on their behalf.
+
 ### Sequencing recommendation
 
 Do not build all seven layers at once. The dependency structure and the value distribution both argue for
