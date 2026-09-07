@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is twenty-one stages and twenty-six supporting modules
-under 1,701 tests, itemized in
+8's total order, and control 13's CI harness. That is twenty-two stages and twenty-seven supporting modules
+under 1,769 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -68,19 +68,30 @@ detection rule in Part 3 apart from the six that ship as saved searches, two of 
 until their lookup is populated, the chained rule engine, and the determinism controls other than 7, 8,
 and 13. Layer 5 is a partial exception, and the boundary inside it is now one thing rather than four:
 **there is no per-user model.** `mean_abs_z` and `max_abs_z` have no producer, so the four behavioral
-and predictive rules that read them -- R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 -- cannot
-fire, and neither can the drift trajectory that is this document's flagship predictive claim.
-Everything else at this layer is built: the session assembly and the five feature stages run under
+and predictive rules that read them -- R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 -- fire on
+nothing. The drift trajectory that is this document's flagship predictive claim is now the exception
+worth stating precisely: the arithmetic behind R-P-L5-006 is built and tested --
+{py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` reports the velocity, the
+acceleration, the length of the rising run and its total rise in the principal's own standard deviations
+-- against scores supplied directly, so the rule's shape is settled before there is a model to argue
+about. Given no score column it carries a null in every drift column and says so once in the log, which
+is what a pipeline with no model looks like and what this repository ships as.
+Everything else at this layer is built: the session assembly and the six feature stages run under
 control 13's six checks against a week-long corpus, the two deterministic rules ship as saved searches
 with their predicates asserted against that corpus, and `morpheus:score:l5` is a produced sourcetype.
 Controls 1, 2, 4 and 12 now ship as code, ahead of the model
 that will consume them. Control 9 is a partial exception, since `determinism.quantize_value` ships but
-the hysteresis half of it does not, and control 3 is outstanding for a concrete reason rather than an
-unexamined one: seeding beyond `manual_seed` means calling `torch.use_deterministic_algorithms`, and the
-environment this work is developed and tested in has no Torch, no `dfencoder` and no `morpheus_dfp` --
-`morpheus_dfp` requires `torch==2.4.0+cu124`. That is also why the autoencoder itself is absent rather
-than merely unfinished: a model path written where the model cannot be run would be written without ever
-having been run. Thresholds are placeholders unless marked otherwise.
+the hysteresis half of it does not, and control 3 is in a third state that is neither built nor absent:
+it is **written and unmeasured**. Seeding beyond `manual_seed` means calling
+`torch.use_deterministic_algorithms`, and the environment this work is developed and tested in has no
+Torch and no CUDA device -- `morpheus.models.dfencoder` is in the tree, but it is a Torch model.
+`examples/layer5_model/run_model.py` sets `CUBLAS_WORKSPACE_CONFIG` before Torch is imported, enables
+deterministic algorithms, trains a per-principal autoencoder on the layer 5 corpus and checks the double
+run and the batch sweep; on a machine without Torch or a card it exits non-zero and writes a failed
+artifact rather than reporting on a model it never trained. That refusal is what is tested here. What it
+measures is reproducibility of the scoring path, not detection quality: a week of five principals is far
+too little data to train an autoencoder that detects anything, and nothing in this document claims it
+does. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
 nowhere else. On 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada
@@ -106,6 +117,18 @@ this fork's files by their copyright header, and the counts are reconciled again
 collected, so a total that does not add up is a failed verdict rather than a quiet one. A better pattern
 was not the repair; the reconciliation is, because a counter that can silently drop a test is
 untrustworthy however carefully its pattern is written.
+
+A third narrowing surfaced afterwards, with the same shape and one further lesson. The marked tier named
+the whole `tests/morpheus/determinism` directory, which reads as complete and is not: `-m gpu_mode`
+selects the 29 tests in the five files carrying a mode marker, and the other six files carry none, so
+320 of that directory's 349 tests were deselected on every GPU run this repository has rendered a
+verdict from, the 353 above included. The totality test could not have caught it, because it exempted
+the directory from the marker check on the grounds that a directory has no markers to check -- excusing
+the one entry that most needed checking. Directory entries are gone, every entry is a file, nothing is
+exempt, and the tier carrying no mode marker grew from 508 tests to 868. What the 353 covered it still
+covers, control 13 included; what it never covered now runs. The general form is worth stating once: an
+entry that cannot be checked is not a covered entry, and the check that excuses what it cannot inspect
+is the check that will go stale.
 
 The wider upstream tier skipped itself, because that checkout's `tests/tests_data` fixtures were
 unfetched Git LFS pointers. Nothing here is a claim about the upstream suite on a GPU, and the limit
@@ -1306,6 +1329,16 @@ windows with a total increase above 1.5 standard deviations, without any single 
 R-B-L5-001 threshold. This is the flagship predictive rule for insider risk. It should never page; it
 should place the principal on a watchlist and raise the sensitivity of layer 7 rules for that principal.
 
+The trajectory this reads is built: {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`
+emits `drift_rising_windows`, `drift_total_rise` and `drift_rise_sigmas` -- the quantity this rule
+thresholds at 1.5 -- alongside the velocity and acceleration this document names as its second predictive mechanism.
+The rule fires on nothing until something produces `mean_abs_z`, and until then every one of those
+columns is null. Three of the definitions are load-bearing and easy to get wrong in a way that reads
+plausibly: a gap in the windows restarts the run rather than extending it, the standard deviation is
+taken over prior windows only so a rise cannot inflate its own denominator, and a score that has never
+varied yields no rise in sigmas rather than an infinite one. Note also where the run begins: four
+increases means five windows, because a rise is measured from the window before it.
+
 ### Layer 6
 
 **R-B-L6-001 - New TLS client fingerprint.** A `ja4_client` value not previously observed for a
@@ -2242,6 +2275,12 @@ or CuPy import. Set it in the container entrypoint, not in Python. `use_determin
 raise on operations with no deterministic implementation, which is the desired behavior: it converts a
 silent reproducibility hole into a startup failure.
 
+`examples/layer5_model/run_model.py` does this one step further than a container entrypoint can: it sets
+the variable before Torch is imported and **refuses to continue if Torch is already in `sys.modules`**,
+because setting it late has no effect and looks exactly like setting it correctly. That is the failure
+mode worth designing against here -- not the operation that raises, which announces itself, but the
+environment variable that silently does nothing.
+
 Emit the seed as `rng_seed` on every event.
 
 ### Control 4: Shard instead of thread
@@ -2710,6 +2749,25 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.telemetry.tc5_risk_stage.TC5RiskStage`), which is the same primitive
   R-D-L5-004 and the plain failure-then-success feature both read, counted over different subsets of
   the stream.
+- The trajectory R-P-L5-006 reads, built against scores supplied directly rather than waiting for a model
+  ({py:mod}`~morpheus.utils.drift_trajectory` and
+  {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`). It reports the first and second
+  differences, the length of the current strictly-increasing run, and the run's total rise in the
+  principal's own standard deviations -- the quantity this document thresholds at 1.5. Three choices in it
+  are decisions rather than details, and each is asserted: a gap in a principal's activity restarts the run
+  rather than extending it, because someone who did not authenticate for two days has not been rising for
+  four consecutive windows; the standard deviation is taken over prior windows only, so a rising sequence
+  cannot inflate the denominator that is meant to detect it; and a principal whose score has never varied
+  reports no rise in sigmas at all rather than an infinite one, since inventing a scale would make the
+  flattest history the most alarming. The module is given a number per entity per window and knows nothing
+  about what produced it, which is what lets the trajectory be tested without an autoencoder.
+- The model half as a runner rather than a result (`examples/layer5_model/run_model.py`, with its
+  [README](../../../../examples/layer5_model/README.md)). It trains a per-principal autoencoder on the
+  corpus above and checks the double run and the batch sweep -- controls 3 and 5, on the machine that has a
+  card. It measures reproducibility of the scoring path and not detection quality, and says so in the
+  artifact it writes rather than only in prose. On a machine without Torch or a device it exits non-zero
+  and writes a failed verdict; that refusal is the part tested here, along with the property that every
+  feature it trains on is one a TC-5 stage derived rather than a column a collector sent.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.
@@ -2724,7 +2782,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   rogue and reports the phone -- and because the corpus previously carried no supplicant at all, which left
   `TC2AuthStage` running in its documented degraded mode for every composed check.
 
-- The two verdicts this repository cannot render itself, packaged so each costs minutes and yields an artifact.
+- The three verdicts this repository cannot render itself, packaged so each costs minutes and yields an artifact.
   `ci/scripts/gpu_conformance.sh` is one command that runs every `gpu_mode` variant plus the GPU coverage that
   carries no mode marker, and writes a JSON artifact naming the card, the driver, the date and the counts. It
   guards the three ways a GPU run has silently reported success here before: no device, so everything deselects

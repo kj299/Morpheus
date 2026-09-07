@@ -49,11 +49,20 @@ export NUMBA_CUDA_USE_NVIDIA_BINDING="${NUMBA_CUDA_USE_NVIDIA_BINDING:-1}"
 #
 # The two lists are maintained by hand and kept total by a test. `tests/morpheus/utils/test_gpu_conformance_targets.py`
 # identifies this fork's own test files by their copyright header and fails if one is in neither list, because a
-# selection that quietly drops a file is the exact failure this script was written to prevent -- and it happened:
-# five TC-5 stage files sat outside both tiers through two merges, so the layer 5 work went unmeasured while the
-# runner reported a clean verdict on everything else.
+# selection that quietly drops a file is the exact failure this script was written to prevent -- and it happened
+# twice. First, five TC-5 stage files sat outside both tiers through two merges, so the layer 5 work went
+# unmeasured while the runner reported a clean verdict on everything else. Second, this tier named the whole
+# `tests/morpheus/determinism` directory, which reads as complete and was not: `-m gpu_mode` selects only the
+# 29 tests in the five files that carry a mode marker, and the other six files -- the liveness registry, the
+# first-detection corpus, the representation invariance suite, the Splunk package -- were deselected on every
+# GPU run this has ever rendered a verdict from. Files are named individually for that reason: a directory entry
+# cannot be checked against the markers inside it, and something that cannot be checked is what goes stale.
 TARGETS=(
-    tests/morpheus/determinism
+    tests/morpheus/determinism/test_determinism_harness.py
+    tests/morpheus/determinism/test_gpu_parity.py
+    tests/morpheus/determinism/test_session_harness.py
+    tests/morpheus/determinism/test_siem_wire_contract.py
+    tests/morpheus/determinism/test_telemetry_harness.py
     tests/morpheus/stages/test_binding_resolver_stage.py
     tests/morpheus/stages/test_determinism_stamp_stage.py
     tests/morpheus/stages/test_community_id_stage.py
@@ -69,6 +78,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc2_binding_stage.py
     tests/morpheus/stages/test_tc2_cardinality_stage.py
     tests/morpheus/stages/test_tc5_cadence_stage.py
+    tests/morpheus/stages/test_tc5_drift_stage.py
     tests/morpheus/stages/test_tc5_novelty_stage.py
     tests/morpheus/stages/test_tc5_risk_stage.py
     tests/morpheus/stages/test_tc5_session_stage.py
@@ -82,6 +92,12 @@ TARGETS=(
 # than an omission. `test_lineage_cudf.py` is the one that matters most: its digest equivalence gate asserts the
 # GPU and CPU hashing paths agree, and a marker filter dropped it once already.
 UNMARKED=(
+    tests/morpheus/determinism/test_end_to_end_mac_spoof.py
+    tests/morpheus/determinism/test_first_detections.py
+    tests/morpheus/determinism/test_layer5_model_runner.py
+    tests/morpheus/determinism/test_representation_invariance.py
+    tests/morpheus/determinism/test_splunk_validation_package.py
+    tests/morpheus/determinism/test_stage_parameter_liveness.py
     tests/morpheus/stages/test_lineage_stage_cli.py
     tests/morpheus/utils/test_binding_closer.py
     tests/morpheus/utils/test_binding_table.py
@@ -91,6 +107,7 @@ UNMARKED=(
     tests/morpheus/utils/test_determinism.py
     tests/morpheus/utils/test_determinism_envelope.py
     tests/morpheus/utils/test_distinct_window.py
+    tests/morpheus/utils/test_drift_trajectory.py
     tests/morpheus/utils/test_entity_key.py
     tests/morpheus/utils/test_event_clock.py
     tests/morpheus/utils/test_geo_velocity.py
@@ -120,10 +137,14 @@ WIDER=(
 )
 # The floor the collected count has to clear, computed from the tier rather than pinned. A constant here goes
 # stale the moment the tier grows -- which is how a tier that had lost five files still cleared a floor written
-# when it had fourteen. Every stage file in TARGETS contributes at least five mode variants and most contribute
-# twenty, so ten per entry is comfortably below a healthy run and far above what a tier with most of its files
-# dropped would collect.
-MINIMUM_SELECTED=$(( (${#TARGETS[@]} - 1) * 10 ))
+# when it had fourteen.
+#
+# Three per entry, which is what the smallest contributor in the tier actually collects: the stage files run
+# twenty or more mode variants each, but `test_gpu_parity.py` runs three, and a floor above what an honest tier
+# collects fails good runs. This is a gross-loss backstop and nothing finer -- it catches a filter or a missing
+# dependency that took most of the suite, and it would not notice one file going missing. That is the totality
+# test's job, and the reason this script no longer trusts a floor to do it.
+MINIMUM_SELECTED=$(( ${#TARGETS[@]} * 3 ))
 
 
 fail() {

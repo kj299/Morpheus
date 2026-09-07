@@ -24,13 +24,19 @@ fixtures are unfetched -- which is the state of every checkout this has ever bee
 
 The fork's own test files are identified by their copyright header rather than by a second hand-maintained list,
 which would have the same failure mode as the first. Every file this fork added carries the same line and no
-upstream file does; at the time of writing that identifies forty-five files, exactly matching what the repository
+upstream file does; at the time of writing that identifies fifty-six files, exactly matching what the repository
 history says the fork added.
 
 Which tier a file belongs in is a real distinction, not bookkeeping. A file with `gpu_mode` variants belongs in
 `TARGETS`, where the marker selects it. A file with none belongs in `UNMARKED`, where it runs in the default
 execution mode -- which on a machine with a GPU is the GPU. Putting an unmarked file in `TARGETS` is the quiet
 failure: it is listed, it looks covered, and `-m gpu_mode` selects nothing from it.
+
+A directory entry has that same failure and hides it better, which is why there are none left. The runner used
+to name `tests/morpheus/determinism` whole; it reads as complete, and `-m gpu_mode` took 29 of its 349 tests,
+leaving the liveness registry and five other files deselected on every GPU run. This test exempted the directory
+from the marker check because a directory has no markers to check -- so the one entry that most needed checking
+was the one entry excused from it. Files are named individually now and nothing is exempt.
 """
 
 import os
@@ -44,8 +50,10 @@ RUNNER = os.path.join(REPO_ROOT, "ci", "scripts", "gpu_conformance.sh")
 FORK_HEADER = "Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved."
 """The line every test file this fork added carries, and no upstream file does."""
 
-SEARCHED = (os.path.join("tests", "morpheus", "stages"), os.path.join("tests", "morpheus", "utils"))
-"""Where a fork test file can live outside the determinism directory, which the runner takes whole."""
+SEARCHED = (os.path.join("tests", "morpheus", "determinism"),
+            os.path.join("tests", "morpheus", "stages"),
+            os.path.join("tests", "morpheus", "utils"))
+"""Where a fork test file can live. All three are searched: the runner names files, not directories."""
 
 
 def _array(name: str) -> list:
@@ -106,7 +114,12 @@ def test_the_runner_is_where_we_think_it_is(tiers: dict):
     assert os.path.exists(RUNNER)
     assert len(tiers["TARGETS"]) > 15
     assert len(tiers["UNMARKED"]) > 5
-    assert "tests/morpheus/determinism" in tiers["TARGETS"]
+
+    for tier in ("TARGETS", "UNMARKED"):
+        for entry in tiers[tier]:
+            assert entry.endswith(".py"), (f"{tier} names the directory {entry}. A directory reads as complete "
+                                           f"and is not checkable against the markers inside it, which is how "
+                                           f"six determinism files were deselected on every GPU run.")
 
 
 def test_this_fork_is_identifiable_by_its_header():
@@ -114,7 +127,8 @@ def test_this_fork_is_identifiable_by_its_header():
 
     # A floor rather than an exact count, so adding a test file is not a failure here -- being outside both tiers
     # is what fails, below. Too low a floor would let the identification silently stop working.
-    assert len(files) >= 45, f"only {len(files)} fork test files identified; the header rule has stopped working"
+    assert len(files) >= 56, f"only {len(files)} fork test files identified; the header rule has stopped working"
+    assert "tests/morpheus/determinism/test_stage_parameter_liveness.py" in files
     assert "tests/morpheus/stages/test_tc5_travel_stage.py" in files
     assert "tests/morpheus/utils/test_geo_velocity.py" in files
 
@@ -139,9 +153,6 @@ def test_each_file_is_in_the_tier_its_markers_put_it_in(tiers: dict):
     # The quiet failure this separates out: an unmarked file listed in TARGETS looks covered and contributes
     # nothing, because `-m gpu_mode` selects nothing from it.
     for entry in tiers["TARGETS"]:
-        if (entry == "tests/morpheus/determinism"):
-            continue
-
         assert _has_gpu_mode_variants(entry), (f"TARGETS names {entry}, which carries no execution-mode marker, so "
                                                f"`-m gpu_mode` selects nothing from it. It belongs in UNMARKED.")
 

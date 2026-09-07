@@ -50,13 +50,13 @@ is the running ledger of what is built and what is not.
 | **Lineage substrate** | Deterministic `event_uid` / `link_uid` provenance identifiers, the Community ID flow hash (verified against the reference implementation over 46,448 flow tuples), time-bounded binding resolution with a fixed tie-break, and event-time window sealing with a lateness horizon and a separate late-arrival stream |
 | **Layer 1 (TC-1)** | Interface counter normalization that tells a counter wrap from a device reboot, transceiver and neighbor novelty, optical power scored against each port's own rolling baseline, link flap counting that catches flaps between two polls, and identifier change detection with no period boundary |
 | **Layer 2 (TC-2)** | Binding closure into the half-open intervals the resolver consumes, optionally emitting a provisional record the moment a binding opens so live attribution has an answer inside the idle window, the three cardinality features, the gratuitous ARP proportion, and 802.1X authorization timing with unpaired authorization flagged |
-| **Layer 5 (TC-5), deterministic half** | Session assembly from the separate start and stop records most identity providers emit, the digital fingerprinting features this layer is the sweet spot for (`logcount`, `locincrement`, `appincrement`, a device increment, distinct source ASNs per window), hour-of-day and day-of-week deviation scored against each principal's own histogram rather than a population's, implied travel speed between consecutive successful authentications, and the failure and multi-factor denial runs that end in a success. The last two are every input the two deterministic layer 5 rules read. No model, no saved searches, and no composed pipeline yet -- see below |
+| **Layer 5 (TC-5), deterministic half** | Session assembly from the separate start and stop records most identity providers emit, the digital fingerprinting features this layer is the sweet spot for (`logcount`, `locincrement`, `appincrement`, a device increment, distinct source ASNs per window), hour-of-day and day-of-week deviation scored against each principal's own histogram rather than a population's, implied travel speed between consecutive successful authentications, the failure and multi-factor denial runs that end in a success, and the drift trajectory R-P-L5-006 reads -- velocity, acceleration, the length of the rising run and its total rise in the principal's own standard deviations. The composed pipeline runs under control 13's six checks and the two deterministic rules ship as saved searches. What is still missing is the model that would give the trajectory a score to track -- see below |
 | **Scoring determinism** | The envelope every scored event carries and the two hashes inside it, a model manifest resolved once per window that refuses to answer for any other, and entity sharding on a hash that does not change with `PYTHONHASHSEED`. Controls 1, 2, 4 and 12 of the guide's thirteen, built before the model that consumes them because retrofitting determinism onto a running pipeline means re-tuning every threshold |
 | **Determinism** | A total row order imposed before any stateful stage, frame canonicalization and digesting, score quantization, and a CI harness running control 13's six checks against all three composed pipelines -- lineage, layer 1 and 2 telemetry, and layer 5 sessions -- over seeded corpora with planted anomalies and the negative controls beside them |
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Six deterministic rules as saved searches in the app. Two at layer 5: a principal authenticated from two places faster than the journey can be made, and a run of multi-factor denials ended by an approval. The first excludes token refreshes and VPN egress ranges from the measurement *and* from becoming the location the next one is measured against, and one intrusion produces a pair of alerts rather than one. And four at layer 2: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Twenty-one stages and twenty-six supporting modules, covered by 1,701 tests.
+Twenty-two stages and twenty-seven supporting modules, covered by 1,769 tests.
 
 ### What this fork is not
 
@@ -66,21 +66,30 @@ Being clear about the boundary is the point of writing it down:
   and 2 telemetry is not Morpheus and is not here. What ships is everything downstream of it.
 - **Layers 3, 4, 6 and 7 are designed, not built.** The telemetry classes, detection rules, and Splunk
   queries for those layers are specified in the guide and nothing runs for them.
-- **Layer 5 is built except for the model, and the model is what the word "predictive" rests on.** Five
+- **Layer 5 is built except for the model, and the model is what the word "predictive" rests on.** Six
   feature stages run under control 13's six checks against a week-long corpus, the two deterministic
   rules ship as saved searches, and the determinism controls the scoring path needs -- the envelope, the
-  pinned manifest, the stable sharding -- are built and tested ahead of it. What is missing is the
-  per-user autoencoder itself: `mean_abs_z` has no producer, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and
-  R-P-L5-006 cannot fire, and R-P-L5-006 is the drift trajectory the guide calls its flagship predictive
-  rule.
+  pinned manifest, the stable sharding -- are built and tested ahead of it. The sixth stage is the
+  trajectory R-P-L5-006 reads, and it is built and tested against scores supplied directly, so that the
+  rule's arithmetic is settled before a model exists to argue about. What is missing is the per-user
+  autoencoder itself: `mean_abs_z` has no producer, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and
+  R-P-L5-006 fire on nothing. A pipeline with no model carries a null in every drift column and says so
+  once in the log rather than failing, which is what this fork ships as.
 - **The autoencoder is not built here because it cannot be built here, and that is worth saying rather
-  than implying.** `morpheus_dfp` requires `torch==2.4.0+cu124` and `dfencoder`, and the environment this
-  work is developed and tested in has none of the three. Everything above was written and verified
-  without them; a model path would be written without ever having run. The controls landed first instead,
-  which is the order the guide argues for anyway, since retrofitting determinism onto a running pipeline
-  means re-tuning every threshold. Control 3, seeding beyond `manual_seed`, is the one control still
-  outstanding, and it is outstanding for the same reason: `torch.use_deterministic_algorithms` cannot be
-  called where Torch is not installed.
+  than implying.** `morpheus.models.dfencoder` is in the tree, but it is a Torch model on a CUDA device
+  and the environment this work is developed and tested in has neither. Everything above was written and
+  verified without them; a model path written here would be a model path that never ran. The controls
+  landed first instead, which is the order the guide argues for anyway, since retrofitting determinism
+  onto a running pipeline means re-tuning every threshold.
+- **The model half is a runner rather than a result.** `examples/layer5_model/run_model.py` trains a
+  per-principal autoencoder on the layer 5 corpus and asks the only question a week of five principals
+  can answer: whether the same seed and the same data produce the same scores twice, and whether a row's
+  score changes with what it was batched with. That is control 3 and control 5, written out in full and
+  **not yet run** -- it needs a machine with Torch and a card, and it writes a `"verdict": "failed"`
+  artifact and exits non-zero on any machine without them rather than reporting on a model it never
+  trained. **It measures reproducibility, not detection quality**, and the artifact carries that caveat
+  in a field of its own so it travels with the numbers. Control 3 is therefore written and unmeasured,
+  which is a different state from either built or absent, and this is the bullet that says which.
 - **The rule thresholds are placeholders** unless a rule says otherwise. They are starting points for
   tuning against an estate's own data, not calibrated values.
 - **"Predictive" is a claim the guide qualifies rather than asserts.** Three of its four mechanisms are
@@ -114,6 +123,17 @@ Being clear about the boundary is the point of writing it down:
   tiers are now kept total by a test that identifies this fork's files by their copyright header, and
   the counts are **reconciled against what pytest collected**, so a total that does not add up is a
   failed verdict rather than a quiet one. A better pattern was not the repair; the reconciliation is.
+- **A third narrowing, and the same shape as the first two.** The marked tier named the whole
+  `tests/morpheus/determinism` directory, which reads as complete. It is not: `-m gpu_mode` selects the
+  29 tests in the five files that carry a mode marker, and the other six files -- the stage parameter
+  liveness registry, the first-detection corpus, the representation invariance suite, the end-to-end MAC
+  spoof, the Splunk validation package -- carry none, so **320 of that directory's 349 tests were
+  deselected on every GPU run this repository has rendered a verdict from**, including the 353 above.
+  The test that keeps the tiers total could not have caught it, because it exempted the directory from
+  the marker check on the grounds that a directory has no markers to check, which excused the one entry that
+  most needed checking. Directory entries are gone; every entry is a file,
+  nothing is exempt, and the unmarked tier grew from 508 tests to 868. What the 353 covered it still
+  covers, control 13 included; what it never covered now runs.
 - **The two modes did not agree, and the per-stage runs could not have told us.** Every one of those 203
   variants passes, and the composed telemetry pipeline still produced `arp_count_in_window = 3.0` on a GPU
   where the CPU golden holds `3`. Nothing raised. cuDF's `to_pandas` cannot put a null inside an integer
