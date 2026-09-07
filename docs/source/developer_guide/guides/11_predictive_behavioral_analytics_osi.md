@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is twenty-two stages and twenty-seven supporting modules
-under 1,788 tests, itemized in
+8's total order, and control 13's CI harness. That is twenty-three stages and twenty-seven supporting modules
+under 1,834 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -2804,6 +2804,17 @@ What Morpheus provides versus what has to be built, stated plainly.
   it exits non-zero and writes a failed verdict; both refusals are tested against a stubbed Torch, along
   with the property that every feature it trains on is one a TC-5 stage derived rather than a column a
   collector sent.
+- The identifier ladder's last rung ({py:class}`~morpheus.stages.telemetry.tc1_binding_stage.TC1BindingStage`).
+  `binding_l1` takes a switch port to a site, a transceiver and an LLDP neighbor, and nothing produced those
+  records, so a chain query stopped at a port name -- a label rather than a place. The stage exists now; the
+  sourcetype stays unproduced until a composed pipeline runs it, which is the next step rather than this one. The key here is the port and
+  the attributes are what is in it, which is the inverse of layer 2 where the key is the mobile thing; getting
+  that backwards produces a table answering "where is this transceiver", which is not the question the ladder
+  asks. Two decisions are asserted rather than described. A binding ends just after its last sighting rather than
+  at the poll that noticed the change, so the silence in between resolves to nothing instead of to a claim nobody
+  made. And the idle timeout is days rather than the thirty minutes layer 2 uses, because a quiet MAC has left
+  while a quiet port has only stopped being asked -- a short horizon would close every binding in the estate
+  during a collector outage.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.

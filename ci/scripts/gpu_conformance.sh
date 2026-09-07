@@ -68,6 +68,7 @@ TARGETS=(
     tests/morpheus/stages/test_community_id_stage.py
     tests/morpheus/stages/test_lineage_stamp_stage.py
     tests/morpheus/stages/test_siem_wire_stage.py
+    tests/morpheus/stages/test_tc1_binding_stage.py
     tests/morpheus/stages/test_tc1_change_stage.py
     tests/morpheus/stages/test_tc1_feature_stage.py
     tests/morpheus/stages/test_tc1_flap_stage.py

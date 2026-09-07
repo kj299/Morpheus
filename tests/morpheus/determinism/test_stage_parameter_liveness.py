@@ -54,6 +54,7 @@ from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
+from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_feature_stage import TC1FeatureStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
@@ -242,6 +243,22 @@ def tied_identifiers() -> dict:
     frame["event_time"] = [0, 0, HOUR, 2 * HOUR]
 
     return frame
+
+
+def port_inventory() -> dict:
+    """Polls of two ports, with one optic swapped and one neighbour repatched, so a binding closes for each cause."""
+    serials = ["SN-AAA", "SN-AAA", "SN-BBB", "SN-CCC", "SN-CCC"]
+    neighbors = ["chassis-a", "chassis-a", "chassis-a", "chassis-b", "chassis-c"]
+    ports = ["Gi1/0/1", "Gi1/0/1", "Gi1/0/1", "Gi1/0/2", "Gi1/0/2"]
+
+    return {
+        "site_id": ["hq"] * len(serials),
+        "device_id": ["sw1"] * len(serials),
+        "port_id": ports,
+        "event_time": [index * MINUTE for index in range(len(serials))],
+        "transceiver_serial": serials,
+        "lldp_neighbor_chassis_id": neighbors,
+    }
 
 
 def macs() -> dict:
@@ -610,6 +627,25 @@ REGISTRY: dict = {
                 Knob("timeout_seconds", DIFFERS, benign=3600, extreme=1),
             ),
         ),
+    "TC1BindingStage":
+        Scenario(
+            stage=TC1BindingStage,
+            frame=port_inventory,
+            base={},
+            knobs=(
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("key_columns", DIFFERS, benign=["site_id", "device_id", "port_id"], extreme=["device_id"]),
+                Knob("attribute_columns",
+                     DIFFERS,
+                     benign=["transceiver_serial", "lldp_neighbor_chassis_id"],
+                     extreme=["transceiver_serial"]),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
+                Knob("idle_timeout_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
+                Knob("emit_open_on_complete", DIFFERS, benign=False, extreme=True),
+                Knob("emit_open_bindings", DIFFERS, benign=False, extreme=True),
+            ),
+        ),
     "TC2BindingStage":
         Scenario(
             stage=TC2BindingStage,
@@ -898,10 +934,59 @@ def test_every_stage_parameter_is_registered(stage_name: str):
     assert len(scenario.knobs) == len(declared), f"{stage_name}: a parameter is registered twice"
 
 
+FORK_HEADER = "Copyright (c) 2026, NVIDIA CORPORATION."
+"""The copyright line every source file this fork added carries.
+
+Upstream files carry a year range ending in 2025, so the 2026 line is what separates them. Note this is the
+source convention; the fork's *test* files use the longer SPDX form, and
+`tests/morpheus/utils/test_gpu_conformance_targets.py` matches on that one. Two conventions, each internally
+consistent, and a scan has to know which tree it is reading."""
+
+STAGE_DIRECTORIES = (("stages", "telemetry"), ("stages", "lineage"), ("stages", "output"))
+
+
+def _stage_classes_on_disk() -> set:
+    """Every stage class this fork added, read from the tree rather than from a list beside it."""
+    import os  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+
+    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+    package = os.path.join(root, "python", "morpheus", "morpheus")
+    found = set()
+
+    for parts in STAGE_DIRECTORIES:
+        directory = os.path.join(package, *parts)
+
+        for name in sorted(os.listdir(directory)):
+            if (not name.endswith(".py") or name.startswith("_")):
+                continue
+
+            with open(os.path.join(directory, name), encoding="utf-8") as handle:
+                text = handle.read()
+
+            if (FORK_HEADER not in text[:2000]):
+                continue
+
+            found.update(re.findall(r"^class (\w+)\(.*(?:Stage|Mixin).*\):", text, re.MULTILINE))
+
+    return found
+
+
 def test_every_stage_in_the_fork_is_covered():
-    # The registry is checked against each stage's signature above; this checks the set of stages itself, so a new
-    # stage cannot arrive with no entry at all.
-    assert len(REGISTRY) == 22
+    # Scanned from the tree, not pinned to a number. The pinned version read as though it enforced this and did
+    # not: a count only notices a stage being removed, never one arriving, so `TC1BindingStage` landed as the
+    # twenty-third stage while the assertion `len(REGISTRY) == 22` stayed green and its own comment claimed a new
+    # stage could not arrive uncovered. That is the same defect as a tier list that reads as total and is not,
+    # which this repository has now found in four separate places.
+    on_disk = _stage_classes_on_disk()
+
+    assert len(on_disk) > 15, f"the header scan found only {sorted(on_disk)}; it has stopped identifying stages"
+
+    missing = sorted(on_disk - set(REGISTRY))
+
+    assert missing == [], (f"{missing} ship in this fork and have no entry in REGISTRY, so no test asserts that "
+                           f"any of their parameters do anything. Add a Scenario for each.")
+
     assert {scenario.stage.__name__ for scenario in REGISTRY.values()} == set(REGISTRY)
 
 
