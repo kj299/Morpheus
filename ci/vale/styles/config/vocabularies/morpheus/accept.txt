@@ -132,6 +132,7 @@ Zeek
 [Ss]ubclassing
 [Ss]ubgraph(s?)
 [Ss]ubnet(s?)
+[Ss]ubprocess(es|.s)?
 [Ss]ubsearch(es)?
 [Ss]ubword(s?)
 [Ss]uperset(s?)

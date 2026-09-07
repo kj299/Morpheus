@@ -56,7 +56,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Six deterministic rules as saved searches in the app. Two at layer 5: a principal authenticated from two places faster than the journey can be made, and a run of multi-factor denials ended by an approval. The first excludes token refreshes and VPN egress ranges from the measurement *and* from becoming the location the next one is measured against, and one intrusion produces a pair of alerts rather than one. And four at layer 2: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Twenty-two stages and twenty-seven supporting modules, covered by 1,769 tests.
+Twenty-two stages and twenty-seven supporting modules, covered by 1,781 tests.
 
 ### What this fork is not
 
@@ -104,15 +104,18 @@ Being clear about the boundary is the point of writing it down:
   rather than in anything this fork adds. Every stage and utility added here passes in GPU mode. The suite
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
-- **Every `gpu_mode` variant this fork has passes on a GPU.** On 2026-09-06 at 23:25 UTC,
-  `ci/scripts/gpu_conformance.sh` ran on that same card over the repaired tiers: **353 collected, 353
-  passed**, nothing failed, the process exited cleanly, and the count reconciles exactly against what
-  was collected. That covers all twenty stages, all three composed pipelines and control 13's six
-  checks in GPU mode. The tier that carries no mode marker -- where the default execution mode on a
-  machine with a card is the GPU -- also **exited cleanly with no failures**, though its counts in that
-  artifact undercount by fifteen: see the next bullet. The wider upstream tier **skipped itself**,
-  because that checkout's `tests/tests_data` fixtures were unfetched Git LFS pointers, so nothing here
-  is a claim about the upstream suite. One card, four runs, no CI.
+- **Every `gpu_mode` variant this fork has passes on a GPU, and so does everything else it adds.** On
+  2026-09-07 at 02:27 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card over tiers that are
+  total for the first time: the marked tier **379 collected, 379 passed**; the tier carrying no mode
+  marker -- where the default execution mode on a machine with a card is the GPU -- **890 collected, 883
+  passed, 7 skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly
+  against what pytest collected. That covers all twenty-two stages, all three composed pipelines,
+  control 13's six checks, the stage parameter liveness registry and the first-detection corpus, in GPU
+  mode. The wider upstream tier **skipped itself**, because that checkout's `tests/tests_data` fixtures
+  were unfetched Git LFS pointers, so nothing here is a claim about the upstream suite. One card, no CI.
+  This verdict supersedes an earlier 353 collected and 353 passed, which was narrower than it read -- see
+  the three bullets below, one per defect, each of which produced an artifact saying `passed` while
+  measuring less than it claimed.
 - **Two earlier verdicts were narrower than they read, and both defects were in the runner.** The first
   selected from a list that was not total: it omitted `test_community_id_stage.py` and
   `test_column_assign.py`, and later the five TC-5 stage files, so "227 of 227" was 227 of the variants
@@ -132,8 +135,22 @@ Being clear about the boundary is the point of writing it down:
   The test that keeps the tiers total could not have caught it, because it exempted the directory from
   the marker check on the grounds that a directory has no markers to check, which excused the one entry that
   most needed checking. Directory entries are gone; every entry is a file,
-  nothing is exempt, and the unmarked tier grew from 508 tests to 868. What the 353 covered it still
+  nothing is exempt, and the unmarked tier grew from 508 tests to 890. What the 353 covered it still
   covers, control 13 included; what it never covered now runs.
+- **A fourth defect, in the counting rather than the selection, and it was two errors that nearly
+  cancelled.** The first run over total tiers reported 378 of 379 in the artifact while pytest's own
+  summary said 379 passed. Three of those tests spawn subprocesses, and a subprocess's pytest output
+  lands in the parent's log, so two names appeared twice and were counted twice while the three tests
+  they displaced went unattributed. An off-by-one is what it looked like; two independent errors of
+  opposite sign is what it was. Adding up streamed lines had been the default for three revisions and
+  was the wrong one: a run that finishes has already been counted, by pytest, in a line it prints for
+  the purpose. That tally is now the authority, and the line-by-line reading is the fallback for a run
+  that crashed before writing one -- which is the only case it was ever needed for. The tally is
+  authoritative about what pytest ran, not about what it was asked to run, so it is still reconciled
+  against the collected list. Before that, the same run had parsed **zero** of 379: pytest puts an
+  outcome on the next line when the identifier does not fit the terminal, and every identifier in that
+  tier carries a `[gpu_mode]` suffix. The artifact now names what went unaccounted rather than only
+  counting it.
 - **The two modes did not agree, and the per-stage runs could not have told us.** Every one of those 203
   variants passes, and the composed telemetry pipeline still produced `arp_count_in_window = 3.0` on a GPU
   where the CPU golden holds `3`. Nothing raised. cuDF's `to_pandas` cannot put a null inside an integer

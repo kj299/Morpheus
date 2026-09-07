@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is twenty-two stages and twenty-seven supporting modules
-under 1,769 tests, itemized in
+under 1,781 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
@@ -101,11 +101,15 @@ on 2026-09-06 with the parity repairs described below in place, giving 231 passe
 the same two upstream failures, and five more passes for the guards those repairs added.
 
 Later on 2026-09-06, at 17:32 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the
-artifact it exists to produce, and it took two further repairs to that runner before the artifact could be
-believed. The run that stands is 2026-09-06 at 23:25 UTC on the same card: 353 collected, 353 passed,
-nothing failed, exited cleanly, and the count reconciled exactly against what was collected -- every
-stage, all three composed pipelines, and control 13's six checks, in GPU mode. The tier carrying no mode
-marker exited cleanly with no failures in the same run.
+artifact it exists to produce. It then took four repairs to that runner before an artifact could be
+believed, and each of the four is recorded below, because each produced a verdict that read `passed`
+while measuring less than it claimed.
+
+**The run that stands is 2026-09-07 at 02:27 UTC**, on the same card, over tiers that are total for the
+first time: the marked tier 379 collected and 379 passed; the tier carrying no mode marker 890 collected,
+883 passed and 7 skipped. Nothing failed in either, both exited cleanly, and both counts reconcile
+exactly against what pytest collected. That is every stage, all three composed pipelines, control 13's
+six checks, the stage parameter liveness registry and the first-detection corpus, in GPU mode.
 
 Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
 less than it claimed. The runner selected from a list that was not total: two files were outside it from
@@ -125,10 +129,27 @@ selects the 29 tests in the five files carrying a mode marker, and the other six
 verdict from, the 353 above included. The totality test could not have caught it, because it exempted
 the directory from the marker check on the grounds that a directory has no markers to check -- excusing
 the one entry that most needed checking. Directory entries are gone, every entry is a file, nothing is
-exempt, and the tier carrying no mode marker grew from 508 tests to 868. What the 353 covered it still
+exempt, and the tier carrying no mode marker grew from 508 tests to 890. What the 353 covered it still
 covers, control 13 included; what it never covered now runs. The general form is worth stating once: an
 entry that cannot be checked is not a covered entry, and the check that excuses what it cannot inspect
 is the check that will go stale.
+
+The fourth defect was in the counting rather than the selection, and it is the one that best argues for
+the reconciliation. The first run over total tiers parsed zero of 379: pytest puts a test's outcome on
+the line after its identifier when the identifier does not fit the terminal, and every identifier in the
+marked tier carries a `[gpu_mode]` suffix, so on a narrow terminal all of them wrapped. Fixing that, the
+same run parsed 378 of 379 -- while pytest's own summary said 379 passed. Three of those tests spawn
+subprocesses, and a subprocess's pytest output lands in the parent's log. Two names were therefore counted
+twice while the three tests they displaced went unattributed. An off-by-one is what it looked like; two
+independent errors of opposite sign is what it was.
+
+Adding up the streamed lines had been the default for three revisions and was the wrong one. It is what a
+run that *died* needs, and a crashed run is the only case it was ever needed for: a run that finishes has
+already been counted, by pytest, in a line it prints for the purpose. That tally is the authority now and
+the line-by-line reading is the fallback. Trusting it does not weaken the check, because the tally is
+authoritative about what pytest ran and not about what it was asked to run -- the gap between those two
+being the entire thing under watch. It is still reconciled against the collected list, and the artifact
+now names what went unaccounted rather than only counting it.
 
 The wider upstream tier skipped itself, because that checkout's `tests/tests_data` fixtures were
 unfetched Git LFS pointers. Nothing here is a claim about the upstream suite on a GPU, and the limit
