@@ -421,3 +421,65 @@ def test_nothing_else_fires(result: pd.DataFrame):
     fired = auth[auth["travel_kmh"] > IMPOSSIBLE_KMH]
 
     assert set(days[fired.index]) == {sp.IMPOSSIBLE_DAY}
+
+
+@pytest.mark.cpu_mode
+def test_the_columns_four_rules_have_waited_for_now_exist(result: pd.DataFrame):
+    # `mean_abs_z` and `max_abs_z` had no producer anywhere in this fork. R-B-L5-001, R-B-L5-002, R-B-L5-005 and
+    # R-P-L5-006 read them, so all four fired on nothing and the drift trajectory read a column of nulls.
+    scored = result[result["telemetry_class"] == "tc5_auth"]
+
+    assert len(scored) > 0
+    assert scored["mean_abs_z"].notna().all()
+    assert scored["max_abs_z"].notna().all()
+
+    for name in sp.SCORED_FEATURES:
+        assert f"{name}_z_loss" in scored.columns
+
+
+@pytest.mark.cpu_mode
+def test_the_summaries_agree_with_the_losses_beside_them(result: pd.DataFrame):
+    # Derived here rather than asked of the scorer, so a model cannot report a mean that disagrees with the
+    # per-feature losses printed next to it -- a discrepancy no rule would catch and every analyst would trust.
+    scored = result[result["telemetry_class"] == "tc5_auth"]
+    losses = [f"{name}_z_loss" for name in sp.SCORED_FEATURES]
+    frame = scored[losses].astype(float)
+
+    assert (frame.max(axis=1).round(4) - scored["max_abs_z"].astype(float)).abs().max() < 1e-9
+    assert (frame.mean(axis=1).round(4) - scored["mean_abs_z"].astype(float)).abs().max() < 1e-9
+
+
+@pytest.mark.cpu_mode
+def test_every_scored_row_says_it_was_scored_against_a_fallback(result: pd.DataFrame):
+    # The corpus has no trained models in it, so every principal resolves to the placeholder. A row claiming its
+    # own model here would be claiming a history that does not exist.
+    scored = result[result["telemetry_class"] == "tc5_auth"]
+
+    assert (scored["mean_abs_z"].notna()).all()
+    assert sp.SCORING_MANIFEST.resolve("anyone@example.com", sp.SCORING_WINDOW).fallback_used is True
+
+
+@pytest.mark.cpu_mode
+def test_no_rule_fires_on_the_reference_scores_and_none_should(result: pd.DataFrame):
+    # The guard against what this wiring most risks: numbers that read like detections. R-B-L5-001 asks for
+    # max_abs_z at or above 6.0 *and* mean_abs_z at or above 2.0, and the conjunction is the rule -- requiring
+    # both is what the guide says suppresses the common case where one feature spikes for a benign reason.
+    #
+    # One row does reach 6.0 on its own: the multi-factor fatigue burst, whose failure count sits six deviations
+    # above a mean of a quarter. That is the arithmetic noticing a genuinely unusual row on one feature, and it
+    # is exactly the case the conjunction exists to hold back, since that row's other nine features are ordinary
+    # and its mean stays under 1.8. The rule does not fire, no threshold was adjusted to arrange that, and a
+    # corpus with no model in it produces no model detections.
+    scored = result[result["telemetry_class"] == "tc5_auth"]
+    fires = scored[(scored["max_abs_z"].astype(float) >= 6.0) & (scored["mean_abs_z"].astype(float) >= 2.0)]
+
+    assert len(fires) == 0
+    assert scored["mean_abs_z"].max() < 2.0
+
+
+@pytest.mark.cpu_mode
+def test_the_reference_scorer_is_documented_as_not_a_model():
+    # Stated in the class that produces them, because the golden file's numbers will outlive anyone's memory of
+    # where they came from.
+    assert "**Not a model.**" in sp.ReferenceScorer.__doc__
+    assert "No detection claim attaches" in sp.ReferenceScorer.__doc__

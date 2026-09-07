@@ -51,8 +51,8 @@ should return nothing:
 | R-D-L5-003, impossible travel | **2** | One principal in New York half an hour after her own London office login, and back in London ninety minutes later. Two rows is what one interloper produces. The eight-hour flight beside it, and the VPN user changing country twice a day, do not appear. |
 | R-D-L5-004, multi-factor fatigue | **1** | Five denials in eight minutes and then an approval. The fumbled password beside it -- two failures and a success with the factor never challenged -- does not appear. |
 | R-C-002, TLS before beaconing | **0** | Correct. Needs layer 4 and layer 7 telemetry; neither class exists. |
-| Behavior summary, per-layer scores | **0** | Correct. Reads `max_abs_z`, which no shipped stage emits. Cannot receive a row until a third layer ships. |
-| Chain assembly, cross-layer risk | **0** | Correct, and for the same reason: only two layers produce events. |
+| Behavior summary, per-layer scores | **0** | Correct, for a new reason. `max_abs_z` now has a producer; what blocks it is the grouping. Nothing emits `osi_layer`, and `entity_key` reaches only layer 1, so `stats by` drops every row. A gap in the producers rather than in this search. |
+| Chain assembly, cross-layer risk | **0** | Correct, and for the same blocker: it groups on `osi_layer`, which nothing emits. Layer 5 produces events now, but from its own corpus, so no chain spans it. |
 | Binding lookup, L2/L3 refresh | **80** | Written into the `binding_l2_l3` collection. |
 | Binding lookup, L1 refresh | **5** | Five port intervals across four ports: three stable, two on the port whose optic is swapped. The lookup keys on port and switch with no bucket, so those two collapse to one row and the later optic wins -- it answers what is in a port now, not what was in it then. |
 | Binding lookup, L2/L3 expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |

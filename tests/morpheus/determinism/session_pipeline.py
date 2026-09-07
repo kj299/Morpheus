@@ -70,6 +70,8 @@ from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
 from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
+from morpheus.stages.telemetry.tc5_score_stage import TC5ScoreStage
+from morpheus.utils.model_manifest import ModelManifest
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.utils.binding_table import NS_PER_SECOND
@@ -477,6 +479,87 @@ def _run_class(config: Config, dataframes: list[pd.DataFrame], stages: list, imp
     return _collect(sink)
 
 
+SCORED_FEATURES = [
+    "logcount",
+    "locincrement",
+    "appincrement",
+    "deviceincrement",
+    "asns_in_window",
+    "hour_surprise_bits",
+    "weekday_surprise_bits",
+    "mfa_ratio",
+    "auth_attempts_in_window",
+    "auth_failures_in_window",
+]
+"""The ten TC-5 derived features, the same set `examples/layer5_model/run_model.py` trains on."""
+
+SCORING_WINDOW = 0
+SCORING_MANIFEST = ModelManifest(window_id=SCORING_WINDOW, models={}, fallback="reference-arithmetic:0")
+"""Every principal resolves to the same placeholder, and `model_fallback_used` is true on every scored row.
+
+That is the honest resolution for a corpus with no trained models in it. An event carrying a fallback is a claim
+about a population rather than about the entity's own history, which is exactly what these scores are.
+"""
+
+REFERENCE_PARAMETERS = {
+    "logcount": (4.038095, 1.72888),
+    "locincrement": (1.32381, 0.467928),
+    "appincrement": (1.0, 0.0),
+    "deviceincrement": (1.0, 0.0),
+    "asns_in_window": (1.285714, 0.451754),
+    "hour_surprise_bits": (3.349456, 0.878393),
+    "weekday_surprise_bits": (2.90969, 0.871514),
+    "mfa_ratio": (0.905805, 0.260939),
+    "auth_attempts_in_window": (1.2, 0.785584),
+    "auth_failures_in_window": (0.238095, 0.889342),
+}
+"""Per-feature mean and standard deviation, computed once over the whole corpus and frozen here.
+
+Frozen rather than computed, and the reason is the first thing control 5 caught. The first version of the
+scorer below derived these from the rows it was handed, which made every score a function of how the stream
+happened to be batched: the same authentication scored differently in a batch of ten and a batch of a hundred,
+and `test_batch_split_sweep` failed on the first run. A trained model does not have this problem, because its
+parameters are learned once and fixed before any scoring happens. Freezing them here is the stand-in for that,
+and it is also what keeps the stub from fitting on the data it is scoring -- a leak no determinism control would
+catch, because every run would leak identically.
+
+A deviation of zero means the feature never varies in this corpus; those score zero rather than dividing by it.
+"""
+
+
+class ReferenceScorer:
+    """**Not a model.** Arithmetic that stands in for one so the scoring path can be tested.
+
+    `TC5ScoreStage` takes a scorer rather than training one, which is what lets the path be exercised where
+    there is no Torch and no card. Something has to occupy that slot in the composed pipeline, and the choice is
+    between a stub and leaving control 13's six checks unable to reach the stage at all.
+
+    It returns each feature's distance from a frozen mean in units of a frozen deviation -- a z-score in the
+    literal sense and nothing more. Deterministic, independent of batching, independent of the order rows arrive
+    in, with no learned parameters, no history and no notion of normal beyond the constants above.
+
+    **No detection claim attaches to any number it produces.** The scores in the golden file are arithmetic, not
+    evidence. A threshold tuned against them would be tuned against this docstring. What the golden proves is
+    that the path from features to scores is deterministic, batch-invariant and permutation-stable, which is a
+    statement about plumbing and a precondition for a real model rather than a substitute for one.
+    """
+
+    def score(self, model_version: str, features: list) -> list:
+        del model_version
+        scores = []
+
+        for row in features:
+            scored = {}
+
+            for (name, value) in row.items():
+                (mean, deviation) = REFERENCE_PARAMETERS[name]
+                scored[name] = 0.0 if deviation == 0 else (float(value) - mean) / deviation
+
+            scores.append(scored)
+
+        return scores
+
+
 def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
@@ -507,16 +590,18 @@ def run_pipeline(config: Config,
 
     outputs = {}
 
-    outputs["tc5_auth"] = _run_class(config,
-                                     batches["tc5_auth"],
-                                     [
-                                         TC5NoveltyStage(config),
-                                         TC5CadenceStage(config, min_samples=CADENCE_MIN_SAMPLES),
-                                         TC5TravelStage(config, excluded_source_networks=(VPN_EGRESS_NETWORK, )),
-                                         TC5RiskStage(config, min_denominator=1),
-                                     ],
-                                     impose_order,
-                                     anchor=CHAIN_ANCHORS["tc5_auth"])
+    outputs["tc5_auth"] = _run_class(
+        config,
+        batches["tc5_auth"],
+        [
+            TC5NoveltyStage(config),
+            TC5CadenceStage(config, min_samples=CADENCE_MIN_SAMPLES),
+            TC5TravelStage(config, excluded_source_networks=(VPN_EGRESS_NETWORK, )),
+            TC5RiskStage(config, min_denominator=1),
+            TC5ScoreStage(config, scorer=ReferenceScorer(), manifest=SCORING_MANIFEST, feature_columns=SCORED_FEATURES),
+        ],
+        impose_order,
+        anchor=CHAIN_ANCHORS["tc5_auth"])
 
     outputs["tc5_session"] = _run_class(config,
                                         batches["tc5_session"],

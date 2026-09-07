@@ -139,6 +139,29 @@ def test_a_principal_who_has_never_varied_reports_no_sigmas(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_a_nullable_score_column_carrying_pandas_na_does_not_raise(config: Config):
+    # The shape this stage will actually be handed once TC5ScoreStage runs in front of it. That stage writes
+    # `mean_abs_z` through `assign_nullable_float_column`, so the column is a pandas nullable Float64 and its
+    # gaps are `pd.NA` rather than `float("nan")`.
+    #
+    # The distinction is not cosmetic. For `pd.NA`, `value is None` is False and `value != value` raises
+    # "boolean value of NA is ambiguous" instead of returning True -- so the null check that worked on every
+    # corpus tested until now killed the pipeline the first time a real scorer fed it. Only `pd.isna` handles
+    # all three of None, NaN and NA.
+    from morpheus.utils.column_assign import assign_nullable_float_column  # pylint: disable=import-outside-toplevel
+
+    payload = frame([1.0, 1.0, 1.0])
+    del payload["mean_abs_z"]
+    df = get_df_class(config.execution_mode)(payload)
+    assign_nullable_float_column(df, "mean_abs_z", [1.0, None, 2.0])
+    meta = MessageMeta(df)
+
+    TC5DriftStage(config).on_data(meta)
+
+    assert _as_list(meta, "drift_rising_windows") == [1, None, 1]
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_a_differently_named_score_column_is_honoured(config: Config):
     payload = frame(FLAT + CLIMB)
     payload["max_abs_z"] = payload.pop("mean_abs_z")

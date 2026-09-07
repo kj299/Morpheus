@@ -68,6 +68,7 @@ from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
 from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
+from morpheus.stages.telemetry.tc5_score_stage import TC5ScoreStage
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.utils.binding_table import Binding
@@ -441,6 +442,32 @@ def scored() -> dict:
     }
 
 
+def scorable() -> dict:
+    """The scored frame with features on it. Carol has no model of her own, so a fallback change is observable."""
+    return {
+        **scored(),
+        "logcount": [3.0, 5.0, 7.0],
+        "mfa_ratio": [0.5, 0.25, 0.75],
+    }
+
+
+class _LengthScorer:
+    """Scores a feature as itself times the length of the pinned model identifier.
+
+    Trivial, and deliberately dependent on `model_version`: a stub ignoring which model it was handed would make
+    the manifest knob look inert when it is not, and an inert-looking knob is exactly what this file exists to
+    tell apart from a knob nothing reads.
+    """
+
+    def __init__(self, scale: float = 1.0):
+        self._scale = scale
+
+    def score(self, model_version: str, features: list) -> list:
+        weight = float(len(model_version)) * self._scale
+
+        return [{name: value * weight for (name, value) in row.items()} for row in features]
+
+
 def _envelope(tier: str = "D1", seed: int = 42) -> DeterminismEnvelope:
     return DeterminismEnvelope(tier=tier,
                                fingerprint="a3f9c2e1b8d47506",
@@ -660,6 +687,27 @@ REGISTRY: dict = {
                 Knob("idle_timeout_seconds", DIFFERS, benign=86400, extreme=60),
                 Knob("emit_open_on_complete", DIFFERS, benign=False, extreme=True),
                 Knob("emit_open_bindings", DIFFERS, benign=False, extreme=True),
+            ),
+        ),
+    "TC5ScoreStage":
+        Scenario(
+            stage=TC5ScoreStage,
+            frame=scorable,
+            base={
+                "scorer": _LengthScorer(),
+                "manifest": _manifest(fallback="dfp-generic:1"),
+                "feature_columns": ["logcount", "mfa_ratio"]
+            },
+            knobs=(
+                Knob("scorer", DIFFERS, benign=_LengthScorer(), extreme=_LengthScorer(scale=2.0)),
+                Knob("entity_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("window_column", INPUT_COLUMN, benign="window_id"),
+                Knob("feature_columns", DIFFERS, benign=["logcount", "mfa_ratio"], extreme=["logcount"]),
+                Knob("manifest",
+                     DIFFERS,
+                     benign=_manifest(fallback="dfp-generic:1"),
+                     extreme=_manifest(fallback="dfp-generic-population:1")),
+                Knob("decimals", DIFFERS, benign=4, extreme=1),
             ),
         ),
     "TC5SessionStage":

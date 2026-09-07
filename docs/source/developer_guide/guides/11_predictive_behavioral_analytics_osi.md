@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is twenty-three stages and twenty-seven supporting modules
-under 1,840 tests, itemized in
+8's total order, and control 13's CI harness. That is twenty-four stages and twenty-seven supporting modules
+under 1,891 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -2910,6 +2910,17 @@ out. `clock_source` and `clock_offset_ms` are in the universal envelope, and **n
 produces, consumes or checks either of them** -- they are schema, not a control. The
 `max_clock_skew_seconds` parameter on the three stateful stages is asserted to be live and to reject an
 invalid value; no test measures what a plausible offset does to a feature.
+
+**Why does no producer emit `osi_layer`, when two shipped searches group by it?** The universal envelope in
+Part 2 requires `entity_key` on every record and the summary and chain-assembly searches aggregate `by _time
+osi_layer entity_key lineage_id`. Neither field is fully supplied: nothing in this fork emits `osi_layer` at
+all, and `entity_key` reaches only the layer 1 class. `stats by` drops a row whose grouping field is absent, so
+both searches return nothing regardless of what else is on the record -- which stayed invisible while
+`max_abs_z` had no producer and the searches were empty for a reason nobody had to look past. Giving the scoring
+path a producer is what exposed it. The fix is small and belongs to the producers rather than the searches, but
+it is a decision about the envelope's contract rather than a typo, so it is recorded here rather than patched:
+either every stage stamps its own layer and entity key, or the searches stop grouping on fields the design does
+not guarantee.
 
 **Should `binding_l1` be bucketed after all?** This document argues that the layer 2 lookup is bucketed
 because a DHCP lease moves and the layer 1 one is not because a transceiver is stable for months. Wiring

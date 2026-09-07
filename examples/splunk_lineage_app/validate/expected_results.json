@@ -86,12 +86,12 @@
     "Behavior summary - per-layer scores": {
       "expected_rows": 0,
       "expected_empty": true,
-      "why": "Reads max_abs_z, which no shipped stage emits: the scoring path above layer 2 is design. This can never receive a row until a third layer ships, which is why it is listed here rather than treated as a defect."
+      "why": "Still empty, but no longer for the reason it was. `max_abs_z` now has a producer: TC5ScoreStage emits it on 105 of the 141 layer 5 events. What blocks this search is its grouping. It aggregates `by _time osi_layer entity_key lineage_id`, and no stage in this fork emits `osi_layer` at all while `entity_key` is present only on layer 1 -- so `stats by` drops every row. The envelope in Part 2 requires both on every record; the pipeline does not yet supply them. That is a gap in the producers rather than in this search."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "why": "Aggregates across osi_layer and fires on a span of layers. Only layers 1 and 2 produce events, and the rule's own threshold needs more, so the same answer as Behavior summary and for the same reason."
+      "why": "Aggregates across `osi_layer` and fires on a span of layers. Nothing emits `osi_layer`, so the grouping drops every row before the threshold is reached -- the same blocker as Behavior summary. Layer 5 now produces events, but from its own corpus and its own pipeline, so there is no chain spanning it and the layer 1 and 2 classes in any case."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 80,

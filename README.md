@@ -56,7 +56,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Six deterministic rules as saved searches in the app. Two at layer 5: a principal authenticated from two places faster than the journey can be made, and a run of multi-factor denials ended by an approval. The first excludes token refreshes and VPN egress ranges from the measurement *and* from becoming the location the next one is measured against, and one intrusion produces a pair of alerts rather than one. And four at layer 2: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Twenty-three stages and twenty-seven supporting modules, covered by 1,840 tests.
+Twenty-four stages and twenty-seven supporting modules, covered by 1,891 tests.
 
 ### What this fork is not
 
@@ -66,15 +66,21 @@ Being clear about the boundary is the point of writing it down:
   and 2 telemetry is not Morpheus and is not here. What ships is everything downstream of it.
 - **Layers 3, 4, 6 and 7 are designed, not built.** The telemetry classes, detection rules, and Splunk
   queries for those layers are specified in the guide and nothing runs for them.
-- **Layer 5 is built except for the model, and the model is what the word "predictive" rests on.** Six
+- **The layer 5 scoring path runs end to end, and what occupies the model's slot is arithmetic.** Seven
   feature stages run under control 13's six checks against a week-long corpus, the two deterministic
   rules ship as saved searches, and the determinism controls the scoring path needs -- the envelope, the
-  pinned manifest, the stable sharding -- are built and tested ahead of it. The sixth stage is the
-  trajectory R-P-L5-006 reads, and it is built and tested against scores supplied directly, so that the
-  rule's arithmetic is settled before a model exists to argue about. What is missing is the per-user
-  autoencoder itself: `mean_abs_z` has no producer, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and
-  R-P-L5-006 fire on nothing. A pipeline with no model carries a null in every drift column and says so
-  once in the log rather than failing, which is what this fork ships as.
+  pinned manifest, the stable sharding -- were built ahead of it. `TC5ScoreStage` now gives `mean_abs_z`
+  and `max_abs_z` a producer, resolving each entity to the model its manifest pins and refusing a row
+  from another window. **It takes a scorer rather than training one**, which is what lets the path be
+  tested where there is no Torch and no card, and what keeps training a scheduled job over history
+  rather than something a stream does to the data it is scoring.
+- **The scores in the composed pipeline are not model output and no detection claim attaches to them.**
+  The corpus has no trained model in it, so the slot is filled by a reference scorer: each feature's
+  distance from a frozen mean in units of a frozen deviation, with no learned parameters and no notion
+  of normal beyond ten constants. Every scored row reports `model_fallback_used`. What the golden proves
+  is that the path from features to scores is deterministic, batch-invariant and permutation-stable --
+  a statement about plumbing, and a precondition for a real model rather than a substitute for one.
+  R-B-L5-001 does not fire on this corpus and nothing was tuned to arrange that.
 - **The autoencoder is not built here because it cannot be built here, and that is worth saying rather
   than implying.** `morpheus.models.dfencoder` is in the tree, but it is a Torch model on a CUDA device
   and the environment this work is developed and tested in has neither. Everything above was written and
@@ -239,7 +245,7 @@ Status is what this fork does with it today, not what the guide specifies.
 | **TC-2** Data link | `mac_address`, and `site_id:switch_id:port_id:vlan_id` | Switch MAC tables, 802.1X/RADIUS accounting, ARP tables, DHCP leases, wireless controller associations | Four stages ship |
 | **TC-3** Network | `src_ip`, and the directed pair | NetFlow v9, IPFIX, sFlow, VPC and cloud flow logs, firewall session logs | Schema only |
 | **TC-4** Transport | `flow_id`, plus `community_id` for cross-tool joins | The TC-3 sources with per-packet detail, Zeek `conn.log` | Schema only; `community_id` ships and is verified against the reference vectors |
-| **TC-5** Session | `user_principal`, plus `session_id` | Identity providers, Kerberos KDC, RADIUS accounting, VPN concentrators, RDP and SSH session logs, MFA providers, Windows security events | Six stages ship; the model is proven reproducible but is not yet in the pipeline |
+| **TC-5** Session | `user_principal`, plus `session_id` | Identity providers, Kerberos KDC, RADIUS accounting, VPN concentrators, RDP and SSH session logs, MFA providers, Windows security events | Seven stages ship, the newest scoring rows against the model the manifest pins for their entity |
 | **TC-6** Presentation | `ja4_client`, plus `certificate_fingerprint_sha256` | TLS inspection points, Zeek `ssl.log` and `x509.log`, load balancer logs, certificate transparency | Schema only |
 | **TC-7** Application | Varies: `user_principal` for SaaS, `hostname` for DNS, `process_guid` for endpoint | HTTP proxies and WAFs, DNS resolvers, SaaS audit APIs, database audit logs, API gateways, EDR | Schema only |
 

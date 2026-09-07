@@ -82,6 +82,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc5_drift_stage.py
     tests/morpheus/stages/test_tc5_novelty_stage.py
     tests/morpheus/stages/test_tc5_risk_stage.py
+    tests/morpheus/stages/test_tc5_score_stage.py
     tests/morpheus/stages/test_tc5_session_stage.py
     tests/morpheus/stages/test_tc5_travel_stage.py
     tests/morpheus/stages/test_total_order_stage.py
