@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is twenty-three stages and twenty-seven supporting modules
-under 1,834 tests, itemized in
+under 1,840 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1719,12 +1719,12 @@ compares against a threshold -- and rounding them to microseconds to fit a times
 quietly change that arithmetic. Where a single column is all that is needed,
 {py:func}`~morpheus.utils.siem_wire.render_event_time_series` is the same rendering without a stage.
 
-That module also carries a fact the app could not previously state anywhere. Seven of the fourteen
-stanzas have no producer in this fork: four are the score sourcetypes for layers 3, 4, 6 and 7, one is
-the layer 1 inventory feed, and two are the TC-0 context store. It was eight until the layer 5 stages
-landed and `morpheus:score:l5` gained one, which is the sort of number that goes stale silently --
-`tests/morpheus/utils/test_siem_sourcetypes.py` is what keeps the module honest, and this sentence is
-checked against it by hand. Each entry says what would have to be
+That module also carries a fact the app could not previously state anywhere. Six of the fourteen
+stanzas have no producer in this fork: four are the score sourcetypes for layers 3, 4, 6 and 7, and two
+are the TC-0 context store. It was eight until the layer 5 stages landed, and seven until
+`TC1BindingStage` gave `binding:l1` one -- the sort of number that goes stale silently, which is why
+`tests/morpheus/utils/test_siem_sourcetypes.py` now asserts this sentence against the module rather than
+leaving a reader to compare them. Each entry says what would have to be
 built. Recording them in one place is what keeps a reader from taking "the app parses seven layers" for
 "seven layers are implemented."
 
@@ -2806,8 +2806,9 @@ What Morpheus provides versus what has to be built, stated plainly.
   collector sent.
 - The identifier ladder's last rung ({py:class}`~morpheus.stages.telemetry.tc1_binding_stage.TC1BindingStage`).
   `binding_l1` takes a switch port to a site, a transceiver and an LLDP neighbor, and nothing produced those
-  records, so a chain query stopped at a port name -- a label rather than a place. The stage exists now; the
-  sourcetype stays unproduced until a composed pipeline runs it, which is the next step rather than this one. The key here is the port and
+  records, so a chain query stopped at a port name -- a label rather than a place. It runs in the composed
+  telemetry pipeline now, `binding:l1` is a produced sourcetype, and the shipped L1 refresh search has rows to
+  write for the first time. The key here is the port and
   the attributes are what is in it, which is the inverse of layer 2 where the key is the mobile thing; getting
   that backwards produces a table answering "where is this transceiver", which is not the question the ladder
   asks. Two decisions are asserted rather than described. A binding ends just after its last sighting rather than
@@ -2908,6 +2909,24 @@ out. `clock_source` and `clock_offset_ms` are in the universal envelope, and **n
 produces, consumes or checks either of them** -- they are schema, not a control. The
 `max_clock_skew_seconds` parameter on the three stateful stages is asserted to be live and to reject an
 invalid value; no test measures what a plausible offset does to a feature.
+
+**Should `binding_l1` be bucketed after all?** This document argues that the layer 2 lookup is bucketed
+because a DHCP lease moves and the layer 1 one is not because a transceiver is stable for months. Wiring
+the producer up exposed the gap in that reasoning: stable for months is not never. The lookup keys on
+`port_id` and `switch_id` with no bucket, so a port whose optic is replaced collapses to a single row and
+the later transceiver wins. It answers what is in a port *now*, which is the wrong tense for the question
+the ladder asks -- an investigation into last Tuesday resolves that port to the optic installed on
+Wednesday, silently and with no indication that the answer is from the wrong interval. The corpus
+demonstrates this: five port intervals across four ports write four lookup rows.
+
+Three options, none obviously right, which is why this is a question rather than a build item. Bucket
+layer 1 at a coarse width -- a day rather than five minutes -- which costs storage proportional to ports
+times days for a fact that rarely changes. Key on the interval rather than the port, making the lookup a
+range join, which Splunk lookups do not do natively. Or accept the present tense deliberately, keep the
+lookup as a current-state answer, and resolve historical layer 1 questions from the `binding:l1` events
+themselves rather than the lookup built from them, in which case the guide should say so and the searches
+that reach layer 1 should be written against the index. The last is the smallest change and the easiest
+to get wrong quietly, which is an argument for deciding rather than defaulting.
 
 **What retention, lawful basis and minimization apply to the behavioral history this design accumulates.**
 Layer 5 alone keeps each principal's location history, last known coordinate, device and application

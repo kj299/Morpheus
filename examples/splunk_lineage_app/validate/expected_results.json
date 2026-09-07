@@ -98,9 +98,9 @@
       "why": "One row per key per five-minute bucket from binding_bucketed.jsonlines, written into the binding_l2_l3 KV Store collection. Every row carries binding_table=dhcp_lease, which is what the search filters on; a zero here means the producer stopped emitting that field and the lookup has quietly stopped being refreshed."
     },
     "Binding lookup - L1 refresh": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "Reads sourcetype=binding:l1, which nothing in this fork produces. It needs a layer 1 inventory feed: switch port to site, transceiver and LLDP neighbour. Recorded in morpheus.utils.siem_sourcetypes as unproduced."
+      "expected_rows": 5,
+      "expected_empty": false,
+      "why": "Five port intervals across four ports: three stable, and two on the port whose optic is swapped partway through the corpus. Produced by TC1BindingStage from the TC-1 stream. Note the lookup keys on port_id and switch_id with no bucket, so the two intervals on the swapped port collapse to one row and the later optic wins -- the lookup answers what is in a port now, not what was in it at a given time. See the open question recorded in Part 6 of the guide."
     },
     "Binding lookup - L2/L3 expiry": {
       "expected_rows": 0,

@@ -152,9 +152,10 @@ def test_the_layer_5_detections_return_exactly_what_is_written(expected: dict, s
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Six of thirteen. That ratio is the honest state of this app, and stating it is the package's main job. It
-    # improved by two searches rather than by two entries: the layer 5 rules ship with events to fire on.
-    assert len(empty) == 6
+    # Five of thirteen. That ratio is the honest state of this app, and stating it is the package's main job. It
+    # improved by two when the layer 5 rules landed with events to fire on, and by one more when
+    # `TC1BindingStage` gave `binding:l1` a producer and the L1 refresh finally had rows to write.
+    assert len(empty) == 5
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name

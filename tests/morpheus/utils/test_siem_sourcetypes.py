@@ -100,11 +100,12 @@ def test_an_unproduced_sourcetype_says_what_is_missing(name: str):
 
 
 def test_the_unproduced_count_is_pinned():
-    # Seven of the fourteen stanzas are configuration for producers this fork has not built. Pinned rather than
+    # Six of the fourteen stanzas are configuration for producers this fork has not built. Pinned rather than
     # merely recorded, so that landing a producer is a deliberate edit here and not a silent drift in what the
-    # app appears to support -- which is exactly what this assertion caught when layer 5 gained one.
-    assert len(UNPRODUCED) == 7
-    assert len(PRODUCED) == 7
+    # app appears to support -- which is exactly what this assertion caught when layer 5 gained one, and again
+    # when `TC1BindingStage` gave `binding:l1` one.
+    assert len(UNPRODUCED) == 6
+    assert len(PRODUCED) == 8
 
 
 NUMBER_WORDS = {

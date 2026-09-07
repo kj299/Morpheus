@@ -367,6 +367,59 @@ def test_the_tap_shows_as_lost_receive_power_only(result: pd.DataFrame):
 
 
 @pytest.mark.cpu_mode
+def test_the_optic_swap_closes_one_binding_and_opens_another(result: pd.DataFrame):
+    # The ladder's last rung, exercised end to end. A replaced transceiver is what `binding_l1` exists to record,
+    # and it must land as two intervals on one port rather than one interval whose serial quietly changed.
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.XCVR_SWAP_PORT}"
+    bindings = _rows(result, "tc1_binding")
+    swapped = bindings[bindings["entity_key"] == port].sort_values("bind_start")
+
+    assert len(swapped) == 2
+    assert list(swapped["transceiver_serial"]) == [
+        f"XCVR-{tp.SWITCH}-{tp.XCVR_SWAP_PORT}", f"XCVR-{tp.SWITCH}-{tp.XCVR_SWAP_PORT}-B"
+    ]
+    assert swapped["bind_end_reason"].iloc[0] == "displaced"
+
+    # The first interval stops at the last poll that saw the old optic, not at the poll that noticed the new one.
+    # The minute between them is silence, and silence is not evidence the old optic was still there.
+    assert swapped["bind_end"].iloc[0] == (tp.XCVR_SWAP_AT_MINUTE - 1) * 60 * NS + 1
+    assert swapped["bind_start"].iloc[1] == tp.XCVR_SWAP_AT_MINUTE * 60 * NS
+
+
+@pytest.mark.cpu_mode
+def test_a_port_whose_light_changed_keeps_one_binding(result: pd.DataFrame):
+    # The negative control, and it needed no planting: the tap already moves this port's receive power by three
+    # decibels without touching its serial. A binding that split on a changing optical reading would produce a new
+    # interval every poll and a lookup nobody could use.
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"
+    bindings = _rows(result, "tc1_binding")
+    tapped = bindings[bindings["entity_key"] == port]
+
+    assert len(tapped) == 1
+    assert tapped["bind_end_reason"].iloc[0] == "drained"
+
+
+@pytest.mark.cpu_mode
+def test_every_port_the_estate_polls_has_a_binding(result: pd.DataFrame):
+    # The lookup's whole job is the stable ports, which are nearly all of them. A producer that only emitted on
+    # change would leave the table almost empty and the ladder's last hop unresolvable for most of the estate.
+    layer_1 = _rows(result, "tc1")
+    bindings = _rows(result, "tc1_binding")
+
+    assert set(bindings["entity_key"]) == set(layer_1["entity_key"])
+
+
+@pytest.mark.cpu_mode
+def test_a_port_binding_carries_the_key_under_both_layers_names(result: pd.DataFrame):
+    # `device_id` at layer 1 and `switch_id` at layer 2 are one identifier, and the shipped refresh search builds
+    # its lookup key from `port_id` and `switch_id`. Both have to be on the row for that search to work unchanged.
+    bindings = _rows(result, "tc1_binding")
+
+    assert set(bindings["switch_id"]) == set(bindings["device_id"])
+    assert not bindings["port_id"].isna().any()
+
+
+@pytest.mark.cpu_mode
 def test_the_flap_between_polls_is_counted(result: pd.DataFrame):
     layer_1 = _rows(result, "tc1")
     port = f"{tp.SITE}:{tp.SWITCH}:Gi1/0/1"

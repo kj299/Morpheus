@@ -54,11 +54,11 @@ should return nothing:
 | Behavior summary, per-layer scores | **0** | Correct. Reads `max_abs_z`, which no shipped stage emits. Cannot receive a row until a third layer ships. |
 | Chain assembly, cross-layer risk | **0** | Correct, and for the same reason: only two layers produce events. |
 | Binding lookup, L2/L3 refresh | **80** | Written into the `binding_l2_l3` collection. |
-| Binding lookup, L1 refresh | **0** | Correct. Nothing produces `binding:l1`; it needs a layer 1 inventory feed. |
+| Binding lookup, L1 refresh | **5** | Five port intervals across four ports: three stable, two on the port whose optic is swapped. The lookup keys on port and switch with no bucket, so those two collapse to one row and the later optic wins -- it answers what is in a port now, not what was in it then. |
 | Binding lookup, L2/L3 expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
 | Binding health, unresolved rate | **1** | An operational metric; the value matters, not whether it fired. |
 
-**Six of the thirteen should return nothing.** That is the point of writing them down. An empty result is this app's
+**Five of the thirteen should return nothing.** That is the point of writing them down. An empty result is this app's
 characteristic failure, and without a list saying which emptiness is correct, a deployment cannot tell a rule that
 is working from a rule that is broken.
 

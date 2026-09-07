@@ -44,6 +44,7 @@ CLASS_SOURCETYPES = {
     "tc2_arp": "morpheus:score:l2",
     "tc2_auth": "morpheus:score:l2",
     "tc2_binding": "binding:l2",
+    "tc1_binding": "binding:l1",
 }
 
 SESSION_CLASS_SOURCETYPES = {

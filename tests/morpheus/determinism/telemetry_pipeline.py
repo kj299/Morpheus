@@ -69,6 +69,7 @@ from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
 from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
+from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
 from morpheus.utils.binding_table import NS_PER_SECOND
@@ -131,6 +132,16 @@ REBOOT_AT_MINUTE = 30
 TAP_AT_MINUTE = 40
 TAP_LOSS_DB = 3.0
 FLAP_AT_MINUTE = 20
+XCVR_SWAP_AT_MINUTE = 50
+XCVR_SWAP_PORT = "Gi1/0/2"
+"""Somebody replaces the optic in one port partway through.
+
+The event the `binding_l1` lookup exists to record, and until this was planted the composed corpus never changed
+a transceiver at all -- so every port bound once and drained, and the displacement path ran only in unit tests.
+Its negative control is already here and needed no planting: the tap on `HUB_PORT` moves that port's receive
+power by three decibels without touching its serial, and must leave its binding whole. A binding that split on a
+changing optical reading would produce a new interval every poll.
+"""
 BYPASS_AT_SECONDS = 1500
 BYPASS_PORT = "Gi1/0/2"
 BYPASS_MAC = "de:ad:be:ef:01:01"
@@ -179,7 +190,7 @@ ROAM_AT_SECONDS = 2100
 
 CS_PER_SECOND = 100
 
-TELEMETRY_CLASSES = ("tc1", "tc2_mac", "tc2_binding", "tc2_arp", "tc2_auth")
+TELEMETRY_CLASSES = ("tc1", "tc1_binding", "tc2_mac", "tc2_binding", "tc2_arp", "tc2_auth")
 
 
 def _envelope(rng: random.Random, collector: str, schema: str, seq: int) -> dict:
@@ -210,7 +221,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
 
 def _build_layer_1(rng: random.Random) -> pd.DataFrame:
-    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, and an unpolled flap planted."""
+    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, an unpolled flap and an optic swap."""
     devices = [(SWITCH, port) for port in PORTS] + [(REBOOTING_SWITCH, "Gi1/0/1")]
     counters = {
         key: {
@@ -246,6 +257,12 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
             else:
                 last_change_cs = 10 * CS_PER_SECOND
 
+            # The optic itself is replaced on one port, which closes that port's binding and opens the next.
+            serial = f"XCVR-{device}-{port}"
+
+            if (device == SWITCH and port == XCVR_SWAP_PORT and minute >= XCVR_SWAP_AT_MINUTE):
+                serial = f"{serial}-B"
+
             rx_dbm = -7.0 + rng.uniform(-0.05, 0.05)
 
             if (device == SWITCH and port == HUB_PORT and minute >= TAP_AT_MINUTE):
@@ -262,7 +279,7 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
                 "oper_status": "up",
                 "optical_tx_dbm": round(-2.0 + rng.uniform(-0.05, 0.05), 3),
                 "optical_rx_dbm": round(rx_dbm, 3),
-                "transceiver_serial": f"XCVR-{device}-{port}",
+                "transceiver_serial": serial,
                 "lldp_neighbor_chassis_id": f"nbr-{device}-{port}",
                 **counters[(device, port)],
                 **_envelope(rng, "snmp-poller", "TC-1/1.0.0", seq),
@@ -547,6 +564,14 @@ def run_pipeline(config: Config,
                                 ],
                                 impose_order,
                                 anchor=CHAIN_ANCHORS["tc1"])
+
+    # The same layer 1 snapshots, closed into port bindings. This is the ladder's last rung: the table that takes
+    # a switch port to the site, optic and neighbour it held at a given moment. The stage emits its own
+    # `binding_uid`, built exactly as `binding_table` builds one, so it serves as the row key directly rather than
+    # having a second identifier composed beside it the way the layer 2 bindings do.
+    port_bindings = _run_class(config, batches["tc1"], [TC1BindingStage(config)], impose_order, seal=False)
+    port_bindings["row_key"] = port_bindings["binding_uid"]
+    outputs["tc1_binding"] = port_bindings
 
     # Layer 2, from the same snapshots: the cardinality features, and the closed bindings.
     outputs["tc2_mac"] = _run_class(config,
