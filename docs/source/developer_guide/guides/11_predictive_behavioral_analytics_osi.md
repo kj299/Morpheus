@@ -112,9 +112,10 @@ artifact it exists to produce. It then took four repairs to that runner before a
 believed, and each of the four is recorded below, because each produced a verdict that read `passed`
 while measuring less than it claimed.
 
-**The run that stands is 2026-09-07 at 13:20 UTC**, on the same card, over tiers that are total: the
-marked tier 379 collected and 379 passed; the tier carrying no mode marker 895 collected, 888 passed and
-7 skipped. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
+**The run that stands is 2026-09-07 at 17:32 UTC**, on the same card, over tiers that are total: the
+marked tier 398 collected and 398 passed; the tier carrying no mode marker 906 collected, 900 passed and
+6 skipped -- every skip a field contract for a sourcetype nothing produces yet, one fewer than before
+because `binding:l1` now has one. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
 pytest collected. It is also the first such run with `torch==2.4.0+cu124` installed beside the RAPIDS
 stack, which answers a question the earlier ones could not: the two coexist in one process, and adding
 Torch does not disturb cuDF. That is every stage, all three composed pipelines, control 13's
