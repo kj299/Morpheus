@@ -57,9 +57,10 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is twenty-two stages and twenty-seven supporting modules
-under 1,781 tests, itemized in
+under 1,785 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
-over 46,448 flow tuples, and the Splunk app was validated three ways, the strongest being a functional
+against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
+functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
 ([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)).
 
@@ -1710,9 +1711,12 @@ compares against a threshold -- and rounding them to microseconds to fit a times
 quietly change that arithmetic. Where a single column is all that is needed,
 {py:func}`~morpheus.utils.siem_wire.render_event_time_series` is the same rendering without a stage.
 
-That module also carries a fact the app could not previously state anywhere. Eight of the fourteen
-stanzas have no producer in this fork: five are the score sourcetypes for layers 3 through 7, one is
-the layer 1 inventory feed, and two are the TC-0 context store. Each entry says what would have to be
+That module also carries a fact the app could not previously state anywhere. Seven of the fourteen
+stanzas have no producer in this fork: four are the score sourcetypes for layers 3, 4, 6 and 7, one is
+the layer 1 inventory feed, and two are the TC-0 context store. It was eight until the layer 5 stages
+landed and `morpheus:score:l5` gained one, which is the sort of number that goes stale silently --
+`tests/morpheus/utils/test_siem_sourcetypes.py` is what keeps the module honest, and this sentence is
+checked against it by hand. Each entry says what would have to be
 built. Recording them in one place is what keeps a reader from taking "the app parses seven layers" for
 "seven layers are implemented."
 
@@ -2548,7 +2552,9 @@ All six checks ship, implemented against the reference lineage pipeline in
 `tests/morpheus/determinism/`, with the comparison half factored into
 {py:mod}`~morpheus.utils.determinism` for reuse against any pipeline: `canonicalize` reduces output to
 a normal form in which two deterministic runs compare equal, `diff_frames` explains the first
-disagreement in build-log terms, `frame_digest` gives the one-line D0 verdict, and
+disagreement in build-log terms, `frame_digest` gives a one-line verdict over that normal form -- which is a
+D1 statement rather than a D0 one, because `canonicalize` quantizes floats first, so two runs differing in the
+fifth decimal digest identically; a genuine D0 comparison has to be made on unquantized output -- and
 `permute_within_contiguous_groups` produces the legal input shuffles for check 6. The corpus is seeded
 code rather than checked-in data, which keeps it out of LFS while remaining exactly as fixed, and the
 golden output is a checked-in CSV regenerated deliberately, never silently, via
@@ -2843,7 +2849,8 @@ What Morpheus provides versus what has to be built, stated plainly.
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| Entity sharding router configuration | Small | `RouterStage` with a stable hash; replaces intra-stage threading |
+| **The per-user autoencoder** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. Nothing produces `mean_abs_z` or `max_abs_z`, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 fire on nothing. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` exercises it under controls 3 and 5, but that runner needs Torch and a card and has not yet been run |
+| Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
 | Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |
 | Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |

@@ -107,6 +107,67 @@ def test_the_unproduced_count_is_pinned():
     assert len(PRODUCED) == 7
 
 
+NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+}
+
+GUIDE = os.path.join(REPO_ROOT,
+                     "docs",
+                     "source",
+                     "developer_guide",
+                     "guides",
+                     "11_predictive_behavioral_analytics_osi.md")
+
+
+def test_the_guide_states_the_same_unproduced_count_the_module_holds():
+    # The count above is pinned in code and was correct; the sentence in the guide saying the same thing was not,
+    # and stayed wrong through the whole layer 5 increment. A number written in prose beside a number held in code
+    # is a number that will disagree with it, and nothing but a reader was checking. This is that reader.
+    with open(GUIDE, encoding="utf-8") as handle:
+        text = re.sub(r"\s+", " ", handle.read())
+
+    match = re.search(r"(\w+) of the (\w+) stanzas have no producer", text, re.IGNORECASE)
+
+    assert match is not None, "the guide no longer states the unproduced count; keep it or drop this test"
+
+    stated_unproduced = NUMBER_WORDS[match.group(1).lower()]
+    stated_total = NUMBER_WORDS[match.group(2).lower()]
+
+    assert stated_unproduced == len(UNPRODUCED), (
+        f"the guide says {match.group(1)} stanzas have no producer; the module holds {len(UNPRODUCED)}")
+    assert stated_total == len(PRODUCED) + len(UNPRODUCED)
+
+
+def test_the_guide_breaks_the_unproduced_count_down_correctly():
+    # The sentence does not only give a total, it splits it into score sourcetypes, the layer 1 inventory feed and
+    # the context store. That breakdown drifted too -- it still said five score sourcetypes after layer 5 gained a
+    # producer -- so the parts are checked against the module, not just the sum.
+    with open(GUIDE, encoding="utf-8") as handle:
+        text = re.sub(r"\s+", " ", handle.read())
+
+    match = re.search(r"stanzas have no producer in this fork: (\w+) are the score sourcetypes", text)
+
+    assert match is not None, "the guide no longer breaks the count down; keep it or drop this test"
+
+    scores = {name for name in UNPRODUCED if name.startswith("morpheus:score:")}
+
+    assert NUMBER_WORDS[match.group(1).lower()] == len(scores), (
+        f"the guide says {match.group(1)} unproduced score sourcetypes; the module holds {sorted(scores)}")
+
+
 def test_asking_for_an_unproduced_sourcetype_says_what_would_have_to_exist():
     with pytest.raises(ValueError, match="TC-0 context store"):
         sourcetype("context:identity")
