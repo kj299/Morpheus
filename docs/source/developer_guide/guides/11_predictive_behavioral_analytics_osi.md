@@ -115,7 +115,7 @@ while measuring less than it claimed.
 **The run that stands is 2026-09-07 at 20:09 UTC**, on the same card, over tiers that are total: the
 marked tier 417 collected and 417 passed; the tier carrying no mode marker 913 collected, 907 passed and
 6 skipped -- every skip a field contract for a sourcetype nothing produces yet. That run is the first to
-check both composed goldens against a device after the scoring path landed, so the per-feature z-scores,
+check both composed golden files against a device after the scoring path landed, so the per-feature z-scores,
 which are float divisions, are now known to agree between host and device rather than assumed to. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
 pytest collected. It is also the first such run with `torch==2.4.0+cu124` installed beside the RAPIDS
 stack, which answers a question the earlier ones could not: the two coexist in one process, and adding
