@@ -97,28 +97,66 @@ def test_preparing_the_environment_refuses_once_torch_is_imported(runner_module)
         del sys.modules["torch"]
 
 
-def test_the_runner_refuses_without_torch(tmp_path):
-    # The guard that matters most: this container has no Torch, and a run that quietly skipped the model would
-    # report a verdict about a model it never trained. It must exit non-zero, say which piece is missing, and
-    # leave a failed artifact rather than no artifact -- an absent file reads as "not run yet", and this was run.
-    assert os.access(RUNNER, os.X_OK), "the runner must be executable or the one command is not one command"
+def _run_with_stub_torch(tmp_path, stub: str) -> tuple:
+    """Run the runner against a stand-in `torch`, so the refusal is forced rather than depended on.
+
+    The earlier version of these tests simply ran the runner and asserted it refused, which was true only while
+    the machine happened to lack Torch. Installing Torch on the machine with the card turned a passing test into
+    a failing one without a line of the runner changing -- the test was asserting a property of the environment.
+    A stub shadowing the real module makes both refusals reproducible anywhere, with or without a card.
+    """
+    stub_root = tmp_path / "stub"
+    stub_root.mkdir()
+    (stub_root / "torch.py").write_text(stub, encoding="utf-8")
 
     artifact = str(tmp_path / "layer5_model.json")
+    environment = dict(os.environ, PYTHONPATH=f"{stub_root}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+
     completed = subprocess.run([sys.executable, RUNNER, artifact],
                                capture_output=True,
                                text=True,
                                check=False,
                                timeout=600,
-                               cwd=REPO_ROOT)
+                               cwd=REPO_ROOT,
+                               env=environment)
+
+    with open(artifact, encoding="utf-8") as handle:
+        return (completed, json.load(handle))
+
+
+def test_the_runner_refuses_when_torch_cannot_be_imported(tmp_path):
+    # The guard that matters most: a run that quietly skipped the model would report a verdict about a model it
+    # never trained. It must exit non-zero, say which piece is missing, and leave a failed artifact rather than
+    # no artifact -- a file that is simply absent reads afterwards as a run that was never started.
+    assert os.access(RUNNER, os.X_OK), "the runner must be executable or the one command is not one command"
+
+    (completed, report) = _run_with_stub_torch(tmp_path, "raise ImportError('stubbed out for this test')\n")
 
     assert completed.returncode != 0, "a machine with no Torch must not report a passing model verdict"
     assert "no Torch" in completed.stdout + completed.stderr
-
-    with open(artifact, encoding="utf-8") as handle:
-        report = json.load(handle)
-
     assert report["verdict"] == "failed"
     assert "Torch" in report["reason"]
+
+
+def test_the_runner_refuses_when_torch_reports_no_device(tmp_path):
+    # The second refusal, which was never covered: Torch present and no card. The scores this measures are the
+    # ones a deployment would act on, so a CPU run would answer a different question than the one asked -- and
+    # answering a different question quietly is the failure this whole script is built against.
+    stub = ("__version__ = '2.4.0+stub'\n"
+            "class _Cuda:\n"
+            "    @staticmethod\n"
+            "    def is_available():\n"
+            "        return False\n"
+            "    @staticmethod\n"
+            "    def get_device_name(index):\n"
+            "        raise AssertionError('must not be asked for a device that is not available')\n"
+            "cuda = _Cuda()\n")
+
+    (completed, report) = _run_with_stub_torch(tmp_path, stub)
+
+    assert completed.returncode != 0, "a machine with no CUDA device must not report a passing model verdict"
+    assert "no CUDA device" in completed.stdout + completed.stderr
+    assert report["verdict"] == "failed"
 
 
 def test_the_runner_says_what_it_does_not_measure(runner_module):

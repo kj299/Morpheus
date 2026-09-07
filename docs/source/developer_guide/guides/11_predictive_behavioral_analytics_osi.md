@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is twenty-two stages and twenty-seven supporting modules
-under 1,785 tests, itemized in
+under 1,786 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -82,17 +82,23 @@ control 13's six checks against a week-long corpus, the two deterministic rules 
 with their predicates asserted against that corpus, and `morpheus:score:l5` is a produced sourcetype.
 Controls 1, 2, 4 and 12 now ship as code, ahead of the model
 that will consume them. Control 9 is a partial exception, since `determinism.quantize_value` ships but
-the hysteresis half of it does not, and control 3 is in a third state that is neither built nor absent:
-it is **written and unmeasured**. Seeding beyond `manual_seed` means calling
-`torch.use_deterministic_algorithms`, and the environment this work is developed and tested in has no
-Torch and no CUDA device -- `morpheus.models.dfencoder` is in the tree, but it is a Torch model.
+the hysteresis half of it does not. Control 3 has now been measured, on the one machine with a card:
 `examples/layer5_model/run_model.py` sets `CUBLAS_WORKSPACE_CONFIG` before Torch is imported, enables
-deterministic algorithms, trains a per-principal autoencoder on the layer 5 corpus and checks the double
-run and the batch sweep; on a machine without Torch or a card it exits non-zero and writes a failed
-artifact rather than reporting on a model it never trained. That refusal is what is tested here. What it
-measures is reproducibility of the scoring path, not detection quality: a week of five principals is far
-too little data to train an autoencoder that detects anything, and nothing in this document claims it
-does. Thresholds are placeholders unless marked otherwise.
+`torch.use_deterministic_algorithms`, trains a per-principal autoencoder on the layer 5 corpus and checks
+the double run and the batch sweep. On 2026-09-07 at 12:01 UTC, with `torch==2.4.0+cu124` on an RTX 5000
+Ada, **the double run was identical and the scores were invariant across batch sizes 1, 8 and 64** for
+all five principals. Had either failed, R-P-L5-006 -- a rule about a score rising by fractions of a
+standard deviation -- would have been measuring the model's own jitter rather than a principal's
+behaviour, and every threshold tuned against those scores would have been tuned against noise.
+
+What that establishes is reproducibility of the scoring path and nothing more. A week of five principals
+is far too little data to train an autoencoder that detects anything, nothing in this document claims it
+does, and the artifact says so in a field of its own so the caveat travels with the numbers. The pipeline
+still produces no `mean_abs_z`, so the four rules that read it continue to fire on nothing. On a machine
+without Torch or without a card the runner exits non-zero and writes a failed verdict rather than
+reporting on a model it never trained, and both refusals are tested by shadowing Torch with a stub rather
+than by depending on its absence -- which is a distinction that cost a passing test the moment Torch was
+installed. Thresholds are placeholders unless marked otherwise.
 
 One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
 nowhere else. On 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada
@@ -2788,13 +2794,14 @@ What Morpheus provides versus what has to be built, stated plainly.
   reports no rise in sigmas at all rather than an infinite one, since inventing a scale would make the
   flattest history the most alarming. The module is given a number per entity per window and knows nothing
   about what produced it, which is what lets the trajectory be tested without an autoencoder.
-- The model half as a runner rather than a result (`examples/layer5_model/run_model.py`, with its
+- The model half, as a runner and now as a result (`examples/layer5_model/run_model.py`, with its
   [README](../../../../examples/layer5_model/README.md)). It trains a per-principal autoencoder on the
-  corpus above and checks the double run and the batch sweep -- controls 3 and 5, on the machine that has a
-  card. It measures reproducibility of the scoring path and not detection quality, and says so in the
-  artifact it writes rather than only in prose. On a machine without Torch or a device it exits non-zero
-  and writes a failed verdict; that refusal is the part tested here, along with the property that every
-  feature it trains on is one a TC-5 stage derived rather than a column a collector sent.
+  corpus above and checks the double run and the batch sweep -- controls 3 and 5, on the machine that has
+  a card, where both passed. It measures reproducibility of the scoring path and not detection quality,
+  and says so in the artifact it writes rather than only in prose. On a machine without Torch or a device
+  it exits non-zero and writes a failed verdict; both refusals are tested against a stubbed Torch, along
+  with the property that every feature it trains on is one a TC-5 stage derived rather than a column a
+  collector sent.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.
@@ -2849,7 +2856,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| **The per-user autoencoder** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. Nothing produces `mean_abs_z` or `max_abs_z`, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 fire on nothing. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` exercises it under controls 3 and 5, but that runner needs Torch and a card and has not yet been run |
+| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. Nothing in the pipeline produces `mean_abs_z` or `max_abs_z`, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 fire on nothing. The model itself is not the missing part: `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus and shown the scoring path reproducible under controls 3 and 5. What is missing is a scoring stage in the composed pipeline, the manifest wiring that pins which model scored which entity, and enough data for the scores to mean anything |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
 | Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |

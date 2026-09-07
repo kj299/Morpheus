@@ -56,7 +56,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Six deterministic rules as saved searches in the app. Two at layer 5: a principal authenticated from two places faster than the journey can be made, and a run of multi-factor denials ended by an approval. The first excludes token refreshes and VPN egress ranges from the measurement *and* from becoming the location the next one is measured against, and one intrusion produces a pair of alerts rather than one. And four at layer 2: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Twenty-two stages and twenty-seven supporting modules, covered by 1,785 tests.
+Twenty-two stages and twenty-seven supporting modules, covered by 1,786 tests.
 
 ### What this fork is not
 
@@ -81,15 +81,20 @@ Being clear about the boundary is the point of writing it down:
   verified without them; a model path written here would be a model path that never ran. The controls
   landed first instead, which is the order the guide argues for anyway, since retrofitting determinism
   onto a running pipeline means re-tuning every threshold.
-- **The model half is a runner rather than a result.** `examples/layer5_model/run_model.py` trains a
-  per-principal autoencoder on the layer 5 corpus and asks the only question a week of five principals
-  can answer: whether the same seed and the same data produce the same scores twice, and whether a row's
-  score changes with what it was batched with. That is control 3 and control 5, written out in full and
-  **not yet run** -- it needs a machine with Torch and a card, and it writes a `"verdict": "failed"`
-  artifact and exits non-zero on any machine without them rather than reporting on a model it never
-  trained. **It measures reproducibility, not detection quality**, and the artifact carries that caveat
-  in a field of its own so it travels with the numbers. Control 3 is therefore written and unmeasured,
-  which is a different state from either built or absent, and this is the bullet that says which.
+- **The model's scoring path is reproducible, and that is now measured rather than assumed.** On
+  2026-09-07 at 12:01 UTC, on the same RTX 5000 Ada card with `torch==2.4.0+cu124`,
+  `examples/layer5_model/run_model.py` trained a per-principal autoencoder on the layer 5 corpus for
+  five principals and answered the only question a week of data can: **the double run was identical and
+  the scores were invariant across batch sizes 1, 8 and 64.** That is control 3 and control 5, measured.
+  Had either failed, R-P-L5-006 -- a rule about a score rising by fractions of a standard deviation --
+  would have been measuring the model's own jitter, and every threshold tuned against it would have been
+  tuned against noise.
+- **What that run does not establish is that the model detects anything.** Five principals over one week
+  is far too little data to train an autoencoder that detects anything, no claim is made that it does,
+  and the artifact carries that caveat in a field of its own so it travels with the numbers rather than
+  living in a document beside them. The pipeline still produces no `mean_abs_z`, so R-B-L5-001,
+  R-B-L5-002, R-B-L5-005 and R-P-L5-006 continue to fire on nothing. What is now true is narrower and
+  worth having: the path from features to scores gives the same answer twice.
 - **The rule thresholds are placeholders** unless a rule says otherwise. They are starting points for
   tuning against an estate's own data, not calibrated values.
 - **"Predictive" is a claim the guide qualifies rather than asserts.** Three of its four mechanisms are

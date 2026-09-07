@@ -88,6 +88,16 @@ Torch or without a device it exits non-zero and writes a `"verdict": "failed"` a
 missing -- an artifact that is simply absent reads as not yet run, and a run that quietly skipped the model would
 be worse than one that refuses. That refusal is itself tested, in the container that has neither.
 
+## The result
+
+Run on 2026-09-07 at 12:01 UTC, on an NVIDIA RTX 5000 Ada Generation Laptop GPU with `torch==2.4.0+cu124`,
+over five principals carrying 26, 18, 26, 28 and 7 usable rows: **the double run was identical and the
+scores were invariant across batch sizes 1, 8 and 64.** Verdict `passed`.
+
+That is controls 3 and 5, measured. It is not a statement that the model detects anything, and the
+paragraph above is not softened by the result: seven rows is not a training set, and neither is
+twenty-eight.
+
 ## The artifact
 
 Same shape as `gpu_conformance.json`: what ran, on what card, with what result.
