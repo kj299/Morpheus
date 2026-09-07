@@ -175,7 +175,7 @@ def test_a_run_that_accounts_for_everything_names_nothing(report):
     summary = report.summarize("tests/a.py::test_one PASSED [100%]", collected_names=names)
 
     assert summary["unaccounted"] == 0
-    assert summary["unaccounted_names"] == []
+    assert "unaccounted_names" not in summary
 
 
 def test_a_wholesale_loss_is_counted_in_full_but_not_listed_in_full(report):
@@ -187,6 +187,62 @@ def test_a_wholesale_loss_is_counted_in_full_but_not_listed_in_full(report):
     assert summary["unaccounted"] == report.MAX_NAMED + 5
     assert len(summary["unaccounted_names"]) == report.MAX_NAMED + 1
     assert summary["unaccounted_names"][-1] == "... and 5 more"
+
+
+TALLY_LINE = ("=========================== 379 passed, 522 deselected, 1 warning in 456.25s "
+              "===========================")
+"""pytest's own final line, which is the authority whenever the run wrote one."""
+
+SUBPROCESS_NOISE = "\n".join([
+    "tests/a.py::test_one[gpu_mode] PASSED                 [  0%]",
+    "tests/a.py::test_two[gpu_mode] PASSED [  7%]",
+    "tests/a.py::test_two[gpu_mode] PASSED                 [  7%]",
+])
+"""The shape that broke the count on a real run.
+
+Three of these tests spawn a subprocess, and the subprocess's own pytest output lands in the log -- so a name
+appears twice while the tests it displaced appear not at all. Adding up streamed lines counted two tests that
+never ran and missed three that did, and the two errors nearly cancelled: 379 became 378."""
+
+
+def test_pytests_own_tally_is_preferred_to_adding_up_the_lines(report):
+    summary = report.summarize("\n".join([SUBPROCESS_NOISE, TALLY_LINE]),
+                               collected_names=[f"tests/a.py::test_{index}" for index in range(379)])
+
+    assert summary["counts"] == {"passed": 379}
+    assert summary["counted_from"] == "pytest's summary"
+    assert summary["unaccounted"] == 0
+    # And no names, because a name-level mismatch under a reconciled tally is this parser's noise, not a gap.
+    assert "unaccounted_names" not in summary
+
+
+def test_deselected_tests_are_not_counted_as_run(report):
+    # They were never going to run, and the collected count they reconcile against already excludes them.
+    summary = report.summarize(TALLY_LINE, collected_names=[f"tests/a.py::test_{index}" for index in range(379)])
+
+    assert "deselected" not in summary["counts"]
+    assert summary["unaccounted"] == 0
+
+
+def test_a_tally_that_does_not_match_what_was_collected_still_fails(report):
+    # The reconciliation is not weakened by trusting pytest: the tally is authoritative about what pytest ran,
+    # not about what it was asked to run, and the gap between those two is the thing being watched for.
+    summary = report.summarize(TALLY_LINE, collected_names=[f"tests/a.py::test_{index}" for index in range(400)])
+
+    assert summary["unaccounted"] == 21
+    assert not report.is_clean({"outcome": "exited cleanly", **summary})
+
+
+def test_a_run_that_died_before_its_tally_is_still_read_line_by_line(report):
+    # The streamed lines are why they are read at all. A run that crashes never writes a summary, and that is
+    # exactly the run whose story matters most.
+    summary = report.summarize("tests/a.py::test_one PASSED [ 50%]\ntests/a.py::test_two",
+                               collected_names=["tests/a.py::test_one", "tests/a.py::test_two"])
+
+    assert summary["counts"] == {"passed": 1}
+    assert "counted_from" not in summary
+    assert summary["died_in"] == "tests/a.py::test_two"
+    assert summary["unaccounted_names"] == ["tests/a.py::test_two"]
 
 
 def test_a_count_that_does_not_add_up_is_not_a_pass(report):

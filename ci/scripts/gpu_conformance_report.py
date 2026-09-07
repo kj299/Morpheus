@@ -45,6 +45,18 @@ import typing
 
 OUTCOMES = ("PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS")
 
+SUMMARY_TOTALS = re.compile(r"^=+ (?P<body>(?:\d+ \w+(?:, )?)+)(?: in [\d.]+s.*)?=*$")
+"""pytest's own final tally, which is the authority whenever the run got far enough to write one.
+
+Reading the streamed lines and adding them up is what a run that *died* needs, and it is what this did
+exclusively for three revisions. It is the wrong default. A test that spawns a subprocess puts the subprocess's
+own pytest output into the log, so names repeat and the addition counts tests that never existed while real ones
+go unattributed -- on the run that exposed this, two phantoms and three orphans cancelled to an off-by-one.
+pytest already knows the answer and prints it. Ask it, and fall back to counting only when there is no answer to
+ask for."""
+
+TALLY = re.compile(r"(?P<count>\d+) (?P<outcome>passed|failed|error|errors|skipped|xfailed|xpassed|deselected)")
+
 MAX_NAMED = 20
 """Unaccounted tests named in the artifact before it stops listing them.
 
@@ -140,15 +152,38 @@ def summarize(text: str, collected: typing.Optional[int] = None, collected_names
 
     result = {"counts": counts, "failures": sorted(failures), "died_in": died_in}
 
-    if (collected_names is not None):
-        missing = [name for name in collected_names if name not in reported]
-        result["collected"] = len(collected_names)
-        result["unaccounted"] = len(missing)
-        result["unaccounted_names"] = missing[:MAX_NAMED] + ([f"... and {len(missing) - MAX_NAMED} more"]
-                                                             if len(missing) > MAX_NAMED else [])
-    elif (collected is not None):
-        result["collected"] = collected
-        result["unaccounted"] = collected - sum(counts.values())
+    # pytest's own tally wins where it exists. `deselected` is dropped: those tests were never going to run, and
+    # the collected count this reconciles against already excludes them.
+    for line in reversed(text.splitlines()):
+        totals = SUMMARY_TOTALS.match(line.strip())
+
+        if (totals is None):
+            continue
+
+        tallied = {match.group("outcome"): int(match.group("count")) for match in TALLY.finditer(totals.group("body"))}
+        tallied.pop("deselected", None)
+
+        if (tallied):
+            counts = {("error" if outcome == "errors" else outcome): value for (outcome, value) in tallied.items()}
+            result["counts"] = counts
+            result["counted_from"] = "pytest's summary"
+
+        break
+
+    expected = len(collected_names) if collected_names is not None else collected
+
+    if (expected is not None):
+        result["collected"] = expected
+        result["unaccounted"] = expected - sum(counts.values())
+
+        # Names only where they are evidence. They come from the streamed lines, which repeat and orphan
+        # themselves when a test spawns a subprocess -- so once the tally reconciles, a name-level mismatch is
+        # this parser's noise rather than a missing test, and printing it would send someone looking for a gap
+        # that is not there. When the numbers genuinely do not add up, the names are where to start.
+        if (result["unaccounted"] != 0 and collected_names is not None):
+            missing = [name for name in collected_names if name not in reported]
+            result["unaccounted_names"] = missing[:MAX_NAMED] + ([f"... and {len(missing) - MAX_NAMED} more"]
+                                                                 if len(missing) > MAX_NAMED else [])
 
     return result
 
