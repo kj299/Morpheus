@@ -49,11 +49,20 @@ export NUMBA_CUDA_USE_NVIDIA_BINDING="${NUMBA_CUDA_USE_NVIDIA_BINDING:-1}"
 #
 # The two lists are maintained by hand and kept total by a test. `tests/morpheus/utils/test_gpu_conformance_targets.py`
 # identifies this fork's own test files by their copyright header and fails if one is in neither list, because a
-# selection that quietly drops a file is the exact failure this script was written to prevent -- and it happened:
-# five TC-5 stage files sat outside both tiers through two merges, so the layer 5 work went unmeasured while the
-# runner reported a clean verdict on everything else.
+# selection that quietly drops a file is the exact failure this script was written to prevent -- and it happened
+# twice. First, five TC-5 stage files sat outside both tiers through two merges, so the layer 5 work went
+# unmeasured while the runner reported a clean verdict on everything else. Second, this tier named the whole
+# `tests/morpheus/determinism` directory, which reads as complete and was not: `-m gpu_mode` selects only the
+# 29 tests in the five files that carry a mode marker, and the other six files -- the liveness registry, the
+# first-detection corpus, the representation invariance suite, the Splunk package -- were deselected on every
+# GPU run this has ever rendered a verdict from. Files are named individually for that reason: a directory entry
+# cannot be checked against the markers inside it, and something that cannot be checked is what goes stale.
 TARGETS=(
-    tests/morpheus/determinism
+    tests/morpheus/determinism/test_determinism_harness.py
+    tests/morpheus/determinism/test_gpu_parity.py
+    tests/morpheus/determinism/test_session_harness.py
+    tests/morpheus/determinism/test_siem_wire_contract.py
+    tests/morpheus/determinism/test_telemetry_harness.py
     tests/morpheus/stages/test_binding_resolver_stage.py
     tests/morpheus/stages/test_determinism_stamp_stage.py
     tests/morpheus/stages/test_community_id_stage.py
@@ -69,6 +78,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc2_binding_stage.py
     tests/morpheus/stages/test_tc2_cardinality_stage.py
     tests/morpheus/stages/test_tc5_cadence_stage.py
+    tests/morpheus/stages/test_tc5_drift_stage.py
     tests/morpheus/stages/test_tc5_novelty_stage.py
     tests/morpheus/stages/test_tc5_risk_stage.py
     tests/morpheus/stages/test_tc5_session_stage.py
@@ -82,6 +92,12 @@ TARGETS=(
 # than an omission. `test_lineage_cudf.py` is the one that matters most: its digest equivalence gate asserts the
 # GPU and CPU hashing paths agree, and a marker filter dropped it once already.
 UNMARKED=(
+    tests/morpheus/determinism/test_end_to_end_mac_spoof.py
+    tests/morpheus/determinism/test_first_detections.py
+    tests/morpheus/determinism/test_layer5_model_runner.py
+    tests/morpheus/determinism/test_representation_invariance.py
+    tests/morpheus/determinism/test_splunk_validation_package.py
+    tests/morpheus/determinism/test_stage_parameter_liveness.py
     tests/morpheus/stages/test_lineage_stage_cli.py
     tests/morpheus/utils/test_binding_closer.py
     tests/morpheus/utils/test_binding_table.py
@@ -91,6 +107,7 @@ UNMARKED=(
     tests/morpheus/utils/test_determinism.py
     tests/morpheus/utils/test_determinism_envelope.py
     tests/morpheus/utils/test_distinct_window.py
+    tests/morpheus/utils/test_drift_trajectory.py
     tests/morpheus/utils/test_entity_key.py
     tests/morpheus/utils/test_event_clock.py
     tests/morpheus/utils/test_geo_velocity.py
@@ -120,26 +137,36 @@ WIDER=(
 )
 # The floor the collected count has to clear, computed from the tier rather than pinned. A constant here goes
 # stale the moment the tier grows -- which is how a tier that had lost five files still cleared a floor written
-# when it had fourteen. Every stage file in TARGETS contributes at least five mode variants and most contribute
-# twenty, so ten per entry is comfortably below a healthy run and far above what a tier with most of its files
-# dropped would collect.
-MINIMUM_SELECTED=$(( (${#TARGETS[@]} - 1) * 10 ))
+# when it had fourteen.
+#
+# Three per entry, which is what the smallest contributor in the tier actually collects: the stage files run
+# twenty or more mode variants each, but `test_gpu_parity.py` runs three, and a floor above what an honest tier
+# collects fails good runs. This is a gross-loss backstop and nothing finer -- it catches a filter or a missing
+# dependency that took most of the suite, and it would not notice one file going missing. That is the totality
+# test's job, and the reason this script no longer trusts a floor to do it.
+MINIMUM_SELECTED=$(( ${#TARGETS[@]} * 3 ))
 
 
+# Written with printf rather than with python, because the failure path is exactly where the environment may be
+# the thing that is broken -- and it was: run outside the container, `python` is not on PATH, so the artifact this
+# function exists to leave behind was never written and the run looked like one that had not happened. Every
+# reason string below is quote-free and single-line for the same reason; keep them that way.
 fail() {
     echo ""
     echo "FAILED: $1"
     echo ""
-    python - "$ARTIFACT" "$1" <<'PY' || true
-import json, sys, datetime
-json.dump({"verdict": "failed", "reason": sys.argv[2],
-           "at": datetime.datetime.now(datetime.timezone.utc).isoformat()},
-          open(sys.argv[1], "w"), indent=2)
-PY
+    printf '{\n  "verdict": "failed",\n  "reason": "%s",\n  "at": "%s"\n}\n' \
+        "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ARTIFACT" || true
     exit 1
 }
 
 cd "${REPO_ROOT}" || fail "cannot enter ${REPO_ROOT}"
+
+# pytest puts a test's outcome on the line after its identifier when the identifier does not fit the terminal,
+# and every identifier in the marked tier carries a `[gpu_mode]` suffix. On a narrow terminal that wrapped all of
+# them, so a tier of 379 passing tests parsed as zero counted and 379 unaccounted. The report module reads a
+# wrapped outcome now too; this stops the wrapping happening in the first place, and neither alone is trusted.
+export COLUMNS=200
 
 echo "=== device ==="
 if ! command -v nvidia-smi > /dev/null 2>&1; then
@@ -151,6 +178,24 @@ if [[ -z "${DEVICE}" ]]; then
     fail "no CUDA device: nvidia-smi reported no GPU. A silent skip must never read as a pass, so this is an error rather than a deselection."
 fi
 echo "${DEVICE}"
+
+echo ""
+echo "=== interpreter ==="
+# Checked separately from the device, because the two live in different places. `nvidia-smi` is visible from a
+# WSL host that has no Morpheus environment at all, so the device check passes there and everything after it
+# fails for a reason that has nothing to do with a GPU: the first run outside the container collected zero tests
+# and the floor reported a marker filter dropping the suite, which was a confident and wrong diagnosis. Name the
+# real cause here instead.
+if ! command -v python > /dev/null 2>&1; then
+    fail "python is not on PATH. This runs inside the Morpheus environment, not on the host beside it -- nvidia-smi is visible from a WSL host that has no environment at all, which is why the device check above passed."
+fi
+
+if ! python -c "import morpheus" > /dev/null 2>&1; then
+    fail "python is on PATH but cannot import morpheus, so every collection below would come back empty and be reported as a suite that went missing. Activate the environment first."
+fi
+
+echo "$(python -c 'import sys; print(sys.executable)')"
+python -c "import morpheus; print(f'morpheus {morpheus.__version__}')" 2>/dev/null || echo "morpheus imports"
 
 echo ""
 echo "=== test data ==="
@@ -178,7 +223,12 @@ fi
 
 echo ""
 echo "=== gpu_mode variants ==="
-SELECTED=$(python -m pytest -m gpu_mode --run_slow --collect-only -q "${TARGETS[@]}" 2>/dev/null | grep -c "::") || SELECTED=0
+# Kept rather than counted and discarded. A count says a run does not add up; the names say which test it does
+# not add up by, and the first run where the tiers were total came back one short with nothing failed and no
+# name to look for. The report module reconciles against these.
+python -m pytest -m gpu_mode --run_slow --collect-only -q "${TARGETS[@]}" \
+    > /tmp/gpu_conformance_marked_collected.txt 2>/dev/null
+SELECTED=$(grep -c "::" /tmp/gpu_conformance_marked_collected.txt) || SELECTED=0
 echo "collected ${SELECTED} gpu_mode tests"
 
 if [[ "${SELECTED}" -lt "${MINIMUM_SELECTED}" ]]; then
@@ -199,7 +249,9 @@ echo "=== coverage that carries no mode marker ==="
 #
 # Collected first, for the same reason the marked tier is: the artifact reconciles what it counted against what
 # pytest said it would run, and without a number to reconcile against, a parser that drops tests reports a pass.
-UNMARKED_SELECTED=$(python -m pytest --run_slow --collect-only -q "${UNMARKED[@]}" 2>/dev/null | grep -c "::") || UNMARKED_SELECTED=0
+python -m pytest --run_slow --collect-only -q "${UNMARKED[@]}" \
+    > /tmp/gpu_conformance_unmarked_collected.txt 2>/dev/null
+UNMARKED_SELECTED=$(grep -c "::" /tmp/gpu_conformance_unmarked_collected.txt) || UNMARKED_SELECTED=0
 echo "collected ${UNMARKED_SELECTED} unmarked tests"
 
 python -m pytest --run_slow -v --tb=short "${UNMARKED[@]}" 2>&1 | tee /tmp/gpu_conformance_unmarked.log

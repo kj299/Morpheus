@@ -64,6 +64,7 @@ from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
+from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
 from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
@@ -392,6 +393,25 @@ def denials() -> dict:
     }
 
 
+def scores() -> dict:
+    # One principal's score across consecutive windows: a flat stretch and then a climb, which is R-P-L5-006's
+    # shape. A second principal is interleaved rather than appended, because evicting the first is only
+    # observable if the first is seen again afterwards.
+    flat = [1.0, 1.02, 0.98, 1.0, 1.01, 1.0]
+    climb = [1.2, 1.6, 2.1, 2.7]
+
+    rows = [("alice@example.com", 100 + index, value) for (index, value) in enumerate(flat)]
+    rows.append(("bob@example.com", 100, 1.0))
+    rows.extend(("alice@example.com", 106 + index, value) for (index, value) in enumerate(climb))
+
+    return {
+        "user_principal": [row[0] for row in rows],
+        "window_id": [row[1] for row in rows],
+        "mean_abs_z": [row[2] for row in rows],
+        "event_time": [index * MINUTE for index in range(len(rows))],
+    }
+
+
 SCORED_WINDOW = 484512
 
 
@@ -661,6 +681,21 @@ REGISTRY: dict = {
                 Knob("decimals", DIFFERS, benign=4, extreme=1),
             ),
         ),
+    "TC5DriftStage":
+        Scenario(
+            stage=TC5DriftStage,
+            frame=scores,
+            base={},
+            knobs=(
+                Knob("entity_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("score_column", INPUT_COLUMN, benign="mean_abs_z"),
+                Knob("window_column", INPUT_COLUMN, benign="window_id"),
+                Knob("max_windows", DIFFERS, benign=64, extreme=2),
+                Knob("min_windows", DIFFERS, benign=4, extreme=100),
+                Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
+                Knob("decimals", DIFFERS, benign=4, extreme=1),
+            ),
+        ),
     "TC5TravelStage":
         Scenario(
             stage=TC5TravelStage,
@@ -866,7 +901,7 @@ def test_every_stage_parameter_is_registered(stage_name: str):
 def test_every_stage_in_the_fork_is_covered():
     # The registry is checked against each stage's signature above; this checks the set of stages itself, so a new
     # stage cannot arrive with no entry at all.
-    assert len(REGISTRY) == 21
+    assert len(REGISTRY) == 22
     assert {scenario.stage.__name__ for scenario in REGISTRY.values()} == set(REGISTRY)
 
 

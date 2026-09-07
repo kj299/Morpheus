@@ -98,11 +98,151 @@ def test_every_shape_of_streamed_line_is_read(report, line):
     assert report.summarize(line)["counts"] == {"passed": 1}
 
 
+WRAPPED = ("tests/morpheus/determinism/test_determinism_harness.py::test_double_run_diff[gpu_mode]\n"
+           "PASSED [  1%]")
+"""What pytest writes when the identifier does not fit the terminal: the outcome goes on the next line.
+
+The third shape this parser could not read, and the most expensive so far. Every identifier in the marked tier
+carries a `[gpu_mode]` suffix, so on a narrow terminal all of them wrapped: 379 passing tests parsed as zero
+counted and 379 unaccounted, on a run that had genuinely passed."""
+
+
+def test_an_outcome_that_wrapped_onto_the_next_line_is_counted(report):
+    summary = report.summarize(WRAPPED, collected=1)
+
+    assert summary["counts"] == {"passed": 1}
+    assert summary["died_in"] is None
+    assert summary["unaccounted"] == 0
+
+
+def test_a_wrapped_failure_keeps_the_name_from_the_line_above(report):
+    summary = report.summarize(WRAPPED.replace("PASSED", "FAILED"))
+
+    assert summary["failures"] == [
+        "tests/morpheus/determinism/test_determinism_harness.py::test_double_run_diff[gpu_mode]"
+    ]
+
+
+def test_a_whole_tier_of_wrapped_lines_reconciles(report):
+    # The shape of the run that produced the defect, rather than one line of it.
+    text = "\n".join([WRAPPED] * 3)
+    summary = report.summarize(text, collected=3)
+
+    assert summary["counts"] == {"passed": 3}
+    assert summary["unaccounted"] == 0
+
+
+def test_an_outcome_with_nothing_above_it_is_not_counted(report):
+    # The other half of the discriminator. A wrapped outcome resolves an identifier that is waiting for one; an
+    # outcome word with no such identifier belongs to something else entirely, and counting it would invent a
+    # test. Inventing one hides a real drop just as well as missing one does, because the total still adds up.
+    assert report.summarize("PASSED [ 10%]")["counts"] == {}
+    assert report.summarize("PASSED [ 10%]", collected=1)["unaccounted"] == 1
+
+
+def test_a_summary_line_is_not_mistaken_for_a_wrapped_outcome(report):
+    # The discriminator. pytest's summary also starts with an outcome word, and counting those against a name
+    # still waiting for one would inflate the total in the direction that hides a drop -- so a line naming a
+    # test is never a wrap. Here the died_in name is genuinely unresolved and must stay that way.
+    started = "tests/morpheus/determinism/test_gpu_parity.py::test_the_pipelines_agree[gpu_mode]"
+    summary = report.summarize("\n".join([started, SUMMARY]))
+
+    assert summary["counts"] == {}
+    assert summary["died_in"] == started
+
+
 def test_the_summary_section_does_not_count_a_failure_twice(report):
     summary = report.summarize("\n".join([PLAIN, FAILED, SUMMARY]))
 
     assert summary["counts"] == {"passed": 1, "failed": 1}
     assert len(summary["failures"]) == 1
+
+
+def test_an_unaccounted_test_is_named_not_just_counted(report):
+    # A count says a run does not add up. The name says which test it does not add up by, which is the whole
+    # difference between a verdict and an investigation: the first run whose tiers were total came back one
+    # short, with nothing failed, nothing crashed, and no name to go looking for.
+    names = ["tests/a.py::test_one", "tests/a.py::test_two", "tests/a.py::test_three"]
+    summary = report.summarize("tests/a.py::test_one PASSED [ 33%]", collected_names=names)
+
+    assert summary["collected"] == 3
+    assert summary["unaccounted"] == 2
+    assert summary["unaccounted_names"] == ["tests/a.py::test_two", "tests/a.py::test_three"]
+
+
+def test_a_run_that_accounts_for_everything_names_nothing(report):
+    names = ["tests/a.py::test_one"]
+    summary = report.summarize("tests/a.py::test_one PASSED [100%]", collected_names=names)
+
+    assert summary["unaccounted"] == 0
+    assert "unaccounted_names" not in summary
+
+
+def test_a_wholesale_loss_is_counted_in_full_but_not_listed_in_full(report):
+    # The list is capped; the count never is. An artifact that answers a lost tier with a thousand lines of JSON
+    # is not more informative than one that answers with the number and the first twenty.
+    names = [f"tests/a.py::test_{index}" for index in range(report.MAX_NAMED + 5)]
+    summary = report.summarize("", collected_names=names)
+
+    assert summary["unaccounted"] == report.MAX_NAMED + 5
+    assert len(summary["unaccounted_names"]) == report.MAX_NAMED + 1
+    assert summary["unaccounted_names"][-1] == "... and 5 more"
+
+
+TALLY_LINE = ("=========================== 379 passed, 522 deselected, 1 warning in 456.25s "
+              "===========================")
+"""pytest's own final line, which is the authority whenever the run wrote one."""
+
+SUBPROCESS_NOISE = "\n".join([
+    "tests/a.py::test_one[gpu_mode] PASSED                 [  0%]",
+    "tests/a.py::test_two[gpu_mode] PASSED [  7%]",
+    "tests/a.py::test_two[gpu_mode] PASSED                 [  7%]",
+])
+"""The shape that broke the count on a real run.
+
+Three of these tests spawn a subprocess, and the subprocess's own pytest output lands in the log -- so a name
+appears twice while the tests it displaced appear not at all. Adding up streamed lines counted two tests that
+never ran and missed three that did, and the two errors nearly cancelled: 379 became 378."""
+
+
+def test_pytests_own_tally_is_preferred_to_adding_up_the_lines(report):
+    summary = report.summarize("\n".join([SUBPROCESS_NOISE, TALLY_LINE]),
+                               collected_names=[f"tests/a.py::test_{index}" for index in range(379)])
+
+    assert summary["counts"] == {"passed": 379}
+    assert summary["counted_from"] == "pytest's summary"
+    assert summary["unaccounted"] == 0
+    # And no names, because a name-level mismatch under a reconciled tally is this parser's noise, not a gap.
+    assert "unaccounted_names" not in summary
+
+
+def test_deselected_tests_are_not_counted_as_run(report):
+    # They were never going to run, and the collected count they reconcile against already excludes them.
+    summary = report.summarize(TALLY_LINE, collected_names=[f"tests/a.py::test_{index}" for index in range(379)])
+
+    assert "deselected" not in summary["counts"]
+    assert summary["unaccounted"] == 0
+
+
+def test_a_tally_that_does_not_match_what_was_collected_still_fails(report):
+    # The reconciliation is not weakened by trusting pytest: the tally is authoritative about what pytest ran,
+    # not about what it was asked to run, and the gap between those two is the thing being watched for.
+    summary = report.summarize(TALLY_LINE, collected_names=[f"tests/a.py::test_{index}" for index in range(400)])
+
+    assert summary["unaccounted"] == 21
+    assert not report.is_clean({"outcome": "exited cleanly", **summary})
+
+
+def test_a_run_that_died_before_its_tally_is_still_read_line_by_line(report):
+    # The streamed lines are why they are read at all. A run that crashes never writes a summary, and that is
+    # exactly the run whose story matters most.
+    summary = report.summarize("tests/a.py::test_one PASSED [ 50%]\ntests/a.py::test_two",
+                               collected_names=["tests/a.py::test_one", "tests/a.py::test_two"])
+
+    assert summary["counts"] == {"passed": 1}
+    assert "counted_from" not in summary
+    assert summary["died_in"] == "tests/a.py::test_two"
+    assert summary["unaccounted_names"] == ["tests/a.py::test_two"]
 
 
 def test_a_count_that_does_not_add_up_is_not_a_pass(report):

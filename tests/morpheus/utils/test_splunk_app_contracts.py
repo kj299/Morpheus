@@ -106,6 +106,56 @@ def test_the_guide_and_the_app_agree_on_both_numbers():
     assert set(expiry_pairs(GUIDE_PATH)) == set(expiry_pairs(SAVEDSEARCHES_PATH))
 
 
+def _stanza_names() -> list:
+    """The saved searches, read with a pattern rather than a parser.
+
+    `configparser` cannot read this file: Splunk continues a long search across lines with a trailing backslash,
+    which is a parse error to Python. The stanza headers are unambiguous on their own.
+    """
+    with open(SAVEDSEARCHES_PATH, encoding="utf-8") as handle:
+        return re.findall(r"^\[(.+)\]\s*$", handle.read(), re.MULTILINE)
+
+
+def test_the_app_readme_states_the_number_of_searches_it_ships():
+    # The README's inventory of savedsearches.conf listed eleven of the thirteen searches by name and had done
+    # since before the layer 5 detections landed. A list of contents maintained by hand beside the thing it lists
+    # drifts the moment the thing grows, and a reader counting stanzas gets a different answer than the document.
+    shipped = len(_stanza_names())
+
+    readme = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "README.md")
+
+    with open(readme, encoding="utf-8") as handle:
+        text = re.sub(r"\s+", " ", handle.read())
+
+    match = re.search(r"savedsearches\.conf` \| Search heads \| (\w+) searches:", text)
+
+    assert match is not None, "the app README no longer states how many searches it ships"
+
+    words = {"eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16}
+
+    assert words.get(match.group(1).lower()) == shipped, (
+        f"the README says {match.group(1)} searches; savedsearches.conf holds {shipped}")
+
+
+def test_every_detection_search_is_named_somewhere_in_the_app_readme():
+    # The other half of the same drift: the README named the four layer 2 detections as the things not yet run
+    # against a live instance, and never gained the two layer 5 ones. What has and has not met a search head is
+    # the most consequential sentence in that document, so every rule it could be wrong about is checked.
+    rules = [name for name in _stanza_names() if name.startswith("R-")]
+
+    assert len(rules) >= 7, f"expected the detection searches to still be there, found {rules}"
+
+    readme = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "README.md")
+
+    with open(readme, encoding="utf-8") as handle:
+        text = handle.read()
+
+    for name in rules:
+        rule_id = name.split(" - ")[0]
+
+        assert rule_id in text, f"{rule_id} ships in the app and is not mentioned in its README"
+
+
 def test_community_id_seed_defaults_to_zero():
     # Contract 3. The seed is part of the hash input, so a non-default value produces flow identifiers that no
     # other tool in the estate agrees with, forfeiting the entire reason the field exists.

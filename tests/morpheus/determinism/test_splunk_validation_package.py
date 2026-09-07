@@ -192,19 +192,41 @@ def test_the_checked_in_events_are_what_the_pipeline_produces():
         assert content == after[name], f"{name} changed; regenerate and review the diff"
 
 
-def test_the_conformance_runner_refuses_without_a_device():
+def test_the_conformance_runner_refuses_without_a_device(tmp_path):
     # The runner's own guard, asserted here because the failure it prevents is a green run that checked nothing.
-    # It must exit non-zero and say why, in this container, where there is no GPU.
+    #
+    # The device is hidden rather than assumed absent. This test used to call the runner bare, which was harmless
+    # only while it was deselected on the machines that have a card: once it ran there, the runner did not
+    # refuse -- it ran the entire suite, from inside a test the suite was running, until the timeout. Stubbing
+    # nvidia-smi to report nothing exercises the guard identically on either machine and cannot recurse, because
+    # the script stops at the device check.
     runner = os.path.join(REPO_ROOT, "ci", "scripts", "gpu_conformance.sh")
 
     assert os.access(runner, os.X_OK), "the runner must be executable or the one command is not one command"
 
-    completed = subprocess.run([runner, str(os.path.join(REPO_ROOT, "build", "gpu_conformance_probe.json"))],
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    stub = stub_bin / "nvidia-smi"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+    environment = dict(os.environ, PATH=f"{stub_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+    artifact = str(tmp_path / "gpu_conformance_probe.json")
+
+    completed = subprocess.run([runner, artifact],
                                capture_output=True,
                                text=True,
                                check=False,
-                               timeout=600,
-                               cwd=REPO_ROOT)
+                               timeout=300,
+                               cwd=REPO_ROOT,
+                               env=environment)
 
-    assert completed.returncode != 0, "a machine with no GPU must not report a passing GPU verdict"
+    assert completed.returncode != 0, "a machine with no visible GPU must not report a passing GPU verdict"
     assert "no CUDA device" in completed.stdout + completed.stderr
+
+    # And the artifact, because a refusal that leaves no file behind reads afterwards as a run never started.
+    with open(artifact, encoding="utf-8") as handle:
+        report = json.load(handle)
+
+    assert report["verdict"] == "failed"
+    assert "no CUDA device" in report["reason"]

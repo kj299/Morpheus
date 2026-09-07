@@ -24,10 +24,17 @@ called `R-D-L5-004 - Multi-factor fatigue`, an entity key case called `[   ]` --
 counted. Fifteen of them. The artifact said `"verdict": "passed"` while silently dropping tests, which is the
 same failure the whole script exists to prevent, wearing its third hat.
 
+The third time was the terminal width. pytest prints the outcome on the line after the identifier when the
+identifier does not fit, and the marked tier's identifiers all carry a `[gpu_mode]` suffix -- so on a narrow
+terminal every single line wrapped, nothing matched, and a tier of 379 passing tests parsed as zero. The runner
+now pins `COLUMNS`, and this reads a wrapped outcome as well, because pinning an environment variable is a thing
+that can be overridden and the parser should not depend on it.
+
 **The counts are reconciled against what was collected.** That is the general repair rather than a better regex:
 a counter that can quietly drop a test is untrustworthy however carefully its pattern is written, so the number
 it produces is checked against the number pytest said it would run, and a mismatch is a failed verdict with the
-difference named. A regex can be wrong again; a reconciliation says so out loud when it is.
+difference named. A regex can be wrong again -- it has been, three times now -- and each time the reconciliation
+is what said so out loud.
 """
 
 import datetime
@@ -37,6 +44,24 @@ import sys
 import typing
 
 OUTCOMES = ("PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS")
+
+SUMMARY_TOTALS = re.compile(r"^=+ (?P<body>(?:\d+ \w+(?:, )?)+)(?: in [\d.]+s.*)?=*$")
+"""pytest's own final tally, which is the authority whenever the run got far enough to write one.
+
+Reading the streamed lines and adding them up is what a run that *died* needs, and it is what this did
+exclusively for three revisions. It is the wrong default. A test that spawns a subprocess puts the subprocess's
+own pytest output into the log, so names repeat and the addition counts tests that never existed while real ones
+go unattributed -- on the run that exposed this, two phantoms and three orphans cancelled to an off-by-one.
+pytest already knows the answer and prints it. Ask it, and fall back to counting only when there is no answer to
+ask for."""
+
+TALLY = re.compile(r"(?P<count>\d+) (?P<outcome>passed|failed|error|errors|skipped|xfailed|xpassed|deselected)")
+
+MAX_NAMED = 20
+"""Unaccounted tests named in the artifact before it stops listing them.
+
+A run that lost one test needs the name; a run that lost four hundred needs the number and a look at the log,
+not four hundred lines of JSON. The count is never truncated -- only the list is."""
 
 TEST_LINE = re.compile(r"^(?P<name>\S+::.*?)\s+(?P<outcome>" + "|".join(OUTCOMES) + r")\b")
 """One streamed verbose line.
@@ -55,8 +80,16 @@ match: those are a second report of tests already counted, and counting them twi
 reconciliation in the direction that hides a drop.
 """
 
+WRAPPED_OUTCOME = re.compile(r"^(?P<outcome>" + "|".join(OUTCOMES) + r")\b(?P<rest>.*)$")
+"""An outcome standing alone on its own line, which is where pytest puts it when the identifier did not fit.
 
-def summarize(text: str, collected: typing.Optional[int] = None) -> dict:
+Only consumed when a name is waiting for one and the rest of the line names no test, which is what separates it
+from the end-of-run summary's `FAILED tests/x::test_y`. Counting a summary line would inflate the total in the
+direction that hides a drop, so the discriminator matters more than the convenience.
+"""
+
+
+def summarize(text: str, collected: typing.Optional[int] = None, collected_names: typing.Optional[list] = None) -> dict:
     """
     Read the streamed per-test lines rather than the summary, so an aborted run still says what happened.
 
@@ -69,6 +102,10 @@ def summarize(text: str, collected: typing.Optional[int] = None) -> dict:
     collected : int, optional
         How many tests pytest said it would run. When given, the parsed total is checked against it and any
         difference is reported as `unaccounted`, which fails the verdict.
+    collected_names : list, optional
+        What pytest said it would run, by name. A count says a run does not add up; the names say which test it
+        does not add up by, which is the difference between a verdict and an investigation. Reported as
+        `unaccounted_names`, capped so a wholesale loss does not write a thousand-line artifact.
 
     Returns
     -------
@@ -77,33 +114,76 @@ def summarize(text: str, collected: typing.Optional[int] = None) -> dict:
     """
     counts: dict = {}
     failures = set()
+    reported = set()
     died_in = None
+
+    def record(name: str, outcome: str) -> None:
+        counts[outcome.lower()] = counts.get(outcome.lower(), 0) + 1
+        reported.add(name)
+
+        if (outcome in ("FAILED", "ERROR")):
+            failures.add(name)
 
     for line in text.splitlines():
         if (not STARTED_LINE.match(line)):
+            wrapped = WRAPPED_OUTCOME.match(line)
+
+            # An outcome alone on a line belongs to the identifier above it, which pytest put on its own line
+            # because it did not fit the terminal. `died_in` is that identifier: it is set for a name with no
+            # outcome yet, which is precisely the state a wrapped line resolves. `::` in the rest of the line
+            # means this is the end-of-run summary re-reporting a test, not a wrap.
+            if (wrapped is not None and died_in is not None and "::" not in wrapped.group("rest")):
+                record(died_in, wrapped.group("outcome"))
+                died_in = None
+
             continue
 
         match = TEST_LINE.match(line)
 
         if (match is None):
-            # A test line with no outcome on it. Either the process died here, or the parser cannot read it --
-            # and the two are told apart by what follows: anything that reports an outcome afterwards means the
-            # run continued, so this was not a death.
+            # A test line with no outcome on it. Either the process died here, the outcome wrapped onto the next
+            # line, or the parser cannot read it -- and they are told apart by what follows: an outcome resolves
+            # the wrap, and anything reporting an outcome afterwards means the run continued past this point.
             died_in = line.strip()
             continue
 
-        outcome = match.group("outcome").lower()
-        counts[outcome] = counts.get(outcome, 0) + 1
+        record(match.group("name"), match.group("outcome"))
         died_in = None
-
-        if (match.group("outcome") in ("FAILED", "ERROR")):
-            failures.add(match.group("name"))
 
     result = {"counts": counts, "failures": sorted(failures), "died_in": died_in}
 
-    if (collected is not None):
-        result["collected"] = collected
-        result["unaccounted"] = collected - sum(counts.values())
+    # pytest's own tally wins where it exists. `deselected` is dropped: those tests were never going to run, and
+    # the collected count this reconciles against already excludes them.
+    for line in reversed(text.splitlines()):
+        totals = SUMMARY_TOTALS.match(line.strip())
+
+        if (totals is None):
+            continue
+
+        tallied = {match.group("outcome"): int(match.group("count")) for match in TALLY.finditer(totals.group("body"))}
+        tallied.pop("deselected", None)
+
+        if (tallied):
+            counts = {("error" if outcome == "errors" else outcome): value for (outcome, value) in tallied.items()}
+            result["counts"] = counts
+            result["counted_from"] = "pytest's summary"
+
+        break
+
+    expected = len(collected_names) if collected_names is not None else collected
+
+    if (expected is not None):
+        result["collected"] = expected
+        result["unaccounted"] = expected - sum(counts.values())
+
+        # Names only where they are evidence. They come from the streamed lines, which repeat and orphan
+        # themselves when a test spawns a subprocess -- so once the tally reconciles, a name-level mismatch is
+        # this parser's noise rather than a missing test, and printing it would send someone looking for a gap
+        # that is not there. When the numbers genuinely do not add up, the names are where to start.
+        if (result["unaccounted"] != 0 and collected_names is not None):
+            missing = [name for name in collected_names if name not in reported]
+            result["unaccounted_names"] = missing[:MAX_NAMED] + ([f"... and {len(missing) - MAX_NAMED} more"]
+                                                                 if len(missing) > MAX_NAMED else [])
 
     return result
 
@@ -119,7 +199,19 @@ def describe(status: int) -> str:
     return f"exited {status}"
 
 
-def tier(log: str, status: int, collected: typing.Optional[int] = None) -> dict:
+def read_collected(path: str) -> typing.Optional[list]:
+    """The names pytest said it would run, from a `--collect-only` capture. `None` when there is no such file."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return [line.strip() for line in handle if "::" in line]
+    except OSError:
+        return None
+
+
+def tier(log: str,
+         status: int,
+         collected: typing.Optional[int] = None,
+         collected_path: typing.Optional[str] = None) -> dict:
     """One tier's section of the artifact, read from its log."""
     try:
         with open(log, encoding="utf-8") as handle:
@@ -127,7 +219,9 @@ def tier(log: str, status: int, collected: typing.Optional[int] = None) -> dict:
     except OSError:
         return {"outcome": describe(status), "note": f"no log at {log}"}
 
-    return {"outcome": describe(status), **summarize(text, collected), "log": log}
+    names = read_collected(collected_path) if collected_path else None
+
+    return {"outcome": describe(status), **summarize(text, collected, names), "log": log}
 
 
 def is_clean(section: dict) -> bool:
@@ -157,8 +251,14 @@ def main() -> int:
     (path, device, marked_selected, marked_status, unmarked_selected, unmarked_status, run_wider,
      wider_status) = sys.argv[1:9]
 
-    marked = tier("/tmp/gpu_conformance_marked.log", int(marked_status), int(marked_selected))
-    unmarked = tier("/tmp/gpu_conformance_unmarked.log", int(unmarked_status), int(unmarked_selected))
+    marked = tier("/tmp/gpu_conformance_marked.log",
+                  int(marked_status),
+                  int(marked_selected),
+                  "/tmp/gpu_conformance_marked_collected.txt")
+    unmarked = tier("/tmp/gpu_conformance_unmarked.log",
+                    int(unmarked_status),
+                    int(unmarked_selected),
+                    "/tmp/gpu_conformance_unmarked_collected.txt")
 
     report = {
         "verdict":

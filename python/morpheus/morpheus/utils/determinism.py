@@ -240,8 +240,10 @@ def frame_digest(df: pd.DataFrame) -> str:
     """
     A SHA-256 digest of a canonicalized frame's CSV rendering.
 
-    Two runs are byte-identical at tier D0 exactly when their digests match. The digest is convenient for a build
-    log; when it differs, `diff_frames` says why.
+    Two runs whose digests match agree on the canonical form: same rows, same order, same values to
+    `float_decimals` places. That is a D1 statement, not a D0 one -- `canonicalize` quantizes floats, so two runs
+    differing in the fifth decimal digest identically and a genuine bit-exact comparison has to be made on
+    unquantized output. The digest is convenient for a build log; when it differs, `diff_frames` says why.
 
     Parameters
     ----------

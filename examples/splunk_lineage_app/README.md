@@ -34,7 +34,7 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored to `event_time` |
 | `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings and the unbucketed L1 bindings, with accelerated fields |
 | `default/transforms.conf` | Search heads | The `binding_l2_l3` and `binding_l1` lookups |
-| `default/savedsearches.conf` | Search heads | Lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the four layer 2 detections R-D-L2-001, 003, 004 and 005, and a binding health alert |
+| `default/savedsearches.conf` | Search heads | Thirteen searches: lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the four layer 2 detections R-D-L2-001, 003, 004 and 005, the two layer 5 detections R-D-L5-003 and R-D-L5-004, and a binding health alert |
 | `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
 
 ## Installation
@@ -132,8 +132,9 @@ Three levels, strongest last:
    failures. The remaining warning is informational (the app contains `collections.conf`, which is
    expected).
 2. **Live load.** The app was installed into a fresh Splunk Enterprise 10.2 instance: `btool check`
-   reports no errors, all five indexes are created, all seven scheduled searches register, and every
-   one of them executes without a parse error against empty indexes.
+   reports no errors, all five indexes are created, all seven scheduled searches that existed at the
+   time register, and every one of them executes without a parse error against empty indexes. The app
+   ships thirteen searches now; the six added since have not been through this step.
 3. **Functional.** With synthetic JSON telemetry seeded into the indexes and bindings written to the
    KV Store: timestamps anchor to `event_time` as the props intend, the identifier ladder resolves an
    IP through both lookups to a physical port and site, the chain assembly search emits the seeded
@@ -141,8 +142,11 @@ Three levels, strongest last:
    the expected gap.
 
 Several things were added after that validation and have **not** been run against a live instance: the
-`binding:l2` and `binding:l2:open` sourcetypes, the `port_designations` lookup, and the four layer 2
-detections `R-D-L2-001`, `R-D-L2-003`, `R-D-L2-004` and `R-D-L2-005`. Their SPL follows
+`binding:l2` and `binding:l2:open` sourcetypes, the `port_designations` lookup, the four layer 2
+detections `R-D-L2-001`, `R-D-L2-003`, `R-D-L2-004` and `R-D-L2-005`, and -- added later still -- the
+`morpheus:score:l5` sourcetype with the two layer 5 detections `R-D-L5-003` and `R-D-L5-004`. That is
+six of the seven detection searches this app ships, so the live pass above covers the app's older half
+and almost none of its detections. Their SPL follows
 the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
 Python over the determinism harness's planted corpus (`tests/morpheus/determinism/test_first_detections.py`),
 where each fires on exactly the planted cases and nothing else -- twice for `R-D-L2-004`, which the corpus
