@@ -162,6 +162,12 @@ fail() {
 
 cd "${REPO_ROOT}" || fail "cannot enter ${REPO_ROOT}"
 
+# pytest puts a test's outcome on the line after its identifier when the identifier does not fit the terminal,
+# and every identifier in the marked tier carries a `[gpu_mode]` suffix. On a narrow terminal that wrapped all of
+# them, so a tier of 379 passing tests parsed as zero counted and 379 unaccounted. The report module reads a
+# wrapped outcome now too; this stops the wrapping happening in the first place, and neither alone is trusted.
+export COLUMNS=200
+
 echo "=== device ==="
 if ! command -v nvidia-smi > /dev/null 2>&1; then
     fail "no CUDA device: nvidia-smi is not on PATH. This verdict needs a machine with a GPU; it cannot be rendered in CI or in a CPU-only container."

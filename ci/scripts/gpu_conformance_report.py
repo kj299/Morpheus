@@ -24,10 +24,17 @@ called `R-D-L5-004 - Multi-factor fatigue`, an entity key case called `[   ]` --
 counted. Fifteen of them. The artifact said `"verdict": "passed"` while silently dropping tests, which is the
 same failure the whole script exists to prevent, wearing its third hat.
 
+The third time was the terminal width. pytest prints the outcome on the line after the identifier when the
+identifier does not fit, and the marked tier's identifiers all carry a `[gpu_mode]` suffix -- so on a narrow
+terminal every single line wrapped, nothing matched, and a tier of 379 passing tests parsed as zero. The runner
+now pins `COLUMNS`, and this reads a wrapped outcome as well, because pinning an environment variable is a thing
+that can be overridden and the parser should not depend on it.
+
 **The counts are reconciled against what was collected.** That is the general repair rather than a better regex:
 a counter that can quietly drop a test is untrustworthy however carefully its pattern is written, so the number
 it produces is checked against the number pytest said it would run, and a mismatch is a failed verdict with the
-difference named. A regex can be wrong again; a reconciliation says so out loud when it is.
+difference named. A regex can be wrong again -- it has been, three times now -- and each time the reconciliation
+is what said so out loud.
 """
 
 import datetime
@@ -55,6 +62,14 @@ match: those are a second report of tests already counted, and counting them twi
 reconciliation in the direction that hides a drop.
 """
 
+WRAPPED_OUTCOME = re.compile(r"^(?P<outcome>" + "|".join(OUTCOMES) + r")\b(?P<rest>.*)$")
+"""An outcome standing alone on its own line, which is where pytest puts it when the identifier did not fit.
+
+Only consumed when a name is waiting for one and the rest of the line names no test, which is what separates it
+from the end-of-run summary's `FAILED tests/x::test_y`. Counting a summary line would inflate the total in the
+direction that hides a drop, so the discriminator matters more than the convenience.
+"""
+
 
 def summarize(text: str, collected: typing.Optional[int] = None) -> dict:
     """
@@ -79,25 +94,37 @@ def summarize(text: str, collected: typing.Optional[int] = None) -> dict:
     failures = set()
     died_in = None
 
+    def record(name: str, outcome: str) -> None:
+        counts[outcome.lower()] = counts.get(outcome.lower(), 0) + 1
+
+        if (outcome in ("FAILED", "ERROR")):
+            failures.add(name)
+
     for line in text.splitlines():
         if (not STARTED_LINE.match(line)):
+            wrapped = WRAPPED_OUTCOME.match(line)
+
+            # An outcome alone on a line belongs to the identifier above it, which pytest put on its own line
+            # because it did not fit the terminal. `died_in` is that identifier: it is set for a name with no
+            # outcome yet, which is precisely the state a wrapped line resolves. `::` in the rest of the line
+            # means this is the end-of-run summary re-reporting a test, not a wrap.
+            if (wrapped is not None and died_in is not None and "::" not in wrapped.group("rest")):
+                record(died_in, wrapped.group("outcome"))
+                died_in = None
+
             continue
 
         match = TEST_LINE.match(line)
 
         if (match is None):
-            # A test line with no outcome on it. Either the process died here, or the parser cannot read it --
-            # and the two are told apart by what follows: anything that reports an outcome afterwards means the
-            # run continued, so this was not a death.
+            # A test line with no outcome on it. Either the process died here, the outcome wrapped onto the next
+            # line, or the parser cannot read it -- and they are told apart by what follows: an outcome resolves
+            # the wrap, and anything reporting an outcome afterwards means the run continued past this point.
             died_in = line.strip()
             continue
 
-        outcome = match.group("outcome").lower()
-        counts[outcome] = counts.get(outcome, 0) + 1
+        record(match.group("name"), match.group("outcome"))
         died_in = None
-
-        if (match.group("outcome") in ("FAILED", "ERROR")):
-            failures.add(match.group("name"))
 
     result = {"counts": counts, "failures": sorted(failures), "died_in": died_in}
 

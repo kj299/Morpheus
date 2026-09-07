@@ -98,6 +98,59 @@ def test_every_shape_of_streamed_line_is_read(report, line):
     assert report.summarize(line)["counts"] == {"passed": 1}
 
 
+WRAPPED = ("tests/morpheus/determinism/test_determinism_harness.py::test_double_run_diff[gpu_mode]\n"
+           "PASSED [  1%]")
+"""What pytest writes when the identifier does not fit the terminal: the outcome goes on the next line.
+
+The third shape this parser could not read, and the most expensive so far. Every identifier in the marked tier
+carries a `[gpu_mode]` suffix, so on a narrow terminal all of them wrapped: 379 passing tests parsed as zero
+counted and 379 unaccounted, on a run that had genuinely passed."""
+
+
+def test_an_outcome_that_wrapped_onto_the_next_line_is_counted(report):
+    summary = report.summarize(WRAPPED, collected=1)
+
+    assert summary["counts"] == {"passed": 1}
+    assert summary["died_in"] is None
+    assert summary["unaccounted"] == 0
+
+
+def test_a_wrapped_failure_keeps_the_name_from_the_line_above(report):
+    summary = report.summarize(WRAPPED.replace("PASSED", "FAILED"))
+
+    assert summary["failures"] == [
+        "tests/morpheus/determinism/test_determinism_harness.py::test_double_run_diff[gpu_mode]"
+    ]
+
+
+def test_a_whole_tier_of_wrapped_lines_reconciles(report):
+    # The shape of the run that produced the defect, rather than one line of it.
+    text = "\n".join([WRAPPED] * 3)
+    summary = report.summarize(text, collected=3)
+
+    assert summary["counts"] == {"passed": 3}
+    assert summary["unaccounted"] == 0
+
+
+def test_an_outcome_with_nothing_above_it_is_not_counted(report):
+    # The other half of the discriminator. A wrapped outcome resolves an identifier that is waiting for one; an
+    # outcome word with no such identifier belongs to something else entirely, and counting it would invent a
+    # test. Inventing one hides a real drop just as well as missing one does, because the total still adds up.
+    assert report.summarize("PASSED [ 10%]")["counts"] == {}
+    assert report.summarize("PASSED [ 10%]", collected=1)["unaccounted"] == 1
+
+
+def test_a_summary_line_is_not_mistaken_for_a_wrapped_outcome(report):
+    # The discriminator. pytest's summary also starts with an outcome word, and counting those against a name
+    # still waiting for one would inflate the total in the direction that hides a drop -- so a line naming a
+    # test is never a wrap. Here the died_in name is genuinely unresolved and must stay that way.
+    started = "tests/morpheus/determinism/test_gpu_parity.py::test_the_pipelines_agree[gpu_mode]"
+    summary = report.summarize("\n".join([started, SUMMARY]))
+
+    assert summary["counts"] == {}
+    assert summary["died_in"] == started
+
+
 def test_the_summary_section_does_not_count_a_failure_twice(report):
     summary = report.summarize("\n".join([PLAIN, FAILED, SUMMARY]))
 
