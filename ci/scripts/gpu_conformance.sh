@@ -147,16 +147,16 @@ WIDER=(
 MINIMUM_SELECTED=$(( ${#TARGETS[@]} * 3 ))
 
 
+# Written with printf rather than with python, because the failure path is exactly where the environment may be
+# the thing that is broken -- and it was: run outside the container, `python` is not on PATH, so the artifact this
+# function exists to leave behind was never written and the run looked like one that had not happened. Every
+# reason string below is quote-free and single-line for the same reason; keep them that way.
 fail() {
     echo ""
     echo "FAILED: $1"
     echo ""
-    python - "$ARTIFACT" "$1" <<'PY' || true
-import json, sys, datetime
-json.dump({"verdict": "failed", "reason": sys.argv[2],
-           "at": datetime.datetime.now(datetime.timezone.utc).isoformat()},
-          open(sys.argv[1], "w"), indent=2)
-PY
+    printf '{\n  "verdict": "failed",\n  "reason": "%s",\n  "at": "%s"\n}\n' \
+        "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ARTIFACT" || true
     exit 1
 }
 
@@ -172,6 +172,24 @@ if [[ -z "${DEVICE}" ]]; then
     fail "no CUDA device: nvidia-smi reported no GPU. A silent skip must never read as a pass, so this is an error rather than a deselection."
 fi
 echo "${DEVICE}"
+
+echo ""
+echo "=== interpreter ==="
+# Checked separately from the device, because the two live in different places. `nvidia-smi` is visible from a
+# WSL host that has no Morpheus environment at all, so the device check passes there and everything after it
+# fails for a reason that has nothing to do with a GPU: the first run outside the container collected zero tests
+# and the floor reported a marker filter dropping the suite, which was a confident and wrong diagnosis. Name the
+# real cause here instead.
+if ! command -v python > /dev/null 2>&1; then
+    fail "python is not on PATH. This runs inside the Morpheus environment, not on the host beside it -- nvidia-smi is visible from a WSL host that has no environment at all, which is why the device check above passed."
+fi
+
+if ! python -c "import morpheus" > /dev/null 2>&1; then
+    fail "python is on PATH but cannot import morpheus, so every collection below would come back empty and be reported as a suite that went missing. Activate the environment first."
+fi
+
+echo "$(python -c 'import sys; print(sys.executable)')"
+python -c "import morpheus; print(f'morpheus {morpheus.__version__}')" 2>/dev/null || echo "morpheus imports"
 
 echo ""
 echo "=== test data ==="
