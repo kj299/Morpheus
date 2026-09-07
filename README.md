@@ -116,9 +116,9 @@ Being clear about the boundary is the point of writing it down:
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
 - **Every `gpu_mode` variant this fork has passes on a GPU, and so does everything else it adds.** On
-  2026-09-07 at 17:32 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card over tiers that are
-  total: the marked tier **398 collected, 398 passed**; the tier carrying no mode marker -- where the
-  default execution mode on a machine with a card is the GPU -- **906 collected, 900 passed, 6
+  2026-09-07 at 20:09 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card over tiers that are
+  total: the marked tier **417 collected, 417 passed**; the tier carrying no mode marker -- where the
+  default execution mode on a machine with a card is the GPU -- **913 collected, 907 passed, 6
   skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against
   what pytest collected. Every remaining skip is a field contract for a sourcetype nothing produces yet;
   there were seven until `binding:l1` gained a producer, and that test now runs instead of skipping.

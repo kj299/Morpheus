@@ -112,10 +112,11 @@ artifact it exists to produce. It then took four repairs to that runner before a
 believed, and each of the four is recorded below, because each produced a verdict that read `passed`
 while measuring less than it claimed.
 
-**The run that stands is 2026-09-07 at 17:32 UTC**, on the same card, over tiers that are total: the
-marked tier 398 collected and 398 passed; the tier carrying no mode marker 906 collected, 900 passed and
-6 skipped -- every skip a field contract for a sourcetype nothing produces yet, one fewer than before
-because `binding:l1` now has one. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
+**The run that stands is 2026-09-07 at 20:09 UTC**, on the same card, over tiers that are total: the
+marked tier 417 collected and 417 passed; the tier carrying no mode marker 913 collected, 907 passed and
+6 skipped -- every skip a field contract for a sourcetype nothing produces yet. That run is the first to
+check both composed goldens against a device after the scoring path landed, so the per-feature z-scores,
+which are float divisions, are now known to agree between host and device rather than assumed to. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
 pytest collected. It is also the first such run with `torch==2.4.0+cu124` installed beside the RAPIDS
 stack, which answers a question the earlier ones could not: the two coexist in one process, and adding
 Torch does not disturb cuDF. That is every stage, all three composed pipelines, control 13's
