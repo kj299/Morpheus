@@ -56,7 +56,7 @@ is the running ledger of what is built and what is not.
 | **SIEM side** | `TA-morpheus-lineage`, an installable Splunk app (indexes, sourcetypes, KV Store binding lookups, and scheduled searches), validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded telemetry ([README](./examples/splunk_lineage_app/README.md)) |
 | **First detections** | Six deterministic rules as saved searches in the app. Two at layer 5: a principal authenticated from two places faster than the journey can be made, and a run of multi-factor denials ended by an approval. The first excludes token refreshes and VPN egress ranges from the measurement *and* from becoming the location the next one is measured against, and one intrusion produces a pair of alerts rather than one. And four at layer 2: a MAC in two places at once, 802.1X authorization with no authentication in front of it, more MACs than permitted on a single-host port, and an address claimed by more than one MAC. The first fires on the interval between the two sightings rather than on their end reason, because an estate polls its switches in sequence and a cross-switch spoof is therefore seconds apart rather than simultaneous. The last two depend on a list the estate owns and ship with the hook for it. R-D-L2-001 fires on nothing until its port designation lookup is populated; R-D-L2-003 is the opposite, and fires on every redundancy gateway until its exclusion list is supplied. All four predicates asserted in Python over the planted corpus. Not yet run on a live search head |
 
-Twenty-two stages and twenty-seven supporting modules, covered by 1,786 tests.
+Twenty-two stages and twenty-seven supporting modules, covered by 1,787 tests.
 
 ### What this fork is not
 
@@ -192,6 +192,82 @@ Being clear about the boundary is the point of writing it down:
   a garbage device number and the process crashes partway through the suite. Setting the variable
   switches Numba to NVIDIA's own bindings and the failures disappear. This is an environment defect
   rather than a code one, but it costs a day to rediscover.
+
+## What you would have to collect
+
+The collectors are out of scope for this fork, so the question a deployment asks first is what its own
+data mesh or lake has to land before any of this runs. That is answered in full in
+[Part 2 of the guide](./docs/source/developer_guide/guides/11_predictive_behavioral_analytics_osi.md#part-2-telemetry-class-requirements),
+including the complete field list per class. What follows is the short version, and the constraints that
+are easy to get wrong.
+
+### The envelope comes first, and it is not optional
+
+**Every record from every layer carries the same fourteen fields before it reaches Morpheus.** They are
+what make ordering total, lineage traceable and features comparable across sources. The ones a
+lake design usually gets wrong:
+
+| Field | Why it matters |
+| --- | --- |
+| `collector_seq` | Strictly monotonic per `collector_id`. This is the tiebreaker that makes the total order total. Without it, two events at the same nanosecond order differently on every run. |
+| `event_time` vs `observed_time` vs `ingest_time` | Three distinct times. `event_time` is when it happened, `observed_time` when the sensor saw it, `ingest_time` when Morpheus received it. |
+| `clock_source`, `clock_offset_ms` | Records beyond a configured bound are quarantined rather than dropped. A device whose clock is wrong by years is a real thing, and one such record can expire every open binding at once. |
+| `sampling_policy` | `full`, `1:N` or `adaptive:<params>`. Any rate-based feature is uninterpretable without it. |
+| `entity_key` | The behavioral subject for that class. Different per layer; see the table below. |
+| `origin_hash`, `event_uid` | Deterministic identity, so a score can be traced back to the bytes that produced it. |
+
+Two rules govern it, and both are the kind that only hurt later:
+
+1. **`ingest_time` never appears in a detection rule or a feature.** It is when your pipeline happened to
+   be running, not when anything happened.
+2. **An unavailable field is explicitly null with a reason code, never defaulted to a plausible value.**
+   Three months into an investigation a defaulted value is indistinguishable from an observed one.
+
+**Fix these at the collector, not in the pipeline.** Patching the envelope downstream is how lineage
+silently breaks.
+
+### What each layer needs
+
+Status is what this fork does with it today, not what the guide specifies.
+
+| Class | Entity key | Where it comes from | Status here |
+| --- | --- | --- | --- |
+| **TC-0** Identity and asset context | user, asset | HR system, IdP groups, CMDB, asset inventory | Schema only. **Bitemporal** is a hard requirement: valid time *and* transaction time, or you cannot answer "was this user in Finance on March 3rd" |
+| **TC-1** Physical | `site_id:device_id:port_id` | SNMP interface tables, optical transceiver diagnostics, LLDP/CDP neighbors, patch-panel inventory | Five stages ship |
+| **TC-2** Data link | `mac_address`, and `site_id:switch_id:port_id:vlan_id` | Switch MAC tables, 802.1X/RADIUS accounting, ARP tables, DHCP leases, wireless controller associations | Four stages ship |
+| **TC-3** Network | `src_ip`, and the directed pair | NetFlow v9, IPFIX, sFlow, VPC and cloud flow logs, firewall session logs | Schema only |
+| **TC-4** Transport | `flow_id`, plus `community_id` for cross-tool joins | The TC-3 sources with per-packet detail, Zeek `conn.log` | Schema only; `community_id` ships and is verified against the reference vectors |
+| **TC-5** Session | `user_principal`, plus `session_id` | Identity providers, Kerberos KDC, RADIUS accounting, VPN concentrators, RDP and SSH session logs, MFA providers, Windows security events | Six stages ship; the model is proven reproducible but is not yet in the pipeline |
+| **TC-6** Presentation | `ja4_client`, plus `certificate_fingerprint_sha256` | TLS inspection points, Zeek `ssl.log` and `x509.log`, load balancer logs, certificate transparency | Schema only |
+| **TC-7** Application | Varies: `user_principal` for SaaS, `hostname` for DNS, `process_guid` for endpoint | HTTP proxies and WAFs, DNS resolvers, SaaS audit APIs, database audit logs, API gateways, EDR | Schema only |
+
+### Four constraints that decide whether the features mean anything
+
+- **Counters must arrive as deltas with an explicit interval, not raw values.** A raw counter cannot be
+  told from a wrap or a reboot without the uptime beside it, and a feature computed from the difference
+  of two raw readings across a device restart is a large negative number that looks like an event.
+  `TC1NormalizeStage` does this correctly given the inputs; it cannot do it without them.
+- **TC-0 must be bitemporal.** It is the smallest and most valuable dataset in the architecture, and a
+  non-bitemporal CMDB can only answer questions about the present.
+- **Ordering is the pipeline's job, but the inputs have to make it possible.** Sort before any cumulative
+  feature; `IncrementColumn`-style features are order-dependent and an unsorted batch silently produces
+  different features and different scores. This is the most easily missed defect in the whole design,
+  because the output stays plausible.
+- **Retention has to match across the lake and the SIEM.** The binding lookups here assume 400 days, and
+  the index retention and the expiry job that prunes against it must agree; a test compares the two, because
+  they fail silently when they drift apart.
+
+### What comes back out
+
+The pipeline emits seven sourcetypes a SIEM consumes, and declares seven more that nothing here produces
+yet -- see [`siem_sourcetypes`](./python/morpheus/morpheus/utils/siem_sourcetypes.py), which says for each
+unproduced one exactly what would have to be built. `TA-morpheus-lineage` is an installable Splunk app
+for the consuming side ([README](./examples/splunk_lineage_app/README.md)).
+
+**Start with layer 5.** The guide's sequencing argues for it and so does the collection cost: identity
+provider logs are already centralized in most estates, the entity is unambiguous, and layers 5 and 7
+carry most of the standalone detection value. Layers 1 and 2 have the highest collection effort and the
+lowest standalone value: they earn their place by completing the ladder, not on their own.
 
 ## Documentation
 ### Using Morpheus

@@ -905,6 +905,33 @@ def test_every_stage_in_the_fork_is_covered():
     assert {scenario.stage.__name__ for scenario in REGISTRY.values()} == set(REGISTRY)
 
 
+def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships():
+    # The README tells a reader what to collect and, per telemetry class, how much of it this fork processes
+    # today. That is a number in prose beside a number on disk, which is the shape that has drifted three times
+    # already in this repository -- most recently a sourcetype count that stayed wrong through a whole
+    # increment. A reader deciding what to instrument acts on this table, so it is checked rather than trusted.
+    import os  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+    telemetry = os.path.join(repo_root, "python", "morpheus", "morpheus", "stages", "telemetry")
+
+    with open(os.path.join(repo_root, "README.md"), encoding="utf-8") as handle:
+        readme = re.sub(r"\s+", " ", handle.read())
+
+    words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+
+    for prefix in ("tc1", "tc2", "tc5"):
+        shipped = len(
+            [name for name in os.listdir(telemetry) if name.startswith(f"{prefix}_") and name.endswith(".py")])
+        label = f"**TC-{prefix[-1]}**"
+        row = re.search(rf"\{label[:6]}\*\* [^|]*\|[^|]*\|[^|]*\| (\w+) stages ship", readme)
+
+        assert row is not None, f"the README's collection table no longer states a stage count for TC-{prefix[-1]}"
+        assert words[row.group(1).lower()] == shipped, (
+            f"the README says {row.group(1)} stages ship for TC-{prefix[-1]}; {shipped} are on disk")
+
+
 @pytest.mark.cpu_mode
 @pytest.mark.parametrize(("stage_name", "knob"), _cases(DIFFERS))
 def test_changing_the_parameter_changes_the_output(stage_name: str, knob: Knob):
