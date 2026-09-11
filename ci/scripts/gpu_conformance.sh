@@ -65,9 +65,11 @@ TARGETS=(
     tests/morpheus/determinism/test_telemetry_harness.py
     tests/morpheus/stages/test_binding_resolver_stage.py
     tests/morpheus/stages/test_determinism_stamp_stage.py
+    tests/morpheus/stages/test_envelope_stamp_stage.py
     tests/morpheus/stages/test_community_id_stage.py
     tests/morpheus/stages/test_lineage_stamp_stage.py
     tests/morpheus/stages/test_siem_wire_stage.py
+    tests/morpheus/stages/test_tc1_binding_stage.py
     tests/morpheus/stages/test_tc1_change_stage.py
     tests/morpheus/stages/test_tc1_feature_stage.py
     tests/morpheus/stages/test_tc1_flap_stage.py
@@ -81,6 +83,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc5_drift_stage.py
     tests/morpheus/stages/test_tc5_novelty_stage.py
     tests/morpheus/stages/test_tc5_risk_stage.py
+    tests/morpheus/stages/test_tc5_score_stage.py
     tests/morpheus/stages/test_tc5_session_stage.py
     tests/morpheus/stages/test_tc5_travel_stage.py
     tests/morpheus/stages/test_total_order_stage.py

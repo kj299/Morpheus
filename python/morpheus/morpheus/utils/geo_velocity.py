@@ -48,7 +48,7 @@ import collections
 import dataclasses
 import math
 import typing
-
+import pandas as pd
 from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
 from morpheus.utils.determinism import quantize_value
 
@@ -167,7 +167,7 @@ def validate_coordinate(latitude: typing.Any, longitude: typing.Any) -> bool:
     if (not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float))):
         return False
 
-    if (latitude != latitude or longitude != longitude):  # pylint: disable=comparison-with-itself
+    if (pd.isna(latitude) or pd.isna(longitude)):
         return False
 
     return -90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0

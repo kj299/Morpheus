@@ -25,6 +25,8 @@ fresh generation. What cannot be checked here is Splunk: this asserts the expect
 head agrees with it.
 """
 
+import collections
+import datetime
 import json
 import os
 import subprocess
@@ -149,12 +151,78 @@ def test_the_layer_5_detections_return_exactly_what_is_written(expected: dict, s
     assert named["mfa_denials_in_window"] == int(fatigue["mfa_denials_in_window"].iloc[0])
 
 
+def _scored_events() -> list:
+    # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
+    # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
+    events = []
+
+    for name in sorted(os.listdir(EVENTS)):
+        if (not name.startswith("morpheus_score_l") or not name.endswith(".jsonlines")):
+            continue
+
+        with open(os.path.join(EVENTS, name), encoding="utf-8") as handle:
+            events.extend(json.loads(line) for line in handle if line.strip())
+
+    return events
+
+
+def _five_minute_bin(event_time: str) -> int:
+    stamp = datetime.datetime.strptime(event_time.replace("UTC", ""), "%Y-%m-%dT%H:%M:%S.%f")
+    seconds = int(stamp.replace(tzinfo=datetime.timezone.utc).timestamp())
+
+    return seconds - (seconds % 300)
+
+
+def test_the_behavior_summary_groups_exactly_what_is_written(expected: dict):
+    # `stats ... by` drops a row that is missing any grouping field, so a missing envelope field does not show up
+    # as an error anywhere -- it shows up as a smaller number, or as zero. That is why this is evaluated rather
+    # than asserted: the row count is the only place the omission would surface.
+    events = _scored_events()
+    entry = expected["searches"]["Behavior summary - per-layer scores"]
+
+    keyless = [event for event in events if event.get("osi_layer") is None or not event.get("entity_key")]
+    assert keyless == [], f"{len(keyless)} scored events would be dropped by the grouping"
+
+    groups = {(_five_minute_bin(event["event_time"]), event["osi_layer"], event["entity_key"], event["lineage_id"])
+              for event in events}
+
+    assert entry["contributing_rows"] == len(events)
+    assert entry["expected_rows"] == len(groups)
+    assert entry["expected_empty"] is False
+
+
+def test_the_chain_assembly_blocker_is_the_lineage_and_not_the_envelope(expected: dict):
+    # An expected-empty search is only honest while its stated reason is the reason. This one was blocked by a
+    # missing `osi_layer`; it is now blocked by single-layer lineage. Asserting the new reason means the entry
+    # cannot quietly keep claiming the old one after the corpus starts linking layers.
+    entry = expected["searches"]["Chain assembly - cross-layer risk"]
+
+    events = _scored_events()
+
+    with open(os.path.join(EVENTS, "morpheus_edge.jsonlines"), encoding="utf-8") as handle:
+        edges = [json.loads(line) for line in handle if line.strip()]
+
+    layers = collections.defaultdict(set)
+
+    for event in events + edges:
+        if (event.get("lineage_id") is not None):
+            layers[event["lineage_id"]].add(event.get("osi_layer"))
+
+    spans = [len(seen - {None}) for seen in layers.values()]
+
+    assert entry["distinct_lineage_ids"] == len(layers)
+    assert entry["maximum_layer_span"] == max(spans)
+    assert max(spans) < 3, "a chain now spans three layers, so this search is no longer correctly empty"
+
+
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Six of thirteen. That ratio is the honest state of this app, and stating it is the package's main job. It
-    # improved by two searches rather than by two entries: the layer 5 rules ship with events to fire on.
-    assert len(empty) == 6
+    # Four of thirteen. That ratio is the honest state of this app, and stating it is the package's main job. It
+    # improved by two when the layer 5 rules landed with events to fire on, by one more when `TC1BindingStage`
+    # gave `binding:l1` a producer, and by one again when `EnvelopeStampStage` put `osi_layer` and `entity_key`
+    # on every record and the behavior summary finally had a grouping that keeps its rows.
+    assert len(empty) == 4
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name

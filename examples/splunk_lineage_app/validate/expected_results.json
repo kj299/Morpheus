@@ -84,23 +84,26 @@
       "why": "A cross-layer rule needing layer 4 and layer 7 telemetry. Neither class exists in this fork, so no event can satisfy either half of the correlation. Empty here is correct and will stay correct until those classes ship."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "Reads max_abs_z, which no shipped stage emits: the scoring path above layer 2 is design. This can never receive a row until a third layer ships, which is why it is listed here rather than treated as a defect."
+      "expected_rows": 355,
+      "expected_empty": false,
+      "contributing_rows": 1719,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 1719 scored events on `morpheus:score:l1`, `l2` and `l5`. This search was empty until `EnvelopeStampStage` gave every record both grouping fields; before that `stats by` dropped every row and the emptiness said nothing about the data. `peak_z` is null on the layer 1 and layer 2 rows because only TC5ScoreStage produces `max_abs_z`, and a null aggregate does not drop a row -- so the count here is a statement about the grouping, not about scoring coverage."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "why": "Aggregates across osi_layer and fires on a span of layers. Only layers 1 and 2 produce events, and the rule's own threshold needs more, so the same answer as Behavior summary and for the same reason."
+      "distinct_lineage_ids": 296,
+      "maximum_layer_span": 1,
+      "why": "Empty, but no longer because `osi_layer` is missing -- every record now carries it. The blocker is the corpus: all 296 distinct `lineage_id` values span exactly one layer, so `dc(osi_layer)` is always 1 and never reaches the threshold of 3. Each telemetry class runs its own pipeline over its own corpus, and the `morpheus:edge` events carry no `lineage_id` at all, so nothing links a layer 1 observation to the layer 2 or layer 5 activity it caused. A chain-assembly rule cannot fire until the classes share a lineage, which is a property of the pipeline rather than of this search."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 80,
       "why": "One row per key per five-minute bucket from binding_bucketed.jsonlines, written into the binding_l2_l3 KV Store collection. Every row carries binding_table=dhcp_lease, which is what the search filters on; a zero here means the producer stopped emitting that field and the lookup has quietly stopped being refreshed."
     },
     "Binding lookup - L1 refresh": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "Reads sourcetype=binding:l1, which nothing in this fork produces. It needs a layer 1 inventory feed: switch port to site, transceiver and LLDP neighbour. Recorded in morpheus.utils.siem_sourcetypes as unproduced."
+      "expected_rows": 5,
+      "expected_empty": false,
+      "why": "Five port intervals across four ports: three stable, and two on the port whose optic is swapped partway through the corpus. Produced by TC1BindingStage from the TC-1 stream. Note the lookup keys on port_id and switch_id with no bucket, so the two intervals on the swapped port collapse to one row and the later optic wins -- the lookup answers what is in a port now, not what was in it at a given time. See the open question recorded in Part 6 of the guide."
     },
     "Binding lookup - L2/L3 expiry": {
       "expected_rows": 0,

@@ -147,6 +147,22 @@ PRODUCED: dict = {
             "itself rather than relying on a sink to do it.",
             required_columns=("binding_table", ),
         ),
+    "binding:l1":
+        Sourcetype(
+            name="binding:l1",
+            time_column="bind_start",
+            time_columns=("bind_start", "bind_end"),
+            producer="`morpheus.stages.telemetry.tc1_binding_stage.TC1BindingStage`, one record per port interval.",
+            # The shipped `Binding lookup - L1 refresh` search builds its key from the first two and returns the
+            # rest. `switch_id` rather than `device_id` because that is the name the search uses; the stage emits
+            # the identifier under both.
+            required_columns=("port_id",
+                              "switch_id",
+                              "site_id",
+                              "transceiver_serial",
+                              "lldp_neighbor_chassis_id",
+                              "binding_uid"),
+        ),
     "binding:l2":
         Sourcetype(
             name="binding:l2",
@@ -180,14 +196,6 @@ UNPRODUCED: dict = {
         Unproduced("morpheus:score:l6", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l7":
         Unproduced("morpheus:score:l7", "event_time", _LAYER_ABOVE_2),
-    "binding:l1":
-        Unproduced(
-            "binding:l1",
-            "bind_start",
-            "A layer 1 inventory producer: switch port to site, transceiver and LLDP neighbor, with the expiry that "
-            "keeps it current. The app consumes this sourcetype into the `binding_l1` lookup and the TC-1 stages read "
-            "the same facts from their input, but nothing here emits the binding records themselves.",
-        ),
     "context:identity":
         Unproduced(
             "context:identity",

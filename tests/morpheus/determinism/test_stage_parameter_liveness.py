@@ -50,10 +50,12 @@ from morpheus.messages import MessageMeta
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
+from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
+from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_feature_stage import TC1FeatureStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
@@ -67,6 +69,7 @@ from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
 from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
+from morpheus.stages.telemetry.tc5_score_stage import TC5ScoreStage
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.utils.binding_table import Binding
@@ -242,6 +245,37 @@ def tied_identifiers() -> dict:
     frame["event_time"] = [0, 0, HOUR, 2 * HOUR]
 
     return frame
+
+
+def port_inventory() -> dict:
+    """Polls of two ports, with one optic swapped and one neighbour repatched, so a binding closes for each cause."""
+    serials = ["SN-AAA", "SN-AAA", "SN-BBB", "SN-CCC", "SN-CCC"]
+    neighbors = ["chassis-a", "chassis-a", "chassis-a", "chassis-b", "chassis-c"]
+    ports = ["Gi1/0/1", "Gi1/0/1", "Gi1/0/1", "Gi1/0/2", "Gi1/0/2"]
+
+    return {
+        "site_id": ["hq"] * len(serials),
+        "device_id": ["sw1"] * len(serials),
+        "port_id": ports,
+        "event_time": [index * MINUTE for index in range(len(serials))],
+        "transceiver_serial": serials,
+        "lldp_neighbor_chassis_id": neighbors,
+    }
+
+
+def keyed_ports() -> dict:
+    """Ports that already carry an `entity_key`, and one that carries only whitespace.
+
+    A stage that reads `overwrite` has to have something to overwrite. The held keys deliberately disagree with
+    what the entity columns would compose, so keeping them and replacing them are visibly different outcomes --
+    if they agreed, the parameter would look inert whether the stage consulted it or not.
+    """
+    return {
+        "site_id": ["hq", "hq", "hq"],
+        "device_id": ["sw1", "sw1", "sw1"],
+        "port_id": ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"],
+        "entity_key": ["held:one", "held:two", "   "],
+    }
 
 
 def macs() -> dict:
@@ -422,6 +456,32 @@ def scored() -> dict:
         "window_id": [SCORED_WINDOW] * 3,
         "event_time": [0, MINUTE, 2 * MINUTE],
     }
+
+
+def scorable() -> dict:
+    """The scored frame with features on it. Carol has no model of her own, so a fallback change is observable."""
+    return {
+        **scored(),
+        "logcount": [3.0, 5.0, 7.0],
+        "mfa_ratio": [0.5, 0.25, 0.75],
+    }
+
+
+class _LengthScorer:
+    """Scores a feature as itself times the length of the pinned model identifier.
+
+    Trivial, and deliberately dependent on `model_version`: a stub ignoring which model it was handed would make
+    the manifest knob look inert when it is not, and an inert-looking knob is exactly what this file exists to
+    tell apart from a knob nothing reads.
+    """
+
+    def __init__(self, scale: float = 1.0):
+        self._scale = scale
+
+    def score(self, model_version: str, features: list) -> list:
+        weight = float(len(model_version)) * self._scale
+
+        return [{name: value * weight for (name, value) in row.items()} for row in features]
 
 
 def _envelope(tier: str = "D1", seed: int = 42) -> DeterminismEnvelope:
@@ -610,6 +670,25 @@ REGISTRY: dict = {
                 Knob("timeout_seconds", DIFFERS, benign=3600, extreme=1),
             ),
         ),
+    "TC1BindingStage":
+        Scenario(
+            stage=TC1BindingStage,
+            frame=port_inventory,
+            base={},
+            knobs=(
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("key_columns", DIFFERS, benign=["site_id", "device_id", "port_id"], extreme=["device_id"]),
+                Knob("attribute_columns",
+                     DIFFERS,
+                     benign=["transceiver_serial", "lldp_neighbor_chassis_id"],
+                     extreme=["transceiver_serial"]),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
+                Knob("idle_timeout_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
+                Knob("emit_open_on_complete", DIFFERS, benign=False, extreme=True),
+                Knob("emit_open_bindings", DIFFERS, benign=False, extreme=True),
+            ),
+        ),
     "TC2BindingStage":
         Scenario(
             stage=TC2BindingStage,
@@ -624,6 +703,27 @@ REGISTRY: dict = {
                 Knob("idle_timeout_seconds", DIFFERS, benign=86400, extreme=60),
                 Knob("emit_open_on_complete", DIFFERS, benign=False, extreme=True),
                 Knob("emit_open_bindings", DIFFERS, benign=False, extreme=True),
+            ),
+        ),
+    "TC5ScoreStage":
+        Scenario(
+            stage=TC5ScoreStage,
+            frame=scorable,
+            base={
+                "scorer": _LengthScorer(),
+                "manifest": _manifest(fallback="dfp-generic:1"),
+                "feature_columns": ["logcount", "mfa_ratio"]
+            },
+            knobs=(
+                Knob("scorer", DIFFERS, benign=_LengthScorer(), extreme=_LengthScorer(scale=2.0)),
+                Knob("entity_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("window_column", INPUT_COLUMN, benign="window_id"),
+                Knob("feature_columns", DIFFERS, benign=["logcount", "mfa_ratio"], extreme=["logcount"]),
+                Knob("manifest",
+                     DIFFERS,
+                     benign=_manifest(fallback="dfp-generic:1"),
+                     extreme=_manifest(fallback="dfp-generic-population:1")),
+                Knob("decimals", DIFFERS, benign=4, extreme=1),
             ),
         ),
     "TC5SessionStage":
@@ -813,6 +913,20 @@ REGISTRY: dict = {
                 Knob("raise_on_failure", RAISES, benign=False, extreme=True),
             ),
         ),
+    "EnvelopeStampStage":
+        Scenario(
+            stage=EnvelopeStampStage,
+            frame=port_inventory,
+            base={
+                "osi_layer": 1,
+                "entity_columns": ["site_id", "device_id", "port_id"],
+            },
+            knobs=(
+                Knob("osi_layer", DIFFERS, benign=1, extreme=5),
+                Knob("entity_columns", DIFFERS, benign=["site_id", "device_id", "port_id"], extreme=["port_id"]),
+                Knob("overwrite", DIFFERS, benign=False, extreme=True, frame=keyed_ports),
+            ),
+        ),
     "LineageStampStage":
         Scenario(
             stage=LineageStampStage,
@@ -898,11 +1012,106 @@ def test_every_stage_parameter_is_registered(stage_name: str):
     assert len(scenario.knobs) == len(declared), f"{stage_name}: a parameter is registered twice"
 
 
+FORK_HEADER = "Copyright (c) 2026, NVIDIA CORPORATION."
+"""The copyright line every source file this fork added carries.
+
+Upstream files carry a year range ending in 2025, so the 2026 line is what separates them. Note this is the
+source convention; the fork's *test* files use the longer SPDX form, and
+`tests/morpheus/utils/test_gpu_conformance_targets.py` matches on that one. Two conventions, each internally
+consistent, and a scan has to know which tree it is reading."""
+
+STAGE_DIRECTORIES = (("stages", "telemetry"), ("stages", "lineage"), ("stages", "output"))
+
+
+def _stage_classes_on_disk() -> set:
+    """Every stage class this fork added, read from the tree rather than from a list beside it."""
+    import os  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+
+    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+    package = os.path.join(root, "python", "morpheus", "morpheus")
+    found = set()
+
+    for parts in STAGE_DIRECTORIES:
+        directory = os.path.join(package, *parts)
+
+        for name in sorted(os.listdir(directory)):
+            if (not name.endswith(".py") or name.startswith("_")):
+                continue
+
+            with open(os.path.join(directory, name), encoding="utf-8") as handle:
+                text = handle.read()
+
+            if (FORK_HEADER not in text[:2000]):
+                continue
+
+            found.update(re.findall(r"^class (\w+)\(.*(?:Stage|Mixin).*\):", text, re.MULTILINE))
+
+    return found
+
+
 def test_every_stage_in_the_fork_is_covered():
-    # The registry is checked against each stage's signature above; this checks the set of stages itself, so a new
-    # stage cannot arrive with no entry at all.
-    assert len(REGISTRY) == 22
+    # Scanned from the tree, not pinned to a number. The pinned version read as though it enforced this and did
+    # not: a count only notices a stage being removed, never one arriving, so `TC1BindingStage` landed as the
+    # twenty-third stage while the assertion `len(REGISTRY) == 22` stayed green and its own comment claimed a new
+    # stage could not arrive uncovered. That is the same defect as a tier list that reads as total and is not,
+    # which this repository has now found in four separate places.
+    on_disk = _stage_classes_on_disk()
+
+    assert len(on_disk) > 15, f"the header scan found only {sorted(on_disk)}; it has stopped identifying stages"
+
+    missing = sorted(on_disk - set(REGISTRY))
+
+    assert missing == [], (f"{missing} ship in this fork and have no entry in REGISTRY, so no test asserts that "
+                           f"any of their parameters do anything. Add a Scenario for each.")
+
     assert {scenario.stage.__name__ for scenario in REGISTRY.values()} == set(REGISTRY)
+
+
+def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships():
+    # The README tells a reader what to collect and, per telemetry class, how much of it this fork processes
+    # today. That is a number in prose beside a number on disk, which is the shape that has drifted three times
+    # already in this repository -- most recently a sourcetype count that stayed wrong through a whole
+    # increment. A reader deciding what to instrument acts on this table, so it is checked rather than trusted.
+    import os  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+    telemetry = os.path.join(repo_root, "python", "morpheus", "morpheus", "stages", "telemetry")
+
+    with open(os.path.join(repo_root, "README.md"), encoding="utf-8") as handle:
+        readme = re.sub(r"\s+", " ", handle.read())
+
+    words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+
+    for prefix in ("tc1", "tc2", "tc5"):
+        shipped = len(
+            [name for name in os.listdir(telemetry) if name.startswith(f"{prefix}_") and name.endswith(".py")])
+        label = f"**TC-{prefix[-1]}**"
+        row = re.search(rf"\{label[:6]}\*\* [^|]*\|[^|]*\|[^|]*\| (\w+) stages ship", readme)
+
+        assert row is not None, f"the README's collection table no longer states a stage count for TC-{prefix[-1]}"
+        assert words[row.group(1).lower()] == shipped, (
+            f"the README says {row.group(1)} stages ship for TC-{prefix[-1]}; {shipped} are on disk")
+
+
+def test_the_readme_uses_links_rather_than_sphinx_roles():
+    # The guide is built by Sphinx and `{py:mod}` renders there as a cross-reference. The README is read on
+    # GitHub, which renders it as the literal text `{py:mod}`morpheus.utils.event_clock``. Two of these were
+    # written into the collection section by habit from editing the guide, and nothing but a reader opening the
+    # rendered page would have noticed.
+    import os  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+
+    for relative in ("README.md",
+                     os.path.join("examples", "layer5_model", "README.md"),
+                     os.path.join("examples", "splunk_lineage_app", "README.md")):
+        with open(os.path.join(repo_root, relative), encoding="utf-8") as handle:
+            found = re.findall(r"\{py:\w+\}`[^`]+`", handle.read())
+
+        assert found == [], f"{relative} uses Sphinx roles, which render as literal text on GitHub: {found}"
 
 
 @pytest.mark.cpu_mode

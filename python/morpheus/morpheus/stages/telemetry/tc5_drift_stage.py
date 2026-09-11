@@ -16,6 +16,7 @@
 import logging
 import typing
 
+import pandas as pd
 import mrc
 from mrc.core import operators as ops
 
@@ -200,7 +201,7 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 window = windows[position]
                 score = scores[position]
 
-                if (entity is None or window is None or score is None or score != score):  # pylint: disable=comparison-with-itself
+                if (entity is None or window is None or pd.isna(score)):
                     velocity.append(None)
                     acceleration.append(None)
                     rising.append(None)

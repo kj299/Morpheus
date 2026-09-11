@@ -51,6 +51,7 @@ TELEMETRY_CLASSES = {
     "morpheus:score:l1": ("tc1", ),
     "morpheus:score:l2": ("tc2_mac", "tc2_arp", "tc2_auth"),
     "binding:l2": ("tc2_binding", ),
+    "binding:l1": ("tc1_binding", ),
 }
 
 # The layer 5 classes, which come from their own corpus and their own pipeline. Both go on one stanza.

@@ -25,7 +25,7 @@ a SIEM.
 
 import hashlib
 import typing
-
+import pandas as pd
 from morpheus.utils.entity_key import render_integral
 
 UNIT_SEPARATOR = "\x1f"
@@ -300,7 +300,7 @@ def link_uid_series(parent_uids: typing.Sequence,
 
     results: list[typing.Optional[str]] = []
     for (parent, child) in zip(parent_uids, child_uids):
-        if (parent is None or parent != parent or parent == ""):  # pylint: disable=comparison-with-itself
+        if (pd.isna(parent) or parent == ""):
             results.append(None)
         else:
             results.append(link_uid(parent, child, relation, join_method, digest_length=digest_length))

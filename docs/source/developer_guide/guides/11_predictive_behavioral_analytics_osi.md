@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is twenty-two stages and twenty-seven supporting modules
-under 1,786 tests, itemized in
+8's total order, and control 13's CI harness. That is twenty-four stages and twenty-seven supporting modules
+under 1,891 tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -112,13 +112,20 @@ artifact it exists to produce. It then took four repairs to that runner before a
 believed, and each of the four is recorded below, because each produced a verdict that read `passed`
 while measuring less than it claimed.
 
-**The run that stands is 2026-09-07 at 13:20 UTC**, on the same card, over tiers that are total: the
-marked tier 379 collected and 379 passed; the tier carrying no mode marker 895 collected, 888 passed and
-7 skipped. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
-pytest collected. It is also the first such run with `torch==2.4.0+cu124` installed beside the RAPIDS
-stack, which answers a question the earlier ones could not: the two coexist in one process, and adding
-Torch does not disturb cuDF. That is every stage, all three composed pipelines, control 13's
-six checks, the stage parameter liveness registry and the first-detection corpus, in GPU mode.
+**The run that stands is 2026-09-07 at 22:42 UTC**, on the same card, over tiers that are total: the
+marked tier 429 collected and 429 passed; the tier carrying no mode marker 919 collected, 913 passed and
+6 skipped -- every skip a field contract for a sourcetype nothing produces yet. Both tiers grew with the
+envelope: twelve marked variants for `EnvelopeStampStage`, and six unmarked -- its four liveness entries
+and the two expectation tests that evaluate what the behavior summary now groups. It is the first device
+check of both composed golden files since every record started carrying `osi_layer` and `entity_key`;
+the run before it was the first since the scoring path landed, and that is where the per-feature
+z-scores -- float divisions, the arithmetic that has diverged between host and device in this project
+before -- were first shown to agree rather than assumed to. Nothing failed in either, both exited cleanly, and both counts
+reconcile exactly against what pytest collected. It is also the first such run with `torch==2.4.0+cu124`
+installed beside the RAPIDS stack, which answers a question the earlier ones could not: the two coexist
+in one process, and adding Torch does not disturb cuDF. That is every stage, all three composed
+pipelines, control 13's six checks, the stage parameter liveness registry and the first-detection
+corpus, in GPU mode.
 
 Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
 less than it claimed. The runner selected from a list that was not total: two files were outside it from
@@ -393,8 +400,8 @@ Output (`stages/output/`): `WriteToKafkaStage`, `WriteToElasticsearchStage`, `Wr
 General (`stages/general/`): `MonitorStage`, `TriggerStage`, `BufferStage`, `DelayStage`,
 `RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, `MultiPortModulesStage`.
 
-Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`. These were added to support the
-design in Part 4 and are covered in detail there.
+Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`, `EnvelopeStampStage`. These were
+added to support the design in Part 4 and are covered in detail there.
 
 There is no Splunk sink. Delivery to Splunk goes through Kafka, HTTP Event Collector via
 `HttpClientSinkStage`, or a file drop consumed by a forwarder. Part 4 covers the tradeoffs.
@@ -756,6 +763,14 @@ pipeline is how lineage silently breaks.
 | `event_uid` | hex string | Deterministic per-event identity. Construction in Part 4. |
 | `entity_key` | string | The primary behavioral subject for this telemetry class. |
 | `site_id` / `tenant_id` | string | Physical and logical scoping. |
+
+`entity_key` and `osi_layer` are stamped by
+{py:class}`~morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage`, placed at the tail of each
+class's segment. The layer is a constant for the class; the entity columns are named per class, because the
+subject differs by layer -- a port at layer 1, a MAC at layer 2, a principal at layer 5. A row missing any
+part of its key carries no key rather than a partial one, on the same rule
+{py:mod}`~morpheus.utils.entity_key` applies everywhere else. Where a class already composes `entity_key`
+for its own state, as the TC-1 stages do, the stage leaves it alone and stamps only the layer.
 
 Two rules govern the envelope. First, `ingest_time` must never appear in a detection rule or a feature.
 Second, when a field is unavailable it must be explicitly null with a reason code, never defaulted to a
@@ -1719,12 +1734,12 @@ compares against a threshold -- and rounding them to microseconds to fit a times
 quietly change that arithmetic. Where a single column is all that is needed,
 {py:func}`~morpheus.utils.siem_wire.render_event_time_series` is the same rendering without a stage.
 
-That module also carries a fact the app could not previously state anywhere. Seven of the fourteen
-stanzas have no producer in this fork: four are the score sourcetypes for layers 3, 4, 6 and 7, one is
-the layer 1 inventory feed, and two are the TC-0 context store. It was eight until the layer 5 stages
-landed and `morpheus:score:l5` gained one, which is the sort of number that goes stale silently --
-`tests/morpheus/utils/test_siem_sourcetypes.py` is what keeps the module honest, and this sentence is
-checked against it by hand. Each entry says what would have to be
+That module also carries a fact the app could not previously state anywhere. Six of the fourteen
+stanzas have no producer in this fork: four are the score sourcetypes for layers 3, 4, 6 and 7, and two
+are the TC-0 context store. It was eight until the layer 5 stages landed, and seven until
+`TC1BindingStage` gave `binding:l1` one -- the sort of number that goes stale silently, which is why
+`tests/morpheus/utils/test_siem_sourcetypes.py` now asserts this sentence against the module rather than
+leaving a reader to compare them. Each entry says what would have to be
 built. Recording them in one place is what keeps a reader from taking "the app parses seven layers" for
 "seven layers are implemented."
 
@@ -2804,6 +2819,18 @@ What Morpheus provides versus what has to be built, stated plainly.
   it exits non-zero and writes a failed verdict; both refusals are tested against a stubbed Torch, along
   with the property that every feature it trains on is one a TC-5 stage derived rather than a column a
   collector sent.
+- The identifier ladder's last rung ({py:class}`~morpheus.stages.telemetry.tc1_binding_stage.TC1BindingStage`).
+  `binding_l1` takes a switch port to a site, a transceiver and an LLDP neighbor, and nothing produced those
+  records, so a chain query stopped at a port name -- a label rather than a place. It runs in the composed
+  telemetry pipeline now, `binding:l1` is a produced sourcetype, and the shipped L1 refresh search has rows to
+  write for the first time. The key here is the port and
+  the attributes are what is in it, which is the inverse of layer 2 where the key is the mobile thing; getting
+  that backwards produces a table answering "where is this transceiver", which is not the question the ladder
+  asks. Two decisions are asserted rather than described. A binding ends just after its last sighting rather than
+  at the poll that noticed the change, so the silence in between resolves to nothing instead of to a claim nobody
+  made. And the idle timeout is days rather than the thirty minutes layer 2 uses, because a quiet MAC has left
+  while a quiet port has only stopped being asked -- a short horizon would close every binding in the estate
+  during a collector outage.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.
@@ -2865,6 +2892,82 @@ What Morpheus provides versus what has to be built, stated plainly.
 | Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |
 | Chained rule engine | Medium | Runs in Splunk, not in Morpheus. The `examples/splunk_lineage_app` searches are the starting set |
 | Bitemporal TC-0 context store | Medium | Valid-time and transaction-time intervals |
+
+### Open questions this work has not answered
+
+Distinct from the table above, which lists components that are absent. These are questions the design
+raises, cannot currently answer, and should not be assumed away.
+
+**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Every join here
+is a join on time across sources that do not share a clock, and the
+[collection section](../../../../README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
+qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0` inverts on
+sub-millisecond disagreement, impossible travel silently carries no score when two authentications
+reorder, and the MAC-in-two-places interval absorbs each switch's offset directly. **None of that has
+been measured.** What is missing is an experiment rather than a component: inject a per-source offset at
+a range of magnitudes -- one millisecond, ten, one second, one minute -- into the existing seeded corpora,
+re-run the composed pipelines, and report which features move, by how much, and at what offset each
+shipped rule changes its decision. The harness for it already exists; control 13's batch-split sweep and
+permutation check are the same shape, differing only in what they perturb.
+
+Three things make this worth doing rather than reasoning about. The corpora are seeded code with planted
+anomalies and negative controls beside them, so a decision change is directly observable rather than
+inferred. The answer is a number an estate can act on -- it converts an instruction to synchronize clocks into a
+statement that this rule needs better than N milliseconds and that one tolerates a minute. And the result may well be that
+several rules are not deployable at all without a clock discipline most estates do not have, which is
+worth knowing before tuning thresholds against them rather than after.
+
+What exists today is narrower than it looks and should not be mistaken for coverage.
+{py:mod}`~morpheus.utils.event_clock` bounds a catastrophically wrong timestamp so one bad row cannot
+expire every open binding; it is not drift correction and its default would not notice a device an hour
+out. `clock_source` and `clock_offset_ms` are in the universal envelope, and **nothing in this repository
+produces, consumes or checks either of them** -- they are schema, not a control. The
+`max_clock_skew_seconds` parameter on the three stateful stages is asserted to be live and to reject an
+invalid value; no test measures what a plausible offset does to a feature.
+
+**Why does no chain span more than one layer?** The `osi_layer` half of this question is now closed:
+{py:class}`~morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage` stamps `osi_layer` and
+`entity_key` on every record from every class, and `Behavior summary - per-layer scores` went from zero rows
+to 355. That gap stayed invisible for as long as it did because both searches were also empty for a second
+reason -- nothing produced `max_abs_z` -- which gave an empty result an explanation nobody had to look past.
+Fixing the more obvious gap is what exposed the less obvious one.
+
+What it exposed next is that `Chain assembly - cross-layer risk` is still empty, and no longer for a reason
+the envelope can fix. It fires on `dc(osi_layer) >= 3` grouped by `lineage_id`, and all 296 distinct
+`lineage_id` values in the corpus span exactly one layer. Each telemetry class runs its own pipeline over its
+own corpus, and the `morpheus:edge` events carry no `lineage_id` at all, so nothing links a layer 1
+observation to the layer 2 or layer 5 activity it caused. Part 4 specifies `lineage_id` as
+`sha256(root_entity_key || window_id || chain_root)`, which is a chain identity only if the classes agree on
+a root -- and today they do not, because they never meet. Closing this needs a composed pipeline where one
+event's `entity_key` resolves to another layer's subject through the binding ladder, which is a build item
+larger than a stamping stage and is recorded here rather than estimated.
+
+**Should `binding_l1` be bucketed after all?** This document argues that the layer 2 lookup is bucketed
+because a DHCP lease moves and the layer 1 one is not because a transceiver is stable for months. Wiring
+the producer up exposed the gap in that reasoning: stable for months is not never. The lookup keys on
+`port_id` and `switch_id` with no bucket, so a port whose optic is replaced collapses to a single row and
+the later transceiver wins. It answers what is in a port *now*, which is the wrong tense for the question
+the ladder asks -- an investigation into last Tuesday resolves that port to the optic installed on
+Wednesday, silently and with no indication that the answer is from the wrong interval. The corpus
+demonstrates this: five port intervals across four ports write four lookup rows.
+
+Three options, none obviously right, which is why this is a question rather than a build item. Bucket
+layer 1 at a coarse width -- a day rather than five minutes -- which costs storage proportional to ports
+times days for a fact that rarely changes. Key on the interval rather than the port, making the lookup a
+range join, which Splunk lookups do not do natively. Or accept the present tense deliberately, keep the
+lookup as a current-state answer, and resolve historical layer 1 questions from the `binding:l1` events
+themselves rather than the lookup built from them, in which case the guide should say so and the searches
+that reach layer 1 should be written against the index. The last is the smallest change and the easiest
+to get wrong quietly, which is an argument for deciding rather than defaulting.
+
+**What retention, lawful basis and minimization apply to the behavioral history this design accumulates.**
+Layer 5 alone keeps each principal's location history, last known coordinate, device and application
+history, and the binding lookups here assume a 400-day retention -- a location history of employees'
+device movements over more than a year, to which a per-user behavioral profile is added once a model is
+in the pipeline. This document specifies no retention limits, no minimization, no lawful basis and no
+treatment of the data as personal data. That is a deliberate deferral recorded here rather than an
+oversight, and it is a question for the deploying organization and its counsel rather than one this
+guide should answer on their behalf.
 
 ### Sequencing recommendation
 
