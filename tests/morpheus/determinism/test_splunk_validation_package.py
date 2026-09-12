@@ -57,6 +57,9 @@ GAP_THRESHOLD_NS = 60 * 10**9
 TRAVEL_KMH_THRESHOLD = 900
 MFA_CHALLENGE_THRESHOLD = 5
 MFA_DENIAL_THRESHOLD = 4
+DRIFT_RISING_THRESHOLD = 4
+DRIFT_SIGMA_THRESHOLD = 1.5
+DRIFT_MEAN_CEILING = 2.0
 """The thresholds the saved searches state, repeated here so the predicate this file evaluates is the
 predicate the app ships rather than an approximation of it."""
 
@@ -151,6 +154,26 @@ def test_the_layer_5_detections_return_exactly_what_is_written(expected: dict, s
     assert named["mfa_denials_in_window"] == int(fatigue["mfa_denials_in_window"].iloc[0])
 
 
+def test_the_drift_rule_returns_exactly_what_is_written(expected: dict, sessions: pd.DataFrame):
+    # R-P-L5-006 as the search states it, then deduplicated the way the search deduplicates. The entry names
+    # every principal-day, because a rule that fires on reference arithmetic is one whose every firing has to be
+    # accounted for -- a new one appearing unexplained is exactly the drift in meaning this file exists to catch.
+    auth = sessions[sessions["telemetry_class"] == "tc5_auth"]
+    entry = expected["searches"]["R-P-L5-006 - Drift trajectory"]
+
+    fires = auth[(auth["drift_mature"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                 & (auth["drift_rising_windows"].astype(float) >= DRIFT_RISING_THRESHOLD)
+                 & (auth["drift_rise_sigmas"].astype(float) > DRIFT_SIGMA_THRESHOLD)
+                 & (auth["mean_abs_z"].astype(float) < DRIFT_MEAN_CEILING)]
+    deduplicated = fires.drop_duplicates(["user_principal", "day_window_id"])
+
+    assert entry["contributing_rows"] == len(fires)
+    assert entry["expected_rows"] == len(deduplicated)
+
+    written = {(row["user_principal"], row["day_window_id"]) for row in entry["key_values"]}
+    assert written == set(zip(deduplicated["user_principal"], deduplicated["day_window_id"].astype(int)))
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -218,7 +241,7 @@ def test_the_chain_assembly_blocker_is_the_lineage_and_not_the_envelope(expected
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Four of thirteen. That ratio is the honest state of this app, and stating it is the package's main job. It
+    # Four of fourteen. That ratio is the honest state of this app, and stating it is the package's main job. It
     # improved by two when the layer 5 rules landed with events to fire on, by one more when `TC1BindingStage`
     # gave `binding:l1` a producer, and by one again when `EnvelopeStampStage` put `osi_layer` and `entity_key`
     # on every record and the behavior summary finally had a grouping that keeps its rows.

@@ -400,8 +400,8 @@ Output (`stages/output/`): `WriteToKafkaStage`, `WriteToElasticsearchStage`, `Wr
 General (`stages/general/`): `MonitorStage`, `TriggerStage`, `BufferStage`, `DelayStage`,
 `RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, `MultiPortModulesStage`.
 
-Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`, `EnvelopeStampStage`. These were
-added to support the design in Part 4 and are covered in detail there.
+Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`, `EnvelopeStampStage`,
+`ChainAnchorStage`. These were added to support the design in Part 4 and are covered in detail there.
 
 There is no Splunk sink. Delivery to Splunk goes through Kafka, HTTP Event Collector via
 `HttpClientSinkStage`, or a file drop consumed by a forwarder. Part 4 covers the tradeoffs.
@@ -1377,8 +1377,16 @@ should place the principal on a watchlist and raise the sensitivity of layer 7 r
 The trajectory this reads is built: {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`
 emits `drift_rising_windows`, `drift_total_rise` and `drift_rise_sigmas` -- the quantity this rule
 thresholds at 1.5 -- alongside the velocity and acceleration this document names as its second predictive mechanism.
-The rule fires on nothing until something produces `mean_abs_z`, and until then every one of those
-columns is null. Three of the definitions are load-bearing and easy to get wrong in a way that reads
+The trajectory is wired into the composed layer 5 pipeline: a second `WindowSealStage` behind the hourly
+one seals the scored events into days, with its columns prefixed `day_` so the hourly windows keep their
+identity, and the drift stage reduces each complete day to one observation per principal -- the mean of the
+day's per-event scores -- and stamps it on every row of the day. The saved search `R-P-L5-006 - Drift
+trajectory` reads those columns and deduplicates on principal and day. On the reference corpus it fires on
+three principals, none of them behaviour: two climb for six straight days because the reference scorer's
+parameters are frozen while `logcount` and the `*increment` features are cumulative, and the third has a
+run of four whose first three rises are hundredths and whose fourth is the planted multi-factor burst -- a
+spike the rule's letter admits because the day's mean stays under 2.0. `drift_acceleration` separates the
+two shapes, and is the column to read first when tuning this rule. Three of the definitions are load-bearing and easy to get wrong in a way that reads
 plausibly: a gap in the windows restarts the run rather than extending it, the standard deviation is
 taken over prior windows only so a rise cannot inflate its own denominator, and a score that has never
 varied yields no rise in sigmas rather than an infinite one. Note also where the run begins: four
@@ -2776,6 +2784,11 @@ What Morpheus provides versus what has to be built, stated plainly.
   come before the autoencoder rather than after it because this document says they must: retrofitting
   determinism onto a running detection pipeline means re-tuning every threshold, since the scores will move.
   What is not here is the autoencoder itself, and the boundary is exact -- see the caveat below.
+- The autoencoder behind the `Scorer` protocol ({py:mod}`~morpheus.utils.dfencoder_scorer`): inference only,
+  fitted models keyed by a pinned version that is a digest of their weights, a manifest builder that declares
+  no fallback, and a training helper that refuses in plain words without Torch. `run_model.py` uses it to run
+  the composed pipeline with the model the guide names, as its fourth check; the composed pipeline's own
+  `run_pipeline` takes a `scorer` and `manifest` so the reference arithmetic and the model occupy the same slot.
 - The composed layer 5 pipeline under control 13's six checks
   (`tests/morpheus/determinism/session_pipeline.py`): a week-long corpus of one estate's authentications,
   with an impossible journey, a legitimate eight-hour flight, a token refresh issued from the origin
@@ -2799,9 +2812,11 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.telemetry.tc5_risk_stage.TC5RiskStage`), which is the same primitive
   R-D-L5-004 and the plain failure-then-success feature both read, counted over different subsets of
   the stream.
-- The trajectory R-P-L5-006 reads, built against scores supplied directly rather than waiting for a model
+- The trajectory R-P-L5-006 reads, built against scores supplied directly and now wired into the composed
+  layer 5 pipeline over daily windows sealed behind the hourly ones
   ({py:mod}`~morpheus.utils.drift_trajectory` and
-  {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`). It reports the first and second
+  {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`, with `aggregate="mean"` reducing each
+  complete day to one observation per principal). It reports the first and second
   differences, the length of the current strictly-increasing run, and the run's total rise in the
   principal's own standard deviations -- the quantity this document thresholds at 1.5. Three choices in it
   are decisions rather than details, and each is asserted: a gap in a principal's activity restarts the run
@@ -2885,7 +2900,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. Nothing in the pipeline produces `mean_abs_z` or `max_abs_z`, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 fire on nothing. The model itself is not the missing part: `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus and shown the scoring path reproducible under controls 3 and 5. What is missing is a scoring stage in the composed pipeline, the manifest wiring that pins which model scored which entity, and enough data for the scores to mean anything |
+| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores every layer 5 event against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory over daily windows, and R-B-L5-001 and R-P-L5-006 are evaluated end to end against the corpus. What scores them is `ReferenceScorer`, frozen arithmetic that the class itself calls not a model. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus under controls 3 and 5. The adapter is built: `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, pins each principal to a digest of its own weights, and `run_model.py` runs the composed pipeline with it as its fourth check. What remains is the verdict from that run on the card, and enough data for the scores to mean anything -- 105 events across five principals proves the wiring and nothing else |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
 | Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |
@@ -2925,22 +2940,32 @@ produces, consumes or checks either of them** -- they are schema, not a control.
 `max_clock_skew_seconds` parameter on the three stateful stages is asserted to be live and to reject an
 invalid value; no test measures what a plausible offset does to a feature.
 
-**Why does no chain span more than one layer?** The `osi_layer` half of this question is now closed:
-{py:class}`~morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage` stamps `osi_layer` and
-`entity_key` on every record from every class, and `Behavior summary - per-layer scores` went from zero rows
-to 355. That gap stayed invisible for as long as it did because both searches were also empty for a second
-reason -- nothing produced `max_abs_z` -- which gave an empty result an explanation nobody had to look past.
-Fixing the more obvious gap is what exposed the less obvious one.
+**Why does no chain span more than two layers?** The first two halves of this question are closed.
+{py:class}`~morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage` put `osi_layer` and `entity_key` on
+every record, and `Behavior summary - per-layer scores` went from zero rows to 355. Then
+{py:class}`~morpheus.stages.lineage.chain_anchor_stage.ChainAnchorStage` made the chain root a per-row decision:
+an ARP observation whose MAC the binding table placed on a port now roots on that port, with
+`chain_anchor_source` recording that it got there through a soft join, and the four chained classes are sealed
+in one pass over their union in event-time order so the port's chain holds its members from both layers. In the
+corpus, 39 of 210 chains span two layers, which is the two-layer proof the sequencing recommendation asks for
+before scaling further. The summary dropped to 320 rows in the process, because groups that differed only in
+`lineage_id` collapsed once resolved observations stopped carrying a chain per address.
 
-What it exposed next is that `Chain assembly - cross-layer risk` is still empty, and no longer for a reason
-the envelope can fix. It fires on `dc(osi_layer) >= 3` grouped by `lineage_id`, and all 296 distinct
-`lineage_id` values in the corpus span exactly one layer. Each telemetry class runs its own pipeline over its
-own corpus, and the `morpheus:edge` events carry no `lineage_id` at all, so nothing links a layer 1
-observation to the layer 2 or layer 5 activity it caused. Part 4 specifies `lineage_id` as
-`sha256(root_entity_key || window_id || chain_root)`, which is a chain identity only if the classes agree on
-a root -- and today they do not, because they never meet. Closing this needs a composed pipeline where one
-event's `entity_key` resolves to another layer's subject through the binding ladder, which is a build item
-larger than a stamping stage and is recorded here rather than estimated.
+What remains is the third layer. `Chain assembly - cross-layer risk` fires on `dc(osi_layer) >= 3`, and no chain
+reaches it: layer 5 runs over its own corpus with its own principals, and nothing yet resolves the
+`dot1x_identity` an 802.1X exchange carries at layer 2 to the `user_principal` an authentication carries at
+layer 5. That is the ladder's next rung -- port to MAC to identity to principal -- and it needs two things this
+fork does not have: a corpus where the same people appear at both layers, and a binding from identity to
+principal for the resolver to walk. Both are build items, not stamping stages, and are recorded here rather than
+estimated. The `morpheus:edge` events also carry no `lineage_id`, because they come from the flow corpus rather
+than from either composed pipeline.
+
+One consequence of sealing the union is worth stating because it looks like a change and is not. 129 rows in
+the layer 2 corpus moved from `sealed_by = flush` to `sealed_by = watermark`: the ARP and 802.1X streams end
+before the layer 1 stream does, so sealed alone their last windows were only ever flushed, and sealed together
+layer 1's later samples advance the watermark past them. Nothing about lateness, revision or window membership
+changed. That is the union behaving the way a deployment's interleaved stream would, which is the point of
+sealing it that way.
 
 **Should `binding_l1` be bucketed after all?** This document argues that the layer 2 lookup is bucketed
 because a DHCP lease moves and the layer 1 one is not because a transceiver is stable for months. Wiring

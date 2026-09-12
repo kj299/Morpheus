@@ -84,17 +84,18 @@
       "why": "A cross-layer rule needing layer 4 and layer 7 telemetry. Neither class exists in this fork, so no event can satisfy either half of the correlation. Empty here is correct and will stay correct until those classes ship."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 355,
+      "expected_rows": 320,
       "expected_empty": false,
       "contributing_rows": 1719,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 1719 scored events on `morpheus:score:l1`, `l2` and `l5`. This search was empty until `EnvelopeStampStage` gave every record both grouping fields; before that `stats by` dropped every row and the emptiness said nothing about the data. `peak_z` is null on the layer 1 and layer 2 rows because only TC5ScoreStage produces `max_abs_z`, and a null aggregate does not drop a row -- so the count here is a statement about the grouping, not about scoring coverage."
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 1719 scored events on `morpheus:score:l1`, `l2` and `l5`. It was 355 before the chained classes were sealed together: an ARP observation the ladder resolved to a port now carries the port's chain rather than one per address, so several groups that differed only in `lineage_id` collapsed into one. `peak_z` is null on the layer 1 and layer 2 rows because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 296,
-      "maximum_layer_span": 1,
-      "why": "Empty, but no longer because `osi_layer` is missing -- every record now carries it. The blocker is the corpus: all 296 distinct `lineage_id` values span exactly one layer, so `dc(osi_layer)` is always 1 and never reaches the threshold of 3. Each telemetry class runs its own pipeline over its own corpus, and the `morpheus:edge` events carry no `lineage_id` at all, so nothing links a layer 1 observation to the layer 2 or layer 5 activity it caused. A chain-assembly rule cannot fire until the classes share a lineage, which is a property of the pipeline rather than of this search."
+      "distinct_lineage_ids": 210,
+      "maximum_layer_span": 2,
+      "two_layer_chains": 39,
+      "why": "Empty, and closer to firing than it was. Chains now span two layers: 39 of the 210 distinct `lineage_id` values hold both a port's layer 1 samples and the layer 2 observations the ladder resolved onto that port, because `ChainAnchorStage` roots a resolved observation on the port and the chained classes are sealed together. The threshold is `dc(osi_layer) >= 3`, and no chain reaches it: layer 5 runs over its own corpus with its own principals, and nothing yet resolves an 802.1X identity at layer 2 to a principal at layer 5. The `morpheus:edge` events carry no `lineage_id`. Reaching three is a corpus and ladder question, recorded in Part 6, not a search one."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 80,
@@ -113,6 +114,42 @@
     "Binding health - unresolved rate": {
       "expected_rows": 1,
       "why": "One summary row over the ARP stream's resolution outcomes. This is an operational health metric rather than a detection, and it is the one search whose value is in the number rather than in whether it fired."
+    },
+    "R-P-L5-006 - Drift trajectory": {
+      "expected_rows": 7,
+      "expected_empty": false,
+      "contributing_rows": 21,
+      "key_values": [
+        {
+          "user_principal": "carol@example.com",
+          "day_window_id": 9
+        },
+        {
+          "user_principal": "dave@example.com",
+          "day_window_id": 8
+        },
+        {
+          "user_principal": "dave@example.com",
+          "day_window_id": 9
+        },
+        {
+          "user_principal": "dave@example.com",
+          "day_window_id": 10
+        },
+        {
+          "user_principal": "svc-batch@example.com",
+          "day_window_id": 8
+        },
+        {
+          "user_principal": "svc-batch@example.com",
+          "day_window_id": 9
+        },
+        {
+          "user_principal": "svc-batch@example.com",
+          "day_window_id": 10
+        }
+      ],
+      "why": "Seven principal-days after deduplication, from 21 rows that carry the trajectory. None of them is behaviour, and the search says so in its own comment. Two principals climb for six straight days because the reference scorer's parameters are frozen while `logcount` and the `*increment` features are cumulative: a score whose baseline never moves under a feature that only grows must rise, and that is arithmetic. The third, on the day of the planted multi-factor burst, has a run of four whose first three rises are hundredths and whose fourth is the burst -- a spike the rule's letter admits because the day's mean stays under R-B-L5-001's 2.0. The predicate is evaluated here exactly as the search states it, so a corpus change that adds or removes a firing shows up as a diff rather than as a search that quietly means something else. What a deployment should take from this: the drift path's first false positives are cumulative features under a stale baseline, and a spike at the end of a flat run. Both are visible in `drift_acceleration` and `drift_baseline_sigma`."
     }
   }
 }

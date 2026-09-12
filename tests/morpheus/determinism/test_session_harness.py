@@ -460,7 +460,7 @@ def test_every_scored_row_says_it_was_scored_against_a_fallback(result: pd.DataF
 
 
 @pytest.mark.cpu_mode
-def test_no_rule_fires_on_the_reference_scores_and_none_should(result: pd.DataFrame):
+def test_the_composite_rule_does_not_fire_on_the_reference_scores(result: pd.DataFrame):
     # The guard against what this wiring most risks: numbers that read like detections. R-B-L5-001 asks for
     # max_abs_z at or above 6.0 *and* mean_abs_z at or above 2.0, and the conjunction is the rule -- requiring
     # both is what the guide says suppresses the common case where one feature spikes for a benign reason.
@@ -468,13 +468,98 @@ def test_no_rule_fires_on_the_reference_scores_and_none_should(result: pd.DataFr
     # One row does reach 6.0 on its own: the multi-factor fatigue burst, whose failure count sits six deviations
     # above a mean of a quarter. That is the arithmetic noticing a genuinely unusual row on one feature, and it
     # is exactly the case the conjunction exists to hold back, since that row's other nine features are ordinary
-    # and its mean stays under 1.8. The rule does not fire, no threshold was adjusted to arrange that, and a
-    # corpus with no model in it produces no model detections.
+    # and its mean stays under 1.8. The rule does not fire, and no threshold was adjusted to arrange that.
     scored = result[result["telemetry_class"] == "tc5_auth"]
     fires = scored[(scored["max_abs_z"].astype(float) >= 6.0) & (scored["mean_abs_z"].astype(float) >= 2.0)]
 
     assert len(fires) == 0
     assert scored["mean_abs_z"].max() < 2.0
+
+
+# --- The trajectory --------------------------------------------------------------------------------------------
+
+
+def _days(auth: pd.DataFrame) -> pd.DataFrame:
+    """One row per principal per day: the trajectory as the daily sealer and the drift stage see it."""
+    return (auth.sort_values(["user_principal", "day_window_id"]).drop_duplicates(["user_principal", "day_window_id"]))
+
+
+@pytest.mark.cpu_mode
+def test_the_trajectory_is_one_observation_per_principal_per_day(result: pd.DataFrame):
+    # The scores are per event and the rule is per day, so the day has to be reduced before it is tracked. The
+    # drift stage reduces each complete day to the mean of its events and stamps that on every row, which is
+    # what makes the columns readable from any event of the day and identical across them.
+    auth = _rows(result, "tc5_auth")
+
+    assert auth["day_window_id"].notna().all()
+    assert auth["drift_rising_windows"].notna().all()
+
+    within = auth.groupby(["user_principal", "day_window_id"
+                           ])[["drift_velocity", "drift_rising_windows", "drift_rise_sigmas",
+                               "drift_mature"]].nunique(dropna=False)
+
+    assert (within <= 1).all().all(), "two events on one day disagreed about the day's trajectory"
+
+    # The day's observation is the mean of its events, which is what the search's comment promises.
+    days = _days(auth)
+    means = auth.groupby(["user_principal", "day_window_id"])["mean_abs_z"].apply(lambda s: s.astype(float).mean())
+
+    for (principal, day, velocity) in zip(days["user_principal"], days["day_window_id"], days["drift_velocity"]):
+        prior = (principal, day - 1)
+
+        if (prior in means.index and pd.notna(velocity)):
+            assert float(velocity) == pytest.approx(round(means[(principal, day)] - means[prior], 4), abs=2e-4)
+
+
+@pytest.mark.cpu_mode
+def test_the_daily_windows_seal_the_way_the_hourly_ones_do(result: pd.DataFrame):
+    # A second sealer behind the first, with its own prefix. Every day but the last is sealed by the watermark,
+    # the last by the flush at end of stream, nothing arrives late, and the hourly columns are untouched.
+    auth = _rows(result, "tc5_auth")
+
+    assert set(auth["day_sealed_by"]) == {"watermark", "flush"}
+    assert auth.loc[auth["day_sealed_by"] == "flush", "day_window_id"].nunique() == 1
+    assert not auth["day_is_late"].astype(bool).any()
+    assert (auth["day_window_id"].astype(int) * 24 <= auth["window_id"].astype(int)).all()
+    assert (auth["window_id"].astype(int) < (auth["day_window_id"].astype(int) + 1) * 24).all()
+
+
+@pytest.mark.cpu_mode
+def test_the_drift_rule_fires_on_exactly_the_reference_arithmetic_it_should(result: pd.DataFrame):
+    # R-P-L5-006 as written: four consecutive rising days, a rise above 1.5 of the principal's own standard
+    # deviations, and no day crossing R-B-L5-001's mean of 2.0. It fires on three principals, none of them
+    # behaviour, and each has to be explained here or the golden could grow a fourth without anyone noticing.
+    #
+    # Two of them climb for six straight days because the reference scorer's parameters are frozen while
+    # `logcount` and the `*increment` features are cumulative. A score with a baseline that never moves, under a
+    # feature that only grows, must rise -- which is the guide's own warning about `locincrement` arriving in the
+    # trajectory rather than in the rule. The third is the fatigue burst: three rises of hundredths and then the
+    # burst, a spike the rule's letter admits because the day's mean stays under 2.0. `drift_acceleration` tells
+    # the two shapes apart, and that is the column a deployment tuning this rule should read first.
+    auth = _rows(result, "tc5_auth")
+    days = _days(auth)
+
+    fires = days[(days["drift_mature"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                 & (days["drift_rising_windows"].astype(float) >= 4)
+                 & (days["drift_rise_sigmas"].astype(float) > 1.5)
+                 & (days["mean_abs_z"].astype(float) < 2.0)]
+
+    assert set(zip(fires["user_principal"], fires["day_window_id"].astype(int))) == {
+        (sp.CAROL, 9),
+        (sp.DAVE, 8),
+        (sp.DAVE, 9),
+        (sp.DAVE, 10),
+        (sp.BATCH, 8),
+        (sp.BATCH, 9),
+        (sp.BATCH, 10),
+    }
+
+    # The two shapes. The climbers accelerate by hundredths; the burst accelerates by most of a unit.
+    burst = fires[fires["user_principal"] == sp.CAROL]
+    climbers = fires[fires["user_principal"] != sp.CAROL]
+
+    assert float(burst["drift_acceleration"].iloc[0]) > 0.5
+    assert climbers["drift_acceleration"].astype(float).abs().max() < 0.1
 
 
 @pytest.mark.cpu_mode

@@ -14,6 +14,7 @@
 """Tracks whether an entity's reconstruction error is climbing across consecutive windows."""
 
 import logging
+import statistics
 import typing
 
 import pandas as pd
@@ -38,6 +39,10 @@ from morpheus.utils.drift_trajectory import DriftTrajectoryTracker
 from morpheus.utils.entity_key import normalize_text
 
 logger = logging.getLogger(__name__)
+
+AGGREGATE_NONE = "none"
+AGGREGATE_MEAN = "mean"
+AGGREGATES = (AGGREGATE_NONE, AGGREGATE_MEAN)
 
 
 @register_stage("tc5-drift")
@@ -85,6 +90,14 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Entities tracked before the least recently seen is forgotten.
     decimals : int, default = 4
         Decimal places every reported figure is rounded to, under determinism control 9.
+    aggregate : str, default = "none"
+        How rows sharing an entity and a window inside one message are treated. `"none"` observes each row as
+        its own window, which is right when the input already carries one row per entity per window and wrong
+        otherwise -- the stage warns when it sees repeats. `"mean"` reduces them to one observation, the mean
+        of their scores, and stamps that observation's trajectory on every one of them. That is the reduction
+        the trajectory needs when the score is per event and the window is a day, and it relies on the message
+        holding the whole window, which is what `WindowSealStage` emits: a fragment would give the mean of a
+        fragment, and nothing here can tell the difference.
     """
 
     def __init__(self,
@@ -95,12 +108,17 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  max_windows: int = DEFAULT_MAX_WINDOWS,
                  min_windows: int = DEFAULT_MIN_WINDOWS,
                  max_entities: int = 100_000,
-                 decimals: int = DEFAULT_FLOAT_DECIMALS):
+                 decimals: int = DEFAULT_FLOAT_DECIMALS,
+                 aggregate: str = AGGREGATE_NONE):
         super().__init__(c)
+
+        if (aggregate not in AGGREGATES):
+            raise ValueError(f"aggregate must be one of {AGGREGATES}, received {aggregate!r}")
 
         self._entity_column = entity_column
         self._score_column = score_column
         self._window_column = window_column
+        self._aggregate = aggregate
         self._warned_scoreless = False
 
         self._tracker = DriftTrajectoryTracker(max_windows=max_windows,
@@ -196,6 +214,27 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             seen: dict = {}
             repeated = 0
 
+            # One observation per entity per window, when asked for it. The members are summed in sorted order
+            # so the mean depends on membership alone, the same property the chain root has.
+            reduced: dict = {}
+
+            if (self._aggregate == AGGREGATE_MEAN):
+                members: dict = {}
+
+                for position in range(row_count):
+                    entity = normalize_text(entities[position])
+                    window = windows[position]
+                    score = scores[position]
+
+                    if (entity is None or window is None or pd.isna(score)):
+                        continue
+
+                    members.setdefault((entity, int(window)), []).append(float(score))
+
+                reduced = {key: statistics.fmean(sorted(values)) for (key, values) in members.items()}
+
+            observed: dict = {}
+
             for position in range(row_count):
                 entity = normalize_text(entities[position])
                 window = windows[position]
@@ -214,10 +253,18 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     continue
 
                 window_id = int(window)
-                repeated += int(seen.get(entity) == window_id)
-                seen[entity] = window_id
 
-                result = self._tracker.observe(entity, window_id, float(score))
+                if (self._aggregate == AGGREGATE_MEAN):
+                    key = (entity, window_id)
+
+                    if (key not in observed):
+                        observed[key] = self._tracker.observe(entity, window_id, reduced[key])
+
+                    result = observed[key]
+                else:
+                    repeated += int(seen.get(entity) == window_id)
+                    seen[entity] = window_id
+                    result = self._tracker.observe(entity, window_id, float(score))
 
                 velocity.append(result.velocity)
                 acceleration.append(result.acceleration)

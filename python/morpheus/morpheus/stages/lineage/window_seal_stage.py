@@ -112,6 +112,12 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Merkle root over these, so the identifier depends on chain membership rather than arrival order.
     lineage_id_column : str, default = "lineage_id"
         Column the chain identifier is written to. This is the field the shipped detections already select.
+    column_prefix : str, default = ""
+        Prefix for the seven window columns this stage writes (`window_id`, `window_start_ns`, `window_end_ns`,
+        `revision`, `sealed_by`, `is_late`, `window_complete`). A second sealer downstream of the first -- a daily
+        one behind an hourly one, so a trajectory can be measured over days while the hourly windows keep their
+        identity -- would otherwise overwrite the first one's columns and leave no trace that it had. The
+        lineage column is named on its own and is not prefixed.
     raise_on_invalid : bool, default = False
         When True a row with an uninterpretable event time fails the batch instead of being emitted flagged.
     """
@@ -128,8 +134,12 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  raise_on_invalid: bool = False,
                  entity_key_column: str = None,
                  uid_column: str = "event_uid",
-                 lineage_id_column: str = "lineage_id"):
+                 lineage_id_column: str = "lineage_id",
+                 column_prefix: str = ""):
         super().__init__(c)
+
+        if (column_prefix is None):
+            raise ValueError("column_prefix must be a string; pass an empty one for unprefixed columns")
 
         if (period_seconds <= 0):
             raise ValueError(f"period_seconds must be positive, received {period_seconds}")
@@ -153,6 +163,7 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._entity_key_column = entity_key_column
         self._uid_column = uid_column
         self._lineage_id_column = lineage_id_column
+        self._column_prefix = column_prefix
         self._warned_no_lineage = False
 
         # Buffered on-time rows per open window, as pandas fragments in arrival order.
@@ -160,13 +171,15 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._emit_control_messages: typing.Optional[bool] = None
 
         self._needed_columns.update({
-            "window_id": TypeId.INT64,
-            "window_start_ns": TypeId.INT64,
-            "window_end_ns": TypeId.INT64,
-            "revision": TypeId.INT64,
-            "sealed_by": TypeId.STRING,
-            "is_late": TypeId.BOOL8,
-            "window_complete": TypeId.BOOL8,
+            self._column(name): type_id
+            for (name, type_id) in (
+                ("window_id", TypeId.INT64),
+                ("window_start_ns", TypeId.INT64),
+                ("window_end_ns", TypeId.INT64),
+                ("revision", TypeId.INT64),
+                ("sealed_by", TypeId.STRING),
+                ("is_late", TypeId.BOOL8),
+                ("window_complete", TypeId.BOOL8), )
         })
 
         # Mark this stage to log timestamps if requested
@@ -174,6 +187,9 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             self._needed_columns[lineage_id_column] = TypeId.STRING
 
         self._should_log_timestamps = True
+
+    def _column(self, name: str) -> str:
+        return f"{self._column_prefix}{name}"
 
     @property
     def name(self) -> str:
@@ -274,13 +290,13 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             (window_id, start_ns, end_ns) = (-1, -1, -1)
             revision = 0
 
-        df["window_id"] = window_id
-        df["window_start_ns"] = start_ns
-        df["window_end_ns"] = end_ns
-        df["revision"] = revision
-        df["sealed_by"] = sealed_by
-        df["is_late"] = late
-        df["window_complete"] = complete
+        df[self._column("window_id")] = window_id
+        df[self._column("window_start_ns")] = start_ns
+        df[self._column("window_end_ns")] = end_ns
+        df[self._column("revision")] = revision
+        df[self._column("sealed_by")] = sealed_by
+        df[self._column("is_late")] = late
+        df[self._column("window_complete")] = complete
 
         return df
 

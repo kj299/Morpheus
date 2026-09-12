@@ -228,7 +228,9 @@ def test_a_chain_is_one_entity_inside_one_window(result: pd.DataFrame):
     # `lineage_id` is the field all four shipped detections already select, and until now nothing populated it.
     # What it has to mean: the events that would be correlated together carry one identifier, and events that
     # would not, do not. Anything weaker makes the column decoration.
-    for (name, anchor) in tp.CHAIN_ANCHORS.items():
+    anchor = "chain_anchor"
+
+    for name in tp.CHAIN_ROOTS:
         rows = _rows(result, name)
         chained = rows[rows["lineage_id"].notna()]
 
@@ -250,6 +252,51 @@ def test_a_chain_is_one_entity_inside_one_window(result: pd.DataFrame):
 
 
 @pytest.mark.cpu_mode
+def test_a_resolved_observation_joins_the_chain_of_the_port_it_resolved_to(result: pd.DataFrame):
+    # The ladder's point, stated as lineage rather than as a column. An ARP observation whose MAC the binding
+    # table placed on a port carries the same `lineage_id` as that port's layer 1 samples in the same window,
+    # because it is the same chain: one root entity, one window, membership from two layers. An observation the
+    # table could not place stays on its own chain, rooted on the address, and shares nothing with layer 1.
+    tc1 = _rows(result, "tc1")
+    arp = _rows(result, "tc2_arp")
+
+    port_chains = {
+        (key, window): chain
+        for (key, window, chain) in zip(tc1["entity_key"], tc1["window_id"], tc1["lineage_id"])
+    }
+
+    resolved = arp[arp["chain_anchor_source"] == "resolved_port_key"]
+    unresolved = arp[arp["chain_anchor_source"] == "arp_sender_ip"]
+
+    assert len(resolved) > 0
+    assert len(unresolved) > 0
+
+    for (key, window, chain) in zip(resolved["chain_anchor"], resolved["window_id"], resolved["lineage_id"]):
+        assert port_chains[(key, window)] == chain, f"{key} in window {window}: resolved row is on its own chain"
+
+    assert set(unresolved["lineage_id"]).isdisjoint(set(tc1["lineage_id"]))
+
+    # And the chain does span two layers, which is the number the cross-layer rule counts.
+    chained = result[result["lineage_id"].notna()]
+    span = chained.groupby("lineage_id")["osi_layer"].nunique()
+
+    assert span.max() == 2
+    assert (span == 2).sum() > 0
+
+
+@pytest.mark.cpu_mode
+def test_every_chained_row_says_where_its_root_came_from(result: pd.DataFrame):
+    # A chain reached through a soft join is not the evidence a direct observation is. The source column is
+    # what lets a reader tell them apart; a chained row without one would be a chain nobody can explain.
+    for (name, candidates) in tp.CHAIN_ROOTS.items():
+        rows = _rows(result, name)
+        chained = rows[rows["lineage_id"].notna()]
+
+        assert chained["chain_anchor_source"].notna().all(), name
+        assert set(chained["chain_anchor_source"]) <= set(candidates), name
+
+
+@pytest.mark.cpu_mode
 def test_the_class_that_is_not_sealed_carries_no_chain(result: pd.DataFrame):
     # The bindings never enter a window, so there is no chain for them to belong to. A blank column is the honest
     # answer; a fabricated one would be worse than the gap this step set out to close.
@@ -263,7 +310,7 @@ def test_a_chain_survives_a_permutation_of_its_own_events(corpus: dict[str, pd.D
     # the identifier depends on is the reason.
     shuffled = tp.run_pipeline(tp.build_pipeline_config(), _permuted(corpus, 1))
 
-    for name in tp.CHAIN_ANCHORS:
+    for name in tp.CHAIN_ROOTS:
         before = set(_rows(result, name)["lineage_id"].dropna())
         after = set(_rows(shuffled, name)["lineage_id"].dropna())
 

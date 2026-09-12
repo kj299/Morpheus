@@ -69,8 +69,10 @@ from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
+from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
 from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
+from morpheus.stages.telemetry.tc5_score_stage import Scorer
 from morpheus.stages.telemetry.tc5_score_stage import TC5ScoreStage
 from morpheus.utils.model_manifest import ModelManifest
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
@@ -464,14 +466,26 @@ by the episode would give one row per logon rather than one per person, which is
 behavioral rollup is for. `session_id` stays on the record as its own column for the rules that join on it.
 """
 
+DRIFT_PREFIX = "day_"
+"""Prefix on the daily sealer's columns, so the hourly windows keep theirs."""
+
 
 def _run_class(config: Config,
                dataframes: list[pd.DataFrame],
                stages: list,
                impose_order: bool,
                anchor: str,
-               envelope: tuple = None) -> pd.DataFrame:
-    """Source → stamp → (total order) → the class's stages → (envelope) → window seal → sink, as one frame."""
+               envelope: tuple = None,
+               daily: list = None) -> pd.DataFrame:
+    """Source → stamp → (total order) → the class's stages → (envelope) → window seal → (daily seal → daily
+    stages) → sink, as one frame.
+
+    The hourly seal is the one the chains and the shipped detections are built on. A class given `daily` is
+    sealed a second time, into days, behind it -- with the daily columns prefixed so the hourly ones keep their
+    identity -- and the daily stages run on those complete days. That is where a trajectory across days is
+    measured: R-P-L5-006 asks about four consecutive daily windows, and a day is not something an hourly window
+    knows about.
+    """
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
@@ -492,6 +506,17 @@ def _run_class(config: Config,
                         lateness_seconds=LATENESS_SECONDS,
                         order_columns=list(DEFAULT_ORDER_COLUMNS),
                         entity_key_column=anchor))
+
+    if (daily is not None):
+        pipe.add_stage(
+            WindowSealStage(config,
+                            period_seconds=DAY_S,
+                            lateness_seconds=LATENESS_SECONDS,
+                            order_columns=list(DEFAULT_ORDER_COLUMNS),
+                            column_prefix=DRIFT_PREFIX))
+
+        for stage in daily:
+            pipe.add_stage(stage)
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
@@ -583,7 +608,9 @@ class ReferenceScorer:
 def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                 impose_order: bool = True) -> pd.DataFrame:
+                 impose_order: bool = True,
+                 scorer: typing.Optional[Scorer] = None,
+                 manifest: typing.Optional[ModelManifest] = None) -> pd.DataFrame:
     """
     Run every layer 5 telemetry class through its pipeline and return one canonicalized frame.
 
@@ -599,6 +626,15 @@ def run_pipeline(config: Config,
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages. The permutation check's negative control turns it
         off, and every stage here is cumulative, so the difference is visible.
+    scorer : `morpheus.stages.telemetry.tc5_score_stage.Scorer`, optional
+        What answers for the scores. Defaults to `ReferenceScorer`, the frozen arithmetic the golden file is
+        built on. `examples/layer5_model/run_model.py` passes a `DfencoderScorer` holding the models it trained,
+        which is how the composed pipeline is run with the autoencoder the guide names -- on the machine that
+        can run one.
+    manifest : `morpheus.utils.model_manifest.ModelManifest`, optional
+        What pins each principal to a version. Defaults to `SCORING_MANIFEST`, which resolves everyone to the
+        reference placeholder. Passed together with `scorer`, or the versions one resolves are ones the other
+        does not hold.
 
     Returns
     -------
@@ -607,6 +643,13 @@ def run_pipeline(config: Config,
     """
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
+
+    if ((scorer is None) != (manifest is None)):
+        raise ValueError("scorer and manifest are passed together or not at all; a manifest resolving versions "
+                         "the scorer does not hold is the mismatch this pairing exists to prevent")
+
+    scorer = ReferenceScorer() if scorer is None else scorer
+    manifest = SCORING_MANIFEST if manifest is None else manifest
 
     outputs = {}
 
@@ -618,11 +661,12 @@ def run_pipeline(config: Config,
             TC5CadenceStage(config, min_samples=CADENCE_MIN_SAMPLES),
             TC5TravelStage(config, excluded_source_networks=(VPN_EGRESS_NETWORK, )),
             TC5RiskStage(config, min_denominator=1),
-            TC5ScoreStage(config, scorer=ReferenceScorer(), manifest=SCORING_MANIFEST, feature_columns=SCORED_FEATURES),
+            TC5ScoreStage(config, scorer=scorer, manifest=manifest, feature_columns=SCORED_FEATURES),
         ],
         impose_order,
         anchor=CHAIN_ANCHORS["tc5_auth"],
-        envelope=CLASS_ENVELOPE["tc5_auth"])
+        envelope=CLASS_ENVELOPE["tc5_auth"],
+        daily=[TC5DriftStage(config, window_column=f"{DRIFT_PREFIX}window_id", aggregate="mean")])
 
     outputs["tc5_session"] = _run_class(config,
                                         batches["tc5_session"],

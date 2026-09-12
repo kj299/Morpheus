@@ -49,16 +49,17 @@ should return nothing:
 | R-D-L2-004, MAC in two places | **2** | A conflict at zero gap and a displacement at two seconds. The roaming device, displaced a full poll cadence later, is deliberately outside the threshold. |
 | R-D-L2-005, authorization without authentication | **2** | One bypass on a quiet port, one that arrived while a legitimate exchange was open. |
 | R-D-L5-003, impossible travel | **2** | One principal in New York half an hour after her own London office login, and back in London ninety minutes later. Two rows is what one interloper produces. The eight-hour flight beside it, and the VPN user changing country twice a day, do not appear. |
+| R-P-L5-006, drift trajectory | **7** | Three principals, none of them behaviour, each explained in `expected_results.json`: two climb for six days because the reference scorer's baseline is frozen under cumulative features, one has a shallow run ended by the planted burst. Watchlist, never a page. |
 | R-D-L5-004, multi-factor fatigue | **1** | Five denials in eight minutes and then an approval. The fumbled password beside it -- two failures and a success with the factor never challenged -- does not appear. |
 | R-C-002, TLS before beaconing | **0** | Correct. Needs layer 4 and layer 7 telemetry; neither class exists. |
-| Behavior summary, per-layer scores | **355** | One row per five-minute bin, layer, entity and lineage over the 1719 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record; `peak_z` is still null outside layer 5, because only `TC5ScoreStage` produces `max_abs_z`. |
-| Chain assembly, cross-layer risk | **0** | Correct, and no longer because `osi_layer` is missing. All 296 lineage chains span exactly one layer, so `dc(osi_layer)` never reaches three. Each class runs its own pipeline over its own corpus and the edge events carry no `lineage_id`, so nothing links a layer 1 observation to what it caused. |
+| Behavior summary, per-layer scores | **320** | One row per five-minute bin, layer, entity and lineage over the 1719 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 355 until resolved layer 2 observations joined their port's chain; `peak_z` is still null outside layer 5, because only `TC5ScoreStage` produces `max_abs_z`. |
+| Chain assembly, cross-layer risk | **0** | Correct, and closer than it was. 39 of the 210 chains span two layers -- a port's layer 1 samples and the layer 2 observations resolved onto it -- but the rule needs three, and layer 5 runs over its own corpus with nothing yet resolving an 802.1X identity to a principal. The edge events carry no `lineage_id`. |
 | Binding lookup, L2/L3 refresh | **80** | Written into the `binding_l2_l3` collection. |
 | Binding lookup, L1 refresh | **5** | Five port intervals across four ports: three stable, two on the port whose optic is swapped. The lookup keys on port and switch with no bucket, so those two collapse to one row and the later optic wins -- it answers what is in a port now, not what was in it then. |
 | Binding lookup, L2/L3 expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
 | Binding health, unresolved rate | **1** | An operational metric; the value matters, not whether it fired. |
 
-**Four of the thirteen should return nothing.** That is the point of writing them down. An empty result is this app's
+**Four of the fourteen should return nothing.** That is the point of writing them down. An empty result is this app's
 characteristic failure, and without a list saying which emptiness is correct, a deployment cannot tell a rule that
 is working from a rule that is broken. It was five until the envelope landed, and the one that changed is worth
 noting: it had been empty for two reasons at once, and fixing the obvious one is what made the other visible.
