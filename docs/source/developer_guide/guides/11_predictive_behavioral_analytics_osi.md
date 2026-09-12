@@ -1377,8 +1377,16 @@ should place the principal on a watchlist and raise the sensitivity of layer 7 r
 The trajectory this reads is built: {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`
 emits `drift_rising_windows`, `drift_total_rise` and `drift_rise_sigmas` -- the quantity this rule
 thresholds at 1.5 -- alongside the velocity and acceleration this document names as its second predictive mechanism.
-The rule fires on nothing until something produces `mean_abs_z`, and until then every one of those
-columns is null. Three of the definitions are load-bearing and easy to get wrong in a way that reads
+The trajectory is wired into the composed layer 5 pipeline: a second `WindowSealStage` behind the hourly
+one seals the scored events into days, with its columns prefixed `day_` so the hourly windows keep their
+identity, and the drift stage reduces each complete day to one observation per principal -- the mean of the
+day's per-event scores -- and stamps it on every row of the day. The saved search `R-P-L5-006 - Drift
+trajectory` reads those columns and deduplicates on principal and day. On the reference corpus it fires on
+three principals, none of them behaviour: two climb for six straight days because the reference scorer's
+parameters are frozen while `logcount` and the `*increment` features are cumulative, and the third has a
+run of four whose first three rises are hundredths and whose fourth is the planted multi-factor burst -- a
+spike the rule's letter admits because the day's mean stays under 2.0. `drift_acceleration` separates the
+two shapes, and is the column to read first when tuning this rule. Three of the definitions are load-bearing and easy to get wrong in a way that reads
 plausibly: a gap in the windows restarts the run rather than extending it, the standard deviation is
 taken over prior windows only so a rise cannot inflate its own denominator, and a score that has never
 varied yields no rise in sigmas rather than an infinite one. Note also where the run begins: four
@@ -2799,9 +2807,11 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.telemetry.tc5_risk_stage.TC5RiskStage`), which is the same primitive
   R-D-L5-004 and the plain failure-then-success feature both read, counted over different subsets of
   the stream.
-- The trajectory R-P-L5-006 reads, built against scores supplied directly rather than waiting for a model
+- The trajectory R-P-L5-006 reads, built against scores supplied directly and now wired into the composed
+  layer 5 pipeline over daily windows sealed behind the hourly ones
   ({py:mod}`~morpheus.utils.drift_trajectory` and
-  {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`). It reports the first and second
+  {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`, with `aggregate="mean"` reducing each
+  complete day to one observation per principal). It reports the first and second
   differences, the length of the current strictly-increasing run, and the run's total rise in the
   principal's own standard deviations -- the quantity this document thresholds at 1.5. Three choices in it
   are decisions rather than details, and each is asserted: a gap in a principal's activity restarts the run
@@ -2885,7 +2895,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. Nothing in the pipeline produces `mean_abs_z` or `max_abs_z`, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 fire on nothing. The model itself is not the missing part: `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus and shown the scoring path reproducible under controls 3 and 5. What is missing is a scoring stage in the composed pipeline, the manifest wiring that pins which model scored which entity, and enough data for the scores to mean anything |
+| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores every layer 5 event against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory over daily windows, and R-B-L5-001 and R-P-L5-006 are evaluated end to end against the corpus. What scores them is `ReferenceScorer`, frozen arithmetic that the class itself calls not a model. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus under controls 3 and 5. What is missing is an adapter putting that model behind the `Scorer` protocol, a manifest that pins it per principal, and enough data for its scores to mean anything -- 105 events across five principals is enough to prove the wiring and nothing else |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
 | Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |

@@ -291,3 +291,75 @@ def test_an_out_of_order_window_does_not_join_the_trajectory(config: Config):
     stage.on_data(after)
 
     assert _as_list(after, "drift_rising_windows") == [3]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_aggregate_mean_reduces_a_window_to_one_observation(config: Config):
+    # Per-event scores, daily windows. Without the reduction the second row of a day is a repeat and reads as
+    # nulls; with it, the day is one observation -- the mean -- and every row of the day carries its trajectory.
+    scores = [1.0, 1.0, 1.2, 1.2, 1.5, 1.5, 1.9, 1.9]
+    windows = [100, 100, 101, 101, 102, 102, 103, 103]
+    meta = run(config, frame(scores, windows=windows), aggregate="mean")
+
+    velocity = _as_list(meta, "drift_velocity")
+    rising = _as_list(meta, "drift_rising_windows")
+
+    # Both rows of one day say the same thing.
+    for day in range(4):
+        assert velocity[2 * day] == velocity[2 * day + 1]
+        assert rising[2 * day] == rising[2 * day + 1]
+
+    assert rising[-1] == 4
+    assert velocity[-1] == pytest.approx(0.4)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_aggregate_mean_is_the_mean_and_not_the_first_or_last(config: Config):
+    # A day whose events are 1.0 and 3.0 is a day at 2.0. If the first or the last had won, the next day's
+    # velocity would say so.
+    scores = [1.0, 3.0, 2.5]
+    windows = [100, 100, 101]
+    meta = run(config, frame(scores, windows=windows), aggregate="mean")
+
+    assert _as_list(meta, "drift_velocity")[-1] == pytest.approx(0.5)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_aggregate_mean_does_not_depend_on_row_order_inside_the_window(config: Config):
+    # Membership decides the mean, not arrival order, so a reordered window gives the same trajectory.
+    forward = run(config,
+                  frame([1.0, 1.4, 1.2, 2.0, 2.2, 2.4], windows=[100, 100, 100, 101, 101, 101]),
+                  aggregate="mean")
+    reversed_rows = run(config,
+                        frame([1.2, 1.4, 1.0, 2.4, 2.2, 2.0], windows=[100, 100, 100, 101, 101, 101]),
+                        aggregate="mean")
+
+    assert _as_list(forward, "drift_velocity")[-1] == _as_list(reversed_rows, "drift_velocity")[-1]
+    assert _as_list(forward, "drift_velocity")[-1] == pytest.approx(1.0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_without_aggregation_a_repeat_is_still_a_repeat(config: Config):
+    # The default is unchanged: the second row of a window is out of order and reads as nulls, and the stage
+    # warns. A caller who has per-event scores has to ask for the reduction.
+    meta = run(config, frame([1.0, 1.0, 1.2], windows=[100, 100, 101]))
+
+    assert _as_list(meta, "drift_velocity")[1] is None
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_aggregate_keeps_entities_apart(config: Config):
+    scores = [1.0, 5.0, 1.5, 5.5]
+    principals = [ALICE, BOB, ALICE, BOB]
+    windows = [100, 100, 101, 101]
+    meta = run(config, frame(scores, principals=principals, windows=windows), aggregate="mean")
+
+    velocity = _as_list(meta, "drift_velocity")
+
+    assert velocity[2] == pytest.approx(0.5)
+    assert velocity[3] == pytest.approx(0.5)
+
+
+def test_an_unknown_aggregate_is_refused(config: Config):
+    with pytest.raises(ValueError, match="aggregate"):
+        TC5DriftStage(config, aggregate="median")

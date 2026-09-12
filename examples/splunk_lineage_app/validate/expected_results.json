@@ -114,6 +114,42 @@
     "Binding health - unresolved rate": {
       "expected_rows": 1,
       "why": "One summary row over the ARP stream's resolution outcomes. This is an operational health metric rather than a detection, and it is the one search whose value is in the number rather than in whether it fired."
+    },
+    "R-P-L5-006 - Drift trajectory": {
+      "expected_rows": 7,
+      "expected_empty": false,
+      "contributing_rows": 21,
+      "key_values": [
+        {
+          "user_principal": "carol@example.com",
+          "day_window_id": 9
+        },
+        {
+          "user_principal": "dave@example.com",
+          "day_window_id": 8
+        },
+        {
+          "user_principal": "dave@example.com",
+          "day_window_id": 9
+        },
+        {
+          "user_principal": "dave@example.com",
+          "day_window_id": 10
+        },
+        {
+          "user_principal": "svc-batch@example.com",
+          "day_window_id": 8
+        },
+        {
+          "user_principal": "svc-batch@example.com",
+          "day_window_id": 9
+        },
+        {
+          "user_principal": "svc-batch@example.com",
+          "day_window_id": 10
+        }
+      ],
+      "why": "Seven principal-days after deduplication, from 21 rows that carry the trajectory. None of them is behaviour, and the search says so in its own comment. Two principals climb for six straight days because the reference scorer's parameters are frozen while `logcount` and the `*increment` features are cumulative: a score whose baseline never moves under a feature that only grows must rise, and that is arithmetic. The third, on the day of the planted multi-factor burst, has a run of four whose first three rises are hundredths and whose fourth is the burst -- a spike the rule's letter admits because the day's mean stays under R-B-L5-001's 2.0. The predicate is evaluated here exactly as the search states it, so a corpus change that adds or removes a firing shows up as a diff rather than as a search that quietly means something else. What a deployment should take from this: the drift path's first false positives are cumulative features under a stale baseline, and a spike at the end of a flat run. Both are visible in `drift_acceleration` and `drift_baseline_sigma`."
     }
   }
 }

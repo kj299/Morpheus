@@ -303,3 +303,39 @@ def test_constructor_validation(config: Config):
 
     with pytest.raises(ValueError):
         make_stage(config, time_column="")
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_prefix_keeps_two_sealers_apart(config: Config):
+    # A daily sealer behind an hourly one is how a trajectory is measured over days while the hourly windows
+    # keep their identity. Without a prefix the second would overwrite the first's seven columns and nothing
+    # would say it had; with one, both sets are on the row and the lineage column, named on its own, is not
+    # touched.
+    frame = get_df_class(config.execution_mode)({
+        "event_time": [t * SECOND_NS for t in (10, 50, 120, 400)],
+        "entity": ["a", "a", "a", "a"],
+        "event_uid": ["u1", "u2", "u3", "u4"],
+    })
+    pipe = LinearPipeline(config)
+    pipe.set_source(InMemorySourceStage(config, dataframes=[frame]))
+    pipe.add_stage(make_stage(config, entity_key_column="entity"))
+    pipe.add_stage(make_stage(config, period_seconds=1000, lateness_seconds=30, column_prefix="day_"))
+    sink = pipe.add_stage(InMemorySinkStage(config))
+    pipe.run()
+
+    result = pd.concat(_frames(sink.get_messages()), ignore_index=True).sort_values("event_time")
+
+    assert sorted(result["window_id"].unique()) == [0, 1, 4]
+    assert sorted(result["day_window_id"].unique()) == [0]
+    assert set(result["day_sealed_by"]) == {"flush"}
+
+    for name in ("window_start_ns", "window_end_ns", "revision", "sealed_by", "is_late", "window_complete"):
+        assert f"day_{name}" in result.columns, name
+
+    assert "day_lineage_id" not in result.columns
+    assert result["lineage_id"].notna().all()
+
+
+def test_a_none_prefix_is_refused(config: Config):
+    with pytest.raises(ValueError, match="column_prefix"):
+        make_stage(config, column_prefix=None)

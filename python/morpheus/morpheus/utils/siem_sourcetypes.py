@@ -119,7 +119,8 @@ PRODUCED: dict = {
             time_columns=("event_time", ),
             producer="The TC-5 stages (session, novelty, cadence, travel, risk) behind WindowSealStage; the "
             "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`.",
-            # R-D-L5-003 and R-D-L5-004 filter on these.
+            # R-D-L5-003 and R-D-L5-004 filter on the first eight; R-P-L5-006 on the rest, which TC5DriftStage
+            # stamps over the daily windows a second WindowSealStage seals behind the hourly one.
             required_columns=("event_uid",
                               "user_principal",
                               "travel_status",
@@ -127,7 +128,13 @@ PRODUCED: dict = {
                               "travel_elapsed_ns",
                               "mfa_denied_then_approved",
                               "mfa_attempts_in_window",
-                              "mfa_denials_in_window"),
+                              "mfa_denials_in_window",
+                              "mean_abs_z",
+                              "max_abs_z",
+                              "day_window_id",
+                              "drift_mature",
+                              "drift_rising_windows",
+                              "drift_rise_sigmas"),
         ),
     "morpheus:edge":
         Sourcetype(

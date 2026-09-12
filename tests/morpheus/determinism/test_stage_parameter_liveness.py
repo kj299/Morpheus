@@ -276,6 +276,19 @@ def resolved_and_unresolved() -> dict:
     }
 
 
+def repeated_days() -> dict:
+    """One principal, two scored events per day for three days.
+
+    Observed row by row, the second event of each day is a repeat and reads as nulls; reduced to one observation
+    per day, every row carries the day's trajectory. The two modes cannot agree on this frame.
+    """
+    return {
+        "user_principal": ["alice@example.com"] * 6,
+        "window_id": [100, 100, 101, 101, 102, 102],
+        "mean_abs_z": [1.0, 1.2, 1.4, 1.6, 1.9, 2.1],
+    }
+
+
 def keyed_ports() -> dict:
     """Ports that already carry an `entity_key`, and one that carries only whitespace.
 
@@ -807,6 +820,7 @@ REGISTRY: dict = {
                 Knob("min_windows", DIFFERS, benign=4, extreme=100),
                 Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
                 Knob("decimals", DIFFERS, benign=4, extreme=1),
+                Knob("aggregate", DIFFERS, benign="none", extreme="mean", frame=repeated_days),
             ),
         ),
     "TC5TravelStage":
@@ -889,6 +903,7 @@ REGISTRY: dict = {
                      reason="Every row in this frame carries a valid event time, and a "
                      "frame that does not is the subject of the window seal stage's own tests; the flag changes "
                      "nothing about a well-formed batch by design."),
+                Knob("column_prefix", DIFFERS, benign="", extreme="day_"),
             ),
         ),
     "TotalOrderStage":
