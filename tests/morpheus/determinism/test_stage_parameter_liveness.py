@@ -48,6 +48,7 @@ from morpheus.config import CppConfig
 from morpheus.config import ExecutionMode
 from morpheus.messages import MessageMeta
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
@@ -260,6 +261,18 @@ def port_inventory() -> dict:
         "event_time": [index * MINUTE for index in range(len(serials))],
         "transceiver_serial": serials,
         "lldp_neighbor_chassis_id": neighbors,
+    }
+
+
+def resolved_and_unresolved() -> dict:
+    """Two ARP observations the ladder placed on a port and one it could not, each with its own address.
+
+    The candidates disagree on every row where both have a value, so preferring one over the other is visible
+    in the output -- which is what makes the order a parameter rather than a set.
+    """
+    return {
+        "resolved_port_key": ["hq:sw1:Gi1/0/1", None, "hq:sw1:Gi1/0/2"],
+        "arp_sender_ip": ["10.0.0.1", "10.0.0.2", "10.0.0.3"],
     }
 
 
@@ -911,6 +924,22 @@ REGISTRY: dict = {
                 Knob("use_base64", DIFFERS, benign=True, extreme=False),
                 Knob("output_column", DIFFERS, benign="community_id", extreme="flow_id"),
                 Knob("raise_on_failure", RAISES, benign=False, extreme=True),
+            ),
+        ),
+    "ChainAnchorStage":
+        Scenario(
+            stage=ChainAnchorStage,
+            frame=resolved_and_unresolved,
+            base={
+                "candidates": ["resolved_port_key", "arp_sender_ip"],
+            },
+            knobs=(
+                Knob("candidates",
+                     DIFFERS,
+                     benign=["resolved_port_key", "arp_sender_ip"],
+                     extreme=["arp_sender_ip", "resolved_port_key"]),
+                Knob("anchor_column", DIFFERS, benign="chain_anchor", extreme="root"),
+                Knob("source_column", DIFFERS, benign="chain_anchor_source", extreme="root_from"),
             ),
         ),
     "EnvelopeStampStage":

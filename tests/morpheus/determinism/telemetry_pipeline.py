@@ -59,6 +59,8 @@ from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
+from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -485,18 +487,25 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-CHAIN_ANCHORS = {
-    "tc1": "entity_key",
-    "tc2_mac": "port_key",
-    "tc2_arp": "arp_sender_ip",
-    "tc2_auth": "auth_port_key",
+CHAIN_ROOTS = {
+    "tc1": ["entity_key"],
+    "tc2_mac": ["port_key"],
+    "tc2_arp": ["resolved_port_key", "arp_sender_ip"],
+    "tc2_auth": ["auth_port_key"],
 }
-"""What each class's correlation chain is rooted on.
+"""What each class's correlation chain is rooted on, as candidates in order of preference, decided per row.
 
-There is no single anchor across the classes, and pretending otherwise would be the fabrication the null-key rule
-exists to prevent. A layer 1 sample is about a port, so its chain is anchored on the port's `entity_key`; an ARP
-observation is about the address being claimed; an 802.1X exchange is about the port it authorized. The binding
-class has no entry because it is not sealed into windows at all."""
+A layer 1 sample is about a port, so its chain is rooted on the port's `entity_key`. A MAC table row and an
+802.1X exchange each name the port they were observed on directly, so they root on it too. An ARP observation
+names only the address being claimed -- unless the ladder resolved its MAC to a port, in which case the
+observation is about that port and joins the port's chain, with `chain_anchor_source` recording that it got
+there through the binding table. An unresolved one stays rooted on the address, which is what it was rooted on
+before and is still true. The binding classes have no entry because they are not sealed into windows at all.
+
+These four classes are sealed together, in one pass over their union in event-time order, because a chain is a
+Merkle root over its members and the members of a port's chain now come from two layers. Sealing each class on
+its own would give the same root key two different roots, one per class, and nothing downstream could tell that
+they were the same chain."""
 
 
 def _run_class(config: Config,
@@ -505,13 +514,24 @@ def _run_class(config: Config,
                impose_order: bool,
                seal: bool = True,
                anchor: str = None,
-               envelope: tuple = None) -> pd.DataFrame:
-    """Source → stamp → (total order) → the class's stages → (envelope) → (window seal) → sink, as one frame.
+               envelope: tuple = None,
+               chain: list[str] = None) -> pd.DataFrame:
+    """Source → stamp → (total order) → the class's stages → (envelope) → (chain anchor) → (window seal) → sink.
 
     The envelope stamp goes after the class's own stages rather than before them, because two of these classes
     are produced by stages that replace the payload wholesale: a binding stage emits one row per interval, not
     one per observation, so anything stamped upstream of it is discarded along with the observations.
+
+    A class given `chain` has its root chosen per row here and is sealed later, in `_seal_chains`, together with
+    every other chained class. `anchor` is the older per-class form and seals the class on its own; the two are
+    not combined.
     """
+    if (chain is not None and anchor is not None):
+        raise ValueError("a class is chained per row or anchored per class, not both")
+
+    if (chain is not None and seal):
+        raise ValueError("a chained class is sealed with the other chained classes, not on its own")
+
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
@@ -526,6 +546,9 @@ def _run_class(config: Config,
         (osi_layer, entity_columns) = envelope
         pipe.add_stage(EnvelopeStampStage(config, osi_layer=osi_layer, entity_columns=entity_columns))
 
+    if (chain is not None):
+        pipe.add_stage(ChainAnchorStage(config, candidates=chain))
+
     if (seal):
         pipe.add_stage(
             WindowSealStage(config,
@@ -538,6 +561,56 @@ def _run_class(config: Config,
     pipe.run()
 
     return _collect(sink)
+
+
+def _seal_chains(config: Config, outputs: dict[str, pd.DataFrame], parts: int = 1) -> dict[str, pd.DataFrame]:
+    """
+    Seal the chained classes together, so a port's chain holds its events from every layer that reached it.
+
+    The classes are tagged, aligned to one column set, concatenated, and put in event-time order -- the order a
+    deployment would see them in, where a layer 1 sample and the layer 2 observations on the same port arrive
+    interleaved rather than one whole class after another. Fed class by class instead, the watermark would advance
+    through the first class and declare every row of the second late. `parts` splits that ordered union into
+    contiguous source frames so the batch-split sweep exercises this pass as well as the per-class ones.
+
+    Each class comes back with its own columns plus the ones sealing adds, so nothing about a class's shape depends
+    on which other classes it was sealed beside.
+    """
+    columns = {name: list(frame.columns) for (name, frame) in outputs.items()}
+    tagged = []
+
+    for (name, frame) in outputs.items():
+        frame = frame.copy()
+        frame["telemetry_class"] = name
+        tagged.append(frame)
+
+    union = pd.concat(tagged, ignore_index=True)
+    union = union.sort_values(list(DEFAULT_ORDER_COLUMNS), kind="stable").reset_index(drop=True)
+
+    size = max(1, len(union) // max(1, parts))
+    dataframes = [union.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(union), size)]
+
+    sealer = WindowSealStage(config,
+                             period_seconds=PERIOD_SECONDS,
+                             lateness_seconds=LATENESS_SECONDS,
+                             order_columns=list(DEFAULT_ORDER_COLUMNS),
+                             entity_key_column=DEFAULT_ANCHOR_COLUMN)
+    added = [name for name in sealer._needed_columns if name not in union.columns]  # pylint: disable=protected-access
+
+    pipe = LinearPipeline(config)
+    pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
+    pipe.add_stage(sealer)
+    sink = pipe.add_stage(InMemorySinkStage(config))
+    pipe.run()
+
+    sealed = _collect(sink)
+    result = {}
+
+    for name in outputs:
+        rows = sealed[sealed["telemetry_class"] == name]
+        result[name] = rows[columns[name] + added].reset_index(drop=True)
+
+    return result
 
 
 def build_binding_table(bindings: pd.DataFrame) -> BindingTable:
@@ -590,7 +663,8 @@ def run_pipeline(config: Config,
                                     TC1ChangeStage(config),
                                 ],
                                 impose_order,
-                                anchor=CHAIN_ANCHORS["tc1"],
+                                seal=False,
+                                chain=CHAIN_ROOTS["tc1"],
                                 envelope=CLASS_ENVELOPE["tc1"])
 
     # The same layer 1 snapshots, closed into port bindings. This is the ladder's last rung: the table that takes
@@ -609,7 +683,8 @@ def run_pipeline(config: Config,
     outputs["tc2_mac"] = _run_class(config,
                                     batches["tc2_mac"], [TC2CardinalityStage(config)],
                                     impose_order,
-                                    anchor=CHAIN_ANCHORS["tc2_mac"],
+                                    seal=False,
+                                    chain=CHAIN_ROOTS["tc2_mac"],
                                     envelope=CLASS_ENVELOPE["tc2_mac"])
     bindings = _run_class(config,
                           batches["tc2_mac"], [TC2BindingStage(config)],
@@ -640,14 +715,21 @@ def run_pipeline(config: Config,
                                  uid_column="binding_uid"),
         ],
         impose_order,
-        anchor=CHAIN_ANCHORS["tc2_arp"],
+        seal=False,
+        chain=CHAIN_ROOTS["tc2_arp"],
         envelope=CLASS_ENVELOPE["tc2_arp"])
 
     outputs["tc2_auth"] = _run_class(config,
                                      batches["tc2_auth"], [TC2AuthStage(config)],
                                      impose_order,
-                                     anchor=CHAIN_ANCHORS["tc2_auth"],
+                                     seal=False,
+                                     chain=CHAIN_ROOTS["tc2_auth"],
                                      envelope=CLASS_ENVELOPE["tc2_auth"])
+
+    # The chained classes are sealed together, in as many contiguous pieces as the widest per-class split, so
+    # control 5 sweeps this pass too.
+    parts = max(len(batches[name]) for name in CHAIN_ROOTS)
+    outputs.update(_seal_chains(config, {name: outputs[name] for name in CHAIN_ROOTS}, parts=parts))
 
     frames = []
 

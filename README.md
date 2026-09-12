@@ -124,7 +124,7 @@ Being clear about the boundary is the point of writing it down:
   there were seven until `binding:l1` gained a producer, and that test now runs instead of skipping.
   These runs also carry `torch==2.4.0+cu124` alongside the RAPIDS stack, so they say something the
   earlier ones could not: adding Torch to this environment does not disturb cuDF, and the two coexist in
-  one process. That covers all twenty-five stages, all three composed pipelines,
+  one process. That covers all twenty-six stages, all three composed pipelines,
   control 13's six checks, the stage parameter liveness registry and the first-detection corpus, in GPU
   mode. The wider upstream tier **skipped itself**, because that checkout's `tests/tests_data` fixtures
   were unfetched Git LFS pointers, so nothing here is a claim about the upstream suite. One card, no CI.
@@ -222,6 +222,7 @@ lake design usually gets wrong:
 | `clock_source`, `clock_offset_ms` | Records beyond a configured bound are quarantined rather than dropped. A device whose clock is wrong by years is a real thing, and one such record can expire every open binding at once. |
 | `sampling_policy` | `full`, `1:N` or `adaptive:<params>`. Any rate-based feature is uninterpretable without it. |
 | `entity_key`, `osi_layer` | The behavioral subject for that class and the layer it came from. The subject differs per layer -- see the table below. Both are stamped by `EnvelopeStampStage` at the tail of each class's segment; searches that group by layer and entity drop any row missing either. |
+| `chain_anchor`, `chain_anchor_source` | What the record's correlation chain is rooted on, and which column supplied it. A layer 2 observation the ladder resolved to a port roots on the port and shares the port's `lineage_id` across layers; `chain_anchor_source` says it got there through the binding table rather than by direct observation. |
 | `origin_hash`, `event_uid` | Deterministic identity, so a score can be traced back to the bytes that produced it. |
 
 Two rules govern it, and both are the kind that only hurt later:
