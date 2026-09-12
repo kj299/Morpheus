@@ -2784,6 +2784,11 @@ What Morpheus provides versus what has to be built, stated plainly.
   come before the autoencoder rather than after it because this document says they must: retrofitting
   determinism onto a running detection pipeline means re-tuning every threshold, since the scores will move.
   What is not here is the autoencoder itself, and the boundary is exact -- see the caveat below.
+- The autoencoder behind the `Scorer` protocol ({py:mod}`~morpheus.utils.dfencoder_scorer`): inference only,
+  fitted models keyed by a pinned version that is a digest of their weights, a manifest builder that declares
+  no fallback, and a training helper that refuses in plain words without Torch. `run_model.py` uses it to run
+  the composed pipeline with the model the guide names, as its fourth check; the composed pipeline's own
+  `run_pipeline` takes a `scorer` and `manifest` so the reference arithmetic and the model occupy the same slot.
 - The composed layer 5 pipeline under control 13's six checks
   (`tests/morpheus/determinism/session_pipeline.py`): a week-long corpus of one estate's authentications,
   with an impossible journey, a legitimate eight-hour flight, a token refresh issued from the origin
@@ -2895,7 +2900,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores every layer 5 event against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory over daily windows, and R-B-L5-001 and R-P-L5-006 are evaluated end to end against the corpus. What scores them is `ReferenceScorer`, frozen arithmetic that the class itself calls not a model. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus under controls 3 and 5. What is missing is an adapter putting that model behind the `Scorer` protocol, a manifest that pins it per principal, and enough data for its scores to mean anything -- 105 events across five principals is enough to prove the wiring and nothing else |
+| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores every layer 5 event against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory over daily windows, and R-B-L5-001 and R-P-L5-006 are evaluated end to end against the corpus. What scores them is `ReferenceScorer`, frozen arithmetic that the class itself calls not a model. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus under controls 3 and 5. The adapter is built: `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, pins each principal to a digest of its own weights, and `run_model.py` runs the composed pipeline with it as its fourth check. What remains is the verdict from that run on the card, and enough data for the scores to mean anything -- 105 events across five principals proves the wiring and nothing else |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
 | Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |

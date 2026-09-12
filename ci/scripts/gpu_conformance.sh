@@ -116,6 +116,7 @@ UNMARKED=(
     tests/morpheus/utils/test_event_clock.py
     tests/morpheus/utils/test_geo_velocity.py
     tests/morpheus/utils/test_gpu_conformance_report.py
+    tests/morpheus/utils/test_dfencoder_scorer.py
     tests/morpheus/utils/test_gpu_conformance_targets.py
     tests/morpheus/utils/test_lineage.py
     tests/morpheus/utils/test_model_manifest.py

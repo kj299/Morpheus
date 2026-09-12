@@ -38,6 +38,13 @@ Three things are checked, each a control from Part 5:
   operation -- batch normalization left in training mode is the usual one -- gives different scores for the same
   row depending on what it was batched with, and no amount of seeding fixes that.
 - **The double run.** Two full train-and-score cycles, compared byte for byte after quantization.
+- **The wired path.** The trained models are placed behind `TC5ScoreStage` through
+  `morpheus.utils.dfencoder_scorer.DfencoderScorer`, with a manifest pinning each principal to a digest of its own
+  weights and no fallback, and the composed layer 5 pipeline is run twice and then under the batch-split sweep.
+  This is the first time the pipeline scores with the model the guide names rather than with frozen arithmetic.
+  The models score the rows they were trained on, which is a leak made on purpose: the question is whether the
+  wired path gives the same numbers twice, and a week of five principals cannot answer any other question about
+  a model.
 
 The artifact it writes is the evidence, in the same shape as `gpu_conformance.json`: what ran, on what card, with
 what result, so a number in a document can be traced to a run rather than to a memory of one.
@@ -135,6 +142,56 @@ def build_features():
     return frames
 
 
+def pipeline_checks(frames: dict, seed: int, epochs: int, eval_batch_size: int) -> dict:
+    """
+    The fourth check: the composed pipeline, with the trained models in the scoring slot.
+
+    Trains once, pins each principal to the digest of its own weights, runs the pipeline twice, then runs the
+    same batch-split sweep the harness runs against the reference scorer. Returns what the artifact records.
+    """
+    import pandas as pd  # pylint: disable=import-outside-toplevel
+
+    import session_pipeline  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.determinism import diff_frames  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.dfencoder_scorer import DfencoderScorer  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.dfencoder_scorer import build_manifest  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.dfencoder_scorer import train_dfencoder_models  # pylint: disable=import-outside-toplevel
+
+    trained = train_dfencoder_models(frames, FEATURE_COLUMNS, seed, epochs, eval_batch_size)
+    scorer = DfencoderScorer(trained.models, FEATURE_COLUMNS)
+    manifest = build_manifest(trained.versions, session_pipeline.SCORING_WINDOW)
+
+    config = session_pipeline.build_pipeline_config()
+    corpus = session_pipeline.build_corpus()
+
+    first = session_pipeline.run_pipeline(config, corpus, scorer=scorer, manifest=manifest)
+    second = session_pipeline.run_pipeline(config, corpus, scorer=scorer, manifest=manifest)
+    double_run = diff_frames(first, second) is None
+
+    def split(frame: pd.DataFrame, parts: int) -> list:
+        size = max(1, len(frame) // parts)
+        return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
+
+    thirds = {name: split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: split(frame, len(frame)) for (name, frame) in corpus.items()}
+    sweep = all(
+        diff_frames(first,
+                    session_pipeline.run_pipeline(config, corpus, batches=batches, scorer=scorer, manifest=manifest)) is
+        None for batches in (thirds, by_row))
+
+    scored = first[first["telemetry_class"] == "tc5_auth"]
+
+    return {
+        "pipeline_double_run_reproducible": double_run,
+        "pipeline_batch_invariant": sweep,
+        "pipeline_scored_rows": int(scored["mean_abs_z"].notna().sum()),
+        "pipeline_principals_pinned": len(trained.versions),
+        "pipeline_principals_skipped": dict(trained.skipped),
+        "model_versions": dict(trained.versions),
+        "pipeline_mean_abs_z_max": float(scored["mean_abs_z"].astype(float).max()),
+    }
+
+
 def train_and_score(frames: dict, seed: int, epochs: int, eval_batch_size: int) -> dict:
     """One full cycle: seed, train a model per principal, score its own rows, return the scores."""
     from morpheus.models.dfencoder import AutoEncoder  # pylint: disable=import-outside-toplevel
@@ -218,8 +275,17 @@ def main() -> int:
         str(size)
         for size in BATCH_SIZES) if batch_invariant else "DIFFERENT: the model has a batch-dependent operation")
 
+    print("\n=== the wired path ===")
+    wired = pipeline_checks(frames, arguments.seed, arguments.epochs, BATCH_SIZES[-1])
+    print("pipeline double run: " + ("identical" if wired["pipeline_double_run_reproducible"] else "DIFFERENT"))
+    print("pipeline batch sweep: " + ("identical" if wired["pipeline_batch_invariant"] else "DIFFERENT"))
+    print(f"{wired['pipeline_scored_rows']} rows scored against {wired['pipeline_principals_pinned']} pinned models")
+
+    verdict_passed = (reproducible and batch_invariant and wired["pipeline_double_run_reproducible"]
+                      and wired["pipeline_batch_invariant"])
+
     report = {
-        "verdict": "passed" if (reproducible and batch_invariant) else "failed",
+        "verdict": "passed" if verdict_passed else "failed",
         "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "device": device,
         "torch": torch.__version__,
@@ -233,9 +299,12 @@ def main() -> int:
         "double_run_reproducible": reproducible,
         "batch_invariant": batch_invariant,
         "batch_sizes": list(BATCH_SIZES),
+        **wired,
         "measures": "reproducibility of the scoring path, not detection quality: a week of five principals is "
                     "far too little data to train an autoencoder that detects anything, and no claim is made "
-                    "that it does.",
+                    "that it does. The wired-path checks score the rows the models were trained on, which is a "
+                    "leak made on purpose so the question stays whether the pipeline gives the same numbers "
+                    "twice with a real model in the slot.",
     }
 
     with open(arguments.artifact, "w", encoding="utf-8") as handle:
