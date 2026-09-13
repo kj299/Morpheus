@@ -174,16 +174,30 @@ def pipeline_checks(frames: dict, seed: int, epochs: int, eval_batch_size: int) 
 
     thirds = {name: split(frame, 3) for (name, frame) in corpus.items()}
     by_row = {name: split(frame, len(frame)) for (name, frame) in corpus.items()}
-    sweep = all(
-        diff_frames(first,
-                    session_pipeline.run_pipeline(config, corpus, batches=batches, scorer=scorer, manifest=manifest)) is
-        None for batches in (thirds, by_row))
+
+    # The disagreement itself is recorded, not just that there was one. A sweep that says only "DIFFERENT"
+    # sends whoever reads the artifact back to the machine to find out what moved, and the machine with the
+    # card is usually not the one asking.
+    sweep_differences = {}
+
+    for (label, batches) in (("thirds", thirds), ("by_row", by_row)):
+        difference = diff_frames(
+            first, session_pipeline.run_pipeline(config, corpus, batches=batches, scorer=scorer, manifest=manifest))
+
+        if (difference is not None):
+            sweep_differences[label] = difference
+
+    differences = dict(sweep_differences)
+
+    if (not double_run):
+        differences["second_run"] = diff_frames(first, second)
 
     scored = first[first["telemetry_class"] == "tc5_auth"]
 
     return {
         "pipeline_double_run_reproducible": double_run,
-        "pipeline_batch_invariant": sweep,
+        "pipeline_batch_invariant": not sweep_differences,
+        "pipeline_differences": differences,
         "pipeline_scored_rows": int(scored["mean_abs_z"].notna().sum()),
         "pipeline_principals_pinned": len(trained.versions),
         "pipeline_principals_skipped": dict(trained.skipped),
@@ -279,6 +293,10 @@ def main() -> int:
     wired = pipeline_checks(frames, arguments.seed, arguments.epochs, BATCH_SIZES[-1])
     print("pipeline double run: " + ("identical" if wired["pipeline_double_run_reproducible"] else "DIFFERENT"))
     print("pipeline batch sweep: " + ("identical" if wired["pipeline_batch_invariant"] else "DIFFERENT"))
+
+    for (label, difference) in sorted(wired["pipeline_differences"].items()):
+        print(f"  {label}: {difference}")
+
     print(f"{wired['pipeline_scored_rows']} rows scored against {wired['pipeline_principals_pinned']} pinned models")
 
     verdict_passed = (reproducible and batch_invariant and wired["pipeline_double_run_reproducible"]

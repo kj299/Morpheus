@@ -34,6 +34,16 @@ including a stub in a test; only training reaches for Torch, and refuses in plai
 trained on the corpus and score the corpus. That is the leak stated above, made deliberately, because the
 question the run answers is whether the pipeline gives the same scores twice with a real model in the slot --
 and a week of five principals cannot answer any other question about a model.
+
+**A row is scored on its own, because control 5 says batching must be irrelevant.** `TC5ScoreStage` hands over
+the rows one entity has *in the message it is processing*, so the size of that group is a function of how the
+stream was chunked, not of the data. A neural network is not shape-invariant to the last decimal: the same row
+in a batch of twenty and in a batch of one goes through different kernels and can come back differing in the
+seventh place. That difference does not stay small. `drift_rise_sigmas` divides a rise by the spread of a few
+nearly-equal scores, so a seventh-place wobble upstream lands as a difference of tenths downstream, far too
+large for quantization to absorb. So the adapter fixes the shape itself: `rows_per_call` rows go to the model
+at a time, one by default, and a row's score is then a function of the row rather than of its company. Raising
+it trades control 5 for throughput, because the last chunk of a group is only as big as the group leaves it.
 """
 
 import dataclasses
@@ -48,6 +58,7 @@ from morpheus.utils.model_manifest import ModelManifest
 logger = logging.getLogger(__name__)
 
 MODEL_NAME_PREFIX = "dfencoder"
+DEFAULT_ROWS_PER_CALL = 1
 DIGEST_LENGTH = 16
 DEFAULT_MIN_ROWS = 4
 
@@ -69,14 +80,20 @@ class DfencoderScorer:
     feature_columns : list of str
         The features, in the order the models were trained on. Every row handed to `score` must carry exactly
         these keys; a row with more or fewer is refused rather than reordered around.
+    rows_per_call : int, default = 1
+        How many rows go to the model at a time. The default of one makes a row's score a function of the row:
+        the model sees the same shape however the pipeline chunked the stream, which is what control 5 asks for.
+        Raising it batches the model's work and gives that up, because the last chunk of an entity's rows is
+        only as big as the group leaves it.
 
     Raises
     ------
     ValueError
-        If no models are given, a version is not pinned, a model has no `get_results`, or no features are named.
+        If no models are given, a version is not pinned, a model has no `get_results`, no features are named,
+        or `rows_per_call` is not a positive integer.
     """
 
-    def __init__(self, models: dict, feature_columns: list[str]):
+    def __init__(self, models: dict, feature_columns: list[str], rows_per_call: int = DEFAULT_ROWS_PER_CALL):
         if (not models):
             raise ValueError("models must hold at least one fitted model; a scorer with nothing behind it would "
                              "answer for every version the manifest could resolve")
@@ -93,8 +110,13 @@ class DfencoderScorer:
                 raise ValueError(f"the model behind {version!r} has no get_results method; this adapter speaks "
                                  f"to morpheus.models.dfencoder.AutoEncoder or anything shaped like it")
 
+        if (not isinstance(rows_per_call, int) or isinstance(rows_per_call, bool) or rows_per_call < 1):
+            raise ValueError(f"rows_per_call must be a positive integer, not {rows_per_call!r}; there is no "
+                             f"batch size at which a model is asked for no rows")
+
         self._models = dict(models)
         self._feature_columns = list(feature_columns)
+        self._rows_per_call = rows_per_call
 
     @property
     def versions(self) -> list[str]:
@@ -144,13 +166,22 @@ class DfencoderScorer:
                                  f"{self._feature_columns}; a row reordered or padded to fit would be scored on "
                                  f"the wrong features without anything saying so")
 
-        frame = pd.DataFrame([[row[name] for name in self._feature_columns] for row in features],
+        scored = []
+
+        for start in range(0, len(features), self._rows_per_call):
+            scored.extend(self._score_chunk(model, features[start:start + self._rows_per_call]))
+
+        return scored
+
+    def _score_chunk(self, model: typing.Any, rows: list) -> list:
+        """Score one fixed-size chunk. The shape the model sees is `rows_per_call`, never the group's size."""
+        frame = pd.DataFrame([[row[name] for name in self._feature_columns] for row in rows],
                              columns=self._feature_columns).astype("float64")
 
         results = model.get_results(frame, return_abs=True)
 
-        if (len(results) != len(features)):
-            raise ValueError(f"the model returned {len(results)} rows for {len(features)}; scores that cannot be "
+        if (len(results) != len(rows)):
+            raise ValueError(f"the model returned {len(results)} rows for {len(rows)}; scores that cannot be "
                              f"aligned back onto the rows are worse than none")
 
         results = results.reset_index(drop=True)
@@ -161,12 +192,10 @@ class DfencoderScorer:
             raise ValueError(f"the model's results carry no {absent}; a feature it was trained on has no loss, "
                              f"which means the model and the feature list disagree about what was trained")
 
-        scored = []
-
-        for position in range(len(features)):
-            scored.append({name: abs(float(results[column].iloc[position])) for (name, column) in loss_columns.items()})
-
-        return scored
+        return [{
+            name: abs(float(results[column].iloc[position]))
+            for (name, column) in loss_columns.items()
+        } for position in range(len(rows))]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -224,9 +253,13 @@ def train_dfencoder_models(frames: dict,
     epochs : int
         Training epochs.
     eval_batch_size : int
-        The batch size scoring uses. Control 5 says it must not matter; the runner measures that it does not.
-    encoder_layers, decoder_layers : list of int, optional
-        Layer sizes. The runner's defaults, `[8, 4]` and `[4, 8]`, are used when unset.
+        The batch size the fitted model evaluates in. This is the model's own knob, not the adapter's:
+        `DfencoderScorer` fixes the shape it asks in separately, so that the score of a row does not depend on
+        how the pipeline chunked the stream.
+    encoder_layers : list of int, optional
+        Encoder layer sizes. The runner's default, `[8, 4]`, is used when unset.
+    decoder_layers : list of int, optional
+        Decoder layer sizes. The runner's default, `[4, 8]`, is used when unset.
     min_rows : int, default = 4
         A principal with fewer usable rows is skipped rather than fitted on nothing, and reported.
 

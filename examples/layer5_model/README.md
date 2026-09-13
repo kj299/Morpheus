@@ -45,7 +45,7 @@ Four checks, each a control from Part 5 of the guide:
 | Double run | The determinism envelope's premise | The same seed and the same data gave different scores. Nothing downstream can be tiered above D3. |
 | Batch invariance | Control 5 | The model has a batch-dependent operation -- batch normalization left in training mode is the usual one. A row's score then depends on what it was batched with, and no amount of seeding fixes it. |
 | Deterministic algorithms | Control 3 | `torch.use_deterministic_algorithms(True, warn_only=False)` raises at startup rather than an operation silently picking a non-deterministic kernel. |
-| The wired path | Controls 1, 3 and 5 together | The composed layer 5 pipeline, with the trained models behind `TC5ScoreStage` through `DfencoderScorer` and a manifest pinning each principal to a digest of its own weights, gave different scores on a second run or under the batch-split sweep. A failure here with the three above passing means the wiring, not the model, is where determinism was lost. |
+| The wired path | Controls 1, 3 and 5 together | The composed layer 5 pipeline, with the trained models behind `TC5ScoreStage` through `DfencoderScorer` and a manifest pinning each principal to a digest of its own weights, gave different scores on a second run or under the batch-split sweep. A failure here with the three above passing means the wiring, not the model, is where determinism was lost -- as happened on the first run, and `pipeline_differences` in the artifact names the column and the two values. |
 
 The fourth is the one that puts the model in the slot the pipeline has held open for it. The adapter,
 [`morpheus.utils.dfencoder_scorer`](../../python/morpheus/morpheus/utils/dfencoder_scorer.py), is inference only:
@@ -54,6 +54,15 @@ on the rows being scored. The runner trains first and pins each principal to a d
 weights, which makes two versions equal exactly when two sets of weights are; that is what control 1 has to
 mean for a model that was trained rather than downloaded. It declares no fallback, and a principal without a
 model is refused rather than scored against another principal's.
+
+**A row goes to the model on its own.** `TC5ScoreStage` hands the scorer the rows one principal has in the
+message it happens to be holding, so the size of that group is a fact about how the stream was chunked rather
+than about the data. A network is not shape-invariant to the last decimal -- the same row in a batch of twenty
+and in a batch of one takes different kernels and can come back differing in the seventh place -- and that
+difference does not stay small: `drift_rise_sigmas` divides a rise by the spread of a few nearly equal scores,
+so a seventh-place wobble upstream arrives as tenths downstream, far past what rounding absorbs. The adapter
+therefore fixes the shape itself and asks for one row at a time, which makes a score a function of its row.
+The first run of this check on a card failed for exactly this reason, which is what the check was for.
 
 **The models score the rows they were trained on.** That is a leak, made on purpose and written into the
 artifact: the question this run answers is whether the wired path gives the same numbers twice with a real model
@@ -130,6 +139,7 @@ Same shape as `gpu_conformance.json`: what ran, on what card, with what result.
   "batch_sizes": [1, 8, 64],
   "pipeline_double_run_reproducible": true,
   "pipeline_batch_invariant": true,
+  "pipeline_differences": {},
   "pipeline_scored_rows": 105,
   "pipeline_principals_pinned": 5,
   "pipeline_principals_skipped": {},
@@ -141,6 +151,9 @@ Same shape as `gpu_conformance.json`: what ran, on what card, with what result.
 
 The `pipeline_*` fields and `model_versions` are absent from the 2026-09-07 artifact above, which predates the
 wired path; a run that reports them is one that scored the composed pipeline with the model.
+`pipeline_differences` is empty on a passing run and otherwise carries one entry per disagreeing run, each
+naming the column, the canonical row and the two values. A failure can then be read off the artifact rather
+than reproduced on the card it happened on.
 
 Paste it back and the numbers in `README.md` and in the guide can be traced to a run rather than to a memory of
 one -- which is the same standard the GPU conformance verdict is held to, and the reason neither claim in this

@@ -37,6 +37,8 @@ from morpheus.config import Config
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
 from morpheus.utils.determinism import permute_within_contiguous_groups
+from morpheus.utils.dfencoder_scorer import DfencoderScorer
+from morpheus.utils.model_manifest import ModelManifest
 from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -89,6 +91,12 @@ def _principal(result: pd.DataFrame, principal: str) -> pd.DataFrame:
 
 def _windows(frame: pd.DataFrame) -> list[int]:
     return [window_id_from_timestamp(int(t), sp.PERIOD_SECONDS * NS) for t in frame["event_time"]]
+
+
+def _split(frame: pd.DataFrame, parts: int) -> list[pd.DataFrame]:
+    size = max(1, len(frame) // parts)
+
+    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
 
 
 def _permuted(corpus: dict[str, pd.DataFrame], seed: int) -> dict[str, pd.DataFrame]:
@@ -179,16 +187,70 @@ def test_against_golden(result: pd.DataFrame):
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-
-    def split(frame: pd.DataFrame, parts: int) -> list[pd.DataFrame]:
-        size = max(1, len(frame) // parts)
-        return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-    thirds = {name: split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, sp.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, sp.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
+
+
+class _ShapeSensitiveModel:
+    """
+    Stands in for what a real network on a card is: not invariant to the shape of the batch it is handed.
+
+    Two matrices multiplied on a GPU do not agree to the last bit across batch shapes, because the shape picks
+    the kernel. The perturbation here is a seventh-place function of the row count, which is the order of what
+    a card actually does, applied deterministically so the test is about shape and nothing else.
+    """
+
+    def get_results(self, df: pd.DataFrame, return_abs: bool = False) -> pd.DataFrame:
+        del return_abs
+        wobble = 1e-7 * len(df)
+
+        return pd.DataFrame({f"{name}_z_loss": df[name].astype("float64") * 0.001 + wobble
+                             for name in df.columns},
+                            index=df.index)
+
+
+def _shape_sensitive(rows_per_call: int):
+    version = "dfencoder/probe:0001"
+    principals = [sp.ALICE, sp.BOB, sp.CAROL, sp.DAVE, sp.BATCH]
+    scorer = DfencoderScorer({version: _ShapeSensitiveModel()}, sp.SCORED_FEATURES, rows_per_call=rows_per_call)
+    manifest = ModelManifest(window_id=sp.SCORING_WINDOW,
+                             models={principal: version
+                                     for principal in principals},
+                             fallback=None)
+
+    return (scorer, manifest)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_row_is_scored_the_same_however_the_stream_was_chunked(pipeline_config: Config,
+                                                                 corpus: dict[str, pd.DataFrame]):
+    # Check 5 reaches the model. TC5ScoreStage hands the scorer the rows an entity has in the message it is
+    # holding, so the size of that group is a fact about the batching. Handing that size through to a model
+    # makes the score a function of how the stream arrived, which is exactly what check 5 forbids.
+    (scorer, manifest) = _shape_sensitive(rows_per_call=1)
+
+    whole = sp.run_pipeline(pipeline_config, corpus, scorer=scorer, manifest=manifest)
+    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
+    chunked = sp.run_pipeline(pipeline_config, corpus, batches=thirds, scorer=scorer, manifest=manifest)
+
+    assert diff_frames(whole, chunked) is None
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_shape_check_has_teeth(pipeline_config: Config, corpus: dict[str, pd.DataFrame]):
+    # The negative control for the check above. Let the group's size reach the model and the run must differ --
+    # and differ by far more than the seventh place it started in, because drift_rise_sigmas divides a rise by
+    # the spread of a few nearly equal scores. If this ever stops differing, the check above proves nothing.
+    (scorer, manifest) = _shape_sensitive(rows_per_call=10_000)
+
+    whole = sp.run_pipeline(pipeline_config, corpus, scorer=scorer, manifest=manifest)
+    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
+    chunked = sp.run_pipeline(pipeline_config, corpus, batches=thirds, scorer=scorer, manifest=manifest)
+
+    assert diff_frames(whole, chunked) is not None
 
 
 @pytest.mark.gpu_and_cpu_mode

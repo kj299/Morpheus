@@ -43,10 +43,12 @@ class StubModel:
         self.rows_returned = rows_returned
         self.drop_column = drop_column
         self.received = None
+        self.call_sizes = []
 
     def get_results(self, df: pd.DataFrame, return_abs: bool = False) -> pd.DataFrame:
         del return_abs
         self.received = df
+        self.call_sizes.append(len(df))
         result = pd.DataFrame({f"{name}_z_loss": df[name] * self.factor for name in df.columns})
 
         if (self.drop_column is not None):
@@ -116,7 +118,9 @@ def test_a_row_with_the_wrong_features_is_refused():
 
 
 def test_a_model_that_drops_rows_is_refused():
-    scorer = DfencoderScorer({VERSION: StubModel(rows_returned=1)}, FEATURES)
+    # The guard is per model call, so the call is given both rows at once: at one row per call there is no
+    # shorter answer than the question.
+    scorer = DfencoderScorer({VERSION: StubModel(rows_returned=1)}, FEATURES, rows_per_call=2)
 
     with pytest.raises(ValueError, match="returned 1 rows for 2"):
         scorer.score(VERSION, rows())
@@ -129,8 +133,38 @@ def test_a_model_without_a_loss_per_feature_is_refused():
         scorer.score(VERSION, rows())
 
 
+def test_a_row_is_scored_on_its_own_however_many_came_with_it():
+    # Control 5 at the adapter's boundary. TC5ScoreStage hands over the rows an entity has in the message it is
+    # holding, so the group's size is a fact about the batching, not about the data. The model must not see it.
+    model = StubModel()
+    scorer = DfencoderScorer({VERSION: model}, FEATURES)
+
+    alone = scorer.score(VERSION, rows()[:1])
+    together = scorer.score(VERSION, rows())
+
+    assert model.call_sizes == [1, 1, 1]
+    assert together[0] == alone[0]
+
+
+def test_a_larger_batch_is_asked_for_in_fixed_sized_calls():
+    model = StubModel()
+    scorer = DfencoderScorer({VERSION: model}, FEATURES, rows_per_call=2)
+
+    scorer.score(VERSION, rows() + rows() + rows()[:1])
+
+    assert model.call_sizes == [2, 2, 1]
+
+
+def test_a_batch_size_below_one_is_refused():
+    with pytest.raises(ValueError, match="positive integer"):
+        DfencoderScorer({VERSION: StubModel()}, FEATURES, rows_per_call=0)
+
+    with pytest.raises(ValueError, match="positive integer"):
+        DfencoderScorer({VERSION: StubModel()}, FEATURES, rows_per_call=True)
+
+
 def test_no_rows_score_to_no_rows():
-    assert DfencoderScorer({VERSION: StubModel()}, FEATURES).score(VERSION, []) == []
+    assert not DfencoderScorer({VERSION: StubModel()}, FEATURES).score(VERSION, [])
 
 
 def test_the_scorer_refuses_to_be_built_wrong():

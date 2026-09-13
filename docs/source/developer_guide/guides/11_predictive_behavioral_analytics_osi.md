@@ -2789,6 +2789,12 @@ What Morpheus provides versus what has to be built, stated plainly.
   no fallback, and a training helper that refuses in plain words without Torch. `run_model.py` uses it to run
   the composed pipeline with the model the guide names, as its fourth check; the composed pipeline's own
   `run_pipeline` takes a `scorer` and `manifest` so the reference arithmetic and the model occupy the same slot.
+  The adapter asks the model for one row at a time. {py:class}`~morpheus.stages.telemetry.tc5_score_stage.TC5ScoreStage`
+  hands over the rows an entity has in the message it is holding, so that group's size is a fact about the
+  batching; a network is not shape-invariant to the last decimal, and letting the size through makes a score
+  depend on how the stream arrived. The first run of the wired check on a card failed on exactly that, and the
+  difference was not small: `drift_rise_sigmas` divides a rise by the spread of a few nearly equal scores, so a
+  seventh-place wobble in a loss arrived as tenths in the column a rule reads.
 - The composed layer 5 pipeline under control 13's six checks
   (`tests/morpheus/determinism/session_pipeline.py`): a week-long corpus of one estate's authentications,
   with an impossible journey, a legitimate eight-hour flight, a token refresh issued from the origin
@@ -2900,7 +2906,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores every layer 5 event against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory over daily windows, and R-B-L5-001 and R-P-L5-006 are evaluated end to end against the corpus. What scores them is `ReferenceScorer`, frozen arithmetic that the class itself calls not a model. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus under controls 3 and 5. The adapter is built: `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, pins each principal to a digest of its own weights, and `run_model.py` runs the composed pipeline with it as its fourth check. What remains is the verdict from that run on the card, and enough data for the scores to mean anything -- 105 events across five principals proves the wiring and nothing else |
+| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores every layer 5 event against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory over daily windows, and R-B-L5-001 and R-P-L5-006 are evaluated end to end against the corpus. What scores them is `ReferenceScorer`, frozen arithmetic that the class itself calls not a model. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus under controls 3 and 5. The adapter is built: `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, pins each principal to a digest of its own weights, and `run_model.py` runs the composed pipeline with it as its fourth check. That check has now been run on a card once and failed, on the adapter passing the group's size through to the model rather than on the model; the adapter fixes the shape it asks in, and the re-run is what is outstanding. What remains beyond it is enough data for the scores to mean anything -- 105 events across five principals proves the wiring and nothing else |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
 | Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |
