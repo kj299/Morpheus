@@ -112,20 +112,31 @@ artifact it exists to produce. It then took four repairs to that runner before a
 believed, and each of the four is recorded below, because each produced a verdict that read `passed`
 while measuring less than it claimed.
 
-**The run that stands is 2026-09-07 at 22:42 UTC**, on the same card, over tiers that are total: the
-marked tier 429 collected and 429 passed; the tier carrying no mode marker 919 collected, 913 passed and
-6 skipped -- every skip a field contract for a sourcetype nothing produces yet. Both tiers grew with the
-envelope: twelve marked variants for `EnvelopeStampStage`, and six unmarked -- its four liveness entries
-and the two expectation tests that evaluate what the behavior summary now groups. It is the first device
-check of both composed golden files since every record started carrying `osi_layer` and `entity_key`;
-the run before it was the first since the scoring path landed, and that is where the per-feature
-z-scores -- float divisions, the arithmetic that has diverged between host and device in this project
-before -- were first shown to agree rather than assumed to. Nothing failed in either, both exited cleanly, and both counts
-reconcile exactly against what pytest collected. It is also the first such run with `torch==2.4.0+cu124`
-installed beside the RAPIDS stack, which answers a question the earlier ones could not: the two coexist
-in one process, and adding Torch does not disturb cuDF. That is every stage, all three composed
-pipelines, control 13's six checks, the stage parameter liveness registry and the first-detection
-corpus, in GPU mode.
+**The run that stands is 2026-09-19 at 22:58 UTC**, on the same card under driver 596.71, over tiers
+that are total: the marked tier 448 collected and 448 passed; the tier carrying no mode marker 941
+collected, 935 passed and 6 skipped -- every skip a field contract for a sourcetype nothing produces
+yet. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
+pytest collected.
+
+It is the first device check of three things the runs before it could not see. The chains now span two
+layers, which means the four chained classes are sealed together over their union rather than class by
+class, and a Merkle root computed on a device over a different order is exactly the kind of arithmetic
+that has diverged here before. The drift trajectory is now measured over daily windows sealed behind the
+hourly ones, so there is a second sealer whose columns had never been produced on a card. And the scorer
+adapter's shape contract is asserted at the pipeline level, including its negative control.
+
+The growth reconciles rather than being taken on trust. The tiers gained nineteen marked variants and
+twenty-two unmarked ones since the 2026-09-07 run, and the same two tiers collect 448 and 931 on a
+machine with no card -- the marked tier identical to the device, the unmarked one exactly ten short of
+it, the same offset the earlier run showed. A tier that grew by a different number than the work added
+would mean a file had fallen out of a list, which is the defect two of the repairs below were for.
+
+These runs also carry `torch==2.4.0+cu124` beside the RAPIDS stack, which answers a question the earlier
+ones could not: the two coexist in one process, and adding Torch does not disturb cuDF. That is every
+stage, all three composed pipelines, control 13's six checks, the stage parameter liveness registry and
+the first-detection corpus, in GPU mode. What it is not is a measurement of the model. The conformance
+tiers score through stubs, deliberately, so that they need no card-trained weights to run; the
+autoencoder behind the adapter is what `run_model.py` measures, and that verdict is separate.
 
 Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
 less than it claimed. The runner selected from a list that was not total: two files were outside it from
