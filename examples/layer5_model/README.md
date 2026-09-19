@@ -113,11 +113,21 @@ be worse than one that refuses. That refusal is itself tested, in the container 
 
 ## The result
 
-Run on 2026-09-07 at 12:01 UTC, on an NVIDIA RTX 5000 Ada Generation Laptop GPU with `torch==2.4.0+cu124`,
-over five principals carrying 26, 18, 26, 28 and 7 usable rows: **the double run was identical and the
-scores were invariant across batch sizes 1, 8 and 64.** Verdict `passed`.
+Run on 2026-09-19 at 23:17 UTC, on an NVIDIA RTX 5000 Ada Generation Laptop GPU with `torch==2.4.0+cu124`,
+over five principals carrying 26, 18, 26, 28 and 7 usable rows: **all four checks passed.** The model's own
+double run was identical and its scores were invariant across batch sizes 1, 8 and 64; the composed pipeline,
+with those models behind `TC5ScoreStage`, gave the same 105 scores twice and again under the batch-split
+sweep, with `pipeline_differences` empty. Verdict `passed`.
 
-That is controls 3 and 5, measured. It is not a statement that the model detects anything, and the
+The fourth check failed on its first attempt, on 2026-09-13, and the failure was real: the adapter was
+letting the size of a message's row group reach the model, so a score depended on how the stream had been
+chunked. The adapter now asks for one row at a time. Two things are worth reading off the two artifacts
+together. The five weight digests are identical across the two runs, so training is reproducible across days
+and reboots and the repair changed how rows were handed over rather than what was fitted. And
+`pipeline_mean_abs_z_max` is 2.3823 in both, so the scores themselves did not move -- what moved was whether
+they stayed put under re-batching.
+
+That is controls 1, 3 and 5, measured. It is not a statement that the model detects anything, and the
 paragraph above is not softened by the result: seven rows is not a training set, and neither is
 twenty-eight.
 
@@ -133,7 +143,7 @@ Same shape as `gpu_conformance.json`: what ran, on what card, with what result.
   "torch": "2.4.0+cu124",
   "seed": 42,
   "epochs": 20,
-  "principals": {"alice@example.com": 21, "…": 0},
+  "principals": {"alice@example.com": 26, "…": 0},
   "double_run_reproducible": true,
   "batch_invariant": true,
   "batch_sizes": [1, 8, 64],
@@ -144,13 +154,13 @@ Same shape as `gpu_conformance.json`: what ran, on what card, with what result.
   "pipeline_principals_pinned": 5,
   "pipeline_principals_skipped": {},
   "model_versions": {"alice@example.com": "dfencoder/alice@example.com:…", "…": "…"},
-  "pipeline_mean_abs_z_max": 0.0,
+  "pipeline_mean_abs_z_max": 2.3823,
   "measures": "reproducibility of the scoring path, not detection quality: …"
 }
 ```
 
-The `pipeline_*` fields and `model_versions` are absent from the 2026-09-07 artifact above, which predates the
-wired path; a run that reports them is one that scored the composed pipeline with the model.
+The `pipeline_*` fields and `model_versions` are absent from artifacts written before 2026-09-13, which
+predate the wired path; a run that reports them is one that scored the composed pipeline with the model.
 `pipeline_differences` is empty on a passing run and otherwise carries one entry per disagreeing run, each
 naming the column, the canonical row and the two values. A failure can then be read off the artifact rather
 than reproduced on the card it happened on.

@@ -85,16 +85,20 @@ that will consume them. Control 9 is a partial exception, since `determinism.qua
 the hysteresis half of it does not. Control 3 has now been measured, on the one machine with a card:
 `examples/layer5_model/run_model.py` sets `CUBLAS_WORKSPACE_CONFIG` before Torch is imported, enables
 `torch.use_deterministic_algorithms`, trains a per-principal autoencoder on the layer 5 corpus and checks
-the double run and the batch sweep. On 2026-09-07 at 12:01 UTC, with `torch==2.4.0+cu124` on an RTX 5000
-Ada, **the double run was identical and the scores were invariant across batch sizes 1, 8 and 64** for
-all five principals. Had either failed, R-P-L5-006 -- a rule about a score rising by fractions of a
+the double run and the batch sweep, and then runs the composed pipeline with those models in the scoring
+slot. On 2026-09-19 at 23:17 UTC, with `torch==2.4.0+cu124` on an RTX 5000 Ada, **all four checks
+passed**: the double run was identical and the scores invariant across batch sizes 1, 8 and 64 for all
+five principals, and the composed pipeline returned the same 105 scores twice and again under the
+batch-split sweep. Had any of them failed, R-P-L5-006 -- a rule about a score rising by fractions of a
 standard deviation -- would have been measuring the model's own jitter rather than a principal's
-behaviour, and every threshold tuned against those scores would have been tuned against noise.
+behaviour, and every threshold tuned against those scores would have been tuned against noise. The
+fourth check did fail on its first run, and that is written up where the adapter is described.
 
 What that establishes is reproducibility of the scoring path and nothing more. A week of five principals
 is far too little data to train an autoencoder that detects anything, nothing in this document claims it
-does, and the artifact says so in a field of its own so the caveat travels with the numbers. The pipeline
-still produces no `mean_abs_z`, so the four rules that read it continue to fire on nothing. On a machine
+does, and the artifact says so in a field of its own so the caveat travels with the numbers. What the
+pipeline publishes as `mean_abs_z` in its golden is still the reference scorer's arithmetic; the model
+occupies that slot only in the runner, which is what the fourth check measures. On a machine
 without Torch or without a card the runner exits non-zero and writes a failed verdict rather than
 reporting on a model it never trained, and both refusals are tested by shadowing Torch with a stub rather
 than by depending on its absence -- which is a distinction that cost a passing test the moment Torch was
@@ -2805,7 +2809,11 @@ What Morpheus provides versus what has to be built, stated plainly.
   batching; a network is not shape-invariant to the last decimal, and letting the size through makes a score
   depend on how the stream arrived. The first run of the wired check on a card failed on exactly that, and the
   difference was not small: `drift_rise_sigmas` divides a rise by the spread of a few nearly equal scores, so a
-  seventh-place wobble in a loss arrived as tenths in the column a rule reads.
+  seventh-place wobble in a loss arrived as tenths in the column a rule reads. With the shape fixed the check
+  passes on the card, and the two artifacts read together say what the repair did and did not touch: the five
+  weight digests and `pipeline_mean_abs_z_max` are identical across the failing run and the passing one, so
+  the same weights produced the same scores, and what changed was only whether they held still under
+  re-batching.
 - The composed layer 5 pipeline under control 13's six checks
   (`tests/morpheus/determinism/session_pipeline.py`): a week-long corpus of one estate's authentications,
   with an impossible journey, a legitimate eight-hour flight, a token refresh issued from the origin
@@ -2917,7 +2925,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores every layer 5 event against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory over daily windows, and R-B-L5-001 and R-P-L5-006 are evaluated end to end against the corpus. What scores them is `ReferenceScorer`, frozen arithmetic that the class itself calls not a model. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus under controls 3 and 5. The adapter is built: `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, pins each principal to a digest of its own weights, and `run_model.py` runs the composed pipeline with it as its fourth check. That check has now been run on a card once and failed, on the adapter passing the group's size through to the model rather than on the model; the adapter fixes the shape it asks in, and the re-run is what is outstanding. What remains beyond it is enough data for the scores to mean anything -- 105 events across five principals proves the wiring and nothing else |
+| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores every layer 5 event against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory over daily windows, and R-B-L5-001 and R-P-L5-006 are evaluated end to end against the corpus. What scores them is `ReferenceScorer`, frozen arithmetic that the class itself calls not a model. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus under controls 3 and 5. The adapter is built: `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, pins each principal to a digest of its own weights, and `run_model.py` runs the composed pipeline with it as its fourth check. That check has now been run on a card and passes: 105 rows scored identically twice over and again under the batch-split sweep, against five models pinned to a digest of their own weights. It failed its first run, on the adapter passing the group's size through to the model rather than on the model itself, which is the defect the check existed to catch. What remains is enough data for the scores to mean anything -- 105 events across five principals proves the wiring and nothing else |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
 | Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |
