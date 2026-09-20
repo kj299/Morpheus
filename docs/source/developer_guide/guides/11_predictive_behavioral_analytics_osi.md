@@ -2829,6 +2829,10 @@ What Morpheus provides versus what has to be built, stated plainly.
   not name reaches no port, and neither does a sign-in made after the hour's last 802.1X exchange, because a
   binding is an interval. This is also what the Splunk package's layer 1, 2 and 5 events are now rendered from,
   since a chain is decided by which classes were sealed together.
+- The clock-skew experiment (`examples/clock_skew/run_experiment.py`): the collectors' clocks spread across a
+  window of a given width, the composed pipelines re-run over the same corpora, and a report of which columns
+  moved and at what width each shipped rule changed what it accuses. It runs anywhere in about forty seconds,
+  needs no card, and answers the open question this document had left open since it was written.
 - R-D-L5-003 and R-D-L5-004 as saved searches, which makes six shipped detections rather than four. Their
   predicates are asserted in Python over the corpus and their row counts written into the validation
   package, so an expectation cannot go stale without a test failing. Both fire on the planted cases and
@@ -2946,32 +2950,66 @@ What Morpheus provides versus what has to be built, stated plainly.
 Distinct from the table above, which lists components that are absent. These are questions the design
 raises, cannot currently answer, and should not be assumed away.
 
-**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Every join here
+**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Measured. Every join here
 is a join on time across sources that do not share a clock, and the
 [collection section](../../../../README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
 qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0` inverts on
 sub-millisecond disagreement, impossible travel silently carries no score when two authentications
 reorder, and the MAC-in-two-places interval absorbs each switch's offset directly. **None of that has
-been measured.** What is missing is an experiment rather than a component: inject a per-source offset at
-a range of magnitudes -- one millisecond, ten, one second, one minute -- into the existing seeded corpora,
-re-run the composed pipelines, and report which features move, by how much, and at what offset each
-shipped rule changes its decision. The harness for it already exists; control 13's batch-split sweep and
-permutation check are the same shape, differing only in what they perturb.
+been measured** -- until now. [`examples/clock_skew/run_experiment.py`](../../../../examples/clock_skew/README.md)
+is the experiment this paragraph asked for: spread the clocks across a window of a given width, re-run the
+composed pipelines over the same seeded corpora, and report which columns move, by how much, and at what width
+each shipped rule changes its decision. It is the shape control 13's sweeps already had, differing only in what
+it perturbs, and it runs anywhere in about forty seconds.
 
-Three things make this worth doing rather than reasoning about. The corpora are seeded code with planted
-anomalies and negative controls beside them, so a decision change is directly observable rather than
-inferred. The answer is a number an estate can act on -- it converts an instruction to synchronize clocks into a
-statement that this rule needs better than N milliseconds and that one tolerates a minute. And the result may well be that
-several rules are not deployable at all without a clock discipline most estates do not have, which is
-worth knowing before tuning thresholds against them rather than after.
+The magnitude is the width of the spread rather than a shift, so that it means one thing: the worst pair of
+clocks in the estate disagrees by exactly that much. A decision is keyed on what a rule accuses rather than on
+when, because a detection identified by its timestamp would differ under every non-zero offset and would
+measure the injection rather than the damage.
 
-What exists today is narrower than it looks and should not be mistaken for coverage.
+**Six of the seven rules are untouched by a full minute of disagreement.** The two that move do not move for
+the reasons this section predicted, and both corrections are worth more than the confirmations would have been.
+
+**R-D-L2-004 fails against switch clocks and is immune to collector clocks.** This document said the
+MAC-in-two-places interval absorbs each switch's offset directly. It does -- and that is exactly why a
+collector's offset does nothing, because both sightings of a displaced MAC arrive through one MAC table feed,
+so its error moves them together and cancels out of the interval. Only the switches' own clocks pull the pair
+apart. The corpus's cross-switch spoof is two seconds wide against a sixty-second threshold, so a minute of
+spread reads it as sixty-two seconds, an ordinary move, and the detection is lost while the simultaneous spoof
+beside it keeps firing. A missed detection with nothing visibly wrong is the worst shape an operator can be
+handed. The number generalizes as a ratio rather than as sixty seconds: the rule tolerates the slack between
+its threshold and the real sweep time, and tuning the threshold down to the sweep spends that slack.
+
+**R-P-L5-006 looks fragile at one millisecond and is not.** Forty-five of the layer 5 corpus's hundred and five
+authentications sit exactly on an hour mark, because the corpus builds its times from whole hours, and an event
+on a boundary changes window under an offset of one nanosecond. Move the same events into the middle of their
+windows -- a uniform shift, which is not a skew at all -- and a full minute changes nothing the rule accuses.
+The exposure is the fraction of events near a window edge, not the size of the clock error, which is a property
+of an estate's traffic rather than of its NTP discipline. It is also a warning about this kind of measurement:
+a corpus built on round numbers overstates the fragility of anything measured against it, and the only way to
+know was to move it and look again.
+
+**The ladder's rungs do not fail together, which counting spans alone would have hidden.** Chains keep their
+span at every width on both axes: fifteen still hold three layers and all fifteen desk sign-ins still resolve to
+the port they were made at, because a principal reaches a port through an 802.1X session lasting most of the
+hour. The rung below reaches through a MAC binding lasting one poll cadence, and there a minute is a large
+fraction of the interval: of 1040 ARP observations rooted on a port, fifteen fall back to their own address and
+six acquire a port they did not have. Attribution moved while reach did not.
+
+Each of those findings is asserted in `tests/morpheus/determinism/test_clock_skew_experiment.py` against the
+pipelines rather than quoted from a saved artifact, and the experiment's own machinery was sabotaged three ways
+first -- making the magnitude mean the largest offset rather than the spread, making the injector a no-op, and
+pointing the switch sweep at collector clocks -- with each break failing the test that exists for it. The third
+is the one that matters: without it, a sweep that quietly measured the wrong clock would have confirmed this
+document's prediction and missed the correction.
+
+What remains missing is correction rather than measurement.
 {py:mod}`~morpheus.utils.event_clock` bounds a catastrophically wrong timestamp so one bad row cannot
 expire every open binding; it is not drift correction and its default would not notice a device an hour
 out. `clock_source` and `clock_offset_ms` are in the universal envelope, and **nothing in this repository
-produces, consumes or checks either of them** -- they are schema, not a control. The
-`max_clock_skew_seconds` parameter on the three stateful stages is asserted to be live and to reject an
-invalid value; no test measures what a plausible offset does to a feature.
+produces, consumes or checks either of them** -- they are schema, not a control. The numbers above are
+therefore the damage a deployment takes today, with no correction in the path. What a corrected pipeline would
+take is a different experiment, and it needs the control built first.
 
 **Why does no chain span more than two layers?** Closed. One at a time, and the last of them here.
 {py:class}`~morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage` put `osi_layer` and `entity_key` on

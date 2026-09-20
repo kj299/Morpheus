@@ -97,6 +97,7 @@ TARGETS=(
 # than an omission. `test_lineage_cudf.py` is the one that matters most: its digest equivalence gate asserts the
 # GPU and CPU hashing paths agree, and a marker filter dropped it once already.
 UNMARKED=(
+    tests/morpheus/determinism/test_clock_skew_experiment.py
     tests/morpheus/determinism/test_end_to_end_mac_spoof.py
     tests/morpheus/determinism/test_first_detections.py
     tests/morpheus/determinism/test_layer5_model_runner.py
