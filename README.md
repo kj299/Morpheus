@@ -322,9 +322,21 @@ detection that looks missed -- the rule simply does not fire. Below that:
 | Feature | How drift moves it |
 | --- | --- |
 | Impossible travel (R-D-L5-003) | Speed is distance over elapsed time. The one-second floor in [`geo_velocity`](./python/morpheus/morpheus/utils/geo_velocity.py) bounds the arithmetic, but drift that makes the second authentication appear *before* the first has the row treated as out of order and not measured at all -- a real journey that silently carries no score |
-| MAC in two places (R-D-L2-004) | The gap is measured between sightings on two switches polled in sequence. Each switch's own offset adds directly to that interval and can carry it across the threshold in either direction |
+| MAC in two places (R-D-L2-004) | The gap is measured between sightings on two switches polled in sequence. Each switch's own offset adds directly to that interval and can carry it across the threshold in either direction. Measured: a minute of spread between switch clocks loses the corpus's cross-switch spoof, and the same minute between *collector* clocks loses nothing at all, because both sightings arrive through one MAC table feed whose error cancels |
 | Session duration | The start and the stop routinely come from different systems. Their disagreement is the duration's error bar |
 | 802.1X exchange timing | The switch stamps one end and RADIUS the other |
+
+**How much of this is real, measured.** [`examples/clock_skew/run_experiment.py`](./examples/clock_skew/README.md)
+spreads the collectors' clocks across a window of a given width, re-runs the composed pipelines over the same
+seeded corpora, and reports at what width each shipped rule changes what it accuses. Swept from one millisecond
+to one minute, **six of the seven rules are untouched by a full minute**, and the two that move do not move for
+the reasons argued above. R-D-L2-004 is immune to collector skew and fails at a minute of switch skew, as the
+row above now says. R-P-L5-006 appears to fail at one millisecond and does not: forty-five of the layer 5
+corpus's hundred and five authentications sit exactly on an hour mark, and an event on a boundary changes
+window under an offset of one nanosecond, so moving the same events into the middle of their windows leaves a
+full minute of spread changing nothing. Boundary proximity is the variable, not the size of the error. The
+cross-layer chains keep their span at every width, while nine of 1040 ARP observations change which port they
+are attributed to -- reach and attribution are different properties and do not fail together.
 
 **What the pipeline does about it, and what it does not.** [`event_clock`](./python/morpheus/morpheus/utils/event_clock.py) protects
 stateful stages from a single catastrophic timestamp -- a clock wrong by years driving the expiry horizon

@@ -20,6 +20,7 @@ import pytest
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
+from morpheus.utils.determinism import apply_clock_skew
 from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.determinism import quantize_value
 from morpheus.utils.determinism import sort_for_cumulative_features
@@ -185,3 +186,57 @@ def test_sort_for_cumulative_features_accepts_an_empty_frame():
     empty = _order_frame().iloc[0:0]
 
     assert len(sort_for_cumulative_features(empty)) == 0
+
+
+def test_a_clock_skew_shifts_only_the_sources_it_names():
+    frame = pd.DataFrame({
+        "event_time": [100, 200, 300, 400],
+        "collector_id": ["snmp", "radius", "snmp", "idp"],
+    })
+
+    shifted = apply_clock_skew(frame, {"snmp": 5, "radius": -7})
+
+    assert list(shifted["event_time"]) == [105, 193, 305, 400]
+    assert list(frame["event_time"]) == [100, 200, 300, 400], "the input frame is not modified"
+    assert list(shifted["collector_id"]) == list(frame["collector_id"]), "rows keep their order"
+
+
+def test_an_empty_skew_is_the_identity():
+    # The zero magnitude has to be a true no-op, or every measurement taken against it is measuring the tool.
+    frame = pd.DataFrame({"event_time": [1, 2, 3], "collector_id": ["a", "b", "a"]})
+
+    pd.testing.assert_frame_equal(apply_clock_skew(frame, {}), frame)
+    pd.testing.assert_frame_equal(apply_clock_skew(frame, {"a": 0, "b": 0}), frame)
+
+
+def test_a_skew_naming_a_source_the_corpus_does_not_carry_is_refused():
+    # A typo here shifts nothing and reads as a magnitude the pipeline tolerated, which is the one way this
+    # experiment could report a clean bill of health it never measured.
+    frame = pd.DataFrame({"event_time": [1], "collector_id": ["snmp"]})
+
+    with pytest.raises(KeyError, match="radius"):
+        apply_clock_skew(frame, {"radius": 5})
+
+
+def test_a_skew_can_be_keyed_on_any_column_that_names_a_clock():
+    # The collector that ships a record and the device that observed it are different clocks, and which one is
+    # wrong changes the answer. The helper has to be able to express both.
+    frame = pd.DataFrame({
+        "event_time": [10, 20, 30],
+        "collector_id": ["mac-table", "mac-table", "mac-table"],
+        "switch_id": ["sw1", "sw3", "sw1"],
+    })
+
+    shifted = apply_clock_skew(frame, {"sw3": 4}, source_column="switch_id")
+
+    assert list(shifted["event_time"]) == [10, 24, 30]
+
+
+def test_a_skew_needs_both_of_its_columns():
+    frame = pd.DataFrame({"event_time": [1], "collector_id": ["a"]})
+
+    with pytest.raises(KeyError, match="switch_id"):
+        apply_clock_skew(frame, {}, source_column="switch_id")
+
+    with pytest.raises(KeyError, match="stamped_at"):
+        apply_clock_skew(frame, {}, time_column="stamped_at")

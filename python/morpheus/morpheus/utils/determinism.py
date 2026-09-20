@@ -309,3 +309,62 @@ def permute_within_contiguous_groups(df: pd.DataFrame, group_values: typing.Sequ
     order.extend(run)
 
     return df.iloc[order].reset_index(drop=True)
+
+
+def apply_clock_skew(df: pd.DataFrame,
+                     offsets: dict,
+                     time_column: str = "event_time",
+                     source_column: str = "collector_id") -> pd.DataFrame:
+    """
+    Shift each row's event time by the offset its source's clock carries, and return a new frame.
+
+    The input transformation for the clock-skew experiment, and a sibling of
+    `permute_within_contiguous_groups`: both perturb a corpus in a way a deployment can actually produce, so
+    that what the pipeline does about it is measured rather than argued. Permutation asks what arrival order
+    changes. This asks what a disagreement between two collectors' clocks changes, which is the question every
+    join on time across sources that do not share a clock has to answer.
+
+    A source the offsets do not name keeps its times, because a correct clock has to be expressible. A source
+    the offsets name and the frame does not carry is refused: that is a typo, and a typo here quietly turns an
+    experiment into a measurement of nothing.
+
+    Parameters
+    ----------
+    df : `pandas.DataFrame`
+        Frame whose event times are shifted. Not modified.
+    offsets : dict
+        Source identifier to signed offset in the same unit as `time_column`, which for the corpora here is
+        nanoseconds. Positive means that collector's clock runs ahead, so its records are stamped late.
+    time_column : str, default = "event_time"
+        The column to shift.
+    source_column : str, default = "collector_id"
+        The column naming the clock each row was stamped by.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        A new frame with the offsets applied, index reset, rows in their original order.
+
+    Raises
+    ------
+    KeyError
+        If either column is absent, or `offsets` names a source the frame does not carry.
+    """
+    for column in (time_column, source_column):
+        if (column not in df.columns):
+            raise KeyError(f"{column!r} is not in the frame; apply_clock_skew needs a time and a source to "
+                           f"shift one by the other. Columns: {sorted(df.columns)}")
+
+    present = set(df[source_column])
+    absent = sorted(source for source in offsets if source not in present)
+
+    if (len(absent) > 0):
+        raise KeyError(f"offsets name {absent}, which this frame does not carry. Sources present: "
+                       f"{sorted(present)}. A source named here and absent from the corpus shifts nothing, "
+                       f"which would read as a magnitude the pipeline tolerated.")
+
+    shifted = df.copy().reset_index(drop=True)
+    delta = shifted[source_column].map(lambda source: int(offsets.get(source, 0))).astype("int64")
+    shifted[time_column] = (shifted[time_column].astype("int64") + delta).astype(df[time_column].dtype)
+
+    return shifted
