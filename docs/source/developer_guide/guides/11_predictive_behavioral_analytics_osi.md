@@ -1998,6 +1998,17 @@ field.port_id     = string
 field.switch_id   = string
 field.binding_uid = string
 accelerated_fields.by_ip_bucket = {"ip": 1, "bucket": 1}
+
+[binding_l1_history_collection]
+enforceTypes = true
+field.port_id                  = string
+field.switch_id                = string
+field.bucket                   = number
+field.site_id                  = string
+field.transceiver_serial       = string
+field.lldp_neighbor_chassis_id = string
+field.binding_uid              = string
+accelerated_fields.by_port_bucket = {"port_id": 1, "switch_id": 1, "bucket": 1}
 ```
 
 ```ini
@@ -2011,14 +2022,36 @@ fields_list   = ip, bucket, mac, port_id, switch_id, binding_uid
 external_type = kvstore
 collection    = binding_l1_collection
 fields_list   = port_id, switch_id, site_id, transceiver_serial, lldp_neighbor_chassis_id
+
+[binding_l1_history]
+external_type = kvstore
+collection    = binding_l1_history_collection
+fields_list   = port_id, switch_id, bucket, site_id, transceiver_serial, lldp_neighbor_chassis_id
 ```
 
 The accelerated field definition is not optional. Without it, every `lookup` against a collection holding
 tens of millions of bucket rows is a collection scan, and the chain queries below become unusable at
 exactly the moment they are needed.
 
-`binding_l1` has no bucket because a transceiver in a switch port is stable for months. Bucket only what
-actually churns; bucketing a stable binding multiplies its row count by the retention period for no gain.
+Layer 1 is two lookups where layer 2 is one, and the reason is worth stating because the obvious single
+lookup is wrong in a way nothing reports. `binding_l1` is keyed on the port alone, so it holds one row per
+port and that row is the port's latest interval: what is in it now. For every port whose optic has never
+been touched -- which is nearly every port in any estate -- that one row is the correct answer for every
+instant in the retention period, and bucketing it would cost a row per port per bucket to keep repeating
+the same answer. For a port whose optic *has* been replaced, the same row is confidently wrong about every
+moment before the replacement, and a search asking about last Tuesday gets Wednesday's optic with nothing
+to indicate the mismatch.
+
+`binding_l1_history` is where that case goes: the intervals the current row has overwritten, and only
+those, expanded across buckets. A port that never changed has nothing superseded and appears here not at
+all, so the collection is proportional to the estate's churn rather than to its size, which is what makes
+a historical layer 1 lookup affordable at all.
+
+The history's bucket is a day rather than the 300 seconds layer 2 uses, and the width follows the length
+of the intervals rather than their importance. A DHCP lease lasts hours, so five-minute buckets divide it
+into a bounded handful of rows. A transceiver sits in a port for months, and expanding one of those at
+five minutes runs past `max_buckets_per_binding` before the optic is five weeks old. Bucketing a long
+interval finely buys precision the poller never had and pays for it by the row.
 
 #### Populating the lookups
 
@@ -2061,7 +2094,18 @@ cron_schedule = 17 3 * * *
 search = | inputlookup binding_l2_l3 \
 | where bucket >= floor((now() - 34560000) / 300) \
 | outputlookup binding_l2_l3
+
+[Binding lookup - L1 history expiry]
+enableSched          = 1
+cron_schedule        = 47 3 * * *
+realtime_schedule    = 0
+search = | inputlookup binding_l1_history \
+| where bucket >= floor((now() - 34560000) / 86400) \
+| outputlookup binding_l1_history key_field=_key
 ```
+
+The current-state `binding_l1` collection needs no expiry job: it holds one row per port, and a
+decommissioned port's row is the last true thing known about it, so there is nothing there that grows.
 
 This is the one place `now()` is acceptable, because the job is maintenance rather than detection and its
 output is never compared across runs. Every search whose result a rule depends on must still use
@@ -2081,11 +2125,18 @@ Single hop, layer 3 to layer 2 to layer 1, resolving an IP to a physical port:
 
 ```spl
 index=behavior_events sourcetype=morpheus:score:l3 max_abs_z>=6.0
-| eval bucket=floor(_time/300)
+| eval bucket=floor(_time/300), l1_bucket=floor(_time/86400)
 | lookup binding_l2_l3 ip AS src_ip bucket OUTPUT mac port_id switch_id
-| lookup binding_l1 port_id switch_id OUTPUT site_id transceiver_serial lldp_neighbor_chassis_id
-| table _time src_ip mac port_id switch_id site_id max_abs_z event_uid lineage_id
+| lookup binding_l1_history port_id switch_id bucket AS l1_bucket OUTPUT site_id transceiver_serial lldp_neighbor_chassis_id
+| lookup binding_l1 port_id switch_id OUTPUT site_id AS site_now transceiver_serial AS transceiver_now lldp_neighbor_chassis_id AS neighbor_now
+| eval site_id = coalesce(site_id, site_now), transceiver_serial = coalesce(transceiver_serial, transceiver_now), lldp_neighbor_chassis_id = coalesce(lldp_neighbor_chassis_id, neighbor_now)
+| table _time src_ip mac port_id switch_id site_id transceiver_serial max_abs_z event_uid lineage_id
 ```
+
+The last hop is two lookups and a coalesce, and the order carries the meaning. The history is consulted
+first and answers only for the ports and days where the current row is wrong; everything else misses it
+and falls back. Reversing the two, or dropping the history hop for brevity, answers every historical
+question in the present tense and looks exactly the same while doing it.
 
 Full chain assembly from the edge index. This is the query that makes R-C-001 through R-C-005
 expressible:
@@ -2882,7 +2933,12 @@ What Morpheus provides versus what has to be built, stated plainly.
   at the poll that noticed the change, so the silence in between resolves to nothing instead of to a claim nobody
   made. And the idle timeout is days rather than the thirty minutes layer 2 uses, because a quiet MAC has left
   while a quiet port has only stopped being asked -- a short horizon would close every binding in the estate
-  during a collector outage.
+  during a collector outage. And the rung answers in two tenses rather than one
+  ({py:meth}`~morpheus.utils.binding_table.BindingTable.superseded`, and `binding_l1_history` beside
+  `binding_l1` in the app). The unbucketed lookup holds what is in a port now, which is the right answer for
+  the overwhelming majority of ports and the wrong answer, silently, for every one whose optic has been
+  replaced; the history holds the intervals that row overwrote, and nothing else, so it is empty in an estate
+  where nobody has touched an optic and grows with the changes rather than with the port count.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.
@@ -2948,7 +3004,9 @@ What Morpheus provides versus what has to be built, stated plainly.
 ### Open questions this work has not answered
 
 Distinct from the table above, which lists components that are absent. These are questions the design
-raises, cannot currently answer, and should not be assumed away.
+raises and should not be assumed away. Two of them have since been answered; the answers stay here, under
+the question that produced them, rather than moving somewhere tidier, because what a question turned out
+to be is worth more to the next reader than a clean list of open ones.
 
 **How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Measured. Every join here
 is a join on time across sources that do not share a clock, and the
@@ -3059,23 +3117,42 @@ layer 1's later samples advance the watermark past them. Nothing about lateness,
 changed. That is the union behaving the way a deployment's interleaved stream would, which is the point of
 sealing it that way.
 
-**Should `binding_l1` be bucketed after all?** This document argues that the layer 2 lookup is bucketed
-because a DHCP lease moves and the layer 1 one is not because a transceiver is stable for months. Wiring
-the producer up exposed the gap in that reasoning: stable for months is not never. The lookup keys on
-`port_id` and `switch_id` with no bucket, so a port whose optic is replaced collapses to a single row and
-the later transceiver wins. It answers what is in a port *now*, which is the wrong tense for the question
-the ladder asks -- an investigation into last Tuesday resolves that port to the optic installed on
-Wednesday, silently and with no indication that the answer is from the wrong interval. The corpus
-demonstrates this: five port intervals across four ports write four lookup rows.
+**Should `binding_l1` be bucketed after all? Decided: yes, and beside the current-state lookup rather
+than instead of it.** The question was whether a lookup keyed on `port_id` and `switch_id` with no bucket
+is good enough. It is not: a port whose optic is replaced collapses to a single row, so the lookup answers
+what is in a port *now*, and an investigation into last Tuesday resolves that port to the optic installed
+on Wednesday, silently and with no indication that the answer is from the wrong interval.
 
-Three options, none obviously right, which is why this is a question rather than a build item. Bucket
-layer 1 at a coarse width -- a day rather than five minutes -- which costs storage proportional to ports
-times days for a fact that rarely changes. Key on the interval rather than the port, making the lookup a
-range join, which Splunk lookups do not do natively. Or accept the present tense deliberately, keep the
-lookup as a current-state answer, and resolve historical layer 1 questions from the `binding:l1` events
-themselves rather than the lookup built from them, in which case the guide should say so and the searches
-that reach layer 1 should be written against the index. The last is the smallest change and the easiest
-to get wrong quietly, which is an argument for deciding rather than defaulting.
+None of the three options this section used to list was taken. Bucketing every port across every day of
+the retention period pays the storage cost for the estate rather than for its churn; a range join is not
+something a Splunk lookup does; and resolving history from the `binding:l1` events instead of from a
+lookup makes the last hop of the ladder a different kind of operation from every other hop, which is the
+smallest change and the easiest to get wrong quietly.
+
+What is built instead splits the question in two, because the two tenses have different shapes.
+`binding_l1` stays exactly as it was, unbucketed, one row per port, answering the present tense; every
+search already written against it is unaffected. `binding_l1_history` holds the intervals that row has
+overwritten -- and only those -- bucketed at a day. In an estate where nobody has touched an optic it is
+empty, and it grows with the number of changes rather than with the number of ports. A walk consults it
+first and falls back to the current row on a miss, which is correct by construction: a port with nothing
+superseded is described for all time by the row the current lookup holds.
+{py:meth}`~morpheus.utils.binding_table.BindingTable.superseded` is the split, and it drops each key's
+latest binding under the same total order `resolve` breaks ties with, so what it keeps is exactly what a
+current-state refresh overwrote.
+
+Two things fell out of building it. The width had to be a day for a reason better than frugality:
+expanding a months-long interval at layer 2's five minutes runs past `max_buckets_per_binding` before the
+optic is five weeks old, so the width follows the length of the intervals rather than their importance.
+And the current-state refresh had the wrong row all along. `outputlookup append=t key_field=_key`
+overwrites a document each time it writes one, so the surviving row is whichever the search emitted last,
+and event results arrive newest first -- which left the *oldest* optic in a lookup whose entire claim is
+to hold the newest. The refresh now sorts ascending on `bind_start` before writing. That defect was
+invisible while the only thing reading the lookup was prose.
+
+The cost of the approximation is the usual one and is stated rather than hidden: an event inside the day
+where a change happened resolves to the interval that came first. That is the same shape as layer 2's
+bucketing error, bounded by the bucket width, where the unbucketed lookup's error was bounded by nothing
+at all.
 
 **What retention, lawful basis and minimization apply to the behavioral history this design accumulates.**
 Layer 5 alone keeps each principal's location history, last known coordinate, device and application

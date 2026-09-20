@@ -88,6 +88,10 @@ def _render(frame, sourcetype: str) -> list:
 
 
 def main() -> int:
+    # Imported here rather than at module scope, like everything else this file takes from morpheus: the path
+    # setup above has to run before the package is reachable.
+    from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS  # pylint: disable=import-outside-toplevel
+
     import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
     import lineage_pipeline  # pylint: disable=import-outside-toplevel
     import session_pipeline as sp  # pylint: disable=import-outside-toplevel
@@ -120,7 +124,20 @@ def main() -> int:
 
     bindings = telemetry[telemetry["telemetry_class"] == "tc2_binding"]
     bucketed = tp.build_binding_table(bindings).to_bucketed_frame()
-    by_sourcetype["binding:bucketed"] = _render(bucketed, "binding:bucketed")
+
+    # The layer 1 history, on the same sourcetype and told apart by `binding_table`. Only the intervals a
+    # current-state row has overwritten are expanded: a port whose optic never changed is answered correctly for
+    # all time by the unbucketed lookup, so putting it here would cost a row per day to repeat that answer.
+    port_bindings = telemetry[telemetry["telemetry_class"] == "tc1_binding"]
+    port_history = tp.build_port_binding_table(port_bindings).superseded().to_bucketed_frame(
+        bucket_seconds=DEFAULT_L1_BUCKET_SECONDS, key_name="entity_key")
+
+    rendered = _render(bucketed, "binding:bucketed")
+
+    if (len(port_history) > 0):
+        rendered.extend(_render(port_history, "binding:bucketed"))
+
+    by_sourcetype["binding:bucketed"] = rendered
 
     for (sourcetype, lines) in sorted(by_sourcetype.items()):
         path = EVENTS / f"{sourcetype.replace(':', '_')}.jsonlines"

@@ -252,15 +252,76 @@ def test_the_chain_assembly_blocker_is_the_risk_and_not_the_span(expected: dict)
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Four of fourteen. That ratio is the honest state of this app, and stating it is the package's main job. It
+    # Six of sixteen. That ratio is the honest state of this app, and stating it is the package's main job. It
     # improved by two when the layer 5 rules landed with events to fire on, by one more when `TC1BindingStage`
     # gave `binding:l1` a producer, and by one again when `EnvelopeStampStage` put `osi_layer` and `entity_key`
     # on every record and the behavior summary finally had a grouping that keeps its rows.
-    assert len(empty) == 4
+    #
+    # Then it went the other way twice, which is what this number is for. The layer 1 history expiry is empty for
+    # the same benign reason its layer 2 twin is: nothing in a fresh corpus is old enough to expire. The L2/L3
+    # refresh is empty because it always was and the document said otherwise -- it selects
+    # `binding_table=dhcp_lease`, this corpus has no DHCP source, and the 80 bucketed rows it was credited with
+    # are a MAC table under a different name. A count that only ever improves is a count nobody is checking.
+    assert len(empty) == 6
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name
         assert len(entry["why"]) > 60, f"{name}: an expected-empty search needs a reason, not a shrug"
+
+
+def test_the_port_history_holds_the_optic_that_was_replaced_and_nothing_else(telemetry: pd.DataFrame):
+    # The layer 1 lookup used to answer every question in the present tense: keyed on the port alone, a port whose
+    # optic is replaced collapses to one row and an investigation into last Tuesday gets Wednesday's optic. The
+    # history lookup is the other tense, and its value is as much in what it leaves out as in what it holds.
+    ports = tp.build_port_binding_table(telemetry[telemetry["telemetry_class"] == "tc1_binding"])
+    swapped = f"{tp.SITE}:{tp.SWITCH}:{tp.XCVR_SWAP_PORT}"
+
+    superseded = ports.superseded()
+
+    # One interval, on the one port anybody touched. The other three ports are described for all time by the row
+    # the current-state lookup holds, and cost the history collection nothing.
+    assert superseded.size == 1
+    assert superseded.key_count == 1
+
+    before = (tp.XCVR_SWAP_AT_MINUTE - 10) * 60 * tp.NS_PER_SECOND
+    last = tp.CORPUS_SECONDS * tp.NS_PER_SECOND - 1
+    optic = tp.PORT_INVENTORY_COLUMNS.index("transceiver_serial")
+
+    # The two tenses disagree, which is the whole point. Resolving the port before the swap through the history
+    # gives the optic that was in it; the current-state answer for the same port is the one in it now.
+    assert superseded.resolve(swapped, before).values[optic] == f"XCVR-{tp.SWITCH}-{tp.XCVR_SWAP_PORT}"
+    assert ports.resolve(swapped, last).values[optic] == f"XCVR-{tp.SWITCH}-{tp.XCVR_SWAP_PORT}-B"
+
+
+def test_the_history_the_app_receives_is_one_day_bucket_on_one_port():
+    # What the search head is actually fed, rather than what the pipeline could produce. The rows ride the shared
+    # bucketed sourcetype and the refresh tells them apart by `binding_table`, so a rename upstream would leave
+    # the L1 history refresh reading the layer 2 bindings, which carry neither a port nor an optic.
+    with open(os.path.join(EVENTS, "binding_bucketed.jsonlines"), encoding="utf-8") as handle:
+        rows = [json.loads(line) for line in handle]
+
+    history = [row for row in rows if row["binding_table"] == "port_inventory"]
+
+    assert len(history) == 1
+    assert history[0]["port_id"] == tp.XCVR_SWAP_PORT
+    assert history[0]["switch_id"] == tp.SWITCH
+    assert history[0]["transceiver_serial"] == f"XCVR-{tp.SWITCH}-{tp.XCVR_SWAP_PORT}"
+
+    # The cost of the approximation, stated rather than discovered. The corpus is one hour and the bucket is a
+    # day, so both intervals fall in bucket zero and every instant in it resolves to the earlier optic -- right
+    # for the fifty minutes before the swap, wrong for the ten after. That error is bounded by the bucket width,
+    # where the unbucketed lookup's error was bounded by nothing at all.
+    assert history[0]["bucket"] == 0
+
+    # The history is additive. The interval stream the current-state refresh reads still carries both of the
+    # swapped port's intervals, so the two lookups are built from the same records rather than one taking rows
+    # away from the other.
+    with open(os.path.join(EVENTS, "binding_l1.jsonlines"), encoding="utf-8") as handle:
+        intervals = [json.loads(line) for line in handle]
+
+    on_swapped = [row["transceiver_serial"] for row in intervals if row["port_id"] == tp.XCVR_SWAP_PORT]
+
+    assert sorted(on_swapped) == [f"XCVR-{tp.SWITCH}-{tp.XCVR_SWAP_PORT}", f"XCVR-{tp.SWITCH}-{tp.XCVR_SWAP_PORT}-B"]
 
 
 def _event_files() -> dict:

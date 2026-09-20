@@ -20,6 +20,8 @@ import logging
 import pandas as pd
 import pytest
 
+from morpheus.utils.binding_table import DEFAULT_BUCKET_SECONDS
+from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import Binding
 from morpheus.utils.binding_table import BindingTable
@@ -408,3 +410,113 @@ def test_the_tie_break_does_not_depend_on_how_the_input_was_batched():
 
     # A missing attribute has to stay comparable with a present one, or the sort raises rather than choosing.
     assert _sort_key(binding(None)) < _sort_key(binding(10))
+
+
+# --- The current/superseded split -------------------------------------------------------------------------------
+#
+# A lookup keyed on the entity alone holds one row per key and that row is the latest binding. For a key that never
+# changed it is right for all time; for one that did it is right about now and silently wrong about everything
+# before. `superseded` is the half a historical lookup needs, and the point of it is what it leaves out.
+
+DAY_NS = 86400 * NS_PER_SECOND
+
+# Four switch ports. One has its optic replaced after a week; the other three never change.
+PORT_BINDINGS = pd.DataFrame({
+    "entity_key": ["hq:sw1:Gi1/0/1", "hq:sw1:Gi1/0/2", "hq:sw1:Gi1/0/2", "hq:sw1:Gi1/0/3"],
+    "transceiver_serial": ["XCVR-1", "XCVR-2-OLD", "XCVR-2-NEW", "XCVR-3"],
+    "bind_start": [0, 0, 7 * DAY_NS, 0],
+    "bind_end": [30 * DAY_NS, 7 * DAY_NS, 30 * DAY_NS, 30 * DAY_NS],
+})
+
+
+def build_ports(df: pd.DataFrame = None) -> BindingTable:
+    return BindingTable.from_dataframe(PORT_BINDINGS if df is None else df,
+                                       name="port_inventory",
+                                       key_column="entity_key",
+                                       value_columns=["transceiver_serial"],
+                                       start_column="bind_start",
+                                       end_column="bind_end")
+
+
+def test_only_the_key_that_changed_is_superseded():
+    superseded = build_ports().superseded()
+
+    # Three ports contribute nothing at all. That is what makes a historical layer 1 lookup affordable: the cost
+    # is the estate's churn, not its size.
+    assert superseded.size == 1
+    assert superseded.key_count == 1
+    assert superseded.resolve("hq:sw1:Gi1/0/2", DAY_NS).values == ("XCVR-2-OLD", )
+    assert superseded.resolve("hq:sw1:Gi1/0/1", DAY_NS) is None
+
+
+def test_the_superseded_table_keeps_its_name_and_columns():
+    # The refresh search selects on `binding_table`, so a split that renamed the table would produce rows no
+    # search consumes.
+    superseded = build_ports().superseded()
+
+    assert superseded.name == "port_inventory"
+    assert superseded.value_columns == ["transceiver_serial"]
+
+
+def test_an_estate_where_nothing_changed_supersedes_nothing():
+    stable = PORT_BINDINGS[PORT_BINDINGS["transceiver_serial"] != "XCVR-2-OLD"]
+
+    assert build_ports(stable).superseded().size == 0
+
+
+def test_the_binding_dropped_is_the_one_a_current_state_refresh_keeps():
+    # The two halves have to agree about which interval is current or the same instant is answered twice, or not
+    # at all. `resolve` at the latest instant gives the current-state row; `superseded` must not hold it.
+    table = build_ports()
+    current = table.resolve("hq:sw1:Gi1/0/2", 29 * DAY_NS)
+
+    assert current.values == ("XCVR-2-NEW", )
+    assert all(binding.uid != current.uid for binding in [table.superseded().resolve("hq:sw1:Gi1/0/2", DAY_NS)])
+
+
+def test_three_keys_that_each_changed_twice_keep_two_intervals_each():
+    # `superseded` drops one binding per key rather than one binding overall, and keeps every interval below the
+    # latest rather than only the one immediately below it.
+    churning = pd.DataFrame({
+        "entity_key": [f"hq:sw1:Gi1/0/{port}" for port in (1, 1, 1, 2, 2, 2, 3, 3, 3)],
+        "transceiver_serial": [f"XCVR-{index}" for index in range(9)],
+        "bind_start": [day * DAY_NS for day in (0, 7, 14) * 3],
+        "bind_end": [day * DAY_NS for day in (7, 14, 30) * 3],
+    })
+
+    superseded = build_ports(churning).superseded()
+
+    assert superseded.key_count == 3
+    assert superseded.size == 6
+
+
+def test_a_day_bucket_separates_an_optic_from_its_replacement():
+    # The whole purpose, end to end. A question about day three resolves through the history to the optic that
+    # was in the port on day three, and the day the replacement happened is where the approximation lives.
+    records = build_ports().superseded().to_bucketed_records(bucket_seconds=86400, key_name="entity_key")
+    by_bucket = {record["bucket"]: record["transceiver_serial"] for record in records}
+
+    # The superseded interval covers days zero through six, and nothing after: day seven onward misses this
+    # lookup entirely and falls back to the current-state row, which is correct for it.
+    assert by_bucket == {day: "XCVR-2-OLD" for day in range(7)}
+    assert all(record["binding_table"] == "port_inventory" for record in records)
+
+
+def test_a_months_long_interval_is_why_the_layer_1_bucket_is_a_day():
+    # The reason the width is not layer 2's, in the shape a real estate produces: an optic that sat in a port for
+    # half a year and was then replaced. Expanding that at five minutes runs past the explosion guard, which is
+    # the concrete form of "bucketing a long interval finely buys precision the poller never had". The guard
+    # trips at ten thousand buckets, which five-minute buckets reach five weeks into an interval.
+    half_a_year = pd.DataFrame({
+        "entity_key": ["hq:sw1:Gi1/0/1", "hq:sw1:Gi1/0/1"],
+        "transceiver_serial": ["XCVR-1-OLD", "XCVR-1-NEW"],
+        "bind_start": [0, 180 * DAY_NS],
+        "bind_end": [180 * DAY_NS, 200 * DAY_NS],
+    })
+
+    table = build_ports(half_a_year).superseded()
+
+    with pytest.raises(ValueError, match="over the limit"):
+        table.to_bucketed_records(bucket_seconds=DEFAULT_BUCKET_SECONDS, key_name="entity_key")
+
+    assert len(table.to_bucketed_records(bucket_seconds=DEFAULT_L1_BUCKET_SECONDS, key_name="entity_key")) == 180

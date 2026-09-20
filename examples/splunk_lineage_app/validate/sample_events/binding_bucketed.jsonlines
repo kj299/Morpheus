@@ -78,3 +78,4 @@
 {"key":"de:ad:be:ef:00:04","bucket":10,"bucket_start":"1970-01-01T00:50:00.000000UTC","port_key":"hq:sw1:Gi1\/0\/3","vlan_id":10,"binding_table":"mac_table","binding_uid":"7edba3a916ffe9a7f27c9ecbcb86be5f"}
 {"key":"de:ad:be:ef:00:04","bucket":11,"bucket_start":"1970-01-01T00:55:00.000000UTC","port_key":"hq:sw1:Gi1\/0\/3","vlan_id":10,"binding_table":"mac_table","binding_uid":"7edba3a916ffe9a7f27c9ecbcb86be5f"}
 {"key":"de:ad:be:ef:00:04","bucket":12,"bucket_start":"1970-01-01T01:00:00.000000UTC","port_key":"hq:sw1:Gi1\/0\/3","vlan_id":10,"binding_table":"mac_table","binding_uid":"7edba3a916ffe9a7f27c9ecbcb86be5f"}
+{"entity_key":"hq:sw1:Gi1\/0\/2","bucket":0,"bucket_start":"1970-01-01T00:00:00.000000UTC","port_id":"Gi1\/0\/2","switch_id":"sw1","site_id":"hq","transceiver_serial":"XCVR-sw1-Gi1\/0\/2","lldp_neighbor_chassis_id":"nbr-sw1-Gi1\/0\/2","binding_table":"port_inventory","binding_uid":"5618ec00d35aa3793700ddcb14b277e2"}
