@@ -53,6 +53,7 @@ from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
+from morpheus.stages.lineage.minimization_stage import MinimizationStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
@@ -261,6 +262,40 @@ def port_inventory() -> dict:
         "event_time": [index * MINUTE for index in range(len(serials))],
         "transceiver_serial": serials,
         "lldp_neighbor_chassis_id": neighbors,
+    }
+
+
+MINIMIZATION_KEY = b"a-key-long-enough-to-be-accepted"
+OTHER_MINIMIZATION_KEY = b"a-different-key-of-the-same-size"
+
+
+def two_principals_at_layer_five() -> dict:
+    """Two principals, each named twice, with a laptop and an address beside them.
+
+    `device_id` is here because it is the column whose category depends on the class: a laptop at layer 5 and a
+    switch at layer 1. It is what makes `telemetry_class` observable without contriving anything.
+    """
+    return {
+        "user_principal": ["alice@example.com", "bob@example.com", "alice@example.com"],
+        "entity_key": ["alice@example.com", "bob@example.com", "alice@example.com"],
+        "device_id": ["laptop-alice", "laptop-bob", "laptop-alice"],
+        "source_ip": ["203.0.113.5", "203.0.113.6", "198.51.100.7"],
+        "source_country": ["US", "US", "FR"],
+        "logcount": [4, 7, 9],
+    }
+
+
+def a_third_name_for_the_same_person() -> dict:
+    """The same principals with the 802.1X identity beside them, which the policy below does not cover.
+
+    The condition `allow_unmasked_copies` exists for: a column the policy left alone, still holding a value the
+    policy digested somewhere else.
+    """
+    return {
+        "user_principal": ["alice@example.com", "bob@example.com"],
+        "entity_key": ["alice@example.com", "bob@example.com"],
+        "desk_identity": ["alice@example.com", "bob@example.com"],
+        "logcount": [4, 7],
     }
 
 
@@ -941,6 +976,34 @@ REGISTRY: dict = {
                 Knob("raise_on_failure", RAISES, benign=False, extreme=True),
             ),
         ),
+    "MinimizationStage":
+        Scenario(
+            stage=MinimizationStage,
+            frame=two_principals_at_layer_five,
+            base={
+                "drop": ["addresses"],
+                "pseudonymize": ["user_principal", "entity_key"],
+                "key": MINIMIZATION_KEY,
+                "telemetry_class": "tc5_auth",
+            },
+            knobs=(
+                Knob("drop", DIFFERS, benign=["addresses"], extreme=["profiles"]),
+                Knob("pseudonymize",
+                     DIFFERS,
+                     benign=["user_principal", "entity_key"],
+                     extreme=["user_principal", "entity_key", "logcount"]),
+                Knob("key", DIFFERS, benign=MINIMIZATION_KEY, extreme=OTHER_MINIMIZATION_KEY),
+                # The one parameter that changes what a category means rather than what is done to it. At layer 5
+                # `device_id` is the laptop somebody authenticated from and `addresses` covers it; at layer 1 it
+                # is the switch that reported a port, and the same three words leave it alone.
+                Knob("telemetry_class", DIFFERS, benign="tc5_auth", extreme="tc1"),
+                Knob("digest_length", DIFFERS, benign=32, extreme=8),
+                Knob("allow_unmasked_copies",
+                     RAISES,
+                     benign=True,
+                     extreme=False,
+                     frame=a_third_name_for_the_same_person),
+            )),
     "ChainAnchorStage":
         Scenario(
             stage=ChainAnchorStage,
