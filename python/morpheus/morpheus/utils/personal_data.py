@@ -49,6 +49,14 @@ They are listed in `AMBIGUOUS` rather than given a category, and `classify` refu
 being told the class. Guessing would either drop the switch identifier and break the identifier ladder, or keep
 the laptop and call the result minimized.
 
+**The layer 3 additions follow the same rule and land in two places.** A flow's counts, ratios, rhythms and TTL
+reference are `profiles`: they are what this design derives about a host's behaviour, and a host is a person's
+device. The raw protocol fields beside them are `operational`, because a port number or a hop count on its own
+says nothing about who, and so are the `_saturated` and `_first_in_window` flags, which describe the tracker's
+window rather than the person. `dst_asn_first_seen` is the exception that proves the split: it is permanent
+rather than window-scoped, so it records that this source has never reached that network before, which is a fact
+about a history rather than about a buffer.
+
 **On pseudonymization.** `pseudonymize` is a keyed HMAC, not a bare digest, because an unkeyed hash of a
 username is reversed with a dictionary in the time it takes to write one. Even keyed, it is pseudonymization and
 never anonymization: the mapping is stable by design, because unstable pseudonyms would destroy the per-entity
@@ -95,6 +103,8 @@ _ADDRESSES = (
     "arp_sender_mac",
     "arp_target_ip",
     "dest_ip",
+    "dst_ip",
+    "flow_pair_key",
     "mac",
     "mac_address",
     "source_ip",
@@ -135,6 +145,10 @@ _PROFILES = (
     "auth_failures_in_window_z_loss",
     "auth_result",
     "auth_unpaired",
+    "bgp_as_dst",
+    "byte_asymmetry",
+    "bytes_in",
+    "bytes_out",
     "cadence_mature",
     "cadence_samples",
     "consecutive_auth_failures",
@@ -151,10 +165,27 @@ _PROFILES = (
     "drift_run_restarted",
     "drift_total_rise",
     "drift_velocity",
+    "dst_asn_first_seen",
+    "dst_is_multicast",
+    "dst_is_private",
+    "dst_is_reserved",
+    "dst_port",
+    "dst_ports_per_src",
+    "dsts_per_src",
+    "flow_interval_cv",
+    "flow_intervals",
+    "flow_mean_interval_ns",
+    "flow_size_cv",
     "hour_share",
     "hour_surprise_bits",
     "hour_surprise_bits_z_loss",
     "hour_unseen",
+    "internal_dst_ratio",
+    "internal_dsts_in_window",
+    "ip_ttl_distinct",
+    "ip_ttl_established",
+    "ip_ttl_shift",
+    "ip_ttl_shifted",
     "local_hour",
     "local_weekday",
     "location_first_seen",
@@ -180,6 +211,7 @@ _PROFILES = (
     "session_out_of_order",
     "session_starts",
     "session_unpaired",
+    "srcs_per_dst",
     "token_type",
     "travel_distance_km",
     "travel_elapsed_floored",
@@ -229,14 +261,24 @@ _OPERATIONAL = (
     "day_window_start_ns",
     "dest_port",
     "directory_resolution",
+    "dst_ports_per_src_first_in_window",
+    "dst_ports_per_src_saturated",
+    "dsts_per_src_first_in_window",
+    "dsts_per_src_saturated",
     "event_time",
+    "flow_regularity_mature",
+    "flow_regularity_saturated",
     "gratuitous_arp_count",
     "gratuitous_arp_ratio",
     "gratuitous_arp_ratio_saturated",
     "if_last_change",
     "input_discards",
     "input_discards_delta",
+    "internal_dst_ratio_saturated",
     "interval_seconds",
+    "ip_ttl",
+    "ip_ttl_mature",
+    "ip_ttl_saturated",
     "is_late",
     "link_flap_device_reset",
     "link_flap_last_change_inconsistent",
@@ -278,6 +320,8 @@ _OPERATIONAL = (
     "schema_version",
     "sealed_by",
     "src_port",
+    "srcs_per_dst_first_in_window",
+    "srcs_per_dst_saturated",
     "supplicant_resolution",
     "symbol_errors",
     "symbol_errors_delta",

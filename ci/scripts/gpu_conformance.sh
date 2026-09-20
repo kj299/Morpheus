@@ -61,6 +61,7 @@ TARGETS=(
     tests/morpheus/determinism/test_determinism_harness.py
     tests/morpheus/determinism/test_estate_harness.py
     tests/morpheus/determinism/test_gpu_parity.py
+    tests/morpheus/determinism/test_network_harness.py
     tests/morpheus/determinism/test_session_harness.py
     tests/morpheus/determinism/test_siem_wire_contract.py
     tests/morpheus/determinism/test_telemetry_harness.py
@@ -82,6 +83,10 @@ TARGETS=(
     tests/morpheus/stages/test_tc2_auth_stage.py
     tests/morpheus/stages/test_tc2_binding_stage.py
     tests/morpheus/stages/test_tc2_cardinality_stage.py
+    tests/morpheus/stages/test_tc3_beacon_stage.py
+    tests/morpheus/stages/test_tc3_cardinality_stage.py
+    tests/morpheus/stages/test_tc3_reach_stage.py
+    tests/morpheus/stages/test_tc3_ttl_stage.py
     tests/morpheus/stages/test_tc5_cadence_stage.py
     tests/morpheus/stages/test_tc5_drift_stage.py
     tests/morpheus/stages/test_tc5_novelty_stage.py
@@ -107,6 +112,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_splunk_validation_package.py
     tests/morpheus/determinism/test_stage_parameter_liveness.py
     tests/morpheus/stages/test_lineage_stage_cli.py
+    tests/morpheus/utils/test_arrival_regularity.py
     tests/morpheus/utils/test_binding_closer.py
     tests/morpheus/utils/test_binding_table.py
     tests/morpheus/utils/test_community_id.py
@@ -136,6 +142,7 @@ UNMARKED=(
     tests/morpheus/utils/test_siem_wire.py
     tests/morpheus/utils/test_splunk_app_contracts.py
     tests/morpheus/utils/test_splunk_field_contracts.py
+    tests/morpheus/utils/test_ttl_profile.py
     tests/morpheus/utils/test_value_novelty.py
     tests/morpheus/utils/test_window_seal.py
 )

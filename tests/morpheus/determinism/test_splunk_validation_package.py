@@ -252,7 +252,10 @@ def test_the_chain_assembly_blocker_is_the_risk_and_not_the_span(expected: dict)
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Six of sixteen. That ratio is the honest state of this app, and stating it is the package's main job. It
+    # Seven of twenty-one. That ratio is the honest state of this app, and stating it is the package's main job.
+    # The seventh is R-P-L3-005, which reads the behavior summary this package does not populate -- the same
+    # deployment-step blocker the chain assembly search has, arriving with layer 3 rather than being discovered.
+    # It
     # improved by two when the layer 5 rules landed with events to fire on, by one more when `TC1BindingStage`
     # gave `binding:l1` a producer, and by one again when `EnvelopeStampStage` put `osi_layer` and `entity_key`
     # on every record and the behavior summary finally had a grouping that keeps its rows.
@@ -262,7 +265,7 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # refresh is empty because it always was and the document said otherwise -- it selects
     # `binding_table=dhcp_lease`, this corpus has no DHCP source, and the 80 bucketed rows it was credited with
     # are a MAC table under a different name. A count that only ever improves is a count nobody is checking.
-    assert len(empty) == 6
+    assert len(empty) == 7
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name
