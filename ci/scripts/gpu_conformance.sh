@@ -59,6 +59,7 @@ export NUMBA_CUDA_USE_NVIDIA_BINDING="${NUMBA_CUDA_USE_NVIDIA_BINDING:-1}"
 # cannot be checked against the markers inside it, and something that cannot be checked is what goes stale.
 TARGETS=(
     tests/morpheus/determinism/test_determinism_harness.py
+    tests/morpheus/determinism/test_estate_harness.py
     tests/morpheus/determinism/test_gpu_parity.py
     tests/morpheus/determinism/test_session_harness.py
     tests/morpheus/determinism/test_siem_wire_contract.py

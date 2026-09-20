@@ -52,8 +52,8 @@ should return nothing:
 | R-P-L5-006, drift trajectory | **7** | Three principals, none of them behaviour, each explained in `expected_results.json`: two climb for six days because the reference scorer's baseline is frozen under cumulative features, one has a shallow run ended by the planted burst. Watchlist, never a page. |
 | R-D-L5-004, multi-factor fatigue | **1** | Five denials in eight minutes and then an approval. The fumbled password beside it -- two failures and a success with the factor never challenged -- does not appear. |
 | R-C-002, TLS before beaconing | **0** | Correct. Needs layer 4 and layer 7 telemetry; neither class exists. |
-| Behavior summary, per-layer scores | **320** | One row per five-minute bin, layer, entity and lineage over the 1719 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 355 until resolved layer 2 observations joined their port's chain; `peak_z` is still null outside layer 5, because only `TC5ScoreStage` produces `max_abs_z`. |
-| Chain assembly, cross-layer risk | **0** | Correct, and closer than it was. 39 of the 210 chains span two layers -- a port's layer 1 samples and the layer 2 observations resolved onto it -- but the rule needs three, and layer 5 runs over its own corpus with nothing yet resolving an 802.1X identity to a principal. The edge events carry no `lineage_id`. |
+| Behavior summary, per-layer scores | **344** | One row per five-minute bin, layer, entity and lineage over the 1743 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5, because only `TC5ScoreStage` produces `max_abs_z`. |
+| Chain assembly, cross-layer risk | **0** | Correct, and for a new reason. The threshold the search was built around is met: 15 of the 219 chains span three layers, holding a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there. What stops it is the line after -- `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)` -- and `risk_score` is written into the index by the detection searches as they fire, not by a stage. This package indexes pipeline output alone, so every chain sums null. |
 | Binding lookup, L2/L3 refresh | **80** | Written into the `binding_l2_l3` collection. |
 | Binding lookup, L1 refresh | **5** | Five port intervals across four ports: three stable, two on the port whose optic is swapped. The lookup keys on port and switch with no bucket, so those two collapse to one row and the later optic wins -- it answers what is in a port now, not what was in it then. |
 | Binding lookup, L2/L3 expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
@@ -61,13 +61,17 @@ should return nothing:
 
 **Four of the fourteen should return nothing.** That is the point of writing them down. An empty result is this app's
 characteristic failure, and without a list saying which emptiness is correct, a deployment cannot tell a rule that
-is working from a rule that is broken. It was five until the envelope landed, and the one that changed is worth
-noting: it had been empty for two reasons at once, and fixing the obvious one is what made the other visible.
+is working from a rule that is broken. It was five until the envelope landed, and chain assembly is worth
+following, because it has now been empty for three different reasons in turn: a missing `osi_layer`, then
+lineage that never left one layer, and now a risk sum no pipeline event contributes to. Each fix made the next
+blocker visible, which is what an expectation file is for.
 
 ## Where the sample events come from
 
 [`make_sample_events.py`](./make_sample_events.py) runs the same `run_pipeline` the determinism tests call and
-puts the output through the same `SiemWireStage` a deployment would put before its sink. They are checked in so
+puts the output through the same `SiemWireStage` a deployment would put before its sink. Layers 1, 2 and 5 come
+from the estate pipeline rather than the telemetry one, because a chain is decided by which classes were sealed
+together: the same events rendered from the telemetry pipeline carry chains that stop at two layers. They are checked in so
 that a change to what a SIEM would receive shows up in a pull request rather than only on a search head.
 
 Regenerate after changing the corpus or a stage, and review the diff:

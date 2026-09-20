@@ -214,10 +214,13 @@ def test_the_behavior_summary_groups_exactly_what_is_written(expected: dict):
     assert entry["expected_empty"] is False
 
 
-def test_the_chain_assembly_blocker_is_the_lineage_and_not_the_envelope(expected: dict):
-    # An expected-empty search is only honest while its stated reason is the reason. This one was blocked by a
-    # missing `osi_layer`; it is now blocked by single-layer lineage. Asserting the new reason means the entry
-    # cannot quietly keep claiming the old one after the corpus starts linking layers.
+def test_the_chain_assembly_blocker_is_the_risk_and_not_the_span(expected: dict):
+    # An expected-empty search is only honest while its stated reason is the reason, and this one has now been
+    # empty for three different reasons. It was a missing `osi_layer`, then single-layer lineage, and neither
+    # holds any more: the estate pipeline carries a principal down to the port they sat at, so chains reach three
+    # layers. What is left is the risk threshold on the next line, which no pipeline event can satisfy because
+    # `risk_score` is written by the detection searches rather than by a stage. Both halves are asserted, so the
+    # entry cannot go on claiming a blocker it has outgrown, and cannot claim this one after risk starts arriving.
     entry = expected["searches"]["Chain assembly - cross-layer risk"]
 
     events = _scored_events()
@@ -235,7 +238,15 @@ def test_the_chain_assembly_blocker_is_the_lineage_and_not_the_envelope(expected
 
     assert entry["distinct_lineage_ids"] == len(layers)
     assert entry["maximum_layer_span"] == max(spans)
-    assert max(spans) < 3, "a chain now spans three layers, so this search is no longer correctly empty"
+    assert entry["two_layer_chains"] == spans.count(2)
+    assert entry["three_layer_chains"] == sum(1 for span in spans if span >= 3)
+
+    assert max(spans) >= 3, "the search's own threshold is dc(osi_layer) >= 3, and nothing reaches it"
+    assert max(spans) < 4, "a span of four would fire through the peak_z branch, so empty would be wrong"
+
+    scored_with_risk = [event for event in events if event.get("risk_score") is not None]
+
+    assert scored_with_risk == [], "risk_score is now on pipeline events, so the stated blocker is gone"
 
 
 def test_every_expected_empty_search_says_why(expected: dict):

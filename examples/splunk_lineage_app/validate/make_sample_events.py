@@ -37,7 +37,7 @@ EVENTS = HERE / "sample_events"
 
 sys.path.insert(0, str(REPO_ROOT / "tests" / "morpheus" / "determinism"))
 
-# The class of each telemetry row, and the sourcetype a deployment would send it on.
+# The class of each estate row, and the sourcetype a deployment would send it on.
 CLASS_SOURCETYPES = {
     "tc1": "morpheus:score:l1",
     "tc2_mac": "morpheus:score:l2",
@@ -45,7 +45,16 @@ CLASS_SOURCETYPES = {
     "tc2_auth": "morpheus:score:l2",
     "tc2_binding": "binding:l2",
     "tc1_binding": "binding:l1",
+    "tc5_auth": "morpheus:score:l5",
 }
+"""Layers 1, 2 and 5 come from the estate pipeline, which is the telemetry pipeline plus the authentications the
+people at those ports made in the same hour, sealed together.
+
+Rendering layers 1 and 2 from the telemetry pipeline instead would index the same events with chains that stop at
+two layers, because a chain is decided by which classes were sealed together. `Chain assembly - cross-layer risk`
+reads `dc(osi_layer)` over a `lineage_id`, so the difference between the two runs is the difference between a
+search with nothing to assemble and one with three layers to assemble.
+"""
 
 SESSION_CLASS_SOURCETYPES = {
     "tc5_auth": "morpheus:score:l5",
@@ -79,12 +88,13 @@ def _render(frame, sourcetype: str) -> list:
 
 
 def main() -> int:
+    import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
     import lineage_pipeline  # pylint: disable=import-outside-toplevel
     import session_pipeline as sp  # pylint: disable=import-outside-toplevel
     import telemetry_pipeline as tp  # pylint: disable=import-outside-toplevel
 
     EVENTS.mkdir(parents=True, exist_ok=True)
-    telemetry = tp.run_pipeline(tp.build_pipeline_config(), tp.build_corpus())
+    telemetry = ep.run_pipeline(ep.build_pipeline_config(), ep.build_corpus())
     written = {}
 
     by_sourcetype: dict = {}

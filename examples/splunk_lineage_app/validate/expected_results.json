@@ -84,18 +84,19 @@
       "why": "A cross-layer rule needing layer 4 and layer 7 telemetry. Neither class exists in this fork, so no event can satisfy either half of the correlation. Empty here is correct and will stay correct until those classes ship."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 320,
+      "expected_rows": 344,
       "expected_empty": false,
-      "contributing_rows": 1719,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 1719 scored events on `morpheus:score:l1`, `l2` and `l5`. It was 355 before the chained classes were sealed together: an ARP observation the ladder resolved to a port now carries the port's chain rather than one per address, so several groups that differed only in `lineage_id` collapsed into one. `peak_z` is null on the layer 1 and layer 2 rows because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage."
+      "contributing_rows": 1743,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 1743 scored events on `morpheus:score:l1`, `l2` and `l5`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on the layer 1 and layer 2 rows because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 210,
-      "maximum_layer_span": 2,
-      "two_layer_chains": 39,
-      "why": "Empty, and closer to firing than it was. Chains now span two layers: 39 of the 210 distinct `lineage_id` values hold both a port's layer 1 samples and the layer 2 observations the ladder resolved onto that port, because `ChainAnchorStage` roots a resolved observation on the port and the chained classes are sealed together. The threshold is `dc(osi_layer) >= 3`, and no chain reaches it: layer 5 runs over its own corpus with its own principals, and nothing yet resolves an 802.1X identity at layer 2 to a principal at layer 5. The `morpheus:edge` events carry no `lineage_id`. Reaching three is a corpus and ladder question, recorded in Part 6, not a search one."
+      "distinct_lineage_ids": 219,
+      "maximum_layer_span": 3,
+      "two_layer_chains": 24,
+      "three_layer_chains": 15,
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 219 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 80,
