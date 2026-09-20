@@ -138,7 +138,9 @@ would mean a file had fallen out of a list, which is the defect two of the repai
 These runs also carry `torch==2.4.0+cu124` beside the RAPIDS stack, which answers a question the earlier
 ones could not: the two coexist in one process, and adding Torch does not disturb cuDF. That is every
 stage, all three composed pipelines, control 13's six checks, the stage parameter liveness registry and
-the first-detection corpus, in GPU mode. What it is not is a measurement of the model. The conformance
+the first-detection corpus, in GPU mode. The estate pipeline that joins layers 1, 2 and 5 postdates it and
+has not run on a card at all: its nineteen checks are a CPU result, and the next conformance run is what
+makes them a device one. What it is not is a measurement of the model. The conformance
 tiers score through stubs, deliberately, so that they need no card-trained weights to run; the
 autoencoder behind the adapter is what `run_model.py` measures, and that verdict is separate.
 
@@ -2821,6 +2823,12 @@ What Morpheus provides versus what has to be built, stated plainly.
   fumbled password, an off-hours authentication and a service account for which the same hour is
   unremarkable, and the three ways a session record goes wrong. Each planted case is asserted as the
   column a rule would read, and each has beside it the case that must stay quiet.
+- The estate pipeline under the same six checks (`tests/morpheus/determinism/estate_pipeline.py`): layers 1, 2
+  and 5 over one hour of one estate, with a supplied directory and a derived supplicant table carrying each
+  principal down to the port they sat at. Fifteen chains span three layers. The remote worker the directory does
+  not name reaches no port, and neither does a sign-in made after the hour's last 802.1X exchange, because a
+  binding is an interval. This is also what the Splunk package's layer 1, 2 and 5 events are now rendered from,
+  since a chain is decided by which classes were sealed together.
 - R-D-L5-003 and R-D-L5-004 as saved searches, which makes six shipped detections rather than four. Their
   predicates are asserted in Python over the corpus and their row counts written into the validation
   package, so an expectation cannot go stale without a test failing. Both fire on the planted cases and
@@ -2965,7 +2973,7 @@ produces, consumes or checks either of them** -- they are schema, not a control.
 `max_clock_skew_seconds` parameter on the three stateful stages is asserted to be live and to reject an
 invalid value; no test measures what a plausible offset does to a feature.
 
-**Why does no chain span more than two layers?** The first two halves of this question are closed.
+**Why does no chain span more than two layers?** Closed. One at a time, and the last of them here.
 {py:class}`~morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage` put `osi_layer` and `entity_key` on
 every record, and `Behavior summary - per-layer scores` went from zero rows to 355. Then
 {py:class}`~morpheus.stages.lineage.chain_anchor_stage.ChainAnchorStage` made the chain root a per-row decision:
@@ -2976,14 +2984,35 @@ corpus, 39 of 210 chains span two layers, which is the two-layer proof the seque
 before scaling further. The summary dropped to 320 rows in the process, because groups that differed only in
 `lineage_id` collapsed once resolved observations stopped carrying a chain per address.
 
-What remains is the third layer. `Chain assembly - cross-layer risk` fires on `dc(osi_layer) >= 3`, and no chain
-reaches it: layer 5 runs over its own corpus with its own principals, and nothing yet resolves the
-`dot1x_identity` an 802.1X exchange carries at layer 2 to the `user_principal` an authentication carries at
-layer 5. That is the ladder's next rung -- port to MAC to identity to principal -- and it needs two things this
-fork does not have: a corpus where the same people appear at both layers, and a binding from identity to
-principal for the resolver to walk. Both are build items, not stamping stages, and are recorded here rather than
-estimated. The `morpheus:edge` events also carry no `lineage_id`, because they come from the flow corpus rather
-than from either composed pipeline.
+The third layer is now closed too. It needed the two things this section named -- a corpus where the same people
+appear at both layers, and a binding from identity to principal -- and `tests/morpheus/determinism/estate_pipeline.py`
+is both. Layers 1 and 2 are the telemetry corpus unchanged; layer 5 is the desk authentications the people at
+those ports made during the same hour. Two bindings carry a principal down to a port, and the split between them
+is the point:
+
+- **The directory** (`user_principal` to `dot1x_identity`) is supplied. Which identity a person presents is an
+  employment fact that lives in an identity provider, and no volume of telemetry produces it.
+- **The supplicant table** (`dot1x_identity` to `auth_port_key`) is derived, by the same
+  {py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage` that closes MAC bindings, keyed on the
+  identity rather than the address. An 802.1X exchange already says who was on a port and when, which is a
+  binding in everything but name, and the stage was general over its key before it was asked to be.
+
+Walking both in order gives `user_principal` to `dot1x_identity` to `auth_port_key`, and that last value is
+layer 1's `entity_key` byte for byte -- which is what lets one chain hold all three layers. Fifteen chains do,
+across the three desks. The two negative controls matter more than the count. The remote worker the directory
+does not name resolves to nothing and shares no chain with any port, because a ladder that put him at another
+person's desk would be worse than one that stopped at two layers. And the sign-ins that happen after the
+hour's last 802.1X exchange resolve to nothing either: a binding is an interval, not a lookup, so the same
+person resolves earlier in the hour and not later. Both are asserted, and the harness was sabotaged four ways --
+naming the remote worker in the directory, rooting layer 5 on the principal, making the supplicant binding
+eternal, and sealing layer 5 apart -- with each break failing the test that exists for it.
+
+`Chain assembly - cross-layer risk` is still empty, and it is worth being exact about why, because the reason has
+changed. Its first threshold, `dc(osi_layer) >= 3`, is met. The line after it is not: `total_risk >= 60 OR
+(layer_span >= 4 AND peak_z >= 4.0)`, and `risk_score` is written into the index by the detection searches as
+they fire rather than by any stage, so a package that indexes pipeline output alone sums null for every chain.
+That is a deployment step, not a corpus or a ladder one. The `morpheus:edge` events still carry no `lineage_id`,
+because they come from the flow corpus rather than from a composed pipeline.
 
 One consequence of sealing the union is worth stating because it looks like a change and is not. 129 rows in
 the layer 2 corpus moved from `sealed_by = flush` to `sealed_by = watermark`: the ARP and 802.1X streams end

@@ -150,13 +150,24 @@ BYPASS_PORT = "Gi1/0/2"
 BYPASS_MAC = "de:ad:be:ef:01:01"
 
 IDENTITIES = {
+    MAC_A: "alice-ws",
+    MAC_B: "bob-ws",
+    MAC_C: "carol-ws",
     "aa:bb:cc:00:00:05": "phone-4021",
     "aa:bb:cc:00:00:06": "desk-4021",
     "de:ad:be:ef:01:01": "unknown-supplicant",
     "de:ad:be:ef:01:02": "unknown-supplicant",
 }
 """The identity a supplicant presented, where it presented one. A device doing MAC authentication bypass has no
-identity to present, which is what makes `unknown-supplicant` the honest value rather than a blank."""
+identity to present, which is what makes `unknown-supplicant` the honest value rather than a blank.
+
+The three workstations present one because the ladder's next rung needs somewhere to stand. An 802.1X identity is
+the only thing in this corpus a directory could bind a person to: a MAC is an asset, and asset assignment is a
+different fact with a different lifetime. Falling back to the MAC left `dot1x_identity` carrying an address on
+most exchanges, which is what the fallback is for and not what an estate with 802.1X deployed actually reports.
+Nothing keys on it -- `TC2AuthStage` prefers `mac_address` when both are present, so the exchange key, the port
+key and every window are untouched.
+"""
 
 AUTH_SUPPLICANTS = {PORTS[0]: MAC_A, PORTS[1]: MAC_B, PORTS[2]: MAC_C}
 """Which device authenticates on each port, matching the MAC table the same corpus reports.
@@ -623,12 +634,16 @@ def build_binding_table(bindings: pd.DataFrame) -> BindingTable:
                                        end_column="bind_end")
 
 
-def run_pipeline(config: Config,
-                 corpus: dict[str, pd.DataFrame],
-                 batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                 impose_order: bool = True) -> pd.DataFrame:
+def run_classes(config: Config,
+                corpus: dict[str, pd.DataFrame],
+                batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
+                impose_order: bool = True) -> dict[str, pd.DataFrame]:
     """
-    Run every telemetry class through its pipeline and return one canonicalized frame.
+    Run every telemetry class through its own pipeline, unsealed, and return the outputs per class.
+
+    Split out of `run_pipeline` so that a harness composing more layers than this one can add its classes to the
+    union before it is sealed. Sealing is where a chain is decided, and a class sealed after the others can never
+    join their chains, so the seam has to be here rather than after.
 
     Parameters
     ----------
@@ -645,8 +660,9 @@ def run_pipeline(config: Config,
 
     Returns
     -------
-    `pandas.DataFrame`
-        Every class's output, tagged with `telemetry_class`, keyed by `row_key`, canonicalized.
+    dict
+        Class name to its output frame, with `row_key` already set on the classes whose key is not `event_uid`.
+        None of them carry window columns yet.
     """
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
@@ -725,6 +741,39 @@ def run_pipeline(config: Config,
                                      seal=False,
                                      chain=CHAIN_ROOTS["tc2_auth"],
                                      envelope=CLASS_ENVELOPE["tc2_auth"])
+
+    return outputs
+
+
+def run_pipeline(config: Config,
+                 corpus: dict[str, pd.DataFrame],
+                 batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
+                 impose_order: bool = True) -> pd.DataFrame:
+    """
+    Run every telemetry class, seal the chained ones together, and return one canonicalized frame.
+
+    Parameters
+    ----------
+    config : `morpheus.config.Config`
+        Pipeline configuration.
+    corpus : dict
+        The frames from `build_corpus`, possibly permuted.
+    batches : dict, optional
+        Per class, how the corpus is split across source frames. Defaults to one frame per class. The batch-split
+        sweep is the caller's to vary.
+    impose_order : bool, default = True
+        Place `TotalOrderStage` ahead of the stateful stages. The permutation check's negative control turns it off
+        to reproduce the removed-sort defect and prove the harness catches it.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        Every class's output, tagged with `telemetry_class`, keyed by `row_key`, canonicalized.
+    """
+    if (batches is None):
+        batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
+
+    outputs = run_classes(config, corpus, batches, impose_order)
 
     # The chained classes are sealed together, in as many contiguous pieces as the widest per-class split, so
     # control 5 sweeps this pass too.
