@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is twenty-six stages and twenty-eight supporting
-modules, covered by 1,167 distinct tests, itemized in
+8's total order, and control 13's CI harness. That is twenty-seven stages and twenty-nine supporting
+modules, covered by 1,213 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1190,7 +1190,13 @@ different question from "is this user in the Finance group," and a non-bitempora
 second.
 
 **Cadence:** daily full snapshot plus event-driven deltas.
-**Retention:** indefinite. This is the smallest and most valuable dataset in the entire architecture.
+**Retention:** as long as the joins need, which is at least as long as the longest-retained index it is used
+to interpret. An earlier draft of this document called that period indefinite, which was a recommendation it
+had no business making: this is employment history, reporting lines and start and end dates, and it is the one
+dataset here that is unambiguously personal data about identifiable people under every regime that has a
+word for it. It is also the smallest and most valuable dataset in the architecture, which is an argument for
+keeping it accurate rather than for keeping it forever. Set the period against the retention of what it
+interprets, and ask counsel rather than this document.
 
 ---
 
@@ -2939,6 +2945,19 @@ What Morpheus provides versus what has to be built, stated plainly.
   the overwhelming majority of ports and the wrong answer, silently, for every one whose optic has been
   replaced; the history holds the intervals that row overwrote, and nothing else, so it is empty in an estate
   where nobody has touched an optic and grows with the changes rather than with the port count.
+- The inventory of what this all holds about a person, and the mechanism for holding less
+  ({py:mod}`~morpheus.utils.personal_data` and
+  {py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`). Every column the reference
+  pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
+  until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
+  counts are the finding: five columns identify a person, eight address their device, fourteen locate them, and
+  seventy-one are behavioural profile, which is to say the largest thing an estate ends up holding is the part
+  this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
+  with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
+  a column whose domain its own definition bounds, because twenty-four hours of digests are read straight off
+  the frequencies. What it is not is asserted beside what it is: a layer 5 record with every name and the desk
+  port digested is re-identified through its own chain, off the layer 2 record one hop down, using the directory
+  the estate supplies.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.
@@ -3154,14 +3173,66 @@ where a change happened resolves to the interval that came first. That is the sa
 bucketing error, bounded by the bucket width, where the unbucketed lookup's error was bounded by nothing
 at all.
 
-**What retention, lawful basis and minimization apply to the behavioral history this design accumulates.**
-Layer 5 alone keeps each principal's location history, last known coordinate, device and application
-history, and the binding lookups here assume a 400-day retention -- a location history of employees'
-device movements over more than a year, to which a per-user behavioral profile is added once a model is
-in the pipeline. This document specifies no retention limits, no minimization, no lawful basis and no
-treatment of the data as personal data. That is a deliberate deferral recorded here rather than an
-oversight, and it is a question for the deploying organization and its counsel rather than one this
-guide should answer on their behalf.
+**What retention, lawful basis and minimization apply to the behavioral history this design accumulates.
+Still open, and narrower than it was.** The legal half stays where it was: which fields are personal data
+in a given jurisdiction, on what basis they may be held, and for how long, are questions for the deploying
+organization and its counsel, and a pipeline that answered them would be answering them wrong. Nothing
+below is legal advice and none of it sets a retention period.
+
+What has changed is that the design no longer makes those questions unanswerable. An organization that
+decided to minimize previously had nothing to decide with: nobody could say what personal data this fork
+produced without reading every stage, there was no mechanism to send less, and so "minimize" could only
+ever be written down as an intention. Three things now exist.
+
+**An inventory** ({py:mod}`~morpheus.utils.personal_data`), derived from the code and checked against it.
+Every column the four reference pipelines emit is classified by what it says about a person on its own:
+whether it *identifies* them, *addresses* their device, *locates* them, *profiles* their behaviour, or is
+a *pseudonym* that re-identifies against the binding tables -- or none of those, in which case it is about
+a network element or the pipeline. A new feature column fails a test until somebody has decided which.
+That test is the point of it: an inventory nobody checks reads as authoritative and is a snapshot of
+whichever day it was written.
+
+The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
+fork emits, five identify a person, eight are addresses, fourteen locate, six are pseudonyms -- and
+seventy-one are behavioural profile. **The largest category by far is the one the design manufactures
+rather than collects.** An estate reviewing this will think about the authentication logs it ingested;
+most of what it ends up holding about a person is derived here, from those logs, and did not exist before
+the pipeline ran.
+
+**A mechanism** ({py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`), placed beside
+the wire stage at the end of a segment, which drops or pseudonymizes by column or by category. Three things
+in it are decisions rather than details, and each is asserted rather than described. The pseudonym is a
+keyed HMAC and the key has no default, because a bare digest of a principal is recovered from the estate's
+own directory. It is stable, because every stateful stage keys per-entity history on an identifier and an
+unstable pseudonym would split one person's history into as many people as there were runs -- and stability
+is exactly what keeps this pseudonymization rather than anonymization. And it refuses to pseudonymize a
+column whose domain is fixed by its own definition: there are twenty-four hours and about two hundred and
+fifty country codes, and whoever holds the output can count how often each digest appears and read the
+mapping off the frequencies, which no key prevents.
+
+**A statement of what each index holds**, in the app's `indexes.conf` beside the retention it sets, in the
+same categories. Retention was already there; what was missing was any way to know what the number applied
+to.
+
+Two limits, both asserted against the estate pipeline rather than left as caveats.
+
+**Minimizing one layer of a design whose purpose is to join layers is a control against casual reading and
+not anonymization.** Take a layer 5 record with every name for the principal digested and the desk port
+digested with them; follow its `lineage_id` into the chain it was sealed into; read the plaintext 802.1X
+identity and port off the layer 2 record it reaches; look that identity up in the directory the estate
+supplies. The principal comes back, at the desk they were sitting at. Nothing in that is an attack -- it is
+the identifier ladder being used for exactly what Part 2 built it for, by somebody holding the same two
+indexes as everybody else. The binding tables exist to re-identify and they will keep doing so.
+
+**The mechanism's safety net catches copies of a value, not second names for a person.** A layer 5 record
+carries the principal's own string three times, under `user_principal`, `entity_key` and `chain_anchor`,
+and digesting one of the three is refused with the other two named. It cannot refuse what it cannot see: the
+802.1X identity the directory resolved is a different string for the same person, and no comparison of
+values will ever say so. A policy is written from the inventory; the check is what catches whatever writing
+it from the inventory still missed.
+
+None of this is a lawful basis, a retention period, or a decision that the data may be held. It is the
+material that makes those decisions possible to take, and to audit afterwards.
 
 ### Sequencing recommendation
 

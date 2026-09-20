@@ -51,6 +51,7 @@ Workday
 XGBoost
 Zeek
 [Aa]llowlist
+[Aa]nonymization
 [Aa]nonymize(d?)
 [Aa]uditable
 [Aa]utoencoder
@@ -107,11 +108,16 @@ Zeek
 [Pp]arallelization
 [Pp]arsable
 [Pp]eriodogram
+[Pp]laintext
 [Pp]ostprocess
 [Pp]reallocate(d|s)?
 [Pp]reprocess
 [Pp]retrained
 [Pp]roxying
+[Pp]seudonym(s?)
+[Pp]seudonymization
+[Pp]seudonymize(d|s)?
+[Pp]seudonymizing
 [Qq]uantize(d?)
 [Rr]econstructible
 [Rr]eindexing

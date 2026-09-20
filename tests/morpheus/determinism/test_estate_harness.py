@@ -384,3 +384,125 @@ def test_the_layers_are_stamped_where_they_came_from(result: pd.DataFrame):
 
     for (name, layer) in expected.items():
         assert set(_rows(result, name)["osi_layer"]) == {layer}, name
+
+
+# --- What minimizing the top layer does and does not achieve ----------------------------------------------------
+#
+# The guide leaves retention and minimization to the deploying organization, and `MinimizationStage` is the
+# mechanism that lets one act on the decision. What follows is that mechanism against a real estate rather than a
+# constructed frame, and then its honest limit: an estate that digests every name and every place in its layer 5
+# records has still not anonymized anybody, because the layers below carry both and the chain leads to them.
+
+LAYER_FIVE_POLICY = ["user_principal", "entity_key", "desk_identity", "chain_anchor", "desk_port_key"]
+"""Everything in a layer 5 row that names the principal or says where they were sitting.
+
+Arrived at by running a smaller policy and reading the refusals. `chain_anchor` has to be here because it is
+copied from whichever candidate matched, and `desk_port_key` because it is one of the candidates -- digesting
+the anchor and shipping the column it came from would put the plaintext back beside the digest.
+"""
+
+MINIMIZATION_KEY = b"an-estate-key-of-sufficient-length"
+
+
+def _minimized(config: Config, result: pd.DataFrame, policy: list = None) -> pd.DataFrame:
+    """The layer 5 rows with a policy applied, exactly as a deployment would apply it per segment."""
+    from morpheus.messages import MessageMeta  # pylint: disable=import-outside-toplevel
+    from morpheus.stages.lineage.minimization_stage import MinimizationStage  # pylint: disable=import-outside-toplevel
+
+    meta = MessageMeta(_rows(result, ep.AUTH_CLASS).reset_index(drop=True))
+    stage = MinimizationStage(config,
+                              pseudonymize=LAYER_FIVE_POLICY if policy is None else policy,
+                              key=MINIMIZATION_KEY)
+    stage.on_data(meta)
+
+    return meta.copy_dataframe()
+
+
+@pytest.mark.cpu_mode
+def test_digesting_only_the_principal_is_refused_and_says_what_else_carries_them(pipeline_config: Config,
+                                                                                 result: pd.DataFrame):
+    # The policy an estate writes first. A layer 5 row carries the principal's own string three times, and two
+    # of the three are places nobody thinks of as a name: the entity key the window was sealed on and the anchor
+    # the chain was rooted on.
+    with pytest.raises(ValueError) as caught:
+        _minimized(pipeline_config, result, policy=["user_principal"])
+
+    for column in ("entity_key", "chain_anchor"):
+        assert column in str(caught.value), column
+
+
+@pytest.mark.cpu_mode
+def test_the_refusal_does_not_catch_a_second_identifier_for_the_same_person(pipeline_config: Config,
+                                                                            result: pd.DataFrame):
+    # The stated limit of that safety net, asserted so nobody mistakes it for completeness. The check compares
+    # values, so it finds the principal's string wherever it was copied -- and `desk_identity` holds the 802.1X
+    # identity the directory resolved, which is a different string for the same person. No value comparison can
+    # find that. It is why a policy is written from the inventory rather than from whatever the refusals happen
+    # to name.
+    auth = _auth(result)
+    identities = set(auth["desk_identity"].dropna())
+
+    assert len(identities) > 0
+    assert not (identities & set(auth["user_principal"]))
+
+    with pytest.raises(ValueError) as caught:
+        _minimized(pipeline_config, result, policy=["user_principal"])
+
+    assert "desk_identity" not in str(caught.value)
+
+
+@pytest.mark.cpu_mode
+def test_the_whole_layer_five_policy_moves_every_name_together(pipeline_config: Config, result: pd.DataFrame):
+    # The mechanism doing its job, so that the limit below is a limit rather than a defect. Every name moves,
+    # and one principal is still one principal afterwards or the per-entity story would break in the SIEM
+    # instead of in the pipeline.
+    minimized = _minimized(pipeline_config, result)
+    principals = set(_auth(result)["user_principal"])
+    desks = set(DESK_PORTS)
+
+    assert len(principals) > 1
+
+    for column in ("user_principal", "entity_key", "desk_identity", "chain_anchor", "desk_port_key"):
+        surviving = set(minimized[column].dropna())
+
+        assert not (surviving & principals), column
+        assert not (surviving & desks), column
+
+    assert minimized["user_principal"].nunique() == len(principals)
+    assert list(minimized["entity_key"]) == list(minimized["user_principal"])
+
+
+@pytest.mark.cpu_mode
+def test_a_fully_minimized_layer_five_is_still_not_anonymous(pipeline_config: Config, result: pd.DataFrame):
+    # The sentence that matters, proved through the shipped artifacts rather than argued. Take a layer 5 row
+    # that names nobody and locates nobody, follow its `lineage_id` into the chain it was sealed into, read the
+    # plaintext 802.1X identity and port off the layer 2 row it reaches, and look the identity up in the
+    # directory the estate supplies. The principal and their desk both come back.
+    #
+    # Nothing here is an attack. It is the identifier ladder being used for exactly what it was built for, by
+    # somebody holding the same two indexes as everybody else. Minimizing one layer of a design whose purpose is
+    # to join layers is a control against casual reading, and it is not anonymization.
+    minimized = _minimized(pipeline_config, result)
+    chained = minimized[minimized["lineage_id"].notna()]
+    identity_to_principal = {identity: principal for (principal, identity) in ep.DIRECTORY.items()}
+
+    assert len(chained) > 0
+
+    neighbours = _rows(result, "tc2_auth")
+    recovered = {}
+
+    for lineage_id in set(chained["lineage_id"]):
+        reached = neighbours[neighbours["lineage_id"] == lineage_id]
+
+        for row in reached.itertuples():
+            principal = identity_to_principal.get(row.dot1x_identity)
+
+            if (principal is not None):
+                recovered.setdefault(principal, set()).add(row.auth_port_key)
+
+    # Every principal who sat at a desk is recovered, at the desk they sat at.
+    assert set(recovered) == set(ep.DESKS)
+    assert ep.REMOTE not in recovered
+
+    for (principal, ports) in recovered.items():
+        assert ports == {f"{ep.tp.SITE}:{ep.tp.SWITCH}:{ep.DESKS[principal]}"}, principal

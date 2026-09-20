@@ -30,7 +30,7 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 
 | File | Deploy to | What it defines |
 | --- | --- | --- |
-| `default/indexes.conf` | Indexers | `behavior_events`, `behavior_lineage`, `behavior_bindings`, `behavior_context`, `behavior_summary`, with deliberately asymmetric retention |
+| `default/indexes.conf` | Indexers | `behavior_events`, `behavior_lineage`, `behavior_bindings`, `behavior_context`, `behavior_summary`, with deliberately asymmetric retention, and a statement of what each one holds about a person beside the period it holds it for |
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored to `event_time` |
 | `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, and the bucketed L1 history beside them, with accelerated fields |
 | `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1` and `binding_l1_history` lookups |
@@ -112,7 +112,16 @@ side alone breaks the joins silently.
    failure: an investigation into last Tuesday resolves that port to the optic installed on Wednesday,
    with nothing to indicate the answer is from the wrong interval. `transforms.conf` carries the full
    two-lookup walk in its header comment.
-8. **Provisional bindings, if enabled.** `TC2BindingStage(emit_open_bindings=True)` emits a record on
+8. **What each index holds about a person, beside how long it holds it.** `indexes.conf` states this per
+   index, in the categories `morpheus.utils.personal_data` classifies columns into. It is not a legal
+   position and sets no lawful basis; it is the half of a retention decision that was missing, since a
+   period is not a decision until somebody can say what it applies to. `behavior_events` carries all five
+   personal categories for 90 days, and most of what it carries is behavioural profile the pipeline derived
+   rather than anything a collector sent. `behavior_bindings` carries addresses and locations for 400 days
+   and is, by design, the thing that re-identifies the rest. Minimization is upstream of all of it --
+   `morpheus.stages.lineage.minimization_stage.MinimizationStage` before the sink -- and is not a substitute:
+   what reaches an index is a pipeline decision, how long it stays is this file's.
+9. **Provisional bindings, if enabled.** `TC2BindingStage(emit_open_bindings=True)` emits a record on
    sourcetype `binding:l2:open` the moment a binding opens, with a null `bind_end`. Whatever builds the
    live lookup from those must cap the open interval with an explicit assumed duration
    (`BindingTable.from_dataframe(open_end_duration_ns=...)`, the source's own aging interval is the

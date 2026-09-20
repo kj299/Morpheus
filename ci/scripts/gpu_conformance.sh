@@ -70,6 +70,7 @@ TARGETS=(
     tests/morpheus/stages/test_envelope_stamp_stage.py
     tests/morpheus/stages/test_community_id_stage.py
     tests/morpheus/stages/test_lineage_stamp_stage.py
+    tests/morpheus/stages/test_minimization_stage.py
     tests/morpheus/stages/test_siem_wire_stage.py
     tests/morpheus/stages/test_tc1_binding_stage.py
     tests/morpheus/stages/test_tc1_change_stage.py
@@ -127,6 +128,7 @@ UNMARKED=(
     tests/morpheus/utils/test_link_flap.py
     tests/morpheus/utils/test_optical_baseline.py
     tests/morpheus/utils/test_outcome_run.py
+    tests/morpheus/utils/test_personal_data.py
     tests/morpheus/utils/test_ratio_window.py
     tests/morpheus/utils/test_session_timer.py
     tests/morpheus/utils/test_sharding.py
