@@ -32,9 +32,9 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | --- | --- | --- |
 | `default/indexes.conf` | Indexers | `behavior_events`, `behavior_lineage`, `behavior_bindings`, `behavior_context`, `behavior_summary`, with deliberately asymmetric retention |
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored to `event_time` |
-| `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings and the unbucketed L1 bindings, with accelerated fields |
-| `default/transforms.conf` | Search heads | The `binding_l2_l3` and `binding_l1` lookups |
-| `default/savedsearches.conf` | Search heads | Fourteen searches: lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the four layer 2 detections R-D-L2-001, 003, 004 and 005, the two layer 5 detections R-D-L5-003 and R-D-L5-004, the layer 5 predictive watchlist R-P-L5-006, and a binding health alert |
+| `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, and the bucketed L1 history beside them, with accelerated fields |
+| `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1` and `binding_l1_history` lookups |
+| `default/savedsearches.conf` | Search heads | Sixteen searches: lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the four layer 2 detections R-D-L2-001, 003, 004 and 005, the two layer 5 detections R-D-L5-003 and R-D-L5-004, the layer 5 predictive watchlist R-P-L5-006, and a binding health alert |
 | `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
 
 ## Installation
@@ -65,15 +65,18 @@ $SPLUNK_HOME/bin/splunk btool savedsearches list "Chain assembly - cross-layer r
 These values are shared contracts between this app and the Morpheus pipeline. Changing either
 side alone breaks the joins silently.
 
-1. **Bucket width, 300 seconds.** The pipeline expands bindings with
-   `BindingTable.to_bucketed_frame(bucket_seconds=300)`, and every query in the guide computes
-   `bucket=floor(_time/300)`. The expiry saved search also assumes it. Each bucketed row carries
-   `bucket_start`, the bucket's own start time, which is what `[binding:bucketed]` anchors `_time` on. A
-   bucketed row has no other time of its own: it stands for a key in a bucket, not for a single binding
-   record, so it carries neither `bind_start` nor `bind_end`.
-2. **Binding retention, 400 days.** `frozenTimePeriodInSecs` on `behavior_bindings` and the cutoff
-   in the `Binding lookup - L2/L3 expiry` search must move together. A lookup that expires before
-   its index produces unattributable events.
+1. **Bucket width: 300 seconds at layers 2 and 3, 86400 at layer 1.** The pipeline expands bindings
+   with `BindingTable.to_bucketed_frame(bucket_seconds=...)`, and every query in the guide rediscretizes
+   event times with the same divisor. The expiry saved searches assume it too. The two widths are not a
+   preference; they follow the intervals. A DHCP lease lasts hours and five minutes divides it usefully,
+   while a transceiver sits in a port for months and expanding one of those at five minutes runs past
+   `max_buckets_per_binding` before the optic is five weeks old. Each bucketed row carries `bucket_start`,
+   the bucket's own start time, which is what `[binding:bucketed]` anchors `_time` on. A bucketed row has
+   no other time of its own: it stands for a key in a bucket, not for a single binding record, so it
+   carries neither `bind_start` nor `bind_end`.
+2. **Binding retention, 400 days.** `frozenTimePeriodInSecs` on `behavior_bindings` and the cutoffs
+   in the `Binding lookup - L2/L3 expiry` and `Binding lookup - L1 history expiry` searches must move
+   together. A lookup that expires before its index produces unattributable events.
 3. **The Community ID seed, zero.** Not a Splunk setting, but the reason the `community_id` field
    joins against Zeek and Suricata data in the same estate. If any producer changes the seed, they
    all must.
@@ -97,8 +100,19 @@ side alone breaks the joins silently.
    `binding_table=dhcp_lease`, because several binding sources land on the one `binding:bucketed`
    sourcetype and a refresh that cannot tell them apart builds the wrong lookup. The producer supplies it:
    `BindingTable.to_bucketed_records(table_name="dhcp_lease")`. Leave it unset and the refresh matches
-   nothing and the KV Store stays empty, which is the same posture as the two lists above.
-7. **Provisional bindings, if enabled.** `TC2BindingStage(emit_open_bindings=True)` emits a record on
+   nothing and the KV Store stays empty, which is the same posture as the two lists above. There are two
+   such sources now: `Binding lookup - L1 history refresh` selects `binding_table=port_inventory` on the
+   same sourcetype, so the discriminator is what keeps a port history out of an IP-to-MAC lookup and an
+   IP-to-MAC lease out of a port history.
+7. **Which layer 1 lookup a search reaches for.** `binding_l1` answers what is in a port *now*;
+   `binding_l1_history` answers what was in it on a given day, and holds a row only for a port whose
+   optic has been replaced. A walk that needs a historical answer consults the history first and falls
+   back to the current row on a miss, which is correct because a port that never changed is described
+   for all time by the row the current lookup holds. Reaching for `binding_l1` alone is the silent
+   failure: an investigation into last Tuesday resolves that port to the optic installed on Wednesday,
+   with nothing to indicate the answer is from the wrong interval. `transforms.conf` carries the full
+   two-lookup walk in its header comment.
+8. **Provisional bindings, if enabled.** `TC2BindingStage(emit_open_bindings=True)` emits a record on
    sourcetype `binding:l2:open` the moment a binding opens, with a null `bind_end`. Whatever builds the
    live lookup from those must cap the open interval with an explicit assumed duration
    (`BindingTable.from_dataframe(open_end_duration_ns=...)`, the source's own aging interval is the
@@ -107,8 +121,12 @@ side alone breaks the joins silently.
 
 ## What to expect once data flows
 
-- The two refresh searches populate the KV Store within their first scheduled cycle; `| inputlookup
+- The three refresh searches populate the KV Store within their first scheduled cycle; `| inputlookup
   binding_l2_l3 | head 5` confirms rows are landing.
+- `binding_l1_history` is the one lookup that is *expected* to be empty in a healthy estate, and stays
+  empty until somebody replaces an optic or moves a fibre. Do not read an empty result there as a broken
+  refresh; read it against `| inputlookup binding_l1 | stats count`, which should hold one row per port
+  from the first cycle onward.
 - `behavior_summary` starts filling on the 5-minute cadence, lagged by the 15-minute lateness
   horizon. Chained rules read from it, so detections trail real time by design; the guide's Part 5
   explains why that trade is correct.

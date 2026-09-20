@@ -34,6 +34,7 @@ import pytest
 
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.utils.binding_table import DEFAULT_BUCKET_SECONDS
+from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS
 from morpheus.utils.community_id import community_id
 from morpheus.utils.community_id import community_id_series
 
@@ -77,12 +78,32 @@ def test_the_patterns_still_find_something():
 
 @pytest.mark.parametrize("path", [SAVEDSEARCHES_PATH, GUIDE_PATH], ids=["app", "guide"])
 def test_bucket_width_matches_the_pipeline(path: str):
-    # Contract 1. The pipeline expands bindings across buckets of DEFAULT_BUCKET_SECONDS; the SIEM rediscretizes
-    # event times with the same divisor. Disagreement means every lookup misses, with no error.
+    # Contract 1. The pipeline expands bindings across buckets of a declared width; the SIEM rediscretizes event
+    # times with the same divisor. Disagreement means every lookup misses, with no error.
+    #
+    # There are two widths, because there are two kinds of interval. Both are declared in code, and a divisor
+    # appearing here that is neither of them is a number somebody typed.
     divisors = {bucket for (_, bucket) in expiry_pairs(path)}
     divisors.update(int(value) for value in DISCRETIZE_PATTERN.findall(read_text(path)))
 
-    assert divisors == {DEFAULT_BUCKET_SECONDS}, f"{path} discretizes on {divisors}"
+    assert divisors == {DEFAULT_BUCKET_SECONDS, DEFAULT_L1_BUCKET_SECONDS}, f"{path} discretizes on {divisors}"
+
+
+def test_each_expiry_job_uses_the_width_of_the_lookup_it_trims():
+    # The half of contract 1 that a set comparison cannot see. With two widths in play, an expiry job that
+    # divides by the other lookup's width still passes every assertion above and quietly trims the wrong rows:
+    # at 300 against a day-bucketed collection the cutoff lands 288 times too high and empties the lookup.
+    expected = {
+        "binding_l2_l3": DEFAULT_BUCKET_SECONDS,
+        "binding_l1_history": DEFAULT_L1_BUCKET_SECONDS,
+    }
+
+    trimmed = dict(
+        re.findall(r"inputlookup\s+(\S+).*?floor\(\(now\(\)\s*-\s*\d+\)\s*/\s*(\d+)\)",
+                   read_text(SAVEDSEARCHES_PATH),
+                   re.DOTALL))
+
+    assert {name: int(bucket) for (name, bucket) in trimmed.items()} == expected
 
 
 def test_binding_retention_matches_between_index_and_expiry_job():
@@ -131,7 +152,7 @@ def test_the_app_readme_states_the_number_of_searches_it_ships():
 
     assert match is not None, "the app README no longer states how many searches it ships"
 
-    words = {"eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16}
+    words = {"eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17}
 
     assert words.get(match.group(1).lower()) == shipped, (
         f"the README says {match.group(1)} searches; savedsearches.conf holds {shipped}")
@@ -172,7 +193,7 @@ def test_kvstore_lookups_expose_the_key_they_are_written_by():
     transforms = configparser.ConfigParser(interpolation=None)
     transforms.read(os.path.join(APP_ROOT, "default", "transforms.conf"))
 
-    for lookup in ("binding_l2_l3", "binding_l1"):
+    for lookup in ("binding_l2_l3", "binding_l1", "binding_l1_history"):
         fields = [field.strip() for field in transforms[lookup]["fields_list"].split(",")]
 
         assert "_key" in fields, f"{lookup} cannot be written by key without _key in fields_list"
@@ -184,7 +205,7 @@ def test_kvstore_lookups_expose_the_key_they_are_written_by():
 
     writes = re.findall(r"outputlookup\s+binding_\S+(.*)", searches)
 
-    assert len(writes) == 3, writes
+    assert len(writes) == 5, writes
 
     for tail in writes:
         assert "key_field=_key" in tail, f"a lookup is written without a key: {tail!r}"

@@ -634,6 +634,36 @@ def build_binding_table(bindings: pd.DataFrame) -> BindingTable:
                                        end_column="bind_end")
 
 
+PORT_INVENTORY_TABLE = "port_inventory"
+"""What the layer 1 binding source calls itself on the shared bucketed sourcetype.
+
+Several binding sources land on `binding:bucketed` and the refresh searches tell them apart with
+`binding_table=...`, so this string is the one the app's L1 history refresh selects on.
+"""
+
+PORT_INVENTORY_COLUMNS = ["port_id", "switch_id", "site_id", "transceiver_serial", "lldp_neighbor_chassis_id"]
+"""What the `binding_l1` lookups return, in the order the app's `fields_list` names them.
+
+`port_id` and `switch_id` are values here rather than the key because the key is the composed `entity_key` and a
+Splunk lookup matches on the two columns separately -- the layer 2 lookup hands them on individually, and nothing
+on the search head composes them back into a port key.
+"""
+
+
+def build_port_binding_table(port_bindings: pd.DataFrame) -> BindingTable:
+    """The layer 1 bindings as an interval table: the port, to the site, optic and neighbour it held.
+
+    The inverse of the layer 2 table above. There the key is the mobile thing and the port is what it resolves to;
+    here the port is the key and the optic is what moves.
+    """
+    return BindingTable.from_dataframe(port_bindings,
+                                       name=PORT_INVENTORY_TABLE,
+                                       key_column="entity_key",
+                                       value_columns=list(PORT_INVENTORY_COLUMNS),
+                                       start_column="bind_start",
+                                       end_column="bind_end")
+
+
 def run_classes(config: Config,
                 corpus: dict[str, pd.DataFrame],
                 batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,

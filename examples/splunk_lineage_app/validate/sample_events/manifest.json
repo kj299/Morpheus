@@ -1,6 +1,6 @@
 {
   "events_per_sourcetype": {
-    "binding:bucketed": 80,
+    "binding:bucketed": 81,
     "binding:l1": 5,
     "binding:l2": 13,
     "morpheus:edge": 47,

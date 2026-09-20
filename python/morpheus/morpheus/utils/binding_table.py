@@ -22,6 +22,12 @@ are known, and only when the resolution rule is fixed in advance.
 This module provides that fixed rule. A `BindingTable` answers "which binding covered this key at this instant" with a
 documented tie-break, so the same inputs resolve the same way on replay, and it can flatten itself into the
 discretized, one-row-per-bucket form that a SIEM lookup requires.
+
+It also splits itself by tense. A lookup keyed on the entity alone holds one row per key and answers what is bound
+to it *now*, which is right for every key that never changed and silently wrong about the past of every key that
+did. `BindingTable.superseded` returns the intervals such a lookup has overwritten -- and only those -- so the
+historical answer can be materialized beside the current one at a cost proportional to how much moved rather than
+to how much exists.
 """
 
 import bisect
@@ -57,6 +63,21 @@ This is a contract, not a preference: the pipeline expands bindings across bucke
 rediscretizes event times with the same divisor. The two sides must agree exactly, or every lookup silently misses.
 The shipped Splunk app uses this value, and `tests/morpheus/utils/test_splunk_app_contracts.py` fails if they
 diverge.
+"""
+
+DEFAULT_L1_BUCKET_SECONDS = 86400
+"""
+Bucket width for the layer 1 port-history lookup, which is a day rather than five minutes.
+
+The width is set by how long the intervals are, not by how important they are. A DHCP lease lasts hours, so
+expanding it across five-minute buckets costs a bounded handful of rows. A transceiver sits in a port for months,
+and expanding one of those at five minutes costs tens of thousands of rows for a single optic -- past
+`DEFAULT_MAX_BUCKETS_PER_BINDING` before the interval is five weeks old. Bucketing a long interval finely buys
+precision the poller never had and pays for it by the bucket.
+
+A day is the coarsest width that still separates one optic from its replacement in every investigation that names
+a date, which is what a layer 1 question is. The cost of the approximation is the usual one and is the same shape
+as layer 2's: an event inside the bucket where the change happened resolves to the interval that came first.
 """
 
 
@@ -448,6 +469,36 @@ class BindingTable:
             results.append(result)
 
         return results
+
+    def superseded(self) -> "BindingTable":
+        """
+        The bindings a current-state lookup no longer describes.
+
+        A lookup keyed on the entity alone answers with one row per key, and that row is the latest binding: what is
+        in the port now. For every key that never changed, that answer is correct for all time and no history is
+        needed. For a key that did change, every binding but the latest is a fact the current row has overwritten,
+        and those are what this returns.
+
+        The split is what makes a historical layer 1 lookup affordable. Expanding every port across every bucket of
+        the retention period costs ports times buckets for facts that overwhelmingly did not change; expanding only
+        the superseded intervals costs nothing at all in an estate where nobody touched an optic.
+
+        The latest binding is the maximum under the same total order `resolve` uses to break ties, so the binding
+        this drops is exactly the one a current-state refresh would have left in the lookup.
+
+        Returns
+        -------
+        `BindingTable`
+            A table with this one's name and value columns, holding every binding except each key's latest. Empty
+            when no key has more than one.
+        """
+        remaining = []
+
+        for key_bindings in self._by_key.values():
+            # Sorted by `_sort_key` at construction, so the last one is the winner a current-state row would hold.
+            remaining.extend(key_bindings[:-1])
+
+        return BindingTable(self._name, self._value_columns, remaining)
 
     def to_bucketed_records(self,
                             bucket_seconds: int = DEFAULT_BUCKET_SECONDS,
