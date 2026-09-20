@@ -101,6 +101,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_end_to_end_mac_spoof.py
     tests/morpheus/determinism/test_first_detections.py
     tests/morpheus/determinism/test_layer5_model_runner.py
+    tests/morpheus/determinism/test_readme_inventory.py
     tests/morpheus/determinism/test_representation_invariance.py
     tests/morpheus/determinism/test_splunk_validation_package.py
     tests/morpheus/determinism/test_stage_parameter_liveness.py
