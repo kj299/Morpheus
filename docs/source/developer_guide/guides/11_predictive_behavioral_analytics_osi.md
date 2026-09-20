@@ -116,31 +116,31 @@ artifact it exists to produce. It then took four repairs to that runner before a
 believed, and each of the four is recorded below, because each produced a verdict that read `passed`
 while measuring less than it claimed.
 
-**The run that stands is 2026-09-19 at 22:58 UTC**, on the same card under driver 596.71, over tiers
-that are total: the marked tier 448 collected and 448 passed; the tier carrying no mode marker 941
+**The run that stands is 2026-09-20 at 12:23 UTC**, on the same card under driver 596.71, over tiers
+that are total: the marked tier 455 collected and 455 passed; the tier carrying no mode marker 941
 collected, 935 passed and 6 skipped -- every skip a field contract for a sourcetype nothing produces
 yet. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
 pytest collected.
 
-It is the first device check of three things the runs before it could not see. The chains now span two
-layers, which means the four chained classes are sealed together over their union rather than class by
-class, and a Merkle root computed on a device over a different order is exactly the kind of arithmetic
-that has diverged here before. The drift trajectory is now measured over daily windows sealed behind the
-hourly ones, so there is a second sealer whose columns had never been produced on a card. And the scorer
-adapter's shape contract is asserted at the pipeline level, including its negative control.
+It is the first device check of the estate pipeline, and so the first on which a chain spanning three
+layers was assembled by a card rather than by a host. That matters more than it sounds: a chain is a
+Merkle root over its members in order, the estate seals five classes together over their union, and the
+ordering and hashing of that union is exactly the arithmetic this project has seen diverge between host
+and device before.
 
-The growth reconciles rather than being taken on trust. The tiers gained nineteen marked variants and
-twenty-two unmarked ones since the 2026-09-07 run, and the same two tiers collect 448 and 931 on a
-machine with no card -- the marked tier identical to the device, the unmarked one exactly ten short of
-it, the same offset the earlier run showed. A tier that grew by a different number than the work added
-would mean a file had fallen out of a list, which is the defect two of the repairs below were for.
+The growth reconciles rather than being taken on trust. The marked tier gained exactly seven since the
+run before, which is the number of `gpu_mode` variants the estate harness has, and the unmarked tier
+gained none because that harness is in the marked list alone. The same two tiers collect 455 and 931 on
+a machine with no card -- the marked tier identical to the device, the unmarked one exactly ten short of
+it, the offset every run so far has shown. A tier that grew by some other number would mean a file had
+fallen out of a list, which is the defect two of the repairs below were for.
 
 These runs also carry `torch==2.4.0+cu124` beside the RAPIDS stack, which answers a question the earlier
 ones could not: the two coexist in one process, and adding Torch does not disturb cuDF. That is every
-stage, all three composed pipelines, control 13's six checks, the stage parameter liveness registry and
-the first-detection corpus, in GPU mode. The estate pipeline that joins layers 1, 2 and 5 postdates it and
-has not run on a card at all: its nineteen checks are a CPU result, and the next conformance run is what
-makes them a device one. What it is not is a measurement of the model. The conformance
+stage, all four composed pipelines, control 13's six checks, the stage parameter liveness registry and
+the first-detection corpus, in GPU mode. What a device run does not reach, in this harness as in the
+others, is the assertions marked `cpu_mode`: the estate's nineteen include the ladder itself and both
+its negative controls, and they are CPU statements by construction rather than by omission. What it is not is a measurement of the model. The conformance
 tiers score through stubs, deliberately, so that they need no card-trained weights to run; the
 autoencoder behind the adapter is what `run_model.py` measures, and that verdict is separate.
 
