@@ -67,6 +67,10 @@ from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
+from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
+from morpheus.stages.telemetry.tc3_cardinality_stage import TC3CardinalityStage
+from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
+from morpheus.stages.telemetry.tc3_ttl_stage import TC3TtlStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
@@ -296,6 +300,42 @@ def a_third_name_for_the_same_person() -> dict:
         "entity_key": ["alice@example.com", "bob@example.com"],
         "desk_identity": ["alice@example.com", "bob@example.com"],
         "logcount": [4, 7],
+    }
+
+
+def flow_records() -> dict:
+    """Eight flows from two sources, spread far enough apart that a window parameter has something to cut."""
+    return {
+        "src_ip": ["10.0.0.5"] * 6 + ["10.0.0.6"] * 2,
+        "dst_ip": ["10.0.0.9", "10.0.0.10", "8.8.8.8", "10.0.0.11", "8.8.4.4", "10.0.0.12", "10.0.0.9", "8.8.8.8"],
+        "dst_port": [443, 445, 443, 22, 443, 445, 443, 80],
+        "bgp_as_dst": ["64512", "64512", "15169", "64512", "15169", "64512", "64512", "15169"],
+        "bytes_out": [100, 200, 300, 400, 500, 600, 700, 800],
+        "bytes_in": [10, 20, 30, 40, 50, 60, 70, 80],
+        "ip_ttl": [64, 64, 64, 64, 64, 63, 128, 128],
+        "event_time": [10**18 + index * 600 * SECOND for index in range(8)],
+    }
+
+
+def paired_flows() -> dict:
+    """Fourteen flows on one pair with three on another interleaved among them.
+
+    Fourteen because twelve intervals are thirteen arrivals, so a frame one flow shorter could not tell a
+    maturity floor of twelve from one of thirteen.
+
+    Interleaved because an entity cap is only observable mid-stream. Run the pairs one after the other and a cap
+    of one evicts the first pair after its last row has already been emitted, so the parameter reads as dead when
+    it is merely too late to matter.
+    """
+    rows = [(10**18 + index * 60 * SECOND, "10.0.0.5", "93.184.216.34", 512) for index in range(14)]
+    rows += [(10**18 + offset * SECOND, "10.0.0.6", "93.184.216.35", 700) for offset in (30, 390, 750)]
+    rows.sort()
+
+    return {
+        "src_ip": [row[1] for row in rows],
+        "dst_ip": [row[2] for row in rows],
+        "bytes_out": [row[3] for row in rows],
+        "event_time": [row[0] for row in rows],
     }
 
 
@@ -976,6 +1016,72 @@ REGISTRY: dict = {
                 Knob("raise_on_failure", RAISES, benign=False, extreme=True),
             ),
         ),
+    "TC3CardinalityStage":
+        Scenario(stage=TC3CardinalityStage,
+                 frame=flow_records,
+                 base={"window_seconds": 3600},
+                 knobs=(
+                     Knob("src_column", INPUT_COLUMN, benign="src_ip"),
+                     Knob("dst_column", INPUT_COLUMN, benign="dst_ip"),
+                     Knob("dst_port_column", INPUT_COLUMN, benign="dst_port"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
+                     Knob("max_samples", DIFFERS, benign=4096, extreme=2),
+                 )),
+    "TC3ReachStage":
+        Scenario(stage=TC3ReachStage,
+                 frame=flow_records,
+                 base={
+                     "window_seconds": 3600, "min_denominator": 1
+                 },
+                 knobs=(
+                     Knob("src_column", INPUT_COLUMN, benign="src_ip"),
+                     Knob("dst_column", INPUT_COLUMN, benign="dst_ip"),
+                     Knob("asn_column", INPUT_COLUMN, benign="bgp_as_dst"),
+                     Knob("bytes_out_column", INPUT_COLUMN, benign="bytes_out"),
+                     Knob("bytes_in_column", INPUT_COLUMN, benign="bytes_in"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
+                     Knob("min_denominator", DIFFERS, benign=1, extreme=100),
+                     Knob("max_samples", DIFFERS, benign=4096, extreme=2),
+                 )),
+    "TC3BeaconStage":
+        Scenario(stage=TC3BeaconStage,
+                 frame=paired_flows,
+                 base={"window_seconds": 86400},
+                 knobs=(
+                     Knob("src_column", INPUT_COLUMN, benign="src_ip"),
+                     Knob("dst_column", INPUT_COLUMN, benign="dst_ip"),
+                     Knob("size_column", INPUT_COLUMN, benign="bytes_out"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("window_seconds", DIFFERS, benign=86400, extreme=120),
+                     Knob("min_intervals", DIFFERS, benign=12, extreme=3),
+                     Knob("max_samples", DIFFERS, benign=4096, extreme=3),
+                     Knob("max_entities", DIFFERS, benign=500000, extreme=1),
+                 )),
+    "TC3TtlStage":
+        Scenario(
+            stage=TC3TtlStage,
+            frame=flow_records,
+            base={
+                "window_seconds": 86400, "min_samples": 2
+            },
+            knobs=(
+                # A list rather than a name, so the column parameter's rename trick does not apply. Two keys
+                # against one is the difference between a reference per source and one per conversation, which
+                # is the choice an estate with mixed exporters actually makes.
+                Knob("key_columns", DIFFERS, benign=["src_ip"], extreme=["src_ip", "dst_ip"]),
+                Knob("ttl_column", INPUT_COLUMN, benign="ip_ttl"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                Knob("window_seconds", DIFFERS, benign=86400, extreme=60),
+                Knob("min_samples", DIFFERS, benign=2, extreme=100),
+                Knob("min_shift", DIFFERS, benign=1, extreme=200),
+                Knob("max_samples", DIFFERS, benign=512, extreme=2),
+            )),
     "MinimizationStage":
         Scenario(
             stage=MinimizationStage,

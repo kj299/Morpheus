@@ -94,6 +94,7 @@ def main() -> int:
 
     import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
     import lineage_pipeline  # pylint: disable=import-outside-toplevel
+    import network_pipeline  # pylint: disable=import-outside-toplevel
     import session_pipeline as sp  # pylint: disable=import-outside-toplevel
     import telemetry_pipeline as tp  # pylint: disable=import-outside-toplevel
 
@@ -121,6 +122,12 @@ def main() -> int:
 
     lineage = lineage_pipeline.run_pipeline(lineage_pipeline.build_pipeline_config(), [lineage_pipeline.build_corpus()])
     by_sourcetype["morpheus:edge"] = _render(lineage, "morpheus:edge")
+
+    # Layer 3 comes from its own corpus and its own pipeline, as layer 5 does. Its records share no entity with
+    # the estate's -- an address is not a port and not a principal -- so they carry their own chains and the
+    # cross-layer search sees them as a fourth layer's worth of events rather than as part of the estate's.
+    flows = network_pipeline.run_pipeline(network_pipeline.build_pipeline_config(), network_pipeline.build_corpus())
+    by_sourcetype["morpheus:score:l3"] = _render(flows, "morpheus:score:l3")
 
     bindings = telemetry[telemetry["telemetry_class"] == "tc2_binding"]
     bucketed = tp.build_binding_table(bindings).to_bucketed_frame()

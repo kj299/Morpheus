@@ -148,11 +148,26 @@ def test_the_app_readme_states_the_number_of_searches_it_ships():
     with open(readme, encoding="utf-8") as handle:
         text = re.sub(r"\s+", " ", handle.read())
 
-    match = re.search(r"savedsearches\.conf` \| Search heads \| (\w+) searches:", text)
+    # `[\w-]+` rather than `\w+`: the counts go into the twenties, and "twenty-one" carries a hyphen that a
+    # word-character class does not match, which would read as the README having stopped stating a number at all.
+    match = re.search(r"savedsearches\.conf` \| Search heads \| ([\w-]+) searches:", text)
 
     assert match is not None, "the app README no longer states how many searches it ships"
 
-    words = {"eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17}
+    words = {
+        "eleven": 11,
+        "twelve": 12,
+        "thirteen": 13,
+        "fourteen": 14,
+        "fifteen": 15,
+        "sixteen": 16,
+        "seventeen": 17,
+        "eighteen": 18,
+        "nineteen": 19,
+        "twenty": 20,
+        "twenty-one": 21,
+        "twenty-two": 22,
+    }
 
     assert words.get(match.group(1).lower()) == shipped, (
         f"the README says {match.group(1)} searches; savedsearches.conf holds {shipped}")

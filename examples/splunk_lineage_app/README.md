@@ -34,8 +34,9 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored to `event_time` |
 | `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, and the bucketed L1 history beside them, with accelerated fields |
 | `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1` and `binding_l1_history` lookups |
-| `default/savedsearches.conf` | Search heads | Sixteen searches: lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the four layer 2 detections R-D-L2-001, 003, 004 and 005, the two layer 5 detections R-D-L5-003 and R-D-L5-004, the layer 5 predictive watchlist R-P-L5-006, and a binding health alert |
+| `default/savedsearches.conf` | Search heads | Twenty-one searches: lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the four layer 2 detections R-D-L2-001, 003, 004 and 005, the five layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004 and the predictive R-P-L3-005, the two layer 5 detections R-D-L5-003 and R-D-L5-004, the layer 5 predictive watchlist R-P-L5-006, and a binding health alert |
 | `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
+| `lookups/scanner_allowlist.csv` | Search heads | The estate's own scanners, which R-B-L3-001 excludes: `src_ip,allowed,owner,note`. Ships header-only; until it is populated the rule fires on every scanner, authorized ones included |
 
 ## Installation
 

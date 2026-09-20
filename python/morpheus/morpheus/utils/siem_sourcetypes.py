@@ -27,7 +27,7 @@ exist yet. `tests/morpheus/utils/test_siem_sourcetypes.py` asserts the two halve
 configuration file appears here, every entry here corresponds to a stanza, and each declared time column is the
 one that stanza's own `TIME_PREFIX` regex anchors on.
 
-Being unproduced is a fact worth recording rather than a gap worth hiding. Seven of the fourteen stanzas are
+Being unproduced is a fact worth recording rather than a gap worth hiding. Five of the fourteen stanzas are
 configuration for producers this fork has not built, and saying so in one place is what keeps "the app supports
 seven layers" from reading as "seven layers are implemented".
 
@@ -95,6 +95,30 @@ PRODUCED: dict = {
             producer="The TC-1 stages (normalize, optical, flap, change) behind WindowSealStage; the `tc1` class of "
             "`tests/morpheus/determinism/telemetry_pipeline.py`.",
             required_columns=("event_uid", "entity_key", "site_id", "device_id", "port_id"),
+        ),
+    "morpheus:score:l3":
+        Sourcetype(
+            name="morpheus:score:l3",
+            time_column="event_time",
+            time_columns=("event_time", ),
+            producer="The TC-3 stages (cardinality, reach, beacon, TTL) behind WindowSealStage; the `tc3` class "
+            "of `tests/morpheus/determinism/network_pipeline.py`.",
+            # The five layer 3 detections read these off this sourcetype. `flow_pair_key` is here because
+            # R-B-L3-002 is about a conversation rather than about a host, and a search grouping by `src_ip`
+            # would average a beacon in with everything else that host does.
+            required_columns=("event_uid",
+                              "src_ip",
+                              "dst_ip",
+                              "flow_pair_key",
+                              "dsts_per_src",
+                              "internal_dst_ratio",
+                              "flow_interval_cv",
+                              "flow_size_cv",
+                              "flow_regularity_mature",
+                              "dst_is_reserved",
+                              "dst_is_multicast",
+                              "ip_ttl_shift",
+                              "ip_ttl_shifted"),
         ),
     "morpheus:score:l2":
         Sourcetype(
@@ -191,12 +215,11 @@ PRODUCED: dict = {
 }
 """Sourcetypes something in this fork emits, keyed by stanza name."""
 
-_LAYER_ABOVE_2 = ("A telemetry class for this layer. Layers 3, 4, 6 and 7 are design in the guide; no collector, "
-                  "no stage and no scoring path for them exists here.")
+_LAYER_ABOVE_2 = ("A telemetry class for this layer. Layers 4, 6 and 7 are design in the guide; no collector, "
+                  "no stage and no scoring path for them exists here. Layer 3 was on this list until the TC-3 "
+                  "stages landed, which is the shape the rest of it is expected to leave in.")
 
 UNPRODUCED: dict = {
-    "morpheus:score:l3":
-        Unproduced("morpheus:score:l3", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l4":
         Unproduced("morpheus:score:l4", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l6":

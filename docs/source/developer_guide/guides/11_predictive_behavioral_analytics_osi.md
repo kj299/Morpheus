@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is twenty-seven stages and twenty-nine supporting
-modules, covered by 1,213 distinct tests, itemized in
+8's total order, and control 13's CI harness. That is thirty-one stages and thirty-one supporting
+modules, covered by 1,308 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1348,6 +1348,18 @@ than one hop-equivalent. Indicates an interposed device or spoofing.
 positive across three consecutive windows while the first difference is also positive. This fires during
 the expansion phase of a scan rather than at its peak. It is a watchlist rule, not an alert rule.
 
+All five of these are built and ship as saved searches. The features they read come from
+{py:class}`~morpheus.stages.telemetry.tc3_cardinality_stage.TC3CardinalityStage`,
+{py:class}`~morpheus.stages.telemetry.tc3_reach_stage.TC3ReachStage`,
+{py:class}`~morpheus.stages.telemetry.tc3_beacon_stage.TC3BeaconStage` and
+{py:class}`~morpheus.stages.telemetry.tc3_ttl_stage.TC3TtlStage`, and each rule is asserted over the seeded
+corpus in `tests/morpheus/determinism/test_network_harness.py` together with the case beside it that must stay
+quiet. Two departures from the text above are deliberate and recorded where they are made. R-B-L3-001's
+threshold is a fixed distinct-destination count standing in for the per-source fourteen-day percentile, which
+the shipped app cannot compute without a history it does not keep. R-B-L3-004 fires on a shift of one hop rather
+than on more than one, because one hop is what a single interposed device costs and the stricter reading would
+miss it.
+
 ### Layer 4
 
 **R-B-L4-001 - Anomalous flow profile.** Direct application of the shipped `abp-pcap-xgb` model over
@@ -1765,10 +1777,11 @@ compares against a threshold -- and rounding them to microseconds to fit a times
 quietly change that arithmetic. Where a single column is all that is needed,
 {py:func}`~morpheus.utils.siem_wire.render_event_time_series` is the same rendering without a stage.
 
-That module also carries a fact the app could not previously state anywhere. Six of the fourteen
-stanzas have no producer in this fork: four are the score sourcetypes for layers 3, 4, 6 and 7, and two
-are the TC-0 context store. It was eight until the layer 5 stages landed, and seven until
-`TC1BindingStage` gave `binding:l1` one -- the sort of number that goes stale silently, which is why
+That module also carries a fact the app could not previously state anywhere. Five of the fourteen
+stanzas have no producer in this fork: three are the score sourcetypes for layers 4, 6 and 7, and two
+are the TC-0 context store. It was eight until the layer 5 stages landed, seven until
+`TC1BindingStage` gave `binding:l1` one, and six until the TC-3 stages landed -- the sort of number that
+goes stale silently, which is why
 `tests/morpheus/utils/test_siem_sourcetypes.py` now asserts this sentence against the module rather than
 leaving a reader to compare them. Each entry says what would have to be
 built. Recording them in one place is what keeps a reader from taking "the app parses seven layers" for
@@ -2945,13 +2958,32 @@ What Morpheus provides versus what has to be built, stated plainly.
   the overwhelming majority of ports and the wrong answer, silently, for every one whose optic has been
   replaced; the history holds the intervals that row overwrote, and nothing else, so it is empty in an estate
   where nobody has touched an optic and grows with the changes rather than with the port count.
+- Layer 3, which was configuration without a producer until now
+  ({py:class}`~morpheus.stages.telemetry.tc3_cardinality_stage.TC3CardinalityStage`,
+  {py:class}`~morpheus.stages.telemetry.tc3_reach_stage.TC3ReachStage`,
+  {py:class}`~morpheus.stages.telemetry.tc3_beacon_stage.TC3BeaconStage` and
+  {py:class}`~morpheus.stages.telemetry.tc3_ttl_stage.TC3TtlStage`, composed in
+  `tests/morpheus/determinism/network_pipeline.py`). `morpheus:score:l3` has a producer, which takes the
+  unproduced stanza count from six to five. Two primitives underneath are new and each carries a decision worth
+  reading: {py:mod}`~morpheus.utils.arrival_regularity` measures regularity as a coefficient of variation, which
+  is scale-free, so one threshold covers a beacon every minute and one every hour -- and it refuses to report a
+  coefficient where the mean interval is zero, because zero is the most beacon-like value it could return for
+  the one case where the quantity is undefined. {py:mod}`~morpheus.utils.ttl_profile` takes the mode of a
+  source's prior packets rather than the mean, since a source that is really two hosts behind one address is
+  bimodal and a mean describes neither.
+  **Two things the corpus caught that the prose had not.** R-B-L3-004 is written as a shift of "more than one
+  hop-equivalent", and read strictly that excludes a shift of one -- which is exactly what a single interposed
+  device produces, so the threshold is inclusive and a test asserts that raising it would miss the case the rule
+  exists for. And the addresses the RFCs reserve for documentation are classified as private, so the first draft
+  of the corpus reported a host browsing the public internet as one that never left the estate, which is the
+  condition R-B-L3-001 distinguishes a scan by.
 - The inventory of what this all holds about a person, and the mechanism for holding less
   ({py:mod}`~morpheus.utils.personal_data` and
   {py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`). Every column the reference
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
-  counts are the finding: five columns identify a person, eight address their device, fourteen locate them, and
-  seventy-one are behavioural profile, which is to say the largest thing an estate ends up holding is the part
+  counts are the finding: five columns identify a person, ten address their device, fourteen locate them, and
+  ninety-three are behavioural profile, which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
   a column whose domain its own definition bounds, because twenty-four hours of digests are read straight off
@@ -3193,8 +3225,8 @@ That test is the point of it: an inventory nobody checks reads as authoritative 
 whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
-fork emits, five identify a person, eight are addresses, fourteen locate, six are pseudonyms -- and
-seventy-one are behavioural profile. **The largest category by far is the one the design manufactures
+fork emits, five identify a person, ten are addresses, fourteen locate, six are pseudonyms -- and
+ninety-three are behavioural profile. **The largest category by far is the one the design manufactures
 rather than collects.** An estate reviewing this will think about the authentication logs it ingested;
 most of what it ends up holding about a person is derived here, from those logs, and did not exist before
 the pipeline ran.

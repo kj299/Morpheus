@@ -48,6 +48,34 @@
         }
       ]
     },
+    "R-B-L3-001 - Fan-out expansion": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 30,
+      "why": "One notable, for the scanner. Two hosts in the corpus reach a comparable number of addresses and only one of them stays inside the estate: 10.0.0.50 reaches 5, 20, 45 and then 80 internal destinations in successive hours, and 10.0.0.60 reaches thirty on the public internet every hour and is not flagged. That is the whole of the difference between a scan and a lunch break, and it is why the rule requires the internal proportion as well as the count. The scanner_allowlist lookup ships header-only, so nothing is excluded here; populated, an authorized scanner would drop out. Note the threshold is a fixed dsts_per_src>50 standing in for the per-source fourteen-day percentile the guide asks for, which this app cannot compute without a history it does not keep."
+    },
+    "R-B-L3-002 - Beaconing": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 36,
+      "why": "One notable, for the pair 10.0.0.70:93.184.216.34, which exchanges a 512-byte message every five minutes for four hours. The negative control is 10.0.0.80, which makes plenty of flows to one file server at the ragged intervals a person produces and whose coefficient of variation is above 1.0 -- an order of magnitude above the 0.15 threshold. Grouped by flow_pair_key rather than by src_ip, because a host that beacons to one address and browses to five hundred others would have the beacon averaged away by a search keyed on the host."
+    },
+    "R-D-L3-003 - Reserved-range egress": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "why": "One flow, to 240.0.0.1. Low volume and high signal by nature, which is only true if the classification is right about everything else -- so what this number really asserts is that the other 410 flows are correctly classified as ordinary. The classification is parsers/ip.py's, through TC3ReachStage, so the search holds no copy of the reserved ranges."
+    },
+    "R-B-L3-004 - TTL fingerprint shift": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 12,
+      "why": "One notable, for 10.0.0.100, whose traffic starts arriving one hop short from the third hour onward: twelve flows, every one of them shifted by exactly -1, which is what a single interposed device costs. The control is 10.0.0.110, whose TTL never moves. The aggregate threshold of three shifted flows is what makes this a statement about a distribution rather than about a packet, which is what the guide's rule asks for; a single shifted flow is noise."
+    },
+    "R-P-L3-005 - Fan-out trajectory": {
+      "expected_rows": 0,
+      "expected_empty": true,
+      "why": "Empty, and for the same reason the chain assembly search is: it reads index=behavior_summary, which the Behavior summary saved search populates as it runs, and this package indexes pipeline output only. The trajectory is present in the data -- the scanner's fan-out rises 5, 20, 45, 80 across four consecutive windows, which is exactly the shape the rule reads -- so running the summary search first on a search head that keeps its output is what would make this fire. That is a deployment step rather than a corpus one."
+    },
     "R-D-L5-003 - Impossible travel": {
       "expected_rows": 2,
       "why": "One principal is authenticated from New York half an hour after her own office login in London, and then back in London ninety minutes later. Two rows rather than one is what a single interloper produces: the jump away and the victim's next authentication from where she actually is. The traveller who makes the same crossing in eight hours is inside the threshold and does not appear, and the VPN user whose apparent location changes country twice a day is excluded by egress range rather than alerted on.",
@@ -84,19 +112,19 @@
       "why": "A cross-layer rule needing layer 4 and layer 7 telemetry. Neither class exists in this fork, so no event can satisfy either half of the correlation. Empty here is correct and will stay correct until those classes ship."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 344,
+      "expected_rows": 476,
       "expected_empty": false,
-      "contributing_rows": 1743,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 1743 scored events on `morpheus:score:l1`, `l2` and `l5`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on the layer 1 and layer 2 rows because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage."
+      "contributing_rows": 2154,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 1743 scored events on `morpheus:score:l1`, `l2` and `l5`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on the layer 1 and layer 2 rows because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew when the TC-3 stages landed: layer 3 contributes 411 scored flows of its own, keyed on source addresses that share no entity with the estate's ports and principals."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 219,
+      "distinct_lineage_ids": 244,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 219 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 244 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,
