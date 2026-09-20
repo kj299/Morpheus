@@ -138,26 +138,28 @@ Being clear about the boundary is the point of writing it down:
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
 - **Every `gpu_mode` variant this fork has passes on a GPU, and so does everything else it adds.** On
-  2026-09-19 at 22:58 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card (driver 596.71) over
-  tiers that are total: the marked tier **448 collected, 448 passed**; the tier carrying no mode marker
+  2026-09-20 at 12:23 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card (driver 596.71) over
+  tiers that are total: the marked tier **455 collected, 455 passed**; the tier carrying no mode marker
   -- where the default execution mode on a machine with a card is the GPU -- **941 collected, 935
   passed, 6 skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly
   against what pytest collected. Every remaining skip is a field contract for a sourcetype nothing
   produces yet; there were seven until `binding:l1` gained a producer, and that test now runs instead of
-  skipping. It is the first device check of the cross-layer chains, of the daily windows the drift
-  trajectory is measured over, and of the scorer adapter's shape contract. The tiers grew by nineteen
-  marked variants and twenty-two unmarked ones since the run before, and the growth reconciles: the same
-  two tiers collect 448 and 931 on a machine with no card, where the unmarked tier has collected exactly
-  ten fewer than the device does across both runs. These runs also carry `torch==2.4.0+cu124` alongside
+  skipping. It is the first device check of the estate pipeline, where a chain reaches three layers.
+  The marked tier grew by exactly seven, which is the number of `gpu_mode` variants that harness has,
+  and the growth reconciles: the same two tiers collect 455 and 931 on a machine with no card, the
+  marked tier identical to the device and the unmarked one exactly ten fewer, the same offset every run
+  has shown. These runs also carry `torch==2.4.0+cu124` alongside
   the RAPIDS stack, so they say something the earlier ones could not: adding Torch to this environment
   does not disturb cuDF, and the two coexist in one process. That covers all twenty-six stages, all
   three composed pipelines, control 13's six checks, the stage parameter liveness registry and the
-  first-detection corpus, in GPU mode. The estate pipeline postdates that run and has not been measured
-  on a card: its nineteen checks pass on CPU and nowhere else yet. What it does not cover is the model: the conformance tiers score
+  first-detection corpus, in GPU mode, and now all four composed pipelines rather than three. What a
+  device run still does not reach is the estate harness's nineteen `cpu_mode` assertions -- the ladder
+  itself, and its negative controls -- which are CPU statements by construction, the same way the other
+  harnesses' `cpu_mode` checks are. What it does not cover is the model: the conformance tiers score
   through stubs, so the autoencoder behind the adapter is measured by `run_model.py` and not here. The wider upstream tier **skipped itself**, because that checkout's `tests/tests_data` fixtures
   were unfetched Git LFS pointers, so nothing here is a claim about the upstream suite. One card, no CI.
-  This verdict supersedes 429 and 913 on 2026-09-07, and before that an earlier 353 collected and 353
-  passed, which was narrower than it read -- see
+  This verdict supersedes 448 and 935 on 2026-09-19, 429 and 913 on 2026-09-07, and before those an
+  earlier 353 collected and 353 passed, which was narrower than it read -- see
   the three bullets below, one per defect, each of which produced an artifact saying `passed` while
   measuring less than it claimed.
 - **Two earlier verdicts were narrower than they read, and both defects were in the runner.** The first
