@@ -1,6 +1,6 @@
 {
   "description": "What each shipped saved search should return when the app is deployed against sample_events/. Generated numbers come from the same run_pipeline the determinism tests call; the expected-empty entries are stated with the reason, because a search returning nothing is the failure mode this whole app is careful about and it must be possible to tell a correct empty from a broken one.",
-  "corpus": "tests/morpheus/determinism/telemetry_pipeline.py, lineage_pipeline.py and session_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
+  "corpus": "tests/morpheus/determinism/estate_pipeline.py, lineage_pipeline.py, network_pipeline.py, transport_pipeline.py and session_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
   "searches": {
     "R-D-L2-001 - MAC address count exceeded on an access port": {
       "expected_rows": 0,
@@ -76,6 +76,49 @@
       "expected_empty": true,
       "why": "Empty, and for the same reason the chain assembly search is: it reads index=behavior_summary, which the Behavior summary saved search populates as it runs, and this package indexes pipeline output only. The trajectory is present in the data -- the scanner's fan-out rises 5, 20, 45, 80 across four consecutive windows, which is exactly the shape the rule reads -- so running the summary search first on a search head that keeps its output is what would make this fire. That is a deployment step rather than a corpus one."
     },
+    "R-D-L4-002 - SYN without completion": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 60,
+      "why": "One notable, for 10.0.0.50, which sends a SYN to each of 60 destination ports inside one 60-second bin and is answered by none of them. The negative control is the workstation beside it, which opens connections to the same kind of ports in the same way and is answered: its flows carry three ACKs each and a syn/all of 0.14. The sweeper is a second control and a more interesting one -- every one of its SYNs is unanswered and scores exactly like the scanner's per flow, but it touches one port across thirty hosts rather than sixty ports on one, so a vertical-scan rule is right not to fire on it. 110 flows in the corpus satisfy the per-flow half of the predicate and one source satisfies the breadth.",
+      "key_values": {
+        "src_ip": "10.0.0.50",
+        "destination_ports": 60,
+        "destination_hosts": 1
+      },
+      "candidate_flows_before_the_breadth_filter": 110
+    },
+    "R-D-L4-003 - RST ratio": {
+      "expected_rows": 2,
+      "expected_empty": false,
+      "contributing_rows": 50,
+      "why": "Two notables from one predicate, which is the whole of this rule. 50 flows in the corpus carry refusals and nothing else, and they sit at the same rst/all of 0.5; what separates them is which side of the refusal fans out. 10.0.1.50 refuses 20 clients, which is a service outage and scores 10. 10.0.0.70 is refused by 30 servers, which is closed-port enumeration and scores 40. A rule reading only the ratio would return these as one kind of thing and send the wrong response to one of them.",
+      "key_values": [
+        {
+          "entity_key": "10.0.1.50",
+          "refusal_direction": "service_outage",
+          "counterparties": 20
+        },
+        {
+          "entity_key": "10.0.0.70",
+          "refusal_direction": "closed_port_enumeration",
+          "counterparties": 30
+        }
+      ]
+    },
+    "R-B-L4-005 - Transfer envelope breach": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 1,
+      "why": "One notable, for the triple 10.0.0.80:10.0.1.30:445, which transfers 60000 bytes against an envelope of 1200 -- fifty times its own 99th percentile. The negative control is 10.0.0.90:10.0.1.40:443, which moves more data in total and varies by a factor of two doing it: a global threshold would have to sit above the busy triple and would then sit above the exfiltration too. The envelope is a percentile rather than a maximum because the triple has 120 prior transfers, above the hundred a 99th percentile by nearest rank needs to be one; below that figure it would be the largest transfer ever seen wearing a percentile's name.",
+      "key_values": {
+        "transfer_triple": "10.0.0.80:10.0.1.30:445",
+        "transferred": 60000,
+        "volume_envelope": 1200.0,
+        "volume_ratio": 50.0,
+        "breached_envelope": "volume and shape"
+      }
+    },
     "R-D-L5-003 - Impossible travel": {
       "expected_rows": 2,
       "why": "One principal is authenticated from New York half an hour after her own office login in London, and then back in London ninety minutes later. Two rows rather than one is what a single interloper produces: the jump away and the victim's next authentication from where she actually is. The traveller who makes the same crossing in eight hours is inside the threshold and does not appear, and the VPN user whose apparent location changes country twice a day is excluded by egress range rather than alerted on.",
@@ -109,22 +152,22 @@
     "R-C-002 - TLS anomaly precedes beaconing": {
       "expected_rows": 0,
       "expected_empty": true,
-      "why": "A cross-layer rule needing layer 4 and layer 7 telemetry. Neither class exists in this fork, so no event can satisfy either half of the correlation. Empty here is correct and will stay correct until those classes ship."
+      "why": "A chained rule over two detections' notables: R-B-L6-001 at layer 6 and R-B-L3-002 at layer 3. Layer 3 now has both a producer and a firing rule, so half of the correlation is available; layer 6 has neither, and the search reads `rule_id`, which detections write into the index as they fire rather than anything the pipeline emits. This package indexes pipeline output only. Both halves would have to change for this to return a row, and empty is correct until they do."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 476,
+      "expected_rows": 890,
       "expected_empty": false,
-      "contributing_rows": 2154,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 1743 scored events on `morpheus:score:l1`, `l2` and `l5`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on the layer 1 and layer 2 rows because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew when the TC-3 stages landed: layer 3 contributes 411 scored flows of its own, keyed on source addresses that share no entity with the estate's ports and principals."
+      "contributing_rows": 2586,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 2586 scored events on `morpheus:score:l1` through `l5`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, and layer 4 contributes 432 scored packets keyed on flows, neither of which shares an entity with the estate's ports and principals or with each other."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 244,
+      "distinct_lineage_ids": 658,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 244 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 658 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,

@@ -97,6 +97,7 @@ def main() -> int:
     import network_pipeline  # pylint: disable=import-outside-toplevel
     import session_pipeline as sp  # pylint: disable=import-outside-toplevel
     import telemetry_pipeline as tp  # pylint: disable=import-outside-toplevel
+    import transport_pipeline  # pylint: disable=import-outside-toplevel
 
     EVENTS.mkdir(parents=True, exist_ok=True)
     telemetry = ep.run_pipeline(ep.build_pipeline_config(), ep.build_corpus())
@@ -128,6 +129,13 @@ def main() -> int:
     # cross-layer search sees them as a fourth layer's worth of events rather than as part of the estate's.
     flows = network_pipeline.run_pipeline(network_pipeline.build_pipeline_config(), network_pipeline.build_corpus())
     by_sourcetype["morpheus:score:l3"] = _render(flows, "morpheus:score:l3")
+
+    # Layer 4 likewise. Its entity is a conversation rather than an address, so its records share no entity with
+    # layer 3's either, even where the two corpora use the same addresses -- which is the thing Part 4's layer 3
+    # to layer 4 hop would have to supply and does not yet.
+    packets = transport_pipeline.run_pipeline(transport_pipeline.build_pipeline_config(),
+                                              transport_pipeline.build_corpus())
+    by_sourcetype["morpheus:score:l4"] = _render(packets, "morpheus:score:l4")
 
     bindings = telemetry[telemetry["telemetry_class"] == "tc2_binding"]
     bucketed = tp.build_binding_table(bindings).to_bucketed_frame()
