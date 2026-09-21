@@ -40,6 +40,7 @@ Okta
 PCIe
 PDF(s?)
 PyPI
+quantile
 SOC's
 SaaS
 Salesforce

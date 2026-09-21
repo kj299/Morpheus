@@ -38,6 +38,7 @@ import pytest
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 VALIDATE = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "validate")
 EXPECTED = os.path.join(VALIDATE, "expected_results.json")
+VALIDATION = os.path.join(VALIDATE, "VALIDATION.md")
 EVENTS = os.path.join(VALIDATE, "sample_events")
 GENERATOR = os.path.join(VALIDATE, "make_sample_events.py")
 SAVEDSEARCHES = os.path.join(REPO_ROOT,
@@ -174,6 +175,118 @@ def test_the_drift_rule_returns_exactly_what_is_written(expected: dict, sessions
     assert written == set(zip(deduplicated["user_principal"], deduplicated["day_window_id"].astype(int)))
 
 
+SCAN_SYN_RATIO = 0.9
+SCAN_PORTS = 50
+REFUSAL_RATIO = 0.5
+REFUSAL_FAN_OUT = 10
+"""The layer 4 searches' own thresholds, repeated here so the predicate this file evaluates is the predicate the
+app ships rather than an approximation of it."""
+
+
+def _layer_4_events() -> list:
+    """What a search head would hold for `sourcetype=morpheus:score:l4`."""
+    with open(os.path.join(EVENTS, "morpheus_score_l4.jsonlines"), encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def _layer_4_bins(events: list) -> dict:
+    """One entry per flow per bin, aggregated the way the layer 4 searches aggregate.
+
+    `max` over the counts, because they are running totals and rise monotonically through a bin. Never `max` over
+    a ratio column: a running ratio is not monotone, and an ordinary handshake opens with a bare SYN, so
+    `max(flow_syn_ratio)` over it is the scan's figure exactly. The searches divide the maxima and so does this.
+    """
+    bins: dict = {}
+
+    for event in events:
+        key = (event["flow_id"], event["rollup_time_ns"], event["src_ip"], event["dst_ip"], event["dst_port"])
+        state = bins.setdefault(key, {"syn": 0, "ack": 0, "rst": 0, "all": 0})
+
+        for (name, column) in (("syn", "flow_syn"), ("ack", "flow_ack"), ("rst", "flow_rst"), ("all", "flow_all")):
+            state[name] = max(state[name], event[column] or 0)
+
+    return bins
+
+
+def test_the_layer_4_detections_return_exactly_what_is_written(expected: dict):
+    # The three layer 4 rules evaluated over the events the app is actually fed, rather than over the frame the
+    # pipeline produced. Everything between the two -- the wire rendering, the boolean spellings, the columns
+    # SiemWireStage carries -- is where a number in this file could quietly stop being the number a search head
+    # would return, and it is the half the harness cannot see.
+    events = _layer_4_events()
+    bins = _layer_4_bins(events)
+    searches = expected["searches"]
+
+    # R-D-L4-002: unanswered SYNs, then the breadth. Both halves, in the order the search applies them.
+    unanswered = {
+        key: state
+        for (key, state) in bins.items()
+        if state["all"] > 0 and state["ack"] == 0 and (state["syn"] / state["all"]) >= SCAN_SYN_RATIO
+    }
+    reach: dict = collections.defaultdict(set)
+    hosts: dict = collections.defaultdict(set)
+
+    for (_, rollup, src_ip, dst_ip, dst_port) in unanswered:
+        reach[(src_ip, rollup)].add(dst_port)
+        hosts[(src_ip, rollup)].add(dst_ip)
+
+    scans = {key: ports for (key, ports) in reach.items() if len(ports) > SCAN_PORTS}
+    entry = searches["R-D-L4-002 - SYN without completion"]
+
+    assert entry["candidate_flows_before_the_breadth_filter"] == len(unanswered)
+    assert entry["contributing_rows"] == len(next(iter(scans.values())))
+    assert entry["expected_rows"] == len(scans)
+    assert entry["key_values"]["src_ip"] == next(iter(scans))[0]
+    assert entry["key_values"]["destination_ports"] == len(next(iter(scans.values())))
+    assert entry["key_values"]["destination_hosts"] == len(hosts[next(iter(scans))])
+
+    # R-D-L4-003: one predicate, and then which side of it fans out.
+    refusing = [
+        key for (key, state) in bins.items() if state["all"] > 0 and (state["rst"] / state["all"]) >= REFUSAL_RATIO
+    ]
+    refused_by: dict = collections.defaultdict(set)
+    refusing_to: dict = collections.defaultdict(set)
+
+    for (_, rollup, src_ip, dst_ip, _port) in refusing:
+        refusing_to[(src_ip, rollup)].add(dst_ip)
+        refused_by[(dst_ip, rollup)].add(src_ip)
+
+    notables: dict = {}
+
+    for (_, rollup, src_ip, dst_ip, _port) in refusing:
+        clients = len(refusing_to[(src_ip, rollup)])
+        servers = len(refused_by[(dst_ip, rollup)])
+
+        if (clients >= REFUSAL_FAN_OUT and servers == 1):
+            notables[(src_ip, "service_outage")] = clients
+        elif (servers >= REFUSAL_FAN_OUT and clients == 1):
+            notables[(dst_ip, "closed_port_enumeration")] = servers
+
+    entry = searches["R-D-L4-003 - RST ratio"]
+
+    assert entry["contributing_rows"] == len(refusing)
+    assert entry["expected_rows"] == len(notables)
+    assert {
+        (row["entity_key"], row["refusal_direction"]): row["counterparties"]
+        for row in entry["key_values"]
+    } == notables
+
+    # R-B-L4-005: either envelope, because a bulk transfer arriving as ordinary-sized packets moves one and not
+    # the other, and that is the shape requiring both would miss.
+    breached = [
+        event for event in events
+        if event.get("flow_data_len_envelope_breached") is True or event.get("flow_bpp_envelope_breached") is True
+    ]
+    entry = searches["R-B-L4-005 - Transfer envelope breach"]
+
+    assert entry["contributing_rows"] == len(breached)
+    assert entry["expected_rows"] == len({event["transfer_triple"] for event in breached})
+    assert entry["key_values"]["transfer_triple"] == breached[0]["transfer_triple"]
+    assert entry["key_values"]["transferred"] == breached[0]["flow_data_len"]
+    assert entry["key_values"]["volume_envelope"] == breached[0]["flow_data_len_envelope"]
+    assert entry["key_values"]["volume_ratio"] == breached[0]["flow_data_len_envelope_ratio"]
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -249,10 +362,69 @@ def test_the_chain_assembly_blocker_is_the_risk_and_not_the_span(expected: dict)
     assert scored_with_risk == [], "risk_score is now on pipeline events, so the stated blocker is gone"
 
 
+def test_the_validation_document_says_the_same_thing_the_expectation_file_does(expected: dict):
+    # VALIDATION.md is the page a deployment actually reads; `expected_results.json` is the page the tests read.
+    # Two documents describing one run, maintained by hand, is the shape that has drifted in five places in this
+    # repository -- and it drifted here: the summary table went a whole increment without the layer 3 searches
+    # in it, still saying "four of the fourteen" over a row count from two increments earlier. Every number in
+    # that table now comes from the same file these assertions do.
+    import re  # pylint: disable=import-outside-toplevel
+
+    with open(VALIDATION, encoding="utf-8") as handle:
+        document = handle.read()
+
+    rows = dict(re.findall(r"^\| ([^|]+?) \| \*\*(\d+)\*\* \|", document, re.MULTILINE))
+
+    assert len(rows) == len(expected["searches"]), (f"the summary table lists {len(rows)} searches and the "
+                                                    f"expectation file holds {len(expected['searches'])}")
+
+    # The table's labels are shortened for a reader, so a row matches the entry it names outright where the two
+    # agree and by rule identifier where the prose was cut down. A label matching nothing, or more than one, is
+    # a row about a search that no longer exists under that name.
+    def named(label: str) -> list:
+        wanted = label.replace(" - ", ", ").lower()
+        exact = [name for name in expected["searches"] if name.replace(" - ", ", ").lower() == wanted]
+
+        return exact or [name for name in expected["searches"] if name.startswith(f"{label.split(',')[0]} -")]
+
+    for (label, stated) in rows.items():
+        entries = named(label)
+
+        assert len(entries) == 1, f"{label!r} in VALIDATION.md matches {entries} in the expectation file"
+        assert int(stated) == expected["searches"][entries[0]]["expected_rows"], (
+            f"VALIDATION.md says {label} returns {stated}; the expectation file says "
+            f"{expected['searches'][entries[0]]['expected_rows']}")
+
+    empty = sum(1 for entry in expected["searches"].values() if entry.get("expected_empty"))
+    stated_empty = re.search(r"\*\*(\w+) of the ([\w-]+) should return nothing\.\*\*", document)
+
+    assert stated_empty is not None, "VALIDATION.md no longer states how many searches return nothing"
+    assert NUMBER_WORDS[stated_empty.group(1).lower()] == empty
+    assert NUMBER_WORDS[stated_empty.group(2).lower()] == len(expected["searches"])
+
+
+NUMBER_WORDS = {
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "twenty-one": 21,
+    "twenty-two": 22,
+    "twenty-three": 23,
+    "twenty-four": 24,
+    "twenty-five": 25,
+}
+"""Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
+which is the right failure: the document said something nobody here anticipated."""
+
+
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Seven of twenty-one. That ratio is the honest state of this app, and stating it is the package's main job.
+    # Seven of twenty-four. That ratio is the honest state of this app, and stating it is the package's main job.
     # The seventh is R-P-L3-005, which reads the behavior summary this package does not populate -- the same
     # deployment-step blocker the chain assembly search has, arriving with layer 3 rather than being discovered.
     # It

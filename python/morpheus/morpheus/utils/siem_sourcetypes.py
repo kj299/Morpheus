@@ -120,6 +120,36 @@ PRODUCED: dict = {
                               "ip_ttl_shift",
                               "ip_ttl_shifted"),
         ),
+    "morpheus:score:l4":
+        Sourcetype(
+            name="morpheus:score:l4",
+            time_column="event_time",
+            time_columns=("event_time", ),
+            producer="The TC-4 stages (flow rollup, transfer envelope) behind WindowSealStage; the `tc4` class "
+            "of `tests/morpheus/determinism/transport_pipeline.py`.",
+            # The three fireable layer 4 detections read these off this sourcetype. The counts are here and the
+            # ratio columns are not, because a running ratio is not monotone and a search that summarizes a bin
+            # has to divide the counts' maxima rather than aggregate the ratio -- see `tc4_flow_stage`.
+            required_columns=("event_uid",
+                              "src_ip",
+                              "dst_ip",
+                              "dst_port",
+                              "flow_id",
+                              "rollup_time_ns",
+                              "flow_syn",
+                              "flow_ack",
+                              "flow_rst",
+                              "flow_all",
+                              "transfer_triple",
+                              "flow_data_len",
+                              "flow_data_len_envelope",
+                              "flow_data_len_envelope_ratio",
+                              "flow_data_len_envelope_breached",
+                              "flow_data_len_envelope_mature",
+                              "flow_bpp",
+                              "flow_bpp_envelope_ratio",
+                              "flow_bpp_envelope_breached"),
+        ),
     "morpheus:score:l2":
         Sourcetype(
             name="morpheus:score:l2",
@@ -215,13 +245,11 @@ PRODUCED: dict = {
 }
 """Sourcetypes something in this fork emits, keyed by stanza name."""
 
-_LAYER_ABOVE_2 = ("A telemetry class for this layer. Layers 4, 6 and 7 are design in the guide; no collector, "
-                  "no stage and no scoring path for them exists here. Layer 3 was on this list until the TC-3 "
-                  "stages landed, which is the shape the rest of it is expected to leave in.")
+_LAYER_ABOVE_2 = ("A telemetry class for this layer. Layers 6 and 7 are design in the guide; no collector, no "
+                  "stage and no scoring path for them exists here. Layers 3 and 4 were on this list until the "
+                  "TC-3 and TC-4 stages landed, which is the shape the rest of it is expected to leave in.")
 
 UNPRODUCED: dict = {
-    "morpheus:score:l4":
-        Unproduced("morpheus:score:l4", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l6":
         Unproduced("morpheus:score:l6", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l7":

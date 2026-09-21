@@ -71,6 +71,8 @@ from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
 from morpheus.stages.telemetry.tc3_cardinality_stage import TC3CardinalityStage
 from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
 from morpheus.stages.telemetry.tc3_ttl_stage import TC3TtlStage
+from morpheus.stages.telemetry.tc4_envelope_stage import TC4EnvelopeStage
+from morpheus.stages.telemetry.tc4_flow_stage import TC4FlowStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
@@ -82,6 +84,10 @@ from morpheus.utils.binding_table import Binding
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.determinism_envelope import DeterminismEnvelope
 from morpheus.utils.model_manifest import ModelManifest
+from morpheus.utils.tcp_flags import ACK
+from morpheus.utils.tcp_flags import PSH
+from morpheus.utils.tcp_flags import RST
+from morpheus.utils.tcp_flags import SYN
 
 DIFFERS = "differs"
 INPUT_COLUMN = "input_column"
@@ -314,6 +320,63 @@ def flow_records() -> dict:
         "bytes_in": [10, 20, 30, 40, 50, 60, 70, 80],
         "ip_ttl": [64, 64, 64, 64, 64, 63, 128, 128],
         "event_time": [10**18 + index * 600 * SECOND for index in range(8)],
+    }
+
+
+def packets() -> dict:
+    """Two flows interleaved across four minutes, each with packets either side of a sixty-second boundary.
+
+    Interleaved because a flow cap is only observable mid-stream: run one flow and then the other and a cap of
+    one evicts the first after its last row has already been emitted, so the parameter reads as dead when it is
+    merely too late to matter. Either side of a boundary because a bin width nothing reads produces one running
+    total whatever it is set to.
+    """
+    rows = []
+
+    for index in range(6):
+        base = 10**18 + index * 40 * SECOND
+        rows.append((base, "10.0.0.5", 50000, "10.0.0.9", 443, SYN if index == 0 else PSH | ACK, index * 100))
+        rows.append((base + 5 * SECOND, "10.0.0.6", 50001, "10.0.0.10", 445, RST | ACK, 0))
+
+    rows.sort()
+
+    return {
+        "src_ip": [row[1] for row in rows],
+        "src_port": [row[2] for row in rows],
+        "dst_ip": [row[3] for row in rows],
+        "dst_port": [row[4] for row in rows],
+        "tcp_flags": [row[5] for row in rows],
+        "data_len": [row[6] for row in rows],
+        "event_time": [row[0] for row in rows],
+    }
+
+
+def transfers() -> dict:
+    """Sixteen transfers on one triple with three more beside it, then one far outside what either has done.
+
+    The sixteen are spread rather than uniform so a quantile has somewhere to move between the middle and the
+    top, and they descend rather than climb so that the most recent are not also the largest -- against a rising
+    series a retention cap is invisible, because the last few samples and the whole history have the same top
+    and therefore the same 99th percentile. The three beside them share a source address and differ in
+    destination port, which is the only way a key made of three columns can be told from a key made of one.
+
+    One transfer partway down sits at twice the envelope rather than three times it, so a multiplier has a case
+    that falls on one side of it at 1.2 and the other at 3.0. Without it every transfer is either under the
+    envelope or far over, and the multiplier could be any number at all.
+    """
+    sizes = [900, 880, 860, 840, 820, 800, 460, 440, 420, 400, 200, 1800, 180, 160, 140, 120, 100]
+    rows = [(10**18 + index * 60 * SECOND, "10.0.0.5", "10.0.0.9", 445, size) for (index, size) in enumerate(sizes)]
+    rows += [(10**18 + offset * SECOND, "10.0.0.5", "10.0.0.9", 443, 3000) for offset in (30, 90, 150)]
+    rows.append((10**18 + 20 * 60 * SECOND, "10.0.0.5", "10.0.0.9", 445, 9000))
+    rows.sort()
+
+    return {
+        "src_ip": [row[1] for row in rows],
+        "dst_ip": [row[2] for row in rows],
+        "dst_port": [row[3] for row in rows],
+        "flow_data_len": [row[4] for row in rows],
+        "flow_bpp": [float(row[4]) for row in rows],
+        "event_time": [row[0] for row in rows],
     }
 
 
@@ -867,6 +930,39 @@ REGISTRY: dict = {
                 Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
             ),
         ),
+    "TC4FlowStage":
+        Scenario(stage=TC4FlowStage,
+                 frame=packets,
+                 base={"bin_seconds": 60},
+                 knobs=(
+                     Knob("src_ip_column", INPUT_COLUMN, benign="src_ip"),
+                     Knob("src_port_column", INPUT_COLUMN, benign="src_port"),
+                     Knob("dst_ip_column", INPUT_COLUMN, benign="dst_ip"),
+                     Knob("dst_port_column", INPUT_COLUMN, benign="dst_port"),
+                     Knob("flags_column", INPUT_COLUMN, benign="tcp_flags"),
+                     Knob("data_len_column", INPUT_COLUMN, benign="data_len"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("bin_seconds", DIFFERS, benign=60, extreme=600),
+                     Knob("max_flows", DIFFERS, benign=500000, extreme=1),
+                 )),
+    "TC4EnvelopeStage":
+        Scenario(stage=TC4EnvelopeStage,
+                 frame=transfers,
+                 base={
+                     "min_samples": 4, "magnitude_columns": ["flow_data_len"]
+                 },
+                 knobs=(
+                     Knob("key_columns", DIFFERS, benign=["src_ip", "dst_ip", "dst_port"], extreme=["src_ip"]),
+                     Knob("magnitude_columns", DIFFERS, benign=["flow_data_len"], extreme=["flow_bpp"]),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("window_seconds", DIFFERS, benign=86400, extreme=120),
+                     Knob("quantile", DIFFERS, benign=0.99, extreme=0.5),
+                     Knob("multiplier", DIFFERS, benign=3.0, extreme=1.2),
+                     Knob("min_samples", DIFFERS, benign=4, extreme=100),
+                     Knob("max_samples", DIFFERS, benign=4096, extreme=5),
+                 )),
     "TC5CadenceStage":
         Scenario(
             stage=TC5CadenceStage,
@@ -1297,7 +1393,10 @@ def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships()
 
     words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
 
-    for prefix in ("tc1", "tc2", "tc5"):
+    # Every class with a producer. TC-3 was not in this loop when its stages landed, and its row went on saying
+    # "Schema only" through a whole increment -- the same drift this test exists to catch, in the one class the
+    # loop did not name. A list of classes is as capable of being incomplete as a count is.
+    for prefix in ("tc1", "tc2", "tc3", "tc4", "tc5"):
         shipped = len(
             [name for name in os.listdir(telemetry) if name.startswith(f"{prefix}_") and name.endswith(".py")])
         label = f"**TC-{prefix[-1]}**"

@@ -41,6 +41,7 @@ import lineage_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
 import session_pipeline  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
+import transport_pipeline  # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 PROPS_PATH = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheus-lineage", "default", "props.conf")
@@ -90,6 +91,13 @@ def network_fixture() -> pd.DataFrame:
     config = network_pipeline.build_pipeline_config()
 
     yield network_pipeline.run_pipeline(config, network_pipeline.build_corpus())
+
+
+@pytest.fixture(name="transport", scope="module")
+def transport_fixture() -> pd.DataFrame:
+    config = transport_pipeline.build_pipeline_config()
+
+    yield transport_pipeline.run_pipeline(config, transport_pipeline.build_corpus())
 
 
 @pytest.fixture(name="lineage", scope="module")
@@ -183,6 +191,15 @@ def test_the_network_pipeline_produces_a_parsable_timestamp(wire_config: Config,
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_the_transport_pipeline_produces_a_parsable_timestamp(wire_config: Config, transport: pd.DataFrame):
+    # Layer 4 joined layer 3 in having a producer, so the stanza is checked against a real frame rather than
+    # against the hand-written sample that stood in for one while nothing emitted it.
+    assert len(transport) > 0, "the harness emitted no layer 4 rows"
+
+    assert_parses_as_its_own_stanza(wire_config, transport.copy(), "morpheus:score:l4")
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_the_lineage_pipeline_produces_a_parsable_timestamp(wire_config: Config, lineage: pd.DataFrame):
     assert_parses_as_its_own_stanza(wire_config, lineage.copy(), "morpheus:edge")
 
@@ -223,7 +240,12 @@ def test_every_produced_sourcetype_is_covered_here():
     # The completeness guard. Adding a producer to siem_sourcetypes without a wire test would otherwise leave the
     # new stanza asserted only by the map that declares it.
     covered = set(TELEMETRY_CLASSES) | {
-        "morpheus:edge", "binding:l2:open", "binding:bucketed", "morpheus:score:l3", "morpheus:score:l5"
+        "morpheus:edge",
+        "binding:l2:open",
+        "binding:bucketed",
+        "morpheus:score:l3",
+        "morpheus:score:l4",
+        "morpheus:score:l5"
     }
 
     assert covered == set(PRODUCED), f"not covered: {sorted(set(PRODUCED) - covered)}"
