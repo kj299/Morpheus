@@ -300,6 +300,7 @@ def golden_columns() -> set:
                  "golden_lineage_expected.csv",
                  "golden_network_expected.csv",
                  "golden_transport_expected.csv",
+                 "golden_presentation_expected.csv",
                  "golden_session_expected.csv"):
         path = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism", name)
 
@@ -349,7 +350,7 @@ def producible() -> set:
 def test_the_app_is_where_we_think_it_is():
     # Without this every assertion below passes over an empty parse, which is the failure mode a linter must not
     # have: it would report a clean bill of health for a file it never read.
-    assert len(searches()) == 24
+    assert len(searches()) == 30
     assert len(lookup_fields()) > 0
     assert len(stage_columns()) > 40
 
@@ -362,6 +363,87 @@ def test_every_field_a_search_reads_is_a_field_something_writes(name: str):
     assert not unresolved, (
         f"{name} reads {sorted(unresolved)}, which nothing in this repository writes. Either a stage should emit "
         f"it, or it belongs in KNOWN_UNPRODUCED with the reason it does not.")
+
+
+def emits(search: str) -> set:
+    """The fields a detection puts on its notable, from its own `table` clause.
+
+    What a chained rule downstream can read. A detection that computes a field and does not select it has not
+    published it, which is the distinction this function exists to make.
+    """
+    emitted = set()
+
+    for clause in re.findall(r"\|\s*table\s+([^|]*)", search):
+        emitted.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", clause))
+
+    return emitted
+
+
+def rules_read_by(search: str) -> set:
+    """The rule identifiers a chained search correlates, from the `rule_id="..."` literals it filters on."""
+    return set(re.findall(r'rule_id\s*=\s*"([^"]+)"', search))
+
+
+def detections_by_rule() -> dict:
+    """Every search that stamps a `rule_id`, keyed by the identifier it stamps."""
+    found = {}
+
+    for (name, search) in searches().items():
+        for identifier in re.findall(r'\|\s*eval[^|]*?\brule_id\s*=\s*"([^"]+)"', search):
+            found[identifier] = (name, search)
+
+    return found
+
+
+def test_a_chained_rule_reads_only_fields_the_rules_it_chains_publish():
+    """
+    The defect this test was written for, which the check above could not see.
+
+    R-C-002 correlates two detections' notables and grouped them `by src_ip dest_ip`. `dest_ip` is the Splunk
+    CIM name and upstream Morpheus's default column; every stage in this fork emits `dst_ip`, and so do both
+    detections R-C-002 reads. Grouping on it put a null in one of two group keys on every notable, which does
+    not fail and does not return nothing -- it collapses every fingerprint and every beacon in the window into
+    one group and reports any of them against any other.
+
+    `test_every_field_a_search_reads_is_a_field_something_writes` passed throughout, because `dest_ip` *is*
+    produced: by the lineage pipeline, which is not the pipeline whose notables R-C-002 reads. "Something,
+    somewhere, writes this" is the wrong question for a chained rule. The right one is whether the searches it
+    names put the field on their notables, and that is what this asserts.
+    """
+    published = detections_by_rule()
+
+    # A chained rule is one that filters on a `rule_id` it does not itself stamp. Every detection stamps its
+    # own, so without that subtraction each of them would read as chaining itself.
+    chained = {}
+
+    for (name, search) in searches().items():
+        stamped = {identifier for (identifier, (owner, _)) in published.items() if owner == name}
+        upstream = rules_read_by(search) - stamped
+
+        if (len(upstream) > 0):
+            chained[name] = (search, upstream)
+
+    assert len(chained) > 0, "no chained rule found; this test has stopped covering anything"
+
+    for (name, (search, upstream)) in chained.items():
+        missing_rules = sorted(upstream - set(published))
+
+        assert missing_rules == [], (f"{name} chains {missing_rules}, which no search in this app stamps. "
+                                     f"A chained rule over a detection that does not exist returns nothing "
+                                     f"forever.")
+
+        available = set()
+
+        for identifier in upstream:
+            available |= emits(published[identifier][1])
+
+        unresolved = referenced_in(search) - created_in(search) - available - SPLUNK_INTRINSICS - SPL_WORDS
+
+        assert not unresolved, (
+            f"{name} reads {sorted(unresolved)}, which none of the rules it chains "
+            f"({sorted(upstream)}) put on their notables. A chained rule joining on a field its inputs do not "
+            f"publish does not fail -- it groups every notable in the window together and correlates the wrong "
+            f"pairs.")
 
 
 def test_the_field_every_detection_selects_is_populated():

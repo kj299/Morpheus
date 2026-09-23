@@ -95,6 +95,7 @@ def main() -> int:
     import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
     import lineage_pipeline  # pylint: disable=import-outside-toplevel
     import network_pipeline  # pylint: disable=import-outside-toplevel
+    import presentation_pipeline  # pylint: disable=import-outside-toplevel
     import session_pipeline as sp  # pylint: disable=import-outside-toplevel
     import telemetry_pipeline as tp  # pylint: disable=import-outside-toplevel
     import transport_pipeline  # pylint: disable=import-outside-toplevel
@@ -136,6 +137,13 @@ def main() -> int:
     packets = transport_pipeline.run_pipeline(transport_pipeline.build_pipeline_config(),
                                               transport_pipeline.build_corpus())
     by_sourcetype["morpheus:score:l4"] = _render(packets, "morpheus:score:l4")
+
+    # Layer 6 likewise, and it is the layer that makes R-C-002 expressible: the chained rule correlates a new
+    # client fingerprint here with beaconing at layer 3 on the same host. The two corpora are separate, so the
+    # rule still returns nothing -- what changed is that both halves now have producers.
+    handshakes = presentation_pipeline.run_pipeline(presentation_pipeline.build_pipeline_config(),
+                                                    presentation_pipeline.build_corpus())
+    by_sourcetype["morpheus:score:l6"] = _render(handshakes, "morpheus:score:l6")
 
     bindings = telemetry[telemetry["telemetry_class"] == "tc2_binding"]
     bucketed = tp.build_binding_table(bindings).to_bucketed_frame()

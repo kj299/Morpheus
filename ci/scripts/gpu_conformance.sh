@@ -62,6 +62,7 @@ TARGETS=(
     tests/morpheus/determinism/test_estate_harness.py
     tests/morpheus/determinism/test_gpu_parity.py
     tests/morpheus/determinism/test_network_harness.py
+    tests/morpheus/determinism/test_presentation_harness.py
     tests/morpheus/determinism/test_session_harness.py
     tests/morpheus/determinism/test_siem_wire_contract.py
     tests/morpheus/determinism/test_telemetry_harness.py
@@ -90,6 +91,10 @@ TARGETS=(
     tests/morpheus/stages/test_tc3_ttl_stage.py
     tests/morpheus/stages/test_tc4_envelope_stage.py
     tests/morpheus/stages/test_tc4_flow_stage.py
+    tests/morpheus/stages/test_tc6_certificate_stage.py
+    tests/morpheus/stages/test_tc6_cipher_stage.py
+    tests/morpheus/stages/test_tc6_content_stage.py
+    tests/morpheus/stages/test_tc6_fingerprint_stage.py
     tests/morpheus/stages/test_tc5_cadence_stage.py
     tests/morpheus/stages/test_tc5_drift_stage.py
     tests/morpheus/stages/test_tc5_novelty_stage.py
@@ -117,6 +122,7 @@ UNMARKED=(
     tests/morpheus/stages/test_lineage_stage_cli.py
     tests/morpheus/utils/test_arrival_regularity.py
     tests/morpheus/utils/test_binding_closer.py
+    tests/morpheus/utils/test_cipher_strength.py
     tests/morpheus/utils/test_binding_table.py
     tests/morpheus/utils/test_community_id.py
     tests/morpheus/utils/test_counter_delta.py
@@ -126,6 +132,7 @@ UNMARKED=(
     tests/morpheus/utils/test_distinct_window.py
     tests/morpheus/utils/test_drift_trajectory.py
     tests/morpheus/utils/test_entity_key.py
+    tests/morpheus/utils/test_established_value.py
     tests/morpheus/utils/test_event_clock.py
     tests/morpheus/utils/test_geo_velocity.py
     tests/morpheus/utils/test_gpu_conformance_report.py
@@ -135,6 +142,7 @@ UNMARKED=(
     tests/morpheus/utils/test_model_manifest.py
     tests/morpheus/utils/test_lineage_cudf.py
     tests/morpheus/utils/test_link_flap.py
+    tests/morpheus/utils/test_media_type.py
     tests/morpheus/utils/test_optical_baseline.py
     tests/morpheus/utils/test_tcp_flags.py
     tests/morpheus/utils/test_transfer_envelope.py
