@@ -1,6 +1,6 @@
 {
   "description": "What each shipped saved search should return when the app is deployed against sample_events/. Generated numbers come from the same run_pipeline the determinism tests call; the expected-empty entries are stated with the reason, because a search returning nothing is the failure mode this whole app is careful about and it must be possible to tell a correct empty from a broken one.",
-  "corpus": "tests/morpheus/determinism/estate_pipeline.py, lineage_pipeline.py, network_pipeline.py, transport_pipeline.py and session_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
+  "corpus": "tests/morpheus/determinism/estate_pipeline.py, lineage_pipeline.py, network_pipeline.py, transport_pipeline.py, presentation_pipeline.py and session_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
   "searches": {
     "R-D-L2-001 - MAC address count exceeded on an access port": {
       "expected_rows": 0,
@@ -119,6 +119,82 @@
         "breached_envelope": "volume and shape"
       }
     },
+    "R-B-L6-001 - New TLS client fingerprint": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 1,
+      "why": "One notable, for 10.0.0.20, which presented one TLS stack across 34 handshakes and then a second. The negative control is 10.0.0.21, whose second stack is equally novel the first time it appears -- it had made two handshakes at that point, so the settled-history floor of twenty separates them. That control is the one the corpus had to be rebuilt to show: novelty alone reports a host the estate has just started seeing exactly like a host whose stack changed.",
+      "key_values": {
+        "src_ip": "10.0.0.20",
+        "new_fingerprints": "t13d3104h1_9b1e5a0f4c22_7e0fd1a83b55",
+        "prior_handshakes": 34
+      }
+    },
+    "R-D-L6-002 - Certificate issuer anomaly": {
+      "expected_rows": 2,
+      "expected_empty": false,
+      "contributing_rows": 2,
+      "why": "Two notables, and the second is the interesting one. 93.184.216.34 presented a proxy's authority after a corpus of one corporate authority, which is interception. 93.184.216.36 migrated authorities legitimately, and the rule reports that once: the single-issuer gate closes on the next handshake, because the destination has now demonstrably presented two. The control is 93.184.216.35, a delivery host rotating among four authorities, which differs from its own mode on 19 handshakes and is removed entirely by the same gate.",
+      "key_values": [
+        {
+          "dst_ip": "93.184.216.34",
+          "presented_issuer": "CN=Inspection Proxy, O=Unknown",
+          "established_issuer": "CN=Corp Issuing CA, O=Example, C=GB"
+        },
+        {
+          "dst_ip": "93.184.216.36",
+          "presented_issuer": "CN=Public Trust CA G3, O=Trust Services, C=US",
+          "established_issuer": "CN=Public Trust CA G2, O=Trust Services, C=US"
+        }
+      ]
+    },
+    "R-D-L6-003 - Self-signed to external destination": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 2,
+      "why": "One notable, for 93.184.216.37, over two connections carrying a self-signed certificate valid for three days. Eight handshakes in the corpus carry a self-signed certificate and six of them are the internal appliance at 10.0.1.50 -- a management interface nobody bought a certificate for, which is what an estate has hundreds of. The classification is parsers/ip.py's, through the same module TC3ReachStage uses, so the search holds no copy of the reserved ranges.",
+      "key_values": {
+        "dst_ip": "93.184.216.37",
+        "connections": 2,
+        "shortest_validity_days": 3.0
+      }
+    },
+    "R-B-L6-004 - Cipher downgrade": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 1,
+      "why": "One notable, for the pair 10.0.0.22:93.184.216.34, which negotiated modern suites ten times and then a broken one. Two controls: the varied host's conversations move between two sound suites routinely, which a reference taken as a mode rather than a minimum would have called a downgrade every time the weaker one was chosen, and the legacy appliance pair sits at a low floor permanently without ever falling below it.",
+      "key_values": {
+        "tls_pair_key": "10.0.0.22:93.184.216.34",
+        "negotiated_tier": "broken",
+        "historical_floor": "modern"
+      }
+    },
+    "R-D-L6-005 - Content type mismatch": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 1,
+      "why": "One notable: an archive behind a declared PNG. 50 handshakes in the corpus carry both content types and reach the comparison, and 49 of them are re-encodings -- a declared PNG detected as a JPEG, which is a thumbnailer or a client guessing from the extension. A rule comparing types rather than categories would return all 50.",
+      "key_values": {
+        "src_ip": "10.0.0.20",
+        "dst_ip": "93.184.216.37",
+        "declared_type": "image/png",
+        "detected_type": "application/zip",
+        "declared_category": "image",
+        "detected_category": "archive"
+      }
+    },
+    "TLS table coverage - unrecognized values": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 105,
+      "why": "One summary row, and the value is in the numbers rather than in whether it fired. Both zero here, which is what makes the five counts above mean what they claim: a corpus that had drifted outside the cipher ordering or the media type map would make those rules fire less and say nothing about why. In a real estate this is the search that reveals an inspection point emitting OpenSSL short names rather than IANA ones, which lands the entire cipher feed in unrecognized_ciphers.",
+      "key_values": {
+        "handshakes": 105,
+        "unrecognized_ciphers": 0,
+        "unclassified_content_types": 0
+      }
+    },
     "R-D-L5-003 - Impossible travel": {
       "expected_rows": 2,
       "why": "One principal is authenticated from New York half an hour after her own office login in London, and then back in London ninety minutes later. Two rows rather than one is what a single interloper produces: the jump away and the victim's next authentication from where she actually is. The traveller who makes the same crossing in eight hours is inside the threshold and does not appear, and the VPN user whose apparent location changes country twice a day is excluded by egress range rather than alerted on.",
@@ -152,22 +228,22 @@
     "R-C-002 - TLS anomaly precedes beaconing": {
       "expected_rows": 0,
       "expected_empty": true,
-      "why": "A chained rule over two detections' notables: R-B-L6-001 at layer 6 and R-B-L3-002 at layer 3. Layer 3 now has both a producer and a firing rule, so half of the correlation is available; layer 6 has neither, and the search reads `rule_id`, which detections write into the index as they fire rather than anything the pipeline emits. This package indexes pipeline output only. Both halves would have to change for this to return a row, and empty is correct until they do."
+      "why": "A chained rule over two detections' notables: R-B-L6-001 at layer 6 and R-B-L3-002 at layer 3. Both halves now have producers and both fire on their own corpora -- which is new, and is what made the search's real defect visible: it grouped `by src_ip dest_ip` while every detection in this fork emits `dst_ip`, so it would have correlated every fingerprint in the window against every beacon through one null group rather than returning nothing. That is fixed. What keeps it empty now is the corpora: layer 3 and layer 6 come from separate seeded runs sharing no host, and the search also reads `rule_id`, which detections write into the index as they fire rather than anything the pipeline emits."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 890,
+      "expected_rows": 937,
       "expected_empty": false,
-      "contributing_rows": 2586,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 2586 scored events on `morpheus:score:l1` through `l5`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, and layer 4 contributes 432 scored packets keyed on flows, neither of which shares an entity with the estate's ports and principals or with each other."
+      "contributing_rows": 2691,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 2691 scored events on `morpheus:score:l1` through `l6`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, and layer 6 contributes 105 scored handshakes keyed on hosts, none of which shares an entity with the estate's ports and principals or with each other."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 658,
+      "distinct_lineage_ids": 666,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 658 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 666 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,

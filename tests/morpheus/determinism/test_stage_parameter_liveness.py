@@ -73,6 +73,10 @@ from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
 from morpheus.stages.telemetry.tc3_ttl_stage import TC3TtlStage
 from morpheus.stages.telemetry.tc4_envelope_stage import TC4EnvelopeStage
 from morpheus.stages.telemetry.tc4_flow_stage import TC4FlowStage
+from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
+from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
+from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
+from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
@@ -348,6 +352,57 @@ def packets() -> dict:
         "tcp_flags": [row[5] for row in rows],
         "data_len": [row[6] for row in rows],
         "event_time": [row[0] for row in rows],
+    }
+
+
+def handshakes() -> dict:
+    """Twelve handshakes on one pair, then three on another interleaved among them.
+
+    Interleaved because an entity cap is only observable mid-stream: run the pairs one after the other and a cap
+    of one evicts the first after its last row has already been emitted, so the parameter reads as dead when it
+    is merely too late to matter.
+
+    The issuer settles and then changes, the suite descends partway through, and the content types cross a
+    category once, so every parameter these four stages take has something in here to bite on.
+    """
+    rows = []
+
+    for index in range(12):
+        rows.append((10**18 + index * 60 * SECOND,
+                     "10.0.0.5",
+                     "93.184.216.34",
+                     "t13d1516h2_8daaf6152771_b186095e22b6" if index < 10 else "t13d0000h0_aaaa_bbbb",
+                     "CN=Corp CA" if index < 10 else "CN=Proxy",
+                     "TLS_AES_128_GCM_SHA256" if index < 10 else "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
+                     "ok" if index < 10 else "self-signed",
+                     "image/png",
+                     "image/jpeg" if index < 10 else "application/zip"))
+
+    for offset in (30, 390, 750):
+        rows.append((10**18 + offset * SECOND,
+                     "10.0.0.6",
+                     "93.184.216.35",
+                     "t13d0312h2_55b375c5d22e_cd85d2d88918",
+                     "CN=Other CA",
+                     "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+                     "ok",
+                     "text/html",
+                     "text/html"))
+
+    rows.sort()
+
+    return {
+        "event_time": [row[0] for row in rows],
+        "src_ip": [row[1] for row in rows],
+        "dst_ip": [row[2] for row in rows],
+        "ja4_client": [row[3] for row in rows],
+        "certificate_issuer": [row[4] for row in rows],
+        "cipher_suite": [row[5] for row in rows],
+        "validation_result": [row[6] for row in rows],
+        "content_type_declared": [row[7] for row in rows],
+        "content_type_detected": [row[8] for row in rows],
+        "certificate_not_before": [row[0] - 10 * 86400 * SECOND for row in rows],
+        "certificate_not_after": [row[0] + 80 * 86400 * SECOND for row in rows],
     }
 
 
@@ -963,6 +1018,59 @@ REGISTRY: dict = {
                      Knob("min_samples", DIFFERS, benign=4, extreme=100),
                      Knob("max_samples", DIFFERS, benign=4096, extreme=5),
                  )),
+    "TC6FingerprintStage":
+        Scenario(stage=TC6FingerprintStage,
+                 frame=handshakes,
+                 base={},
+                 knobs=(
+                     Knob("key_columns", DIFFERS, benign=["src_ip"], extreme=["src_ip", "dst_ip"]),
+                     Knob("fingerprint_column", INPUT_COLUMN, benign="ja4_client"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("max_values", DIFFERS, benign=64, extreme=1),
+                     Knob("max_entities", DIFFERS, benign=100000, extreme=1),
+                 )),
+    "TC6CertificateStage":
+        Scenario(
+            stage=TC6CertificateStage,
+            frame=handshakes,
+            base={"min_samples": 3},
+            knobs=(
+                Knob("key_columns", DIFFERS, benign=["dst_ip"], extreme=["dst_ip", "src_ip"]),
+                Knob("issuer_column", INPUT_COLUMN, benign="certificate_issuer"),
+                Knob("validation_column", INPUT_COLUMN, benign="validation_result"),
+                # The reference is keyed on the destination by default, so renaming the destination
+                # column has to move the key with it or the two runs are keyed on different things.
+                Knob("destination_column", INPUT_COLUMN, benign="dst_ip", also={"key_columns": ["renamed_dst_ip"]}),
+                Knob("not_before_column", INPUT_COLUMN, benign="certificate_not_before"),
+                Knob("not_after_column", INPUT_COLUMN, benign="certificate_not_after"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                Knob("window_seconds", DIFFERS, benign=2592000, extreme=120),
+                Knob("min_samples", DIFFERS, benign=3, extreme=100),
+                Knob("max_samples", DIFFERS, benign=512, extreme=3),
+            )),
+    "TC6CipherStage":
+        Scenario(stage=TC6CipherStage,
+                 frame=handshakes,
+                 base={"min_samples": 3},
+                 knobs=(
+                     Knob("key_columns", DIFFERS, benign=["src_ip", "dst_ip"], extreme=["src_ip"]),
+                     Knob("cipher_column", INPUT_COLUMN, benign="cipher_suite"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("window_seconds", DIFFERS, benign=2592000, extreme=120),
+                     Knob("min_samples", DIFFERS, benign=3, extreme=100),
+                     Knob("max_samples", DIFFERS, benign=512, extreme=2),
+                 )),
+    "TC6ContentStage":
+        Scenario(stage=TC6ContentStage,
+                 frame=handshakes,
+                 base={},
+                 knobs=(
+                     Knob("declared_column", INPUT_COLUMN, benign="content_type_declared"),
+                     Knob("detected_column", INPUT_COLUMN, benign="content_type_detected"),
+                 )),
     "TC5CadenceStage":
         Scenario(
             stage=TC5CadenceStage,
@@ -1396,7 +1504,7 @@ def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships()
     # Every class with a producer. TC-3 was not in this loop when its stages landed, and its row went on saying
     # "Schema only" through a whole increment -- the same drift this test exists to catch, in the one class the
     # loop did not name. A list of classes is as capable of being incomplete as a count is.
-    for prefix in ("tc1", "tc2", "tc3", "tc4", "tc5"):
+    for prefix in ("tc1", "tc2", "tc3", "tc4", "tc5", "tc6"):
         shipped = len(
             [name for name in os.listdir(telemetry) if name.startswith(f"{prefix}_") and name.endswith(".py")])
         label = f"**TC-{prefix[-1]}**"

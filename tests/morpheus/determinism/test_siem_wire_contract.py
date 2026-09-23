@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # pylint: disable=wrong-import-position
 import lineage_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
+import presentation_pipeline  # noqa: E402
 import session_pipeline  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 import transport_pipeline  # noqa: E402
@@ -98,6 +99,13 @@ def transport_fixture() -> pd.DataFrame:
     config = transport_pipeline.build_pipeline_config()
 
     yield transport_pipeline.run_pipeline(config, transport_pipeline.build_corpus())
+
+
+@pytest.fixture(name="presentation", scope="module")
+def presentation_fixture() -> pd.DataFrame:
+    config = presentation_pipeline.build_pipeline_config()
+
+    yield presentation_pipeline.run_pipeline(config, presentation_pipeline.build_corpus())
 
 
 @pytest.fixture(name="lineage", scope="module")
@@ -200,6 +208,14 @@ def test_the_transport_pipeline_produces_a_parsable_timestamp(wire_config: Confi
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_the_presentation_pipeline_produces_a_parsable_timestamp(wire_config: Config, presentation: pd.DataFrame):
+    # Layer 6 was the last of the score stanzas parsed without a producer but one. Only layer 7 is left.
+    assert len(presentation) > 0, "the harness emitted no layer 6 rows"
+
+    assert_parses_as_its_own_stanza(wire_config, presentation.copy(), "morpheus:score:l6")
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_the_lineage_pipeline_produces_a_parsable_timestamp(wire_config: Config, lineage: pd.DataFrame):
     assert_parses_as_its_own_stanza(wire_config, lineage.copy(), "morpheus:edge")
 
@@ -245,7 +261,8 @@ def test_every_produced_sourcetype_is_covered_here():
         "binding:bucketed",
         "morpheus:score:l3",
         "morpheus:score:l4",
-        "morpheus:score:l5"
+        "morpheus:score:l5",
+        "morpheus:score:l6"
     }
 
     assert covered == set(PRODUCED), f"not covered: {sorted(set(PRODUCED) - covered)}"

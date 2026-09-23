@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is thirty-three stages and thirty-three supporting
-modules, covered by 1,382 distinct tests, itemized in
+8's total order, and control 13's CI harness. That is thirty-seven stages and thirty-six supporting
+modules, covered by 1,496 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1479,6 +1479,45 @@ the rule.
 in a way that crosses a category boundary, for example declared `image/png` and detected as an archive.
 Strong tunneling indicator.
 
+All five of these are built and ship as saved searches, reading
+{py:class}`~morpheus.stages.telemetry.tc6_fingerprint_stage.TC6FingerprintStage`,
+{py:class}`~morpheus.stages.telemetry.tc6_certificate_stage.TC6CertificateStage`,
+{py:class}`~morpheus.stages.telemetry.tc6_cipher_stage.TC6CipherStage` and
+{py:class}`~morpheus.stages.telemetry.tc6_content_stage.TC6ContentStage`, and each is asserted over the
+seeded corpus in `tests/morpheus/determinism/test_presentation_harness.py` together with the case beside
+it that must stay quiet. R-B-L6-001 is as cheap as this section claims: the layer rides collection points
+layers 3 and 4 already established, and four of the five rules reuse primitives the fork had before layer
+6 existed.
+
+Two judgement tables ship beside the rules, because two of them cannot be written without one.
+{py:mod}`~morpheus.utils.cipher_strength` orders suites into six tiers -- there is no field in a handshake
+that says how strong a suite is -- and {py:mod}`~morpheus.utils.media_type` maps types to the coarse
+categories R-D-L6-005's "crosses a category boundary" depends on. **Both report what they could not place
+rather than guessing at it.** A default rank would either manufacture a downgrade for every suite the
+table has not heard of or hide a real one; a default category would do the same for content. An
+unrecognized value therefore gets no verdict, the rule declines, and a coverage search counts what fell
+outside both tables. A table that silently covers everything is worse than one that says where it ends -- and the
+failure it prevents is specific: an inspection point emitting OpenSSL short names rather than IANA ones
+puts its entire cipher feed outside the ordering, which reads as a rule that never fires.
+
+Three departures from the text above are deliberate. R-B-L6-001 requires the host to have a settled
+handshake history rather than reading novelty alone, for a reason the corpus supplied and the prose had
+not: every fingerprint is new to a host the estate has just started seeing, so novelty alone reports a
+laptop back from repair identically to a host whose TLS stack changed underneath it. R-D-L6-002 fires
+only where the destination has presented exactly one authority until now, which removes the delivery
+hosts legitimately sitting behind four and makes the rule self-silencing on a genuine authority
+migration -- one notable, and then the destination has demonstrably presented two. And R-B-L6-004 takes
+each pair's *minimum* rather than its mode, because a pair that negotiates a strong suite nine times in
+ten has a mode the tenth routine negotiation sits below.
+
+One departure from Part 2's entity key is recorded where it is made. TC-6's key is given there as
+`ja4_client` plus `certificate_fingerprint_sha256`, and both are carried on every row because both are
+what an analyst pivots on; neither is what the envelope seals on. A JA4 fingerprint is a property of a
+TLS stack, so thousands of unrelated hosts running one browser build share it, and a chain rooted on it
+would merge them into a single entity while `Behavior summary - per-layer scores` aggregated the estate's
+browser population. The host is what acquires a stack, gets intercepted and gets downgraded, so the host
+is the sealing entity -- which is also what makes R-C-002 expressible.
+
 ### Layer 7
 
 **R-B-L7-001 - DNS tunneling.** Query name entropy above 4.0 bits per character with mean label length
@@ -1747,10 +1786,15 @@ specification, including the ICMP and ICMPv6 message-type mapping:
 ```python
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 
-pipe.add_stage(CommunityIdStage(config, src_ip_column="src_ip", dst_ip_column="dest_ip",
+pipe.add_stage(CommunityIdStage(config, src_ip_column="src_ip", dst_ip_column="dst_ip",
                                 protocol_column="protocol", src_port_column="src_port",
-                                dst_port_column="dest_port"))
+                                dst_port_column="dst_port"))
 ```
+
+Name the columns your frames actually carry. The stage defaults to `dest_ip` and `dest_port`, which are
+the Splunk CIM spellings; every telemetry class in this fork emits `dst_ip` and `dst_port`, which is why
+each composed pipeline passes them explicitly. Mixing the two is not a syntax error anywhere -- it is a
+null column, and R-C-002 spent several increments grouping on one.
 
 Leave `seed` at its default of zero. The seed is part of the hash input, so a non-default value produces
 identifiers that no other tool in the estate will agree with, which forfeits the entire benefit.
@@ -1808,11 +1852,11 @@ compares against a threshold -- and rounding them to microseconds to fit a times
 quietly change that arithmetic. Where a single column is all that is needed,
 {py:func}`~morpheus.utils.siem_wire.render_event_time_series` is the same rendering without a stage.
 
-That module also carries a fact the app could not previously state anywhere. Four of the fourteen
-stanzas have no producer in this fork: two are the score sourcetypes for layers 6 and 7, and two
+That module also carries a fact the app could not previously state anywhere. Three of the fourteen
+stanzas have no producer in this fork: one is the score sourcetype for layer 7, and two
 are the TC-0 context store. It was eight until the layer 5 stages landed, seven until
-`TC1BindingStage` gave `binding:l1` one, six until the TC-3 stages landed, and five until the TC-4
-stages landed -- the sort of number that goes stale silently, which is why
+`TC1BindingStage` gave `binding:l1` one, and then six, five and four as layers 3, 4 and 6 landed
+-- the sort of number that goes stale silently, which is why
 `tests/morpheus/utils/test_siem_sourcetypes.py` now asserts this sentence against the module rather than
 leaving a reader to compare them. Each entry says what would have to be
 built. Recording them in one place is what keeps a reader from taking "the app parses seven layers" for
@@ -2237,7 +2281,7 @@ index=behavior_events (rule_id="R-B-L6-001" OR rule_id="R-B-L3-002") earliest=-2
 | stats min(eval(if(rule_id="R-B-L6-001", _time, null()))) AS t_tls
         min(eval(if(rule_id="R-B-L3-002", _time, null()))) AS t_beacon
         values(lineage_id) AS lineage_id
-  by src_ip dest_ip
+  by src_ip dst_ip
 | where isnotnull(t_tls) AND isnotnull(t_beacon)
 | eval gap = t_beacon - t_tls
 | where gap > 0 AND gap <= 3600
@@ -2268,7 +2312,7 @@ search = index=behavior_events (rule_id="R-B-L6-001" OR rule_id="R-B-L3-002") \
 | stats min(eval(if(rule_id="R-B-L6-001", _time, null()))) AS t_tls \
         min(eval(if(rule_id="R-B-L3-002", _time, null()))) AS t_beacon \
         values(lineage_id) AS lineage_id \
-  by src_ip dest_ip \
+  by src_ip dst_ip \
 | where isnotnull(t_tls) AND isnotnull(t_beacon) \
 | eval gap = t_beacon - t_tls \
 | where gap > 0 AND gap <= 3600 \
@@ -2293,6 +2337,16 @@ Point by point, because each line is there to prevent a specific failure:
   returns the same rows whenever it actually executes. With `latest_time = now` they would be a source of
   nondeterminism rather than a scheduling convenience.
 - **`realtime_schedule = 0`** again, for the same reason as the lookup jobs: catch up rather than skip.
+- **The pair is `(src_ip, dst_ip)`, and the spelling is the point.** This listing said `dest_ip` until
+  layer 6 shipped and gave the rule its first chance to return a row. `dest_ip` is the Splunk CIM name and
+  upstream Morpheus's default column; every detection in this fork emits `dst_ip`. A chained rule grouping
+  on a field its inputs do not publish does not fail and does not return nothing -- it puts a null in one
+  of two group keys on every notable, collapses the window into a single group, and reports any
+  fingerprint against any beacon. That is worse than a rule that cannot fire, because a rule that cannot
+  fire is visible. `tests/morpheus/utils/test_splunk_field_contracts.py` had passed throughout, since
+  `dest_ip` *is* produced -- by the lineage pipeline, which is not the pipeline whose notables this rule
+  reads. It now asks the narrower question a chained rule needs: whether the searches it names put the
+  field on their own notables.
 
 Overlapping windows mean a chain can match on consecutive runs. Deduplicate downstream on
 `(rule_id, lineage_id)` rather than by narrowing the window. The alternative trades duplicate alerts for
@@ -3029,14 +3083,35 @@ What Morpheus provides versus what has to be built, stated plainly.
   answers travelling the way a capture records them: a refusal arrives with the server as its source, so the
   flags land on the reverse flow, and putting them on the forward one inverts the fan-out direction the rule
   distinguishes a sweep from an outage by.
+- Layer 6, which was configuration without a producer until now
+  ({py:class}`~morpheus.stages.telemetry.tc6_fingerprint_stage.TC6FingerprintStage`,
+  {py:class}`~morpheus.stages.telemetry.tc6_certificate_stage.TC6CertificateStage`,
+  {py:class}`~morpheus.stages.telemetry.tc6_cipher_stage.TC6CipherStage` and
+  {py:class}`~morpheus.stages.telemetry.tc6_content_stage.TC6ContentStage`, composed in
+  `tests/morpheus/determinism/presentation_pipeline.py`). `morpheus:score:l6` has a producer, which takes the
+  unproduced stanza count from four to three and leaves layer 7 as the only score sourcetype without one. Three
+  primitives underneath are new. {py:mod}`~morpheus.utils.established_value` keeps a per-entity reference over a
+  trailing window and takes either the mode or the minimum of it, which is the one parameter separating the
+  issuer rule from the downgrade rule. {py:mod}`~morpheus.utils.cipher_strength` and
+  {py:mod}`~morpheus.utils.media_type` are the two judgement tables described above.
+  **Two things the corpus caught that the prose had not.** R-B-L6-001 as written flags a host the estate has
+  just started seeing exactly as loudly as a host whose stack changed, because every fingerprint is new to a
+  host with no history, which is why the stage carries the prior-handshake count and the rule requires a
+  settled one.
+  And R-C-002, the chained rule this layer finally gives a second half, grouped `by src_ip dest_ip` while every
+  detection in this fork emits `dst_ip`: not a rule that returns nothing, which is visible, but one that
+  collapses every notable in the window into a single null group and correlates the wrong pairs. It had passed
+  the field-contract linter throughout, because `dest_ip` *is* produced -- by the lineage pipeline, which is
+  not the pipeline whose notables the rule reads. "Something, somewhere, writes this" is the wrong question for
+  a chained rule, and the linter now asks the right one.
 - The inventory of what this all holds about a person, and the mechanism for holding less
   ({py:mod}`~morpheus.utils.personal_data` and
   {py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`). Every column the reference
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
-  counts are the finding: five columns identify a person, twelve address their device, fourteen locate them, and
-  a hundred and thirteen are behavioural profile, which is to say the largest thing an estate ends up holding is
-  the part
+  counts are the finding: five columns identify a person, fifteen address their device, fourteen locate them,
+  and a hundred and forty-two are behavioural profile, which is to say the largest thing an estate ends up
+  holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
   a column whose domain its own definition bounds, because twenty-four hours of digests are read straight off
@@ -3278,8 +3353,8 @@ That test is the point of it: an inventory nobody checks reads as authoritative 
 whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
-fork emits, five identify a person, twelve are addresses, fourteen locate, six are pseudonyms -- and
-a hundred and thirteen are behavioural profile. **The largest category by far is the one the design manufactures
+fork emits, five identify a person, fifteen are addresses, fourteen locate, six are pseudonyms -- and
+a hundred and forty-two are behavioural profile. **The largest category by far is the one the design manufactures
 rather than collects.** An estate reviewing this will think about the authentication logs it ingested;
 most of what it ends up holding about a person is derived here, from those logs, and did not exist before
 the pipeline ran.

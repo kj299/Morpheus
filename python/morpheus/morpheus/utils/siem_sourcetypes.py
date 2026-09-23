@@ -150,6 +150,42 @@ PRODUCED: dict = {
                               "flow_bpp_envelope_ratio",
                               "flow_bpp_envelope_breached"),
         ),
+    "morpheus:score:l6":
+        Sourcetype(
+            name="morpheus:score:l6",
+            time_column="event_time",
+            time_columns=("event_time", ),
+            producer="The TC-6 stages (fingerprint, certificate, cipher, content) behind WindowSealStage; the "
+            "`tc6` class of `tests/morpheus/determinism/presentation_pipeline.py`.",
+            # The five layer 6 detections read these. `ja4_client_observations` and `cert_issuer_distinct` are
+            # here because two of the rules are unusable without them: novelty alone fires on every host the
+            # estate has just started seeing, and an issuer difference alone fires on every delivery host behind
+            # more than one authority.
+            required_columns=("event_uid",
+                              "src_ip",
+                              "dst_ip",
+                              "ja4_client",
+                              "ja4_client_first_seen",
+                              "ja4_client_observations",
+                              "certificate_issuer",
+                              "cert_issuer_established",
+                              "cert_issuer_differs",
+                              "cert_issuer_distinct",
+                              "cert_issuer_mature",
+                              "cert_self_signed",
+                              "cert_self_signed_external",
+                              "cert_validity_days",
+                              "cipher_suite",
+                              "cipher_tier",
+                              "cipher_floor_tier",
+                              "cipher_downgraded",
+                              "cipher_mature",
+                              "content_type_declared",
+                              "content_type_detected",
+                              "content_category_declared",
+                              "content_category_detected",
+                              "content_category_crossed"),
+        ),
     "morpheus:score:l2":
         Sourcetype(
             name="morpheus:score:l2",
@@ -245,13 +281,11 @@ PRODUCED: dict = {
 }
 """Sourcetypes something in this fork emits, keyed by stanza name."""
 
-_LAYER_ABOVE_2 = ("A telemetry class for this layer. Layers 6 and 7 are design in the guide; no collector, no "
-                  "stage and no scoring path for them exists here. Layers 3 and 4 were on this list until the "
-                  "TC-3 and TC-4 stages landed, which is the shape the rest of it is expected to leave in.")
+_LAYER_ABOVE_2 = ("A telemetry class for this layer. Layer 7 is design in the guide; no collector, no stage and "
+                  "no scoring path for it exists here. Layers 3, 4 and 6 were on this list until their stages "
+                  "landed, which is the shape the last of it is expected to leave in.")
 
 UNPRODUCED: dict = {
-    "morpheus:score:l6":
-        Unproduced("morpheus:score:l6", "event_time", _LAYER_ABOVE_2),
     "morpheus:score:l7":
         Unproduced("morpheus:score:l7", "event_time", _LAYER_ABOVE_2),
     "context:identity":

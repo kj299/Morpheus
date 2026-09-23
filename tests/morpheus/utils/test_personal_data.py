@@ -159,7 +159,7 @@ def test_the_counts_the_documents_quote_are_the_counts_here():
     # thing in the inventory and a reader takes them at face value. Pinning them here means a reclassification
     # fails a test rather than quietly making two documents wrong.
     assert [len(columns_in(category)) for category in (IDENTIFIES, ADDRESSES, LOCATES, PSEUDONYMS, PROFILES)] == [
-        5, 12, 14, 6, 113
+        5, 15, 14, 6, 142
     ], "the category sizes have moved; README.md and the guide's Part 6 quote them and need the same edit"
 
     for name in ("README.md",
@@ -169,7 +169,7 @@ def test_the_counts_the_documents_quote_are_the_counts_here():
                               "guides",
                               "11_predictive_behavioral_analytics_osi.md")):
         with open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
-            assert "a hundred and thirteen are behavioural profile" in handle.read(), name
+            assert "a hundred and forty-two are behavioural profile" in handle.read(), name
 
 
 def test_columns_in_resolves_the_ambiguous_names_for_a_class():
