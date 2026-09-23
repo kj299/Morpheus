@@ -64,6 +64,16 @@ state every stateful stage in this design depends on, and a stable mapping is a 
 casual access to the SIEM, not a reason to treat the output as no longer personal data. The binding tables that
 sit beside it exist to re-identify, and they still will.
 
+**Layer 7 carries the most sensitive columns this fork produces.** `query_name` and `url_path` are browsing
+history, and both routinely carry an identifier inside them -- a user's name in an internal hostname, an account
+number in a REST path. They are classified as `PROFILES`, because one category per column is what this module
+can say, but a reader choosing a minimization policy should treat them as the worst of that category. What makes
+them tractable is that neither shipped layer 7 rule needs them at the wire. R-D-L7-005 reads counts the stage
+computed, never the path itself, so `url_path` can be dropped outright. R-B-L7-001 counts *distinct* subdomains,
+and a keyed digest preserves distinctness exactly, so `dns_subdomain` and `query_name` can be pseudonymized and
+the rule returns the same answer. Both claims are asserted in `tests/morpheus/determinism/test_application_harness.py`
+rather than left here.
+
 **A keyed hash over a bounded domain is not minimization at all**, which `BOUNDED_DOMAIN` names and
 `morpheus.stages.lineage.minimization_stage.MinimizationStage` refuses. There are about two hundred and fifty
 country codes and exactly twenty-four hours; whoever holds the output can count how often each digest appears
@@ -106,6 +116,7 @@ _ADDRESSES = (
     "dst_ip",
     "flow_id",
     "flow_pair_key",
+    "http_client_key",
     "mac",
     "mac_address",
     "source_ip",
@@ -161,6 +172,11 @@ _PROFILES = (
     "device_first_seen",
     "deviceincrement",
     "deviceincrement_z_loss",
+    "dns_mean_label_length",
+    "dns_registered_domain",
+    "dns_subdomain",
+    "dns_subdomain_entropy",
+    "dns_subdomains_per_domain",
     "dot1x_result",
     "drift_acceleration",
     "drift_baseline_sigma",
@@ -227,6 +243,10 @@ _PROFILES = (
     "hour_surprise_bits",
     "hour_surprise_bits_z_loss",
     "hour_unseen",
+    "http_2xx_in_window",
+    "http_4xx_in_window",
+    "http_4xx_to_2xx_ratio",
+    "http_distinct_paths",
     "internal_dst_ratio",
     "internal_dsts_in_window",
     "ip_ttl_distinct",
@@ -249,7 +269,10 @@ _PROFILES = (
     "max_abs_z",
     "mean_abs_z",
     "mfa_attempts_in_window",
+    "query_name",
     "tls_version",
+    "url_path",
+    "user_agent",
     "validation_result",
     "mfa_challenge",
     "mfa_denials_in_window",
@@ -321,6 +344,7 @@ _OPERATIONAL = (
     "day_window_start_ns",
     "dest_port",
     "directory_resolution",
+    "dns_subdomains_saturated",
     "dst_ports_per_src_first_in_window",
     "dst_ports_per_src_saturated",
     "dsts_per_src_first_in_window",
@@ -333,6 +357,9 @@ _OPERATIONAL = (
     "gratuitous_arp_count",
     "gratuitous_arp_ratio",
     "gratuitous_arp_ratio_saturated",
+    "http_method",
+    "http_status_class",
+    "http_window_saturated",
     "if_last_change",
     "input_discards",
     "input_discards_delta",
@@ -376,6 +403,7 @@ _OPERATIONAL = (
     "ports_per_mac_first_in_window",
     "ports_per_mac_saturated",
     "protocol",
+    "query_type",
     "resolution_method",
     "rollup_time_ns",
     "resolved_vlan_id",
@@ -386,6 +414,7 @@ _OPERATIONAL = (
     "src_port",
     "srcs_per_dst_first_in_window",
     "srcs_per_dst_saturated",
+    "status_code",
     "supplicant_resolution",
     "symbol_errors",
     "symbol_errors_delta",
@@ -458,16 +487,20 @@ BOUNDED_DOMAIN = frozenset({
     "content_category_declared",
     "content_category_detected",
     "dot1x_result",
+    "http_method",
+    "http_status_class",
     "local_hour",
     "local_weekday",
     "mfa_result",
     "oper_status",
     "osi_layer",
     "protocol",
+    "query_type",
     "resolved_vlan_id",
     "session_action",
     "source_country",
     "source_region",
+    "status_code",
     "tcp_flags",
     "telemetry_class",
     "tls_version",

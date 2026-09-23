@@ -58,6 +58,7 @@ export NUMBA_CUDA_USE_NVIDIA_BINDING="${NUMBA_CUDA_USE_NVIDIA_BINDING:-1}"
 # GPU run this has ever rendered a verdict from. Files are named individually for that reason: a directory entry
 # cannot be checked against the markers inside it, and something that cannot be checked is what goes stale.
 TARGETS=(
+    tests/morpheus/determinism/test_application_harness.py
     tests/morpheus/determinism/test_determinism_harness.py
     tests/morpheus/determinism/test_estate_harness.py
     tests/morpheus/determinism/test_gpu_parity.py
@@ -95,6 +96,8 @@ TARGETS=(
     tests/morpheus/stages/test_tc6_cipher_stage.py
     tests/morpheus/stages/test_tc6_content_stage.py
     tests/morpheus/stages/test_tc6_fingerprint_stage.py
+    tests/morpheus/stages/test_tc7_dns_stage.py
+    tests/morpheus/stages/test_tc7_http_stage.py
     tests/morpheus/stages/test_tc5_cadence_stage.py
     tests/morpheus/stages/test_tc5_drift_stage.py
     tests/morpheus/stages/test_tc5_novelty_stage.py
@@ -144,6 +147,7 @@ UNMARKED=(
     tests/morpheus/utils/test_link_flap.py
     tests/morpheus/utils/test_media_type.py
     tests/morpheus/utils/test_optical_baseline.py
+    tests/morpheus/utils/test_query_entropy.py
     tests/morpheus/utils/test_tcp_flags.py
     tests/morpheus/utils/test_transfer_envelope.py
     tests/morpheus/utils/test_outcome_run.py

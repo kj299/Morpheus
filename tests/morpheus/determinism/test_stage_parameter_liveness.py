@@ -77,6 +77,8 @@ from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
 from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
 from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
 from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
+from morpheus.stages.telemetry.tc7_dns_stage import TC7DnsStage
+from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
@@ -352,6 +354,51 @@ def packets() -> dict:
         "tcp_flags": [row[5] for row in rows],
         "data_len": [row[6] for row in rows],
         "event_time": [row[0] for row in rows],
+    }
+
+
+def dns_queries() -> dict:
+    """Ten names under one domain spread across twenty minutes, so a window or a cap has something to cut."""
+    names = [f"chunk{index}x9q2k7m4v8b3n6c1z5p0w.evil.com" for index in range(10)]
+
+    return {
+        "query_name": names,
+        "event_time": [10**18 + index * 120 * SECOND for index in range(10)],
+    }
+
+
+def _two_domains() -> dict:
+    """Two registered domains interleaved, so a cap of one entity evicts one of them mid-stream."""
+    names = []
+    times = []
+
+    for index in range(6):
+        names.append(f"a{index}x9q2k7m4v8b3n6c1z5p0w.evil.com")
+        names.append(f"b{index}x9q2k7m4v8b3n6c1z5p0w.other.com")
+        times.extend([10**18 + index * 60 * SECOND, 10**18 + index * 60 * SECOND + SECOND])
+
+    return {"query_name": names, "event_time": times}
+
+
+def http_requests() -> dict:
+    """Two clients interleaved, each requesting distinct paths with a mix of statuses across twenty minutes.
+
+    Interleaved because an entity cap is only observable mid-stream, for the same reason it is in `paired_flows`.
+    """
+    rows = []
+
+    for index in range(10):
+        base = 10**18 + index * 120 * SECOND
+        rows.append((base, "10.0.0.5", f"/p{index}", 404 if index % 3 else 200))
+        rows.append((base + 5 * SECOND, "10.0.0.6", f"/q{index}", 200))
+
+    rows.sort()
+
+    return {
+        "event_time": [row[0] for row in rows],
+        "src_ip": [row[1] for row in rows],
+        "url_path": [row[2] for row in rows],
+        "status_code": [row[3] for row in rows],
     }
 
 
@@ -1071,6 +1118,32 @@ REGISTRY: dict = {
                      Knob("declared_column", INPUT_COLUMN, benign="content_type_declared"),
                      Knob("detected_column", INPUT_COLUMN, benign="content_type_detected"),
                  )),
+    "TC7DnsStage":
+        Scenario(stage=TC7DnsStage,
+                 frame=dns_queries,
+                 base={},
+                 knobs=(
+                     Knob("query_column", INPUT_COLUMN, benign="query_name"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("window_seconds", DIFFERS, benign=3600, extreme=300),
+                     Knob("max_samples", DIFFERS, benign=4096, extreme=3),
+                     Knob("max_entities", DIFFERS, benign=500000, extreme=1, frame=_two_domains),
+                 )),
+    "TC7HttpStage":
+        Scenario(stage=TC7HttpStage,
+                 frame=http_requests,
+                 base={},
+                 knobs=(
+                     Knob("key_columns", DIFFERS, benign=["src_ip"], extreme=["url_path"]),
+                     Knob("status_column", INPUT_COLUMN, benign="status_code"),
+                     Knob("path_column", INPUT_COLUMN, benign="url_path"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("window_seconds", DIFFERS, benign=600, extreme=60),
+                     Knob("max_samples", DIFFERS, benign=4096, extreme=2),
+                     Knob("max_entities", DIFFERS, benign=500000, extreme=1),
+                 )),
     "TC5CadenceStage":
         Scenario(
             stage=TC5CadenceStage,
@@ -1504,7 +1577,7 @@ def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships()
     # Every class with a producer. TC-3 was not in this loop when its stages landed, and its row went on saying
     # "Schema only" through a whole increment -- the same drift this test exists to catch, in the one class the
     # loop did not name. A list of classes is as capable of being incomplete as a count is.
-    for prefix in ("tc1", "tc2", "tc3", "tc4", "tc5", "tc6"):
+    for prefix in ("tc1", "tc2", "tc3", "tc4", "tc5", "tc6", "tc7"):
         shipped = len(
             [name for name in os.listdir(telemetry) if name.startswith(f"{prefix}_") and name.endswith(".py")])
         label = f"**TC-{prefix[-1]}**"

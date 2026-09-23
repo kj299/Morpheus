@@ -301,6 +301,7 @@ def golden_columns() -> set:
                  "golden_network_expected.csv",
                  "golden_transport_expected.csv",
                  "golden_presentation_expected.csv",
+                 "golden_application_expected.csv",
                  "golden_session_expected.csv"):
         path = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism", name)
 
@@ -350,7 +351,7 @@ def producible() -> set:
 def test_the_app_is_where_we_think_it_is():
     # Without this every assertion below passes over an empty parse, which is the failure mode a linter must not
     # have: it would report a clean bill of health for a file it never read.
-    assert len(searches()) == 30
+    assert len(searches()) == 32
     assert len(lookup_fields()) > 0
     assert len(stage_columns()) > 40
 
