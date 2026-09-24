@@ -287,6 +287,81 @@ def test_the_layer_4_detections_return_exactly_what_is_written(expected: dict):
     assert entry["key_values"]["volume_ratio"] == breached[0]["flow_data_len_envelope_ratio"]
 
 
+TUNNEL_ENTROPY = 4.0
+TUNNEL_LABEL_LENGTH = 30
+TUNNEL_SUBDOMAINS = 100
+ENUMERATION_PATHS = 200
+ENUMERATION_RATIO = 0.7
+"""The layer 7 searches' own thresholds, repeated here so the predicates this file evaluates are the ones the
+app ships."""
+
+
+def _layer_7_events() -> list:
+    """What a search head would hold for `sourcetype=morpheus:score:l7`."""
+    with open(os.path.join(EVENTS, "morpheus_score_l7.jsonlines"), encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def test_the_layer_7_detections_return_exactly_what_is_written(expected: dict):
+    # Evaluated over the events the app is fed rather than the frame the pipeline produced. For R-B-L7-001 this is
+    # not a formality: the search computes its own count, of distinct subdomains among queries clearing the other
+    # two conditions, which is a different figure from the stage's count of every subdomain. Only the search's
+    # version holds all three conditions to the same traffic, and this is the place it is computed as the search
+    # computes it.
+    events = _layer_7_events()
+    searches = expected["searches"]
+
+    qualifying = [
+        event for event in events if (event.get("dns_subdomain_entropy") or 0) > TUNNEL_ENTROPY and (
+            event.get("dns_mean_label_length") or 0) > TUNNEL_LABEL_LENGTH
+    ]
+    subdomains: dict = collections.defaultdict(set)
+    clients: dict = collections.defaultdict(set)
+
+    for event in qualifying:
+        subdomains[event["dns_registered_domain"]].add(event["dns_subdomain"])
+        clients[event["dns_registered_domain"]].add(event["src_ip"])
+
+    tunnels = {domain: names for (domain, names) in subdomains.items() if len(names) > TUNNEL_SUBDOMAINS}
+    entry = searches["R-B-L7-001 - DNS tunneling"]
+
+    assert entry["candidate_rows_clearing_entropy_and_length"] == len(qualifying)
+    assert entry["expected_rows"] == len(tunnels)
+    assert entry["key_values"]["dns_registered_domain"] in tunnels
+
+    domain = entry["key_values"]["dns_registered_domain"]
+
+    assert entry["key_values"]["qualifying_subdomains"] == len(tunnels[domain])
+    assert entry["contributing_rows"] == sum(1 for event in qualifying if event["dns_registered_domain"] == domain)
+    assert entry["key_values"]["clients"] == len(clients[domain])
+
+    # R-D-L7-005, read off the same row the way the search reads it, the ratio as a multiplication.
+    enumerating = [
+        event for event in events
+        if (event.get("http_distinct_paths") or 0) > ENUMERATION_PATHS and event.get("http_4xx_in_window") is not None
+        and event["http_4xx_in_window"] > ENUMERATION_RATIO * event["http_2xx_in_window"]
+    ]
+    by_client: dict = collections.defaultdict(list)
+
+    for event in enumerating:
+        by_client[event["src_ip"]].append(event)
+
+    entry = searches["R-D-L7-005 - Enumeration"]
+
+    assert entry["contributing_rows"] == len(enumerating)
+    assert entry["expected_rows"] == len(by_client)
+
+    written = {row["src_ip"]: (row["distinct_paths"], row["refusals"], row["successes"]) for row in entry["key_values"]}
+    derived = {
+        client: (max(event["http_distinct_paths"] for event in rows),
+                 max(event["http_4xx_in_window"] for event in rows),
+                 max(event["http_2xx_in_window"] for event in rows))
+        for (client, rows) in by_client.items()
+    }
+
+    assert written == derived
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -395,6 +470,19 @@ def test_the_validation_document_says_the_same_thing_the_expectation_file_does(e
             f"VALIDATION.md says {label} returns {stated}; the expectation file says "
             f"{expected['searches'][entries[0]]['expected_rows']}")
 
+    # The notes quote figures of their own, and checking only the Rows column let two of them go stale through a
+    # whole increment: the summary note said 2586 scored events and the chain note 658 chains, both from layer 4,
+    # while the rows beside them had been kept current. The two aggregates are the ones whose notes carry a figure
+    # the expectation file also holds, so those figures are checked too.
+    summary = expected["searches"]["Behavior summary - per-layer scores"]
+    chain = expected["searches"]["Chain assembly - cross-layer risk"]
+
+    summary_note = re.search(r"^\| Behavior summary[^|]*\|[^|]*\| (.+?) \|$", document, re.MULTILINE).group(1)
+    chain_note = re.search(r"^\| Chain assembly[^|]*\|[^|]*\| (.+?) \|$", document, re.MULTILINE).group(1)
+
+    assert f"over the {summary['contributing_rows']} scored events" in summary_note, summary_note[:120]
+    assert f"of the {chain['distinct_lineage_ids']} chains" in chain_note, chain_note[:160]
+
     empty = sum(1 for entry in expected["searches"].values() if entry.get("expected_empty"))
     stated_empty = re.search(r"\*\*(\w+) of the ([\w-]+) should return nothing\.\*\*", document)
 
@@ -431,7 +519,7 @@ which is the right failure: the document said something nobody here anticipated.
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Seven of twenty-four. That ratio is the honest state of this app, and stating it is the package's main job.
+    # Seven of thirty-two. That ratio is the honest state of this app, and stating it is the package's main job.
     # The seventh is R-P-L3-005, which reads the behavior summary this package does not populate -- the same
     # deployment-step blocker the chain assembly search has, arriving with layer 3 rather than being discovered.
     # It

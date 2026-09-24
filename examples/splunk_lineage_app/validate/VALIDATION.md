@@ -62,11 +62,13 @@ should return nothing:
 | R-B-L6-004, cipher downgrade | **1** | One notable: a pair that negotiated modern suites ten times and then a broken one. The pair whose own suite varies routinely does not appear, and neither does the legacy appliance sitting at a low floor. |
 | R-D-L6-005, content type mismatch | **1** | One notable: an archive behind a declared PNG. 50 handshakes reach the comparison and 49 are re-encodings, which is what comparing categories rather than types is for. |
 | TLS table coverage, unrecognized values | **1** | An operational metric; the value matters, not whether it fired. Both counts are zero, which is what makes the five above mean what they claim. |
+| R-B-L7-001, DNS tunneling | **1** | One notable: 130 random, long-labelled subdomains under one domain. The CDN fails only on label length, the tenant domain only on the count, and the SaaS provider on both per-query conditions -- each of the three conditions has a control it alone keeps quiet. |
+| R-D-L7-005, enumeration | **2** | Two notables, one of which has found nothing and so has no ratio at all; it appears because the search tests 4xx > 0.7 * 2xx. The crawler fails only on the ratio and the broken client only on the path count. |
 | R-D-L5-003, impossible travel | **2** | One principal in New York half an hour after her own London office login, and back in London ninety minutes later. Two rows is what one interloper produces. The eight-hour flight beside it, and the VPN user changing country twice a day, do not appear. |
 | R-D-L5-004, multi-factor fatigue | **1** | Five denials in eight minutes and then an approval. The fumbled password beside it -- two failures and a success with the factor never challenged -- does not appear. |
 | R-C-002, TLS before beaconing | **0** | Correct. Chains two detections' notables, and layer 6 has neither a producer nor a rule. It also reads `rule_id`, which detections write as they fire. |
-| Behavior summary, per-layer scores | **937** | One row per five-minute bin, layer, entity and lineage over the 2586 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5, because only `TC5ScoreStage` produces `max_abs_z`. |
-| Chain assembly, cross-layer risk | **0** | Correct, and for a new reason. The threshold the search was built around is met: 15 of the 658 chains span three layers, holding a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there. What stops it is the line after -- `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)` -- and `risk_score` is written into the index by the detection searches as they fire, not by a stage. This package indexes pipeline output alone, so every chain sums null. |
+| Behavior summary, per-layer scores | **970** | One row per five-minute bin, layer, entity and lineage over the 3871 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5, because only `TC5ScoreStage` produces `max_abs_z`. |
+| Chain assembly, cross-layer risk | **0** | Correct, and for a new reason. The threshold the search was built around is met: 15 of the 676 chains span three layers, holding a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there. What stops it is the line after -- `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)` -- and `risk_score` is written into the index by the detection searches as they fire, not by a stage. This package indexes pipeline output alone, so every chain sums null. |
 | Binding lookup, L2/L3 refresh | **0** | Correct, and it always was. The search selects `binding_table=dhcp_lease`; this corpus has no DHCP source, and the 80 bucketed rows it used to be credited with are a MAC table under a different name. |
 | Binding lookup, L1 refresh | **5** | Five port intervals across four ports: three stable, two on the port whose optic is swapped. The lookup keys on port and switch with no bucket, so those two collapse to one row and the later optic wins -- it answers what is in a port now, not what was in it then. |
 | Binding lookup, L1 history refresh | **1** | One row, and one row is the point. Only the port whose optic was replaced has a superseded interval; the other three are described for all time by the current-state row and cost the history nothing. |
@@ -75,10 +77,10 @@ should return nothing:
 | Binding health, unresolved rate | **1** | An operational metric; the value matters, not whether it fired. |
 | R-P-L5-006, drift trajectory | **7** | Three principals, none of them behaviour, each explained in `expected_results.json`: two climb for six days because the reference scorer's baseline is frozen under cumulative features, one has a shallow run ended by the planted burst. Watchlist, never a page. |
 
-**Seven of the thirty should return nothing.** That is the point of writing them down. An empty result is
+**Seven of the thirty-two should return nothing.** That is the point of writing them down. An empty result is
 this app's characteristic failure, and without a list saying which emptiness is correct, a deployment cannot
 tell a rule that is working from a rule that is broken. The ratio has moved both ways, which is what makes it
-worth stating: it improved as layers 3, 4, 5 and 6 gained producers, and went the other way when the L2/L3 refresh
+worth stating: it improved as layers 3, 4, 5, 6 and 7 gained producers, and went the other way when the L2/L3 refresh
 was found to have been empty all along under a note that credited it with 80 rows. Chain assembly is the one
 worth following, because it has now been empty for three different reasons in turn: a missing `osi_layer`, then
 lineage that never left one layer, and now a risk sum no pipeline event contributes to. Each fix made the next
@@ -90,9 +92,9 @@ blocker visible, which is what an expectation file is for.
 puts the output through the same `SiemWireStage` a deployment would put before its sink. Layers 1, 2 and 5 come
 from the estate pipeline rather than the telemetry one, because a chain is decided by which classes were sealed
 together: the same events rendered from the telemetry pipeline carry chains that stop at two layers. Layers 3
-4 and 6 come from their own corpora and their own pipelines, and share an entity with neither the estate nor
-each other -- an address is not a port, a conversation is not an address, and the host a handshake was made from
-is not any of them. They are checked in so
+4, 6 and 7 come from their own corpora and their own pipelines, and share an entity with neither the estate
+nor each other -- an address is not a port, a conversation is not an address, and the host a handshake or a query
+was made from is not any of them. They are checked in so
 that a change to what a SIEM would receive shows up in a pull request rather than only on a search head.
 
 Regenerate after changing the corpus or a stage, and review the diff:

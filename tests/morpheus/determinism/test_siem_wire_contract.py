@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import lineage_pipeline  # noqa: E402
+import application_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
 import presentation_pipeline  # noqa: E402
 import session_pipeline  # noqa: E402
@@ -106,6 +107,13 @@ def presentation_fixture() -> pd.DataFrame:
     config = presentation_pipeline.build_pipeline_config()
 
     yield presentation_pipeline.run_pipeline(config, presentation_pipeline.build_corpus())
+
+
+@pytest.fixture(name="application", scope="module")
+def application_fixture() -> pd.DataFrame:
+    config = application_pipeline.build_pipeline_config()
+
+    yield application_pipeline.run_pipeline(config, application_pipeline.build_corpus())
 
 
 @pytest.fixture(name="lineage", scope="module")
@@ -216,6 +224,20 @@ def test_the_presentation_pipeline_produces_a_parsable_timestamp(wire_config: Co
 
 
 @pytest.mark.gpu_and_cpu_mode
+@pytest.mark.parametrize("telemetry_class", ["tc7_dns", "tc7_http"])
+def test_the_application_pipeline_produces_a_parsable_timestamp(wire_config: Config,
+                                                                application: pd.DataFrame,
+                                                                telemetry_class: str):
+    # The last score stanza to get a producer. Both layer 7 classes share it, the way layer 2's classes share
+    # theirs, so each is checked against it separately rather than as one frame that could hide either.
+    rows = application[application["telemetry_class"] == telemetry_class].reset_index(drop=True)
+
+    assert len(rows) > 0, f"the harness emitted no {telemetry_class} rows"
+
+    assert_parses_as_its_own_stanza(wire_config, rows, "morpheus:score:l7")
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_the_lineage_pipeline_produces_a_parsable_timestamp(wire_config: Config, lineage: pd.DataFrame):
     assert_parses_as_its_own_stanza(wire_config, lineage.copy(), "morpheus:edge")
 
@@ -262,7 +284,8 @@ def test_every_produced_sourcetype_is_covered_here():
         "morpheus:score:l3",
         "morpheus:score:l4",
         "morpheus:score:l5",
-        "morpheus:score:l6"
+        "morpheus:score:l6",
+        "morpheus:score:l7"
     }
 
     assert covered == set(PRODUCED), f"not covered: {sorted(set(PRODUCED) - covered)}"

@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is thirty-seven stages and thirty-six supporting
-modules, covered by 1,496 distinct tests, itemized in
+8's total order, and control 13's CI harness. That is thirty-nine stages and thirty-seven supporting
+modules, covered by 1,562 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1543,6 +1543,35 @@ per-host novelty alone is dominated by long-tail legitimate software.
 increasing across consecutive weekly windows while the principal's role assignment in TC-0 is unchanged.
 Classic slow-burn insider indicator, invisible to any single-window rule.
 
+Two of these six are built and ship as saved searches: R-B-L7-001, reading
+{py:class}`~morpheus.stages.telemetry.tc7_dns_stage.TC7DnsStage`, and R-D-L7-005, reading
+{py:class}`~morpheus.stages.telemetry.tc7_http_stage.TC7HttpStage`. Both are asserted over the seeded corpus in
+`tests/morpheus/determinism/test_application_harness.py`, and every condition in each rule has a benign case
+beside it that the condition alone keeps quiet: a content delivery network whose labels are random but short, a
+tenant domain with random labels but too few of them, a crawler past two hundred paths that mostly succeeds, and
+a broken client refused on a handful of paths. The other four are not built. R-B-L7-002, R-P-L7-006 and
+R-B-L7-004 read the TC-0 context store -- a classification weight, a role assignment and a peer group -- and
+that store does not exist yet. R-B-L7-003 needs a running Triton server, and nothing in this fork's CI can
+fire it.
+
+Three decisions the text above leaves open are made here. **Entropy is measured below the registered domain.**
+Ordinary names score 3.0 to 3.7 bits per character as whole names but 0 to 2.3 once the registered domain is
+removed, while a tunnel's encoded labels score above 4 either way, so the narrower measurement widens the margin
+the 4.0 threshold sits in. The registered domain is found by the full Public Suffix List algorithm over the list
+Morpheus already bundles, because the existing loader in `url_parser.py` treats wildcard and exception rules as
+literal names. **The distinct subdomain count is taken among qualifying queries.** Counting across all of a
+domain's traffic lets a SaaS domain with a hundred ordinary names and one random name satisfy all three
+conditions on different queries; the search counts distinct subdomains only among the queries that clear the
+entropy and length conditions. And **the enumeration ratio is evaluated as a multiplication**, 4xx above 0.7
+times 2xx, because the ratio is undefined for a client that has never received a success, and that client is
+the enumerator most worth reporting.
+
+One departure from Part 2's entity key is recorded where it is made. TC-7 gives `hostname` as the key for DNS;
+both stages seal on the querying client, `src_ip`, because that is the address a resolver log carries and the
+one the lower layers' chains are rooted on. The registered domain is the rule's grouping key rather than the
+sealing entity, for the reason the layer 6 fingerprint is: one tunnel domain is queried by whichever hosts are
+compromised, and sealing on it would merge them.
+
 ### Cross-layer chained rules
 
 These are the reason to build the lineage substrate at all. Each is expressed as an ordered sequence with
@@ -1852,11 +1881,11 @@ compares against a threshold -- and rounding them to microseconds to fit a times
 quietly change that arithmetic. Where a single column is all that is needed,
 {py:func}`~morpheus.utils.siem_wire.render_event_time_series` is the same rendering without a stage.
 
-That module also carries a fact the app could not previously state anywhere. Three of the fourteen
-stanzas have no producer in this fork: one is the score sourcetype for layer 7, and two
-are the TC-0 context store. It was eight until the layer 5 stages landed, seven until
-`TC1BindingStage` gave `binding:l1` one, and then six, five and four as layers 3, 4 and 6 landed
--- the sort of number that goes stale silently, which is why
+That module also carries a fact the app could not previously state anywhere. Two of the fourteen
+stanzas have no producer in this fork: none are the score sourcetypes any longer -- every layer from 1
+to 7 now has one -- and both are the TC-0 context store. It was eight until the layer 5 stages landed,
+seven until `TC1BindingStage` gave `binding:l1` one, and then six, five, four and three as layers 3,
+4, 6 and 7 landed -- the sort of number that goes stale silently, which is why
 `tests/morpheus/utils/test_siem_sourcetypes.py` now asserts this sentence against the module rather than
 leaving a reader to compare them. Each entry says what would have to be
 built. Recording them in one place is what keeps a reader from taking "the app parses seven layers" for
@@ -3104,13 +3133,25 @@ What Morpheus provides versus what has to be built, stated plainly.
   the field-contract linter throughout, because `dest_ip` *is* produced -- by the lineage pipeline, which is
   not the pipeline whose notables the rule reads. "Something, somewhere, writes this" is the wrong question for
   a chained rule, and the linter now asks the right one.
+- Layer 7's DNS and HTTP half
+  ({py:class}`~morpheus.stages.telemetry.tc7_dns_stage.TC7DnsStage` and
+  {py:class}`~morpheus.stages.telemetry.tc7_http_stage.TC7HttpStage`, composed in
+  `tests/morpheus/determinism/application_pipeline.py`), over one new primitive,
+  {py:mod}`~morpheus.utils.query_entropy`, which finds the registered domain and measures the name below it.
+  `morpheus:score:l7` has a producer, which leaves no score sourcetype without one; the two stanzas still
+  unproduced are both the TC-0 context store, which is also what the SaaS and endpoint rules at this layer wait
+  for. **What the corpus caught that the prose had not.** R-B-L7-001's three conditions, read as three
+  independent aggregates over a domain's hour, are satisfied by a SaaS domain with a hundred ordinary tenant
+  names and one random one, since the count and the entropy are then met by different queries; the search counts
+  subdomains only among the queries that meet the other two. And R-D-L7-005 written as a ratio never fires on the
+  client that received nothing but refusals.
 - The inventory of what this all holds about a person, and the mechanism for holding less
   ({py:mod}`~morpheus.utils.personal_data` and
   {py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`). Every column the reference
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
-  counts are the finding: five columns identify a person, fifteen address their device, fourteen locate them,
-  and a hundred and forty-two are behavioural profile, which is to say the largest thing an estate ends up
+  counts are the finding: five columns identify a person, sixteen address their device, fourteen locate them,
+  and a hundred and fifty-four are behavioural profile, which is to say the largest thing an estate ends up
   holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
@@ -3353,8 +3394,8 @@ That test is the point of it: an inventory nobody checks reads as authoritative 
 whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
-fork emits, five identify a person, fifteen are addresses, fourteen locate, six are pseudonyms -- and
-a hundred and forty-two are behavioural profile. **The largest category by far is the one the design manufactures
+fork emits, five identify a person, sixteen are addresses, fourteen locate, six are pseudonyms -- and
+a hundred and fifty-four are behavioural profile. **The largest category by far is the one the design manufactures
 rather than collects.** An estate reviewing this will think about the authentication logs it ingested;
 most of what it ends up holding about a person is derived here, from those logs, and did not exist before
 the pipeline ran.

@@ -186,6 +186,31 @@ PRODUCED: dict = {
                               "content_category_detected",
                               "content_category_crossed"),
         ),
+    "morpheus:score:l7":
+        Sourcetype(
+            name="morpheus:score:l7",
+            time_column="event_time",
+            time_columns=("event_time", ),
+            producer="The TC-7 DNS and HTTP stages behind WindowSealStage; the `tc7_dns` and `tc7_http` classes of "
+            "`tests/morpheus/determinism/application_pipeline.py`. The SaaS and endpoint sub-classes will share this "
+            "sourcetype when they land.",
+            # R-B-L7-001 and R-D-L7-005 read these. The two count columns are here as well as the ratio because the
+            # ratio is undefined for a client with no successes, and the search reads the counts for that reason.
+            required_columns=("event_uid",
+                              "src_ip",
+                              "query_name",
+                              "dns_registered_domain",
+                              "dns_subdomain",
+                              "dns_subdomain_entropy",
+                              "dns_mean_label_length",
+                              "dns_subdomains_per_domain",
+                              "url_path",
+                              "status_code",
+                              "http_4xx_in_window",
+                              "http_2xx_in_window",
+                              "http_4xx_to_2xx_ratio",
+                              "http_distinct_paths"),
+        ),
     "morpheus:score:l2":
         Sourcetype(
             name="morpheus:score:l2",
@@ -281,13 +306,7 @@ PRODUCED: dict = {
 }
 """Sourcetypes something in this fork emits, keyed by stanza name."""
 
-_LAYER_ABOVE_2 = ("A telemetry class for this layer. Layer 7 is design in the guide; no collector, no stage and "
-                  "no scoring path for it exists here. Layers 3, 4 and 6 were on this list until their stages "
-                  "landed, which is the shape the last of it is expected to leave in.")
-
 UNPRODUCED: dict = {
-    "morpheus:score:l7":
-        Unproduced("morpheus:score:l7", "event_time", _LAYER_ABOVE_2),
     "context:identity":
         Unproduced(
             "context:identity",

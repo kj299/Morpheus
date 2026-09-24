@@ -92,6 +92,7 @@ def main() -> int:
     # setup above has to run before the package is reachable.
     from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS  # pylint: disable=import-outside-toplevel
 
+    import application_pipeline  # pylint: disable=import-outside-toplevel
     import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
     import lineage_pipeline  # pylint: disable=import-outside-toplevel
     import network_pipeline  # pylint: disable=import-outside-toplevel
@@ -144,6 +145,12 @@ def main() -> int:
     handshakes = presentation_pipeline.run_pipeline(presentation_pipeline.build_pipeline_config(),
                                                     presentation_pipeline.build_corpus())
     by_sourcetype["morpheus:score:l6"] = _render(handshakes, "morpheus:score:l6")
+
+    # Layer 7's DNS and HTTP classes share one sourcetype, as layer 2's classes do. The SaaS and endpoint
+    # sub-classes will join them once the TC-0 context store their rules are weighted by exists.
+    requests = application_pipeline.run_pipeline(application_pipeline.build_pipeline_config(),
+                                                 application_pipeline.build_corpus())
+    by_sourcetype["morpheus:score:l7"] = _render(requests, "morpheus:score:l7")
 
     bindings = telemetry[telemetry["telemetry_class"] == "tc2_binding"]
     bucketed = tp.build_binding_table(bindings).to_bucketed_frame()

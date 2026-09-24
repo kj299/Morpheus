@@ -1,6 +1,6 @@
 {
   "description": "What each shipped saved search should return when the app is deployed against sample_events/. Generated numbers come from the same run_pipeline the determinism tests call; the expected-empty entries are stated with the reason, because a search returning nothing is the failure mode this whole app is careful about and it must be possible to tell a correct empty from a broken one.",
-  "corpus": "tests/morpheus/determinism/estate_pipeline.py, lineage_pipeline.py, network_pipeline.py, transport_pipeline.py, presentation_pipeline.py and session_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
+  "corpus": "tests/morpheus/determinism/estate_pipeline.py, lineage_pipeline.py, network_pipeline.py, transport_pipeline.py, presentation_pipeline.py, application_pipeline.py and session_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
   "searches": {
     "R-D-L2-001 - MAC address count exceeded on an access port": {
       "expected_rows": 0,
@@ -195,6 +195,38 @@
         "unclassified_content_types": 0
       }
     },
+    "R-B-L7-001 - DNS tunneling": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 130,
+      "candidate_rows_clearing_entropy_and_length": 160,
+      "why": "One notable, for evil-tunnel.com: 130 distinct subdomains, every one of them random and long-labelled, from one client. Each of the rule's three conditions has a control in this corpus that it alone keeps quiet. cdn-assets.net clears entropy and the count and fails only on label length -- the guide's own warning that entropy alone flags every content delivery network. tenant-saas.com clears entropy and length on all 30 of its queries and fails only on the count, because it is one hostname asked for repeatedly; those 30 rows are why 160 rows clear the per-query conditions and only 130 contribute. saas-provider.com has 130 ordinary subdomains and fails both per-query conditions. The count is taken over qualifying queries in the search rather than read off the row, so all three conditions hold for the same traffic.",
+      "key_values": {
+        "dns_registered_domain": "evil-tunnel.com",
+        "qualifying_subdomains": 130,
+        "clients": 1
+      }
+    },
+    "R-D-L7-005 - Enumeration": {
+      "expected_rows": 2,
+      "expected_empty": false,
+      "contributing_rows": 40,
+      "why": "Two notables. 10.0.0.40 requested 220 distinct paths and was refused on nine in ten. 10.0.0.41 requested as many and was refused on every one, so its 4xx:2xx ratio is undefined on every row -- it appears only because the search tests 4xx > 0.7 * 2xx rather than thresholding the ratio column, and a search written the other way would lose the client the rule is most for. The crawler requests as many distinct paths and is refused on one in twenty; the broken client is refused on every request but asks for one path. Each fails exactly one condition.",
+      "key_values": [
+        {
+          "src_ip": "10.0.0.40",
+          "distinct_paths": 220,
+          "refusals": 198,
+          "successes": 22
+        },
+        {
+          "src_ip": "10.0.0.41",
+          "distinct_paths": 220,
+          "refusals": 220,
+          "successes": 0
+        }
+      ]
+    },
     "R-D-L5-003 - Impossible travel": {
       "expected_rows": 2,
       "why": "One principal is authenticated from New York half an hour after her own office login in London, and then back in London ninety minutes later. Two rows rather than one is what a single interloper produces: the jump away and the victim's next authentication from where she actually is. The traveller who makes the same crossing in eight hours is inside the threshold and does not appear, and the VPN user whose apparent location changes country twice a day is excluded by egress range rather than alerted on.",
@@ -231,19 +263,19 @@
       "why": "A chained rule over two detections' notables: R-B-L6-001 at layer 6 and R-B-L3-002 at layer 3. Both halves now have producers and both fire on their own corpora -- which is new, and is what made the search's real defect visible: it grouped `by src_ip dest_ip` while every detection in this fork emits `dst_ip`, so it would have correlated every fingerprint in the window against every beacon through one null group rather than returning nothing. That is fixed. What keeps it empty now is the corpora: layer 3 and layer 6 come from separate seeded runs sharing no host, and the search also reads `rule_id`, which detections write into the index as they fire rather than anything the pipeline emits."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 937,
+      "expected_rows": 970,
       "expected_empty": false,
-      "contributing_rows": 2691,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 2691 scored events on `morpheus:score:l1` through `l6`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, and layer 6 contributes 105 scored handshakes keyed on hosts, none of which shares an entity with the estate's ports and principals or with each other."
+      "contributing_rows": 3871,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 3871 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, none of which shares an entity with the estate's ports and principals or with each other."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 666,
+      "distinct_lineage_ids": 676,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 666 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 676 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,

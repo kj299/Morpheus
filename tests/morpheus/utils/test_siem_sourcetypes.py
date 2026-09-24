@@ -100,15 +100,18 @@ def test_an_unproduced_sourcetype_says_what_is_missing(name: str):
 
 
 def test_the_unproduced_count_is_pinned():
-    # Three of the fourteen stanzas are configuration for producers this fork has not built. Pinned rather than
-    # merely recorded, so that landing a producer is a deliberate edit here and not a silent drift in what the
-    # app appears to support -- which is exactly what this assertion caught when layer 5 gained one, again when
-    # `TC1BindingStage` gave `binding:l1` one, and again as each of layers 3, 4 and 6 gained theirs.
-    assert len(UNPRODUCED) == 3
-    assert len(PRODUCED) == 11
+    # Two of the fourteen stanzas are configuration for producers this fork has not built, and both are the TC-0
+    # context store. Pinned rather than merely recorded, so that landing a producer is a deliberate edit here and
+    # not a silent drift in what the app appears to support -- which is exactly what this assertion caught when
+    # layer 5 gained one, again when `TC1BindingStage` gave `binding:l1` one, and again as each of layers 3, 4, 6
+    # and 7 gained theirs.
+    assert len(UNPRODUCED) == 2
+    assert len(PRODUCED) == 12
 
 
 NUMBER_WORDS = {
+    # The score sourcetypes reached zero when layer 7 landed, and a sentence saying so has to be checkable too.
+    "none": 0,
     "one": 1,
     "two": 2,
     "three": 3,
