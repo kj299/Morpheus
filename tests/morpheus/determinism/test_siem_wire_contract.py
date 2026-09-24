@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # pylint: disable=wrong-import-position
 import lineage_pipeline  # noqa: E402
 import application_pipeline  # noqa: E402
+import context_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
 import presentation_pipeline  # noqa: E402
 import session_pipeline  # noqa: E402
@@ -114,6 +115,13 @@ def application_fixture() -> pd.DataFrame:
     config = application_pipeline.build_pipeline_config()
 
     yield application_pipeline.run_pipeline(config, application_pipeline.build_corpus())
+
+
+@pytest.fixture(name="context", scope="module")
+def context_fixture() -> pd.DataFrame:
+    config = context_pipeline.build_pipeline_config()
+
+    yield context_pipeline.run_pipeline(config, context_pipeline.build_corpus())
 
 
 @pytest.fixture(name="lineage", scope="module")
@@ -238,6 +246,23 @@ def test_the_application_pipeline_produces_a_parsable_timestamp(wire_config: Con
 
 
 @pytest.mark.gpu_and_cpu_mode
+@pytest.mark.parametrize("stanza, telemetry_class", [("context:identity", "tc0_identity"),
+                                                     ("context:asset", "tc0_asset")])
+def test_the_context_pipeline_produces_a_parsable_timestamp(wire_config: Config,
+                                                            context: pd.DataFrame,
+                                                            stanza: str,
+                                                            telemetry_class: str):
+    # The last two stanzas to get a producer. Timed on when a fact became true, not on when it was recorded: a
+    # correction recorded today about last March belongs on last March's timeline, which is where a search for the
+    # context of last March's events will look for it.
+    rows = context[context["telemetry_class"] == telemetry_class].reset_index(drop=True)
+
+    assert len(rows) > 0, f"the harness emitted no {telemetry_class} rows"
+
+    assert_parses_as_its_own_stanza(wire_config, rows, stanza)
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_the_lineage_pipeline_produces_a_parsable_timestamp(wire_config: Config, lineage: pd.DataFrame):
     assert_parses_as_its_own_stanza(wire_config, lineage.copy(), "morpheus:edge")
 
@@ -285,7 +310,9 @@ def test_every_produced_sourcetype_is_covered_here():
         "morpheus:score:l4",
         "morpheus:score:l5",
         "morpheus:score:l6",
-        "morpheus:score:l7"
+        "morpheus:score:l7",
+        "context:identity",
+        "context:asset",
     }
 
     assert covered == set(PRODUCED), f"not covered: {sorted(set(PRODUCED) - covered)}"

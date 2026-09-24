@@ -168,13 +168,13 @@ TIMESTAMP_FIELD_OWNERS = {
     "bind_start": "TC2BindingStage, on every closed and provisional binding record",
     "bind_end": "TC2BindingStage, on closed binding records",
     "bucket_start": "BindingTable.to_bucketed_records, on every bucketed row",
-    # The TC-0 context store is in Part 6's "Must be built" table. These two stanzas are the contract it will have to
-    # meet, deliberately shipped ahead of it. Listing the field here keeps this test honest about the difference
-    # between "nothing emits it yet, by design" and "nothing will ever emit it, by mistake".
-    "valid_from": "not built: the bitemporal TC-0 context store, per Part 6",
+    # The two context stanzas shipped ahead of their producer and were listed here as "not built" until the TC-0
+    # store landed; the tripwire below is what moved this entry.
+    "valid_from": "TC0IdentityStage and TC0AssetStage, on every version they record",
 }
 
-UNBUILT_TIMESTAMP_FIELDS = {"valid_from"}
+UNBUILT_TIMESTAMP_FIELDS: set = set()
+"""Timestamp fields a stanza anchors on ahead of the producer that will write them. None, since the TC-0 store."""
 
 
 @pytest.mark.parametrize("stanza", timestamped_stanzas())
@@ -194,11 +194,13 @@ def test_every_stanza_is_timed_on_a_field_something_actually_emits(stanza: str):
     assert settings["TIME_PREFIX"].endswith('"')
 
 
-def test_the_unbuilt_timestamp_fields_are_still_unbuilt():
-    # A tripwire on the exemption above: when the TC-0 store lands and starts writing `valid_from`, this fails and
-    # the field moves from the unbuilt set to an owner, rather than the exemption quietly outliving its reason.
-    for field in UNBUILT_TIMESTAMP_FIELDS:
-        assert "not built" in TIMESTAMP_FIELD_OWNERS[field]
+def test_the_unbuilt_timestamp_fields_are_exactly_the_ones_marked_unbuilt():
+    # A tripwire on the exemption above, in both directions: a field exempted as unbuilt must say so, and a field
+    # whose owner says "not built" must be exempted. It is what moved `valid_from` to an owner when the TC-0 store
+    # landed, rather than letting the exemption quietly outlive its reason.
+    marked = {field for (field, owner) in TIMESTAMP_FIELD_OWNERS.items() if "not built" in owner}
+
+    assert marked == UNBUILT_TIMESTAMP_FIELDS
 
 
 def test_the_bucketed_stanza_is_timed_on_the_field_the_expansion_writes():

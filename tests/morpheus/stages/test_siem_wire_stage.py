@@ -36,6 +36,7 @@ from morpheus.io import serializers
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
+from morpheus.utils import siem_sourcetypes
 from morpheus.utils.type_utils import get_df_class
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
@@ -224,9 +225,15 @@ def test_the_requirement_can_be_relaxed_for_exploration(config: Config, capfd: p
 
 
 @pytest.mark.cpu_mode
-def test_an_unproduced_sourcetype_cannot_be_configured(config: Config):
-    with pytest.raises(ValueError, match="TC-0 context store"):
-        SiemWireStage(config, sourcetype="context:asset")
+def test_an_unproduced_sourcetype_cannot_be_configured(config: Config, monkeypatch):
+    # Every stanza has a producer now, so the refusal is exercised on one that exists only for this test.
+    placeholder = siem_sourcetypes.Unproduced("context:placeholder",
+                                              "valid_from",
+                                              "A producer this test pretends is not built yet.")
+    monkeypatch.setitem(siem_sourcetypes.UNPRODUCED, placeholder.name, placeholder)
+
+    with pytest.raises(ValueError, match="pretends is not built"):
+        SiemWireStage(config, sourcetype=placeholder.name)
 
 
 @pytest.mark.cpu_mode

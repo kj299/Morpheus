@@ -100,13 +100,13 @@ def test_an_unproduced_sourcetype_says_what_is_missing(name: str):
 
 
 def test_the_unproduced_count_is_pinned():
-    # Two of the fourteen stanzas are configuration for producers this fork has not built, and both are the TC-0
-    # context store. Pinned rather than merely recorded, so that landing a producer is a deliberate edit here and
-    # not a silent drift in what the app appears to support -- which is exactly what this assertion caught when
-    # layer 5 gained one, again when `TC1BindingStage` gave `binding:l1` one, and again as each of layers 3, 4, 6
-    # and 7 gained theirs.
-    assert len(UNPRODUCED) == 2
-    assert len(PRODUCED) == 12
+    # None of the fourteen stanzas is configuration for a producer this fork has not built any longer; the TC-0
+    # context store was the last. Pinned rather than merely recorded, so that landing a producer is a deliberate
+    # edit here and not a silent drift in what the app appears to support -- which is exactly what this assertion
+    # caught when layer 5 gained one, again when `TC1BindingStage` gave `binding:l1` one, as each of layers 3, 4, 6
+    # and 7 gained theirs, and when the context store did.
+    assert len(UNPRODUCED) == 0
+    assert len(PRODUCED) == 14
 
 
 NUMBER_WORDS = {
@@ -143,7 +143,9 @@ def test_the_guide_states_the_same_unproduced_count_the_module_holds():
     with open(GUIDE, encoding="utf-8") as handle:
         text = re.sub(r"\s+", " ", handle.read())
 
-    match = re.search(r"(\w+) of the (\w+) stanzas have no producer", text, re.IGNORECASE)
+    # "have no producer" while there were some; "is without a producer" once there were none, because "none of the
+    # stanzas have no producer" says the opposite of what it means to anyone reading it quickly.
+    match = re.search(r"(\w+) of the (\w+) stanzas (?:have no producer|is without a producer)", text, re.IGNORECASE)
 
     assert match is not None, "the guide no longer states the unproduced count; keep it or drop this test"
 
@@ -167,19 +169,36 @@ def test_the_guide_breaks_the_unproduced_count_down_correctly():
     # grammatical.
     match = re.search(r"stanzas have no producer in this fork: (\w+) (?:is|are) the score sourcetypes?", text)
 
-    assert match is not None, "the guide no longer breaks the count down; keep it or drop this test"
-
     scores = {name for name in UNPRODUCED if name.startswith("morpheus:score:")}
 
+    if (len(UNPRODUCED) == 0):
+        # Nothing left to break down. The sentence that listed the parts now says there are none, and the count
+        # test above holds it to that; what must not survive is the old breakdown beside it.
+        assert match is None, "the guide still breaks down an unproduced count the module no longer holds"
+        return
+
+    assert match is not None, "the guide no longer breaks the count down; keep it or drop this test"
     assert NUMBER_WORDS[match.group(1).lower()] == len(scores), (
         f"the guide says {match.group(1)} unproduced score sourcetypes; the module holds {sorted(scores)}")
 
 
-def test_asking_for_an_unproduced_sourcetype_says_what_would_have_to_exist():
-    with pytest.raises(ValueError, match="TC-0 context store"):
-        sourcetype("context:identity")
+def test_asking_for_an_unproduced_sourcetype_says_what_would_have_to_exist(monkeypatch):
+    # Nothing is unproduced any longer, so the mechanism is exercised on a stanza that exists only for this test.
+    placeholder = Unproduced("context:placeholder", "valid_from", "A producer this test pretends is not built yet.")
+    monkeypatch.setitem(UNPRODUCED, placeholder.name, placeholder)
 
-    assert isinstance(describe("context:identity"), Unproduced)
+    with pytest.raises(ValueError, match="pretends is not built"):
+        sourcetype(placeholder.name)
+
+    assert isinstance(describe(placeholder.name), Unproduced)
+
+
+def test_the_context_store_is_produced():
+    entry = sourcetype("context:identity")
+
+    assert entry.time_column == "valid_from"
+    assert "recorded_at" in entry.time_columns
+    assert sourcetype("context:asset").time_column == "valid_from"
 
 
 def test_asking_for_a_produced_sourcetype_returns_it():

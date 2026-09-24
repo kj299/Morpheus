@@ -59,6 +59,7 @@ export NUMBA_CUDA_USE_NVIDIA_BINDING="${NUMBA_CUDA_USE_NVIDIA_BINDING:-1}"
 # cannot be checked against the markers inside it, and something that cannot be checked is what goes stale.
 TARGETS=(
     tests/morpheus/determinism/test_application_harness.py
+    tests/morpheus/determinism/test_context_harness.py
     tests/morpheus/determinism/test_determinism_harness.py
     tests/morpheus/determinism/test_estate_harness.py
     tests/morpheus/determinism/test_gpu_parity.py
@@ -87,6 +88,9 @@ TARGETS=(
     tests/morpheus/stages/test_tc2_binding_stage.py
     tests/morpheus/stages/test_tc2_cardinality_stage.py
     tests/morpheus/stages/test_tc3_beacon_stage.py
+    tests/morpheus/stages/test_tc0_asset_stage.py
+    tests/morpheus/stages/test_tc0_enrich_stage.py
+    tests/morpheus/stages/test_tc0_identity_stage.py
     tests/morpheus/stages/test_tc3_cardinality_stage.py
     tests/morpheus/stages/test_tc3_reach_stage.py
     tests/morpheus/stages/test_tc3_ttl_stage.py
@@ -127,6 +131,7 @@ UNMARKED=(
     tests/morpheus/utils/test_binding_closer.py
     tests/morpheus/utils/test_cipher_strength.py
     tests/morpheus/utils/test_binding_table.py
+    tests/morpheus/utils/test_bitemporal.py
     tests/morpheus/utils/test_community_id.py
     tests/morpheus/utils/test_counter_delta.py
     tests/morpheus/utils/test_cyclic_histogram.py

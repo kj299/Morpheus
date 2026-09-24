@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is thirty-nine stages and thirty-seven supporting
-modules, covered by 1,562 distinct tests, itemized in
+8's total order, and control 13's CI harness. That is forty-two stages and thirty-eight supporting
+modules, covered by 1,633 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1198,6 +1198,43 @@ word for it. It is also the smallest and most valuable dataset in the architectu
 keeping it accurate rather than for keeping it forever. Set the period against the retention of what it
 interprets, and ask counsel rather than this document.
 
+This is built. {py:mod}`~morpheus.utils.bitemporal` holds the facts,
+{py:class}`~morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage` and
+{py:class}`~morpheus.stages.telemetry.tc0_asset_stage.TC0AssetStage` produce `context:identity` and
+`context:asset`, and {py:class}`~morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage` attaches the context
+to an event at the event's own time. `tests/morpheus/determinism/test_context_harness.py` runs the composition
+under control 13 and asserts, case by case, where the two views must differ and where they must agree: a leaver
+recorded six days late, a department corrected three weeks after the fact, a database reclassified two days
+before the inventory said so, and beside them a move recorded on time, where they must not differ at all. The
+store never deletes and never edits: a correction is a new version recorded later, and a retraction is a version
+saying a fact did not hold over the interval it names, because a later version covering only part of an earlier
+one would otherwise leave the rest of it standing. The retention period stays unset, for the reason given above.
+
+Five decisions the text above leaves open are made in the code.
+
+- **Transaction time is the instant each version was recorded, and its end is derived rather than stored.** A
+  version stops being current, for a given valid instant, when a later-recorded version covers that instant.
+  Storing the end would mean rewriting a record whenever something later superseded part of it, which is the
+  mutation an append-only log exists to avoid, and the end would still be per instant rather than per record,
+  because a correction usually covers only part of what it corrects. Every as-known-at question filters on the
+  recorded instant, so nothing is lost.
+- **The recorded instant comes from the source, and a record without one is refused.** Stamping the moment the
+  record reached the pipeline would make every as-known-at answer depend on when the pipeline ran, and a replay
+  would disagree with the original.
+- **A daily snapshot is diffed, not appended.** A full export restates everything, and recording it daily would
+  bury every real change under a copy of the directory. The store records only what differs from what it knew at
+  the snapshot's instant, and an entity the snapshot omits is retracted from the snapshot onward -- not from some
+  earlier date the export never stated.
+- **Group membership is one fact per principal and group, each with its own dates**, because that is how
+  directories hold it and because the condition R-P-L7-006 depends on -- a role assignment that has not changed
+  -- is then a question about intervals.
+- **The join defaults to what was known at the event's time.** With everything the store holds, a correction
+  recorded next week would change what an enrichment of this week's events said, and a detection would be
+  credited with knowledge it could not have had. The latest view is a parameter, for investigation.
+
+An asset's peer group, which R-B-L7-004 compares against, is read from the inventory rather than computed. A group
+derived by clustering hosts on their behaviour would move when the behaviour it is meant to judge moves.
+
 ---
 
 ## Part 3: Detection Rule Recommendations
@@ -1551,8 +1588,8 @@ beside it that the condition alone keeps quiet: a content delivery network whose
 tenant domain with random labels but too few of them, a crawler past two hundred paths that mostly succeeds, and
 a broken client refused on a handful of paths. The other four are not built. R-B-L7-002, R-P-L7-006 and
 R-B-L7-004 read the TC-0 context store -- a classification weight, a role assignment and a peer group -- and
-that store does not exist yet. R-B-L7-003 needs a running Triton server, and nothing in this fork's CI can
-fire it.
+that store has only now been built; their rules are the next increments. R-B-L7-003 needs a running Triton
+server, and nothing in this fork's CI can fire it.
 
 Three decisions the text above leaves open are made here. **Entropy is measured below the registered domain.**
 Ordinary names score 3.0 to 3.7 bits per character as whole names but 0 to 2.3 once the registered domain is
@@ -1881,15 +1918,16 @@ compares against a threshold -- and rounding them to microseconds to fit a times
 quietly change that arithmetic. Where a single column is all that is needed,
 {py:func}`~morpheus.utils.siem_wire.render_event_time_series` is the same rendering without a stage.
 
-That module also carries a fact the app could not previously state anywhere. Two of the fourteen
-stanzas have no producer in this fork: none are the score sourcetypes any longer -- every layer from 1
-to 7 now has one -- and both are the TC-0 context store. It was eight until the layer 5 stages landed,
-seven until `TC1BindingStage` gave `binding:l1` one, and then six, five, four and three as layers 3,
-4, 6 and 7 landed -- the sort of number that goes stale silently, which is why
-`tests/morpheus/utils/test_siem_sourcetypes.py` now asserts this sentence against the module rather than
-leaving a reader to compare them. Each entry says what would have to be
-built. Recording them in one place is what keeps a reader from taking "the app parses seven layers" for
-"seven layers are implemented."
+That module also carries a fact the app could not previously state anywhere. None of the fourteen
+stanzas is without a producer in this fork any longer: every score sourcetype from layer 1 to 7 has
+one, and the last two, `context:identity` and `context:asset`, gained theirs with the TC-0 context store.
+It was eight until the layer 5 stages landed, seven until `TC1BindingStage` gave `binding:l1` one, then
+six, five, four and three as layers 3, 4, 6 and 7 landed, and two until the context store did -- the
+sort of number that goes stale silently, which is why `tests/morpheus/utils/test_siem_sourcetypes.py`
+asserts this sentence against the module rather than leaving a reader to compare them. While there were
+any, each entry said what would have to be built, and the mechanism stays for the next stanza shipped
+ahead of its producer. Recording them in one place is what kept a reader from taking "the app parses
+seven layers" for "seven layers are implemented."
 
 Measured on a live Splunk instance, ingesting the same event both ways through Morpheus's own Kafka
 serializer: the rendered form lands at its true event time, three hours in the past. The unrendered
@@ -3145,14 +3183,29 @@ What Morpheus provides versus what has to be built, stated plainly.
   names and one random one, since the count and the entropy are then met by different queries; the search counts
   subdomains only among the queries that meet the other two. And R-D-L7-005 written as a ratio never fires on the
   client that received nothing but refusals.
+- The TC-0 identity and asset context store
+  ({py:mod}`~morpheus.utils.bitemporal`,
+  {py:class}`~morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage`,
+  {py:class}`~morpheus.stages.telemetry.tc0_asset_stage.TC0AssetStage` and
+  {py:class}`~morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage`, composed in
+  `tests/morpheus/determinism/context_pipeline.py`), which Part 6 had listed as must be built. `context:identity`
+  and `context:asset` have producers, which leaves none of the fourteen stanzas without one. Nothing fires on it
+  yet; it is what the SaaS and endpoint rules at layer 7 will read. **What the corpus caught that the prose had not.** A
+  snapshot is how most HR systems report a departure -- by leaving the person out -- and the text above describes
+  snapshots and deltas without saying what an omission means. Read naively, an omitted principal stays current
+  forever, because nothing ever says otherwise; read as a deletion, the whole history goes. The store reads it as
+  a retraction valid from the snapshot, which is the one thing the export actually states. And the join's default
+  had to be chosen: enriching with everything the store holds lets a correction recorded later rewrite what an
+  enrichment already said, which is the failure control 13 exists to catch, arriving through context instead of
+  through a model.
 - The inventory of what this all holds about a person, and the mechanism for holding less
   ({py:mod}`~morpheus.utils.personal_data` and
   {py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`). Every column the reference
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
-  counts are the finding: five columns identify a person, sixteen address their device, fourteen locate them,
-  and a hundred and fifty-four are behavioural profile, which is to say the largest thing an estate ends up
-  holding is the part
+  counts are the finding: nine columns identify a person, seventeen address their device, fourteen locate
+  them, and a hundred and sixty are profile, a hundred and fifty-four of them behavioural and derived here,
+  which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
   a column whose domain its own definition bounds, because twenty-four hours of digests are read straight off
@@ -3219,7 +3272,6 @@ What Morpheus provides versus what has to be built, stated plainly.
 | Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |
 | Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |
 | Chained rule engine | Medium | Runs in Splunk, not in Morpheus. The `examples/splunk_lineage_app` searches are the starting set |
-| Bitemporal TC-0 context store | Medium | Valid-time and transaction-time intervals |
 
 ### Open questions this work has not answered
 
@@ -3394,11 +3446,12 @@ That test is the point of it: an inventory nobody checks reads as authoritative 
 whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
-fork emits, five identify a person, sixteen are addresses, fourteen locate, six are pseudonyms -- and
-a hundred and fifty-four are behavioural profile. **The largest category by far is the one the design manufactures
-rather than collects.** An estate reviewing this will think about the authentication logs it ingested;
-most of what it ends up holding about a person is derived here, from those logs, and did not exist before
-the pipeline ran.
+fork emits, nine identify a person, seventeen are addresses, fourteen locate, eight are pseudonyms -- and
+a hundred and sixty are profile, a hundred and fifty-four of them behavioural and derived here; the other
+six are the organisational columns the TC-0 context store and its join carry. **The largest category by far
+is the one the design manufactures rather than collects.** An estate reviewing this will think about the
+authentication logs it ingested; most of what it ends up holding about a person is derived here, from those
+logs, and did not exist before the pipeline ran.
 
 **A mechanism** ({py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`), placed beside
 the wire stage at the end of a segment, which drops or pseudonymizes by column or by category. Three things

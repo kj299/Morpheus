@@ -15,6 +15,7 @@ docker exec morpheus-lineage-validate bash -lc '
     case "$st" in
       morpheus:score:*|morpheus:edge) idx=behavior_events ;;
       binding:*)                      idx=behavior_bindings ;;
+      context:*)                      idx=behavior_context ;;
       *)                              idx=behavior_events ;;
     esac
     [ "$st" = "morpheus:edge" ] && idx=behavior_lineage
