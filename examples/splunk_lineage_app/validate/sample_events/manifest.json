@@ -3,6 +3,8 @@
     "binding:bucketed": 81,
     "binding:l1": 5,
     "binding:l2": 13,
+    "context:asset": 7,
+    "context:identity": 21,
     "morpheus:edge": 47,
     "morpheus:score:l1": 244,
     "morpheus:score:l2": 1334,

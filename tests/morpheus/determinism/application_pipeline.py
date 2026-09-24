@@ -18,8 +18,8 @@ The first two layer 7 sub-classes, DNS and HTTP, and their composed pipeline, fo
 
 Layer 7 is not one telemetry class. The guide gives it four sub-classes keyed on four different entities, and this
 file builds the two whose rules need nothing else to exist: `tc7_dns` and `tc7_http`, sharing `morpheus:score:l7` the
-way layer 2's classes share `morpheus:score:l2`. The SaaS and endpoint sub-classes wait for the TC-0 context store,
-because their rules are weighted by data classification, role assignment and peer groups that only it can supply.
+way layer 2's classes share `morpheus:score:l2`. The SaaS and endpoint sub-classes wait for their rules, which read
+the data classification, role assignment and peer groups that only the TC-0 context store can supply.
 
 Both classes seal on the **client**. For HTTP the guide gives no entity key and the source is what behaves. For DNS the
 guide says `hostname`, which is ambiguous between the host that asked and the name it asked for; the host that asked is

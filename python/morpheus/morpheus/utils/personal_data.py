@@ -74,6 +74,16 @@ and a keyed digest preserves distinctness exactly, so `dns_subdomain` and `query
 the rule returns the same answer. Both claims are asserted in `tests/morpheus/determinism/test_application_harness.py`
 rather than left here.
 
+**The TC-0 context store is personal data of a different kind, and is classified on the same rule.** Department,
+employment status and group membership are organisational facts about an identifiable person rather than behaviour
+this design derived, but they describe the person, so they are `PROFILES`; a manager and an asset's owner are other
+people, named, so they are `IDENTIFIES`; and a hostname addresses a device the way a MAC address does. The
+attributes of an asset -- criticality, data classification, owning team, peer group -- are about the asset and are
+`OPERATIONAL`. `context_entity` and `context_key` hold a principal on an identity record and a host on an asset
+record, so they are in `AMBIGUOUS` for the same reason `entity_key` is. The valid and recorded instants are
+operational on the same reasoning as `event_time`, although together with a principal they are a start date and a
+leaving date, which is why the row, not the column, is what counts as personal data.
+
 **A keyed hash over a bounded domain is not minimization at all**, which `BOUNDED_DOMAIN` names and
 `morpheus.stages.lineage.minimization_stage.MinimizationStage` refuses. There are about two hundred and fifty
 country codes and exactly twenty-four hours; whoever holds the output can count how often each digest appears
@@ -101,8 +111,12 @@ PERSONAL_CATEGORIES = (IDENTIFIES, ADDRESSES, LOCATES, PROFILES, PSEUDONYMS)
 """Every category except `OPERATIONAL`. What this fork emits that is about a person at all."""
 
 _IDENTIFIES = (
+    "ctx_manager",
+    "ctx_owner",
     "desk_identity",
     "dot1x_identity",
+    "manager",
+    "owner",
     "session_id",
     "session_key",
     "user_principal",
@@ -116,6 +130,7 @@ _ADDRESSES = (
     "dst_ip",
     "flow_id",
     "flow_pair_key",
+    "hostname",
     "http_client_key",
     "mac",
     "mac_address",
@@ -169,6 +184,10 @@ _PROFILES = (
     "cadence_samples",
     "consecutive_auth_failures",
     "consecutive_mfa_denials",
+    "ctx_department",
+    "ctx_employment_status",
+    "ctx_groups",
+    "department",
     "device_first_seen",
     "deviceincrement",
     "deviceincrement_z_loss",
@@ -216,6 +235,7 @@ _PROFILES = (
     "dst_port",
     "dst_ports_per_src",
     "dsts_per_src",
+    "employment_status",
     "flow_ack",
     "flow_ackpush_ratio",
     "flow_all",
@@ -239,6 +259,7 @@ _PROFILES = (
     "flow_size_cv",
     "flow_syn",
     "flow_syn_ratio",
+    "group_name",
     "hour_share",
     "hour_surprise_bits",
     "hour_surprise_bits_z_loss",
@@ -304,6 +325,8 @@ _PROFILES = (
 _PSEUDONYMS = (
     "binding_uid",
     "community_id",
+    "context_uid",
+    "ctx_version_uids",
     "event_uid",
     "lineage_id",
     "origin_hash",
@@ -323,12 +346,25 @@ _OPERATIONAL = (
     "bind_provisional",
     "bind_start",
     "chain_anchor_source",
+    "change",
     "collector_id",
     "collector_seq",
+    "context_attributes",
+    "context_kind",
+    "context_refused",
     "counter_reset",
     "counter_wrapped",
     "crc_errors",
     "crc_errors_delta",
+    "criticality",
+    "ctx_criticality",
+    "ctx_data_classification",
+    "ctx_found",
+    "ctx_knowledge",
+    "ctx_owning_team",
+    "ctx_peer_group",
+    "ctx_recorded_at",
+    "data_classification",
     "day_is_late",
     "day_revision",
     "day_sealed_by",
@@ -399,11 +435,15 @@ _OPERATIONAL = (
     "ouis_per_vlan_saturated",
     "output_discards",
     "output_discards_delta",
+    "owning_team",
+    "peer_group",
     "ports_per_mac",
     "ports_per_mac_first_in_window",
     "ports_per_mac_saturated",
+    "probe_id",
     "protocol",
     "query_type",
+    "recorded_at",
     "resolution_method",
     "rollup_time_ns",
     "resolved_vlan_id",
@@ -411,6 +451,7 @@ _OPERATIONAL = (
     "sample_out_of_order",
     "schema_version",
     "sealed_by",
+    "source_seq",
     "src_port",
     "srcs_per_dst_first_in_window",
     "srcs_per_dst_saturated",
@@ -425,6 +466,8 @@ _OPERATIONAL = (
     "transceiver_serial_distinct_count",
     "transceiver_serial_first_seen",
     "uptime",
+    "valid_from",
+    "valid_to",
     "vlan_id",
     "window_complete",
     "window_end_ns",
@@ -453,6 +496,12 @@ AMBIGUOUS: dict[str, dict[str, str]] = {
         "tc2_mac": LOCATES,
         "tc5_auth": IDENTIFIES,
         "tc5_session": IDENTIFIES,
+    },
+    "context_entity": {
+        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES
+    },
+    "context_key": {
+        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES
     },
 }
 """Column names whose meaning depends on which telemetry class the row belongs to.
@@ -486,7 +535,9 @@ BOUNDED_DOMAIN = frozenset({
     "cipher_tier",
     "content_category_declared",
     "content_category_detected",
+    "ctx_employment_status",
     "dot1x_result",
+    "employment_status",
     "http_method",
     "http_status_class",
     "local_hour",

@@ -27,9 +27,10 @@ exist yet. `tests/morpheus/utils/test_siem_sourcetypes.py` asserts the two halve
 configuration file appears here, every entry here corresponds to a stanza, and each declared time column is the
 one that stanza's own `TIME_PREFIX` regex anchors on.
 
-Being unproduced is a fact worth recording rather than a gap worth hiding. Five of the fourteen stanzas are
-configuration for producers this fork has not built, and saying so in one place is what keeps "the app supports
-seven layers" from reading as "seven layers are implemented".
+Being unproduced is a fact worth recording rather than a gap worth hiding. Eight of the fourteen stanzas were
+once configuration for producers this fork had not built, and saying so in one place is what kept "the app supports
+seven layers" from reading as "seven layers are implemented". None is any longer -- the TC-0 context store was the
+last -- and `UNPRODUCED` stays, empty, so that the next stanza shipped ahead of its producer is recorded the same way.
 
 On nanoseconds. Wire rendering is microsecond precision, because that is what Splunk's `%6N` reads. Columns whose
 names end in `_ns` -- `window_start_ns`, `window_end_ns`, `bind_gap_ns` -- are deliberately left as numbers: they
@@ -303,23 +304,46 @@ PRODUCED: dict = {
             "record the moment a binding opens.",
             required_columns=("mac_address", "port_key", "bind_provisional"),
         ),
+    "context:identity":
+        Sourcetype(
+            name="context:identity",
+            time_column="valid_from",
+            time_columns=("valid_from", "valid_to", "recorded_at"),
+            producer="`morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage`, one record per version of a "
+            "profile or a group membership; the `tc0_identity` class of "
+            "`tests/morpheus/determinism/context_pipeline.py`.",
+            # What a consumer rebuilds a `BitemporalStore` from. `recorded_at` is the transaction time and `change`
+            # distinguishes a retraction from an assertion; without either the store cannot answer as-known-at
+            # questions, which is the whole of what it is for.
+            required_columns=("context_uid",
+                              "context_kind",
+                              "context_entity",
+                              "context_key",
+                              "context_attributes",
+                              "change",
+                              "user_principal"),
+        ),
+    "context:asset":
+        Sourcetype(
+            name="context:asset",
+            time_column="valid_from",
+            time_columns=("valid_from", "valid_to", "recorded_at"),
+            producer="`morpheus.stages.telemetry.tc0_asset_stage.TC0AssetStage`, one record per version of an asset; "
+            "the `tc0_asset` class of `tests/morpheus/determinism/context_pipeline.py`.",
+            required_columns=("context_uid",
+                              "context_kind",
+                              "context_entity",
+                              "context_key",
+                              "context_attributes",
+                              "change",
+                              "hostname",
+                              "data_classification",
+                              "peer_group"),
+        ),
 }
 """Sourcetypes something in this fork emits, keyed by stanza name."""
 
-UNPRODUCED: dict = {
-    "context:identity":
-        Unproduced(
-            "context:identity",
-            "valid_from",
-            "The TC-0 context store. Identity attribution is design in the guide and has no producer here.",
-        ),
-    "context:asset":
-        Unproduced(
-            "context:asset",
-            "valid_from",
-            "The TC-0 context store. Asset attribution is design in the guide and has no producer here.",
-        ),
-}
+UNPRODUCED: dict = {}
 """Sourcetypes the app parses and nothing here emits, with what is missing."""
 
 

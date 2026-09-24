@@ -93,6 +93,7 @@ def main() -> int:
     from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS  # pylint: disable=import-outside-toplevel
 
     import application_pipeline  # pylint: disable=import-outside-toplevel
+    import context_pipeline  # pylint: disable=import-outside-toplevel
     import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
     import lineage_pipeline  # pylint: disable=import-outside-toplevel
     import network_pipeline  # pylint: disable=import-outside-toplevel
@@ -147,10 +148,20 @@ def main() -> int:
     by_sourcetype["morpheus:score:l6"] = _render(handshakes, "morpheus:score:l6")
 
     # Layer 7's DNS and HTTP classes share one sourcetype, as layer 2's classes do. The SaaS and endpoint
-    # sub-classes will join them once the TC-0 context store their rules are weighted by exists.
+    # sub-classes will join them with the rules that read the TC-0 context store below.
     requests = application_pipeline.run_pipeline(application_pipeline.build_pipeline_config(),
                                                  application_pipeline.build_corpus())
     by_sourcetype["morpheus:score:l7"] = _render(requests, "morpheus:score:l7")
+
+    # The TC-0 context store: every version the two producers recorded, refused ones included, because a count of
+    # refusals is something an estate should be able to see on its search head. The probes are the harness's own
+    # and are not sent anywhere.
+    context = context_pipeline.run_pipeline(context_pipeline.build_pipeline_config(), context_pipeline.build_corpus())
+
+    for (name, sourcetype) in ((context_pipeline.IDENTITY_CLASS, "context:identity"), (context_pipeline.ASSET_CLASS,
+                                                                                       "context:asset")):
+        rows = context[context["telemetry_class"] == name]
+        by_sourcetype[sourcetype] = _render(rows.dropna(axis=1, how="all"), sourcetype)
 
     bindings = telemetry[telemetry["telemetry_class"] == "tc2_binding"]
     bucketed = tp.build_binding_table(bindings).to_bucketed_frame()

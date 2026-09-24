@@ -302,6 +302,7 @@ def golden_columns() -> set:
                  "golden_transport_expected.csv",
                  "golden_presentation_expected.csv",
                  "golden_application_expected.csv",
+                 "golden_context_expected.csv",
                  "golden_session_expected.csv"):
         path = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism", name)
 

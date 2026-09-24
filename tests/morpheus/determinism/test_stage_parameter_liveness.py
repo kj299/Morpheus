@@ -77,6 +77,9 @@ from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
 from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
 from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
 from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
+from morpheus.stages.telemetry.tc0_asset_stage import TC0AssetStage
+from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
+from morpheus.stages.telemetry.tc0_identity_stage import TC0IdentityStage
 from morpheus.stages.telemetry.tc7_dns_stage import TC7DnsStage
 from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
@@ -88,6 +91,9 @@ from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.utils.binding_table import Binding
 from morpheus.utils.binding_table import BindingTable
+from morpheus.utils.bitemporal import MEMBERSHIP
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism_envelope import DeterminismEnvelope
 from morpheus.utils.model_manifest import ModelManifest
 from morpheus.utils.tcp_flags import ACK
@@ -400,6 +406,54 @@ def http_requests() -> dict:
         "url_path": [row[2] for row in rows],
         "status_code": [row[3] for row in rows],
     }
+
+
+DAY = 24 * HOUR
+
+
+def identity_records() -> dict:
+    """Profiles and memberships: one membership retracted, and one move recorded two days late."""
+    return {
+        "user_principal": ["alice", "alice", "bob", "bob"],
+        "group_name": [None, "finance-users", None, None],
+        "department": ["Finance", None, "Engineering", "Finance"],
+        "manager": ["frank", None, "grace", "frank"],
+        "employment_status": ["active", None, "active", "active"],
+        "valid_from": [0, 0, 0, 10 * DAY],
+        "valid_to": [None, 5 * DAY, None, None],
+        "recorded_at": [DAY, DAY, DAY, 12 * DAY],
+        "change": ["assert", "retract", "assert", "assert"],
+    }
+
+
+def asset_records() -> dict:
+    return {
+        "hostname": ["db-ledger", "db-ledger", "ws-01"],
+        "owner": ["frank", "frank", "alice"],
+        "owning_team": ["finance-it", "finance-it", "finance-it"],
+        "criticality": ["high", "high", "medium"],
+        "data_classification": ["confidential", "restricted", "internal"],
+        "peer_group": ["databases", "databases", "finance-workstations"],
+        "valid_from": [0, 5 * DAY, 0],
+        "valid_to": [None, None, None],
+        "recorded_at": [0, 7 * DAY, 0],
+        "change": ["assert", "assert", "retract"],
+    }
+
+
+def _context_store(correction: str = "Marketing") -> BitemporalStore:
+    return BitemporalStore(
+        "identity",
+        [
+            make_version("profile", "carol", 0, None, 0, values={"department": "Sales"}),
+            make_version("profile", "carol", 0, None, 20 * DAY, values={"department": correction}),
+            make_version(
+                MEMBERSHIP, "carol", 0, None, 0, values={"group_name": "sales-users"}, key_parts=("sales-users", )),
+        ])
+
+
+def context_probes() -> dict:
+    return {"user_principal": ["carol", "carol", "mallory"], "event_time": [5 * DAY, 25 * DAY, 5 * DAY]}
 
 
 def handshakes() -> dict:
@@ -1118,6 +1172,54 @@ REGISTRY: dict = {
                      Knob("declared_column", INPUT_COLUMN, benign="content_type_declared"),
                      Knob("detected_column", INPUT_COLUMN, benign="content_type_detected"),
                  )),
+    "TC0IdentityStage":
+        Scenario(
+            stage=TC0IdentityStage,
+            frame=identity_records,
+            base={},
+            knobs=(
+                Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("group_column", INPUT_COLUMN, benign="group_name"),
+                Knob("profile_columns", DIFFERS, benign=None, extreme=["department"]),
+                # The instants are written back under their canonical names, so renaming an input column would
+                # leave both names in the output; swapping which column is read is the evidence instead.
+                Knob("valid_from_column", DIFFERS, benign="valid_from", extreme="recorded_at"),
+                Knob("valid_to_column", DIFFERS, benign="valid_to", extreme="valid_from"),
+                Knob("recorded_column", DIFFERS, benign="recorded_at", extreme="valid_from"),
+                Knob("change_column", DIFFERS, benign="change", extreme="no_such_column"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+            ),
+        ),
+    "TC0AssetStage":
+        Scenario(
+            stage=TC0AssetStage,
+            frame=asset_records,
+            base={},
+            knobs=(
+                Knob("asset_column", INPUT_COLUMN, benign="hostname"),
+                Knob("asset_columns", DIFFERS, benign=None, extreme=["data_classification"]),
+                Knob("valid_from_column", DIFFERS, benign="valid_from", extreme="recorded_at"),
+                Knob("valid_to_column", DIFFERS, benign="valid_to", extreme="valid_from"),
+                Knob("recorded_column", DIFFERS, benign="recorded_at", extreme="valid_from"),
+                Knob("change_column", DIFFERS, benign="change", extreme="no_such_column"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+            ),
+        ),
+    "TC0EnrichStage":
+        Scenario(
+            stage=TC0EnrichStage,
+            frame=context_probes,
+            base={"store": _context_store()},
+            knobs=(
+                Knob("store", DIFFERS, benign=_context_store(), extreme=_context_store("Support")),
+                Knob("entity_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("knowledge", DIFFERS, benign="event", extreme="latest"),
+                Knob("prefix", DIFFERS, benign="ctx_", extreme="context_at_event_"),
+                Knob("set_kinds", DIFFERS, benign=None, extreme={}),
+            ),
+        ),
     "TC7DnsStage":
         Scenario(stage=TC7DnsStage,
                  frame=dns_queries,
@@ -1577,7 +1679,7 @@ def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships()
     # Every class with a producer. TC-3 was not in this loop when its stages landed, and its row went on saying
     # "Schema only" through a whole increment -- the same drift this test exists to catch, in the one class the
     # loop did not name. A list of classes is as capable of being incomplete as a count is.
-    for prefix in ("tc1", "tc2", "tc3", "tc4", "tc5", "tc6", "tc7"):
+    for prefix in ("tc0", "tc1", "tc2", "tc3", "tc4", "tc5", "tc6", "tc7"):
         shipped = len(
             [name for name in os.listdir(telemetry) if name.startswith(f"{prefix}_") and name.endswith(".py")])
         label = f"**TC-{prefix[-1]}**"
