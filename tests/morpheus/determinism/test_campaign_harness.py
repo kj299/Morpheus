@@ -53,6 +53,7 @@ SAVEDSEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "savedsearches.conf")
 RULE = "R-C-001 - Lateral movement chain"
 EXFIL_RULE = "R-C-004 - Staged exfiltration"
+C2_RULE = "R-C-002 - TLS anomaly precedes beaconing"
 
 
 @pytest.fixture(name="corpus", scope="module")
@@ -120,7 +121,9 @@ def test_the_three_collectors_share_their_entities(corpus: dict[str, pd.DataFram
     logins = corpus[cp_.AUTH_CLASS]
     processes = corpus[cp_.PROCESS_CLASS]
 
-    assert set(flows["src_ip"]) <= set(logins["source_ip"])
+    lateral = flows[flows["src_ip"].isin({actor.source for actor in cp_.ACTORS.values()})]
+
+    assert set(lateral["src_ip"]) <= set(logins["source_ip"])
     assert {host.lower() for host in logins["target_host"]} == set(processes["hostname"])
 
     for frame in corpus.values():
@@ -315,9 +318,11 @@ def test_every_exfiltrator_takes_every_single_layer_step(result: pd.DataFrame):
 
     assert set(bulk["user_principal"]) == set(cp_.EXFILTRATORS)
     assert set(breached["src_ip"]) == {actor.breach_address for actor in cp_.EXFILTRATORS.values()}
-    assert set(
-        novel["src_ip"]) == {actor.breach_address
-                             for actor in cp_.EXFILTRATORS.values() if actor.principal != cp_.OTO}
+    # Among the exfiltrators' addresses; R-C-002's attacker also meets an issuer the estate has not seen.
+    addresses = {actor.breach_address for actor in cp_.EXFILTRATORS.values()}
+    expected = {actor.breach_address for actor in cp_.EXFILTRATORS.values() if actor.principal != cp_.OTO}
+
+    assert set(novel["src_ip"]) & addresses == expected
 
 
 @pytest.mark.cpu_mode
@@ -337,6 +342,50 @@ def test_the_estate_issuer_is_new_only_after_the_estate_has_a_week_of_history(re
     early = handshakes[handshakes["event_time"].astype("int64") < cp_.at(7)]
 
     assert early["cert_issuer_new_to_estate"].isna().all()
+
+
+# --- R-C-002: command and control establishment, and one control per condition --------------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_the_command_and_control_chain_fires_on_the_attacker_alone(result: pd.DataFrame):
+    attacker = cp_.BEACONERS[cp_.C2_ATTACKER]
+
+    assert set(cp_.tls_before_beaconing(result)) == {(attacker.host, attacker.beacon_destination)}
+
+
+@pytest.mark.cpu_mode
+@pytest.mark.parametrize("host, condition",
+                         [(cp_.BEACON_FIRST, {
+                             "ordered": False
+                         }), (cp_.OTHER_DESTINATION, {
+                             "same_destination": False
+                         }), (cp_.C2_TOO_SLOW, {
+                             "window_seconds": None
+                         }), (cp_.UNSETTLED, {
+                             "settled": False
+                         })])
+def test_each_command_and_control_control_is_stopped_by_its_one_condition(result: pd.DataFrame,
+                                                                          host: str,
+                                                                          condition: dict):
+    assert host not in {source for (source, _) in cp_.tls_before_beaconing(result)}
+    assert host in {source for (source, _) in cp_.tls_before_beaconing(result, **condition)}
+
+
+@pytest.mark.cpu_mode
+def test_every_beaconer_presents_a_new_fingerprint_and_beacons(result: pd.DataFrame):
+    # Every one of the five does both halves; only the unsettled host's fingerprint is below R-B-L6-001's floor.
+    handshakes = result[result["telemetry_class"] == cp_.HANDSHAKE_CLASS]
+    first = handshakes[handshakes["ja4_client_first_seen"].astype("boolean").fillna(False).astype(bool)]
+    flows = result[result["telemetry_class"] == cp_.FLOW_CLASS]
+    mature = flows[flows["flow_regularity_mature"].astype("boolean").fillna(False).astype(bool)]
+
+    assert set(first["src_ip"]) >= set(cp_.BEACONERS)
+    assert set(mature["src_ip"]) >= set(cp_.BEACONERS)
+
+    settled = first[first["ja4_client_observations"].astype(int) >= 20]
+
+    assert set(settled["src_ip"]) & set(cp_.BEACONERS) == set(cp_.BEACONERS) - {cp_.UNSETTLED}
 
 
 # --- The search as shipped -----------------------------------------------------------------------------------------
@@ -387,10 +436,26 @@ def test_the_exfiltration_search_carries_the_conditions_this_harness_asserts():
     assert "rule_id" not in search.split("| eval _time = t_handshake, rule_id", 1)[0]
 
 
+def test_the_command_and_control_search_carries_the_conditions_this_harness_asserts():
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        text = handle.read()
+
+    search = text.split(f"[{C2_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
+    tolerance = cp_.JOIN_TOLERANCE_SECONDS
+    window = cp_.C2_WINDOW_SECONDS
+
+    assert "ja4_client_first_seen=true ja4_client_observations>=20" in search
+    assert "flow_regularity_mature=true flow_interval_cv<0.15 flow_size_cv<0.15" in search
+    assert "join type=inner max=0 src_ip dst_ip" in search
+    assert f"t_beacon >= t_tls - {tolerance} AND t_beacon - t_tls <= {window}" in search
+    assert f"risk_score = {cp_.C2_SEVERITY}" in search
+    assert "rule_id" not in search.split("rule_id = ", 1)[0]
+
+
 def test_the_search_reads_scored_events_rather_than_notables():
-    # R-C-002 reads notables, which only exist once the detection searches have run and written them -- which is why
-    # it has never returned a row anywhere this fork can test. This rule reads the events themselves.
-    # Everything before the rule stamps its own rule_id is what it reads.
+    # Notables exist only once the detection searches have run and written them; R-C-002 read them, and returned no
+    # row anywhere this fork could test until it was rewritten to read events too. Everything before a rule stamps
+    # its own rule_id is what it reads.
     reads = _search().split('| eval _time = t_process, rule_id', 1)[0]
 
     assert "rule_id" not in reads

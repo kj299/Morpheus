@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is forty-four stages and thirty-nine supporting
-modules, covered by 1,763 distinct tests, itemized in
+modules, covered by 1,770 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1692,7 +1692,7 @@ physical `port_id` values in different `site_id` values, within a window shorter
 time. This is impossible travel with physical-layer corroboration, and it is far stronger than the
 geolocation version because it does not depend on IP geolocation accuracy.
 
-R-C-002 ships as a saved search over its two detections' notables. R-C-001 and R-C-004 are built and asserted in
+All three chains that ship are asserted in
 `tests/morpheus/determinism/test_campaign_harness.py`, over a corpus written as one estate seen by three collectors
 -- `tests/morpheus/determinism/campaign_pipeline.py` -- where an attacker completes all three steps and six others
 each fall one step short: the process before the login, the last step thirty-five minutes after the first, a login to
@@ -1705,9 +1705,14 @@ and the export last rather than first. Every one of their exports and breaches i
 on its own, which is the case for the chain: the single-layer rules see five identical exfiltrations and cannot say
 which one was the principal who had just taken the data.
 
-Four decisions come with it. **It reads the scored events, not other rules' notables.** R-C-002 correlates notables,
-which exist only once the detections have run and written them, and has never returned a row anywhere this fork can
-test; R-C-001 writes its steps' conditions into its own search and fires on pipeline output alone. **Its steps are joined on values, not
+R-C-002 is asserted there too, rewritten to read events: a settled host's new stack to a destination and, fourteen
+minutes later, its beacon there maturing, beside a beacon already running an hour before, a beacon to another
+address, one maturing after sixty-seven minutes, and a host with five handshakes behind it.
+
+Four decisions come with R-C-001. **It reads the scored events, not other rules' notables.** R-C-002 first
+correlated notables, which exist only once the detections have run and written them, and never returned a row
+anywhere this fork could test; R-C-001 writes its steps' conditions into its own search and fires on pipeline output
+alone, and R-C-002 now does the same. **Its steps are joined on values, not
 on the lineage identifiers**, which is a departure from the text above: the three layers are sealed on three
 different entities -- a source address, a principal, a host -- and no lineage chain holds all three. The flow's
 `src_ip` is joined to the login's `source_ip` and the login's `target_host` to the process's `hostname`,
@@ -2438,22 +2443,29 @@ This works because both streams carry `lineage_id`, which is the entire point of
 The `layer_span >= 3` filter is what keeps it cheap: the overwhelming majority of chains are
 single-layer and are discarded before anything expensive happens.
 
-Ordered-sequence detection for a specific chained rule, R-C-002:
+Ordered-sequence detection for a specific chained rule, R-C-002, reading each step's events and joining them on
+the pair both steps share:
 
 ```spl
-index=behavior_events (rule_id="R-B-L6-001" OR rule_id="R-B-L3-002") earliest=-2h
-| stats min(eval(if(rule_id="R-B-L6-001", _time, null()))) AS t_tls
-        min(eval(if(rule_id="R-B-L3-002", _time, null()))) AS t_beacon
-        values(lineage_id) AS lineage_id
-  by src_ip dst_ip
-| where isnotnull(t_tls) AND isnotnull(t_beacon)
-| eval gap = t_beacon - t_tls
-| where gap > 0 AND gap <= 3600
-| eval rule_id="R-C-002", risk_score=70
+index=behavior_events sourcetype=morpheus:score:l6 ja4_client_first_seen=true ja4_client_observations>=20
+| eval t_tls = _time
+| rename lineage_id AS tls_lineage
+| fields src_ip dst_ip t_tls ja4_client tls_lineage
+| join type=inner max=0 src_ip dst_ip
+    [search index=behavior_events sourcetype=morpheus:score:l3 flow_regularity_mature=true
+            flow_interval_cv<0.15 flow_size_cv<0.15
+     | stats min(_time) AS t_beacon values(lineage_id) AS beacon_lineage BY src_ip dst_ip]
+| where t_beacon >= t_tls - 120 AND t_beacon - t_tls <= 3600
+| eval gap = t_beacon - t_tls, rule_id = "R-C-002", risk_score = 70
 ```
 
-Requiring `gap > 0` enforces the ordering, which is the entire point of a chained rule. A rule that
-matches the same two events in either order is a co-occurrence rule and should be labeled as one.
+Requiring the beacon after the fingerprint enforces the ordering, which is the entire point of a chained rule. A
+rule that matches the same two events in either order is a co-occurrence rule and should be labeled as one. The
+120 seconds is the rule's declared join tolerance, from the governance above: the two steps come from different
+sensors, and an ordering tested as `gap > 0` inverts on sub-millisecond disagreement between them. It was written
+that way first, over the two detections' notables, and it never returned a row anywhere this fork could test,
+because notables exist only once the detections have run and written them; it now reads the events, as R-C-001
+and R-C-004 do.
 
 #### Scheduling the detections
 
@@ -2465,23 +2477,22 @@ stanza around it:
 [R-C-002 - TLS anomaly precedes beaconing]
 enableSched            = 1
 cron_schedule          = */15 * * * *
-dispatch.earliest_time = -2h@m
+dispatch.earliest_time = -3h@m
 dispatch.latest_time   = -15m@m
 realtime_schedule      = 0
 schedule_window        = 5
 allow_skew             = 5m
-description = Layer 6 TLS fingerprint anomaly followed within one hour by layer 3 beaconing on the same \
-              endpoint pair. Determinism tier D2. Bucket width 300s on binding lookups.
-search = index=behavior_events (rule_id="R-B-L6-001" OR rule_id="R-B-L3-002") \
-| stats min(eval(if(rule_id="R-B-L6-001", _time, null()))) AS t_tls \
-        min(eval(if(rule_id="R-B-L3-002", _time, null()))) AS t_beacon \
-        values(lineage_id) AS lineage_id \
-  by src_ip dst_ip \
-| where isnotnull(t_tls) AND isnotnull(t_beacon) \
-| eval gap = t_beacon - t_tls \
-| where gap > 0 AND gap <= 3600 \
-| eval rule_id = "R-C-002", risk_score = 70
-action.correlationsearch.enabled = 1
+description = A settled host's new TLS client fingerprint to a destination, followed within one hour by \
+              that host beaconing to that destination. Join tolerance 120s. Determinism tier D1.
+search = index=behavior_events sourcetype=morpheus:score:l6 ja4_client_first_seen=true ja4_client_observations>=20 \
+| eval t_tls = _time \
+| rename lineage_id AS tls_lineage \
+| fields src_ip dst_ip t_tls ja4_client tls_lineage \
+| join type=inner max=0 src_ip dst_ip [search index=behavior_events sourcetype=morpheus:score:l3 \
+    flow_regularity_mature=true flow_interval_cv<0.15 flow_size_cv<0.15 \
+    | stats min(_time) AS t_beacon values(lineage_id) AS beacon_lineage BY src_ip dst_ip] \
+| where t_beacon >= t_tls - 120 AND t_beacon - t_tls <= 3600 \
+| eval gap = t_beacon - t_tls, rule_id = "R-C-002", risk_score = 70
 action.correlationsearch.label   = R-C-002
 ```
 
@@ -2492,8 +2503,9 @@ Point by point, because each line is there to prevent a specific failure:
   two runs over the same nominal window return different results and the rule is not reproducible. The
   `@m` snap matters as much as the offset: without it the window boundary moves with the scheduler's
   jitter.
-- **The window is 2 hours for a rule with a 1-hour `maxspan`.** A sequence rule needs a search window of
-  at least the span plus the schedule interval plus the lateness horizon, or a chain straddling a window
+- **The window is 3 hours for a rule with a 1-hour `maxspan`.** A sequence rule needs a search window of
+  at least the span plus the schedule interval plus the lateness horizon, and this one also needs the hour of
+  beaconing before the fingerprint in it, since a beacon already running then is the case it must not report, or a chain straddling a window
   boundary is never seen by either run. Getting this wrong produces a rule that works in testing, where
   events are dense, and misses in production, where they are not.
 - **`schedule_window = 5` and `allow_skew = 5m`** let the scheduler move the run to reduce contention.
@@ -2508,14 +2520,14 @@ Point by point, because each line is there to prevent a specific failure:
   of two group keys on every notable, collapses the window into a single group, and reports any
   fingerprint against any beacon. That is worse than a rule that cannot fire, because a rule that cannot
   fire is visible. `tests/morpheus/utils/test_splunk_field_contracts.py` had passed throughout, since
-  `dest_ip` *is* produced -- by the lineage pipeline, which is not the pipeline whose notables this rule
-  reads. It now asks the narrower question a chained rule needs: whether the searches it names put the
-  field on their own notables.
+  `dest_ip` *is* produced -- by the lineage pipeline, which is not the layer this rule reads. It now asks
+  the narrower question a chained rule needs: whether each step's layer puts the field on its own events.
 
 Overlapping windows mean a chain can match on consecutive runs. Deduplicate downstream on
-`(rule_id, lineage_id)` rather than by narrowing the window. The alternative trades duplicate alerts for
-missed ones, which is the wrong trade. The `lineage_id` is stable across runs by construction, which is
-what makes this deduplication reliable rather than best-effort.
+`(rule_id, src_ip, dst_ip)` rather than by narrowing the window. The alternative trades duplicate alerts for
+missed ones, which is the wrong trade. The pair is stable across runs by construction, which is what makes
+this deduplication reliable rather than best-effort; the two steps' lineage identifiers ride along as evidence,
+because a fingerprint and a beacon are sealed by different pipelines and share no chain.
 
 For rules driven off the summary index rather than the raw index, the same stanza applies with
 `index=behavior_summary` and a longer `dispatch.earliest_time`, since summary rows are written on a
@@ -3417,8 +3429,8 @@ to be is worth more to the next reader than a clean list of open ones.
 **How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Measured. Every join here
 is a join on time across sources that do not share a clock, and the
 [collection section](../../../../README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
-qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0` inverts on
-sub-millisecond disagreement, impossible travel silently carries no score when two authentications
+qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0`, as it was first
+written, inverted on sub-millisecond disagreement, impossible travel silently carries no score when two authentications
 reorder, and the MAC-in-two-places interval absorbs each switch's offset directly. **None of that has
 been measured** -- until now. [`examples/clock_skew/run_experiment.py`](../../../../examples/clock_skew/README.md)
 is the experiment this paragraph asked for: spread the clocks across a window of a given width, re-run the

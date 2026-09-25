@@ -55,6 +55,15 @@ its own layer's composed pipeline, and the attacker does all three while four ot
 - **outside the session**: the breach comes from the principal's own address twenty minutes after they logged off;
 - **known issuer**: the last connection's certificate is the corporate one every host in the estate sees daily;
 - **wrong order**: the breach and the handshake both happen before the export.
+
+**R-C-002 - Command and control establishment.** A settled host presents a TLS client fingerprint it never has, to a
+destination, and within the hour starts beaconing to that same destination. The attacker does both; four others do
+both with one condition broken:
+
+- **beacon first**: the host was already beaconing to the destination an hour before the new fingerprint;
+- **other destination**: the beacon goes somewhere other than where the new fingerprint went;
+- **too slow**: the beacon matures sixty-seven minutes after the fingerprint;
+- **unsettled host**: five handshakes of history, so the new fingerprint is only new because the host is.
 """
 
 import typing
@@ -226,6 +235,45 @@ SESSION_HOLDERS = {**{actor.principal: actor.address for actor in EXFILTRATORS.v
 """Every principal with a daily session and the address it comes from. Max exports nothing; Lee's breach comes from
 Max's address."""
 
+# --- R-C-002's actors ---------------------------------------------------------------------------------------------
+
+C2_WINDOW_SECONDS = 3600
+C2_SEVERITY = 70
+SETTLED_HANDSHAKES = 24
+"""Past the twenty R-B-L6-001's floor asks for."""
+UNSETTLED_HANDSHAKES = 5
+BEACON_FLOWS = 20
+BEACON_PERIOD_SECONDS = 60
+BEACON_BYTES = 512
+PUBLIC_ISSUER = "CN=Public Web CA, O=Example Trust"
+
+
+class Beaconer(typing.NamedTuple):
+    """A host, how settled its TLS history is, and when and where its new fingerprint and its beacon happen."""
+
+    host: str
+    history: int
+    fingerprint_destination: str
+    fingerprint_minute: float
+    beacon_destination: str
+    beacon_start_minute: float
+    """Minutes after the campaign hour starts; negative for the hour before."""
+
+
+C2_ATTACKER = "10.20.2.5"
+BEACON_FIRST = "10.20.2.6"
+OTHER_DESTINATION = "10.20.2.7"
+C2_TOO_SLOW = "10.20.2.8"
+UNSETTLED = "10.20.2.9"
+
+BEACONERS = {
+    C2_ATTACKER: Beaconer(C2_ATTACKER, SETTLED_HANDSHAKES, "203.0.113.100", 0, "203.0.113.100", 2),
+    BEACON_FIRST: Beaconer(BEACON_FIRST, SETTLED_HANDSHAKES, "203.0.113.101", 0, "203.0.113.101", -60),
+    OTHER_DESTINATION: Beaconer(OTHER_DESTINATION, SETTLED_HANDSHAKES, "203.0.113.102", 0, "203.0.113.112", 2),
+    C2_TOO_SLOW: Beaconer(C2_TOO_SLOW, SETTLED_HANDSHAKES, "203.0.113.103", 0, "203.0.113.103", 55),
+    UNSETTLED: Beaconer(UNSETTLED, UNSETTLED_HANDSHAKES, "203.0.113.104", 0, "203.0.113.104", 2),
+}
+
 
 def servers() -> list:
     """Every server a principal logs into or a campaign reaches, in one peer group."""
@@ -349,14 +397,19 @@ def _packet(rows: list, source: str, source_port: int, destination: str, data_le
     rows.append(record)
 
 
-def _handshake(rows: list, source: str, destination: str, issuer: str, when: int):
+def _handshake(rows: list,
+               source: str,
+               destination: str,
+               issuer: str,
+               when: int,
+               fingerprint: str = presentation_pipeline.CHROME):
     record = _envelope(rows, "tls-inspect-01", "tc6.v1", f"{source}->{destination}", when)
     record.update({
         "src_ip": source,
         "dst_ip": destination,
         "dst_port": 443,
         "tls_version": "TLSv1.3",
-        "ja4_client": presentation_pipeline.CHROME,
+        "ja4_client": fingerprint,
         "certificate_issuer": issuer,
         "certificate_fingerprint_sha256": f"{destination}|{issuer}",
         "cipher_suite": presentation_pipeline.MODERN_SUITE,
@@ -425,6 +478,36 @@ def _build_exfiltration(sessions: list, packets: list, handshakes: list, exports
                    at(LAST_DAY, CAMPAIGN_HOUR, actor.handshake_minute))
 
 
+def _build_command_and_control(flows: list, handshakes: list):
+    for (index, actor) in enumerate(BEACONERS.values()):
+        # The host's ordinary history: one stack, to the portal, every two minutes from eight.
+        for count in range(actor.history):
+            _handshake(handshakes, actor.host, PORTAL, PORTAL_ISSUER, at(LAST_DAY, 8, 2 * count, index))
+
+        _handshake(handshakes,
+                   actor.host,
+                   actor.fingerprint_destination,
+                   PUBLIC_ISSUER,
+                   at(LAST_DAY, CAMPAIGN_HOUR, actor.fingerprint_minute, index),
+                   fingerprint=presentation_pipeline.NEW_STACK)
+
+        for count in range(BEACON_FLOWS):
+            when = at(LAST_DAY, CAMPAIGN_HOUR, actor.beacon_start_minute,
+                      index) + count * BEACON_PERIOD_SECONDS * NS_PER_SECOND
+            record = _envelope(flows, "netflow-01", "tc3.v1", f"{actor.host}->{actor.beacon_destination}", when)
+            record.update({
+                "src_ip": actor.host,
+                "dst_ip": actor.beacon_destination,
+                "dst_port": 443,
+                "protocol": "tcp",
+                "ip_ttl": 128,
+                "bytes_out": BEACON_BYTES,
+                "bytes_in": 128,
+                "bgp_as_dst": "64500",
+            })
+            flows.append(record)
+
+
 def build_corpus() -> dict[str, pd.DataFrame]:
     """The campaign, split by collector."""
     flows: list = []
@@ -470,6 +553,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     handshakes: list = []
     exports: list = []
     _build_exfiltration(sessions, packets, handshakes, exports)
+    _build_command_and_control(flows, handshakes)
 
     return {
         FLOW_CLASS: frame(flows),
@@ -778,5 +862,47 @@ def staged_exfiltration(result: pd.DataFrame,
                     continue
 
                 fired.setdefault((principal, address), (t1, t2, t3))
+
+    return fired
+
+
+# --- R-C-002, evaluated the way its search evaluates it ------------------------------------------------------------
+
+
+def tls_before_beaconing(result: pd.DataFrame,
+                         settled: bool = True,
+                         same_destination: bool = True,
+                         ordered: bool = True,
+                         window_seconds: typing.Optional[int] = C2_WINDOW_SECONDS,
+                         tolerance_seconds: int = JOIN_TOLERANCE_SECONDS) -> dict:
+    """(host, destination) pairs R-C-002 fires on, with the fingerprint's time and the beacon's.
+
+    The beacon is dated when it first matures, which is when R-B-L3-002 would first report it.
+    """
+    tolerance_ns = tolerance_seconds * NS_PER_SECOND
+    fingerprints = result[(result["telemetry_class"] == HANDSHAKE_CLASS) & result["ja4_client_first_seen"].map(_truthy)]
+
+    if (settled):
+        fingerprints = fingerprints[fingerprints["ja4_client_observations"].astype("Int64").fillna(0) >= 20]
+
+    flows = result[(result["telemetry_class"] == FLOW_CLASS) & result["flow_regularity_mature"].map(_truthy)]
+    flows = flows[(flows["flow_interval_cv"].astype(float) < 0.15) & (flows["flow_size_cv"].astype(float) < 0.15)]
+    beacons = flows.groupby(["src_ip", "dst_ip"])["event_time"].min().astype("int64")
+    fired: dict = {}
+
+    for (_, fingerprint) in fingerprints.iterrows():
+        t1 = int(fingerprint["event_time"])
+
+        for ((source, destination), t2) in beacons.items():
+            if (source != fingerprint["src_ip"]) or (same_destination and destination != fingerprint["dst_ip"]):
+                continue
+
+            if (ordered and t2 < t1 - tolerance_ns):
+                continue
+
+            if (window_seconds is not None and t2 - t1 > window_seconds * NS_PER_SECOND):
+                continue
+
+            fired.setdefault((source, destination), (t1, int(t2)))
 
     return fired

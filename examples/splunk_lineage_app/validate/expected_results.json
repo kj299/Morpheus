@@ -55,10 +55,10 @@
       "why": "One notable, for the scanner. Two hosts in the corpus reach a comparable number of addresses and only one of them stays inside the estate: 10.0.0.50 reaches 5, 20, 45 and then 80 internal destinations in successive hours, and 10.0.0.60 reaches thirty on the public internet every hour and is not flagged. That is the whole of the difference between a scan and a lunch break, and it is why the rule requires the internal proportion as well as the count. The scanner_allowlist lookup ships header-only, so nothing is excluded here; populated, an authorized scanner would drop out. Note the threshold is a fixed dsts_per_src>50 standing in for the per-source fourteen-day percentile the guide asks for, which this app cannot compute without a history it does not keep."
     },
     "R-B-L3-002 - Beaconing": {
-      "expected_rows": 1,
+      "expected_rows": 6,
       "expected_empty": false,
-      "contributing_rows": 36,
-      "why": "One notable, for the pair 10.0.0.70:93.184.216.34, which exchanges a 512-byte message every five minutes for four hours. The negative control is 10.0.0.80, which makes plenty of flows to one file server at the ragged intervals a person produces and whose coefficient of variation is above 1.0 -- an order of magnitude above the 0.15 threshold. Grouped by flow_pair_key rather than by src_ip, because a host that beacons to one address and browses to five hundred others would have the beacon averaged away by a search keyed on the host."
+      "contributing_rows": 76,
+      "why": "One notable, for the pair 10.0.0.70:93.184.216.34, which exchanges a 512-byte message every five minutes for four hours. The negative control is 10.0.0.80, which makes plenty of flows to one file server at the ragged intervals a person produces and whose coefficient of variation is above 1.0 -- an order of magnitude above the 0.15 threshold. Grouped by flow_pair_key rather than by src_ip, because a host that beacons to one address and browses to five hundred others would have the beacon averaged away by a search keyed on the host. Five more pairs come from the campaign corpus, R-C-002's five hosts each sending a 512-byte message every sixty seconds; the rule reports all five on their regularity alone, and 40 more mature rows contribute."
     },
     "R-D-L3-003 - Reserved-range egress": {
       "expected_rows": 1,
@@ -120,10 +120,10 @@
       }
     },
     "R-B-L6-001 - New TLS client fingerprint": {
-      "expected_rows": 1,
+      "expected_rows": 5,
       "expected_empty": false,
-      "contributing_rows": 1,
-      "why": "One notable, for 10.0.0.20, which presented one TLS stack across 34 handshakes and then a second. The negative control is 10.0.0.21, whose second stack is equally novel the first time it appears -- it had made two handshakes at that point, so the settled-history floor of twenty separates them. That control is the one the corpus had to be rebuilt to show: novelty alone reports a host the estate has just started seeing exactly like a host whose stack changed.",
+      "contributing_rows": 5,
+      "why": "One notable, for 10.0.0.20, which presented one TLS stack across 34 handshakes and then a second. The negative control is 10.0.0.21, whose second stack is equally novel the first time it appears -- it had made two handshakes at that point, so the settled-history floor of twenty separates them. That control is the one the corpus had to be rebuilt to show: novelty alone reports a host the estate has just started seeing exactly like a host whose stack changed. Four more come from the campaign corpus: R-C-002's attacker and three of its controls are settled hosts, twenty-four handshakes each, presenting a new stack once. The fifth control has five handshakes behind it and is held back by the floor, exactly as 10.0.0.21 is. Which of the four went on to beacon to the destination it presented the new stack to, within the hour, is R-C-002's to say.",
       "key_values": {
         "src_ip": "10.0.0.20",
         "new_fingerprints": "t13d3104h1_9b1e5a0f4c22_7e0fd1a83b55",
@@ -258,24 +258,30 @@
       ]
     },
     "R-C-002 - TLS anomaly precedes beaconing": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "A chained rule over two detections' notables: R-B-L6-001 at layer 6 and R-B-L3-002 at layer 3. Both halves now have producers and both fire on their own corpora -- which is new, and is what made the search's real defect visible: it grouped `by src_ip dest_ip` while every detection in this fork emits `dst_ip`, so it would have correlated every fingerprint in the window against every beacon through one null group rather than returning nothing. That is fixed. What keeps it empty now is the corpora: layer 3 and layer 6 come from separate seeded runs sharing no host, and the search also reads `rule_id`, which detections write into the index as they fire rather than anything the pipeline emits."
+      "expected_rows": 1,
+      "expected_empty": false,
+      "why": "One chain, and the first time this rule has returned a row: it used to read the two detections' notables, which only exist once those detections have run, and now reads the scored events. 10.20.2.5, settled on one TLS stack across twenty-four handshakes, presented a new one to 203.0.113.100, and fourteen minutes later its beacon to that address matured. Four others do both halves with one condition broken and are quiet: 10.20.2.6 was already beaconing an hour before its new stack; 10.20.2.7's beacon went to a different address than its new stack; 10.20.2.8's beacon matured sixty-seven minutes later; 10.20.2.9 had five handshakes behind it, so its new stack is only new because the host is. Every one of the five beacons is an R-B-L3-002 notable, and four of the five new stacks are R-B-L6-001 notables, on their own.",
+      "key_values": [
+        {
+          "src_ip": "10.20.2.5",
+          "dst_ip": "203.0.113.100"
+        }
+      ]
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 4224,
+      "expected_rows": 4294,
       "expected_empty": false,
-      "contributing_rows": 7926,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 7926 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 208 flows, 70 host logins, 108 session records, 555 packets, 59 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus."
+      "contributing_rows": 8132,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 8132 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 70 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 3298,
+      "distinct_lineage_ids": 3314,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 3298 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 3314 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,
