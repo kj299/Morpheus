@@ -300,17 +300,7 @@ def golden_columns() -> set:
     """
     columns = set()
 
-    for name in ("golden_telemetry_expected.csv",
-                 "golden_lineage_expected.csv",
-                 "golden_network_expected.csv",
-                 "golden_transport_expected.csv",
-                 "golden_presentation_expected.csv",
-                 "golden_application_expected.csv",
-                 "golden_campaign_expected.csv",
-                 "golden_context_expected.csv",
-                 "golden_endpoint_expected.csv",
-                 "golden_saas_expected.csv",
-                 "golden_session_expected.csv"):
+    for name in GOLDEN_NAMES:
         path = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism", name)
 
         with open(path, encoding="utf-8") as handle:
@@ -374,85 +364,102 @@ def test_every_field_a_search_reads_is_a_field_something_writes(name: str):
         f"it, or it belongs in KNOWN_UNPRODUCED with the reason it does not.")
 
 
-def emits(search: str) -> set:
-    """The fields a detection puts on its notable, from its own `table` clause.
-
-    What a chained rule downstream can read. A detection that computes a field and does not select it has not
-    published it, which is the distinction this function exists to make.
-    """
-    emitted = set()
-
-    for clause in re.findall(r"\|\s*table\s+([^|]*)", search):
-        emitted.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", clause))
-
-    return emitted
-
-
-def rules_read_by(search: str) -> set:
-    """The rule identifiers a chained search correlates, from the `rule_id="..."` literals it filters on."""
-    return set(re.findall(r'rule_id\s*=\s*"([^"]+)"', search))
+GOLDEN_NAMES = ("golden_telemetry_expected.csv",
+                "golden_lineage_expected.csv",
+                "golden_network_expected.csv",
+                "golden_transport_expected.csv",
+                "golden_presentation_expected.csv",
+                "golden_application_expected.csv",
+                "golden_campaign_expected.csv",
+                "golden_context_expected.csv",
+                "golden_endpoint_expected.csv",
+                "golden_saas_expected.csv",
+                "golden_session_expected.csv")
 
 
-def detections_by_rule() -> dict:
-    """Every search that stamps a `rule_id`, keyed by the identifier it stamps."""
-    found = {}
+def layer_columns() -> dict:
+    """Per OSI layer, the columns populated on at least one of that layer's events in the goldens."""
+    import collections  # pylint: disable=import-outside-toplevel
+    import csv  # pylint: disable=import-outside-toplevel
 
-    for (name, search) in searches().items():
-        for identifier in re.findall(r'\|\s*eval[^|]*?\brule_id\s*=\s*"([^"]+)"', search):
-            found[identifier] = (name, search)
+    found = collections.defaultdict(set)
+
+    for name in GOLDEN_NAMES:
+        path = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism", name)
+
+        with open(path, encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                layer = row.get("osi_layer")
+
+                if (layer):
+                    found[layer].update(column for (column, value) in row.items() if value != "")
 
     return found
 
 
-def test_a_chained_rule_reads_only_fields_the_rules_it_chains_publish():
+def chain_steps(search: str) -> list:
+    """(layer, text) for each step of a chained search: its base search, and each subsearch it joins."""
+    steps = [search.split("| join", 1)[0]] + re.findall(r"\[search\s+([^\]]*)\]", search)
+    found = []
+
+    for step in steps:
+        layer = re.search(r"sourcetype=morpheus:score:l(\d)", step)
+
+        if (layer is not None):
+            found.append((layer.group(1), step))
+
+    return found
+
+
+def unread_by_layer(search: str, columns: dict) -> dict:
+    """Fields each step reads that no event of the step's layer carries, by layer."""
+    missing = {}
+
+    for (layer, step) in chain_steps(search):
+        fields = referenced_in(step) - created_in(step) - SPLUNK_INTRINSICS - SPL_WORDS
+        unresolved = fields - columns.get(layer, set())
+
+        if (len(unresolved) > 0):
+            missing[layer] = sorted(unresolved)
+
+    return missing
+
+
+def test_a_chained_rule_reads_each_step_from_a_layer_that_writes_it():
     """
     The defect this test was written for, which the check above could not see.
 
-    R-C-002 correlates two detections' notables and grouped them `by src_ip dest_ip`. `dest_ip` is the Splunk
-    CIM name and upstream Morpheus's default column; every stage in this fork emits `dst_ip`, and so do both
-    detections R-C-002 reads. Grouping on it put a null in one of two group keys on every notable, which does
-    not fail and does not return nothing -- it collapses every fingerprint and every beacon in the window into
-    one group and reports any of them against any other.
+    R-C-002 once correlated two detections' notables and grouped them `by src_ip dest_ip`. `dest_ip` is the Splunk
+    CIM name and upstream Morpheus's default column; every stage in this fork emits `dst_ip`. Grouping on it put a
+    null in one of two group keys on every notable, which does not fail and does not return nothing -- it collapses
+    every fingerprint and every beacon in the window into one group and reports any of them against any other.
 
     `test_every_field_a_search_reads_is_a_field_something_writes` passed throughout, because `dest_ip` *is*
-    produced: by the lineage pipeline, which is not the pipeline whose notables R-C-002 reads. "Something,
-    somewhere, writes this" is the wrong question for a chained rule. The right one is whether the searches it
-    names put the field on their notables, and that is what this asserts.
+    produced: by the lineage pipeline, which is not the layer whose events R-C-002 reads. "Something, somewhere,
+    writes this" is the wrong question for a chained rule. The chained rules now read scored events rather than
+    notables, so the right question is whether the layer each step reads puts the field on its events -- which is
+    what this asserts, from the goldens, for the base search and every subsearch a chain joins.
     """
-    published = detections_by_rule()
+    columns = layer_columns()
+    chains = {name: search for (name, search) in searches().items() if name.startswith("R-C-")}
 
-    # A chained rule is one that filters on a `rule_id` it does not itself stamp. Every detection stamps its
-    # own, so without that subtraction each of them would read as chaining itself.
-    chained = {}
+    assert len(chains) >= 3, "fewer chained rules than this fork ships; this test has stopped covering them"
 
-    for (name, search) in searches().items():
-        stamped = {identifier for (identifier, (owner, _)) in published.items() if owner == name}
-        upstream = rules_read_by(search) - stamped
-
-        if (len(upstream) > 0):
-            chained[name] = (search, upstream)
-
-    assert len(chained) > 0, "no chained rule found; this test has stopped covering anything"
-
-    for (name, (search, upstream)) in chained.items():
-        missing_rules = sorted(upstream - set(published))
-
-        assert missing_rules == [], (f"{name} chains {missing_rules}, which no search in this app stamps. "
-                                     f"A chained rule over a detection that does not exist returns nothing "
-                                     f"forever.")
-
-        available = set()
-
-        for identifier in upstream:
-            available |= emits(published[identifier][1])
-
-        unresolved = referenced_in(search) - created_in(search) - available - SPLUNK_INTRINSICS - SPL_WORDS
-
-        assert not unresolved, (
-            f"{name} reads {sorted(unresolved)}, which none of the rules it chains "
-            f"({sorted(upstream)}) put on their notables. A chained rule joining on a field its inputs do not "
-            f"publish does not fail -- it groups every notable in the window together and correlates the wrong "
+    for (name, search) in chains.items():
+        assert len(chain_steps(search)) >= 2, f"{name} has fewer than two steps this test can read"
+        assert not unread_by_layer(search, columns), (
+            f"{name} reads fields no event of that layer carries: {unread_by_layer(search, columns)}. A chain "
+            f"joining on a field its step does not write does not fail -- it joins nulls and correlates the wrong "
             f"pairs.")
+
+
+def test_a_join_on_a_field_its_layer_does_not_write_would_be_caught():
+    # The negative control, with the defect that started this: a layer 6 step joined on `dest_ip`.
+    search = ("index=behavior_events sourcetype=morpheus:score:l3 flow_regularity_mature=true "
+              "| join type=inner src_ip dest_ip [search index=behavior_events sourcetype=morpheus:score:l6 "
+              "ja4_client_first_seen=true | fields src_ip dest_ip]")
+
+    assert unread_by_layer(search, layer_columns()) == {"6": ["dest_ip"]}
 
 
 def test_the_field_every_detection_selects_is_populated():

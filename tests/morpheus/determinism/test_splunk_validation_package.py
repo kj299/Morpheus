@@ -472,6 +472,58 @@ def test_the_staged_exfiltration_chain_returns_exactly_what_is_written(expected:
     assert entry["key_values"] == chains
 
 
+def _events_of(sourcetype_file: str) -> list:
+    with open(os.path.join(EVENTS, sourcetype_file), encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def test_the_fingerprint_and_beacon_detections_count_exactly_what_is_written(expected: dict):
+    # Evaluated over the events the app is fed, the way the two searches read them. Neither count was checked
+    # against the events until the campaign corpus added hosts to both; a written expectation that nothing
+    # re-derives goes stale the first time another corpus shares the sourcetype.
+    searches = expected["searches"]
+    fingerprints = [
+        event for event in _events_of("morpheus_score_l6.jsonlines")
+        if event.get("ja4_client_first_seen") is True and (event.get("ja4_client_observations") or 0) >= 20
+    ]
+    entry = searches["R-B-L6-001 - New TLS client fingerprint"]
+
+    assert entry["contributing_rows"] == len(fingerprints)
+    assert entry["expected_rows"] == len({event["src_ip"] for event in fingerprints})
+    assert entry["key_values"]["src_ip"] in {event["src_ip"] for event in fingerprints}
+
+    def regular(value) -> bool:
+        return value is not None and value < 0.15
+
+    beacons = [
+        event for event in _events_of("morpheus_score_l3.jsonlines") if event.get("flow_regularity_mature") is True
+        and regular(event.get("flow_interval_cv")) and regular(event.get("flow_size_cv"))
+    ]
+    entry = searches["R-B-L3-002 - Beaconing"]
+
+    assert entry["contributing_rows"] == len(beacons)
+    assert entry["expected_rows"] == len({event["flow_pair_key"] for event in beacons})
+
+
+def test_the_command_and_control_chain_returns_exactly_what_is_written(expected: dict):
+    events = [
+        event for event in _scored_events()
+        if event.get("telemetry_class") in (campaign_pipeline.FLOW_CLASS, campaign_pipeline.HANDSHAKE_CLASS)
+    ]
+    frame = pd.DataFrame(events)
+    stamps = pd.to_datetime(frame["event_time"].str.replace("UTC", "", regex=False), utc=True)
+    frame["event_time"] = (stamps - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(nanoseconds=1)
+
+    chains = sorted(({
+        "src_ip": source, "dst_ip": destination
+    } for (source, destination) in campaign_pipeline.tls_before_beaconing(frame)),
+                    key=lambda row: (row["src_ip"], row["dst_ip"]))
+    entry = expected["searches"]["R-C-002 - TLS anomaly precedes beaconing"]
+
+    assert entry["expected_rows"] == len(chains)
+    assert entry["key_values"] == chains
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -634,7 +686,8 @@ which is the right failure: the document said something nobody here anticipated.
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Seven of thirty-four. That ratio is the honest state of this app, and stating it is the package's main job.
+    # Seven of thirty-four, when this was written. That ratio is the honest state of this app, and stating it is the
+    # package's main job.
     # The seventh is R-P-L3-005, which reads the behavior summary this package does not populate -- the same
     # deployment-step blocker the chain assembly search has, arriving with layer 3 rather than being discovered.
     # It
@@ -647,7 +700,10 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # refresh is empty because it always was and the document said otherwise -- it selects
     # `binding_table=dhcp_lease`, this corpus has no DHCP source, and the 80 bucketed rows it was credited with
     # are a MAC table under a different name. A count that only ever improves is a count nobody is checking.
-    assert len(empty) == 7
+    #
+    # Six of thirty-seven now: R-C-002 left the list when it was rewritten to read scored events rather than
+    # notables and the campaign corpus gave it a chain to find.
+    assert len(empty) == 6
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name
