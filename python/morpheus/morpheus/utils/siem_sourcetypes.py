@@ -274,13 +274,14 @@ PRODUCED: dict = {
             time_columns=("event_time", ),
             producer="The TC-5 stages (session, novelty, cadence, travel, risk) behind WindowSealStage; the "
             "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`; and host "
-            "logins through TC5NoveltyStage with a target host, the `tc5_auth` class of "
-            "`tests/morpheus/determinism/campaign_pipeline.py`.",
+            "logins through TC5NoveltyStage with a target host and sessions through TC5SessionStage, the `tc5_auth` "
+            "and `tc5_session` classes of `tests/morpheus/determinism/campaign_pipeline.py`.",
             # Two sources with different shapes share this sourcetype. An identity provider's sign-ins carry
             # locations and factors and are scored: R-D-L5-003 and R-D-L5-004 filter on the first six of that set,
             # and R-P-L5-006 on the rest, which TC5DriftStage stamps over the daily windows a second
             # WindowSealStage seals behind the hourly one. A host login -- a Windows logon, an SSH session -- has
-            # no location or factor but names the host logged into, which R-C-001 reads.
+            # no location or factor but names the host logged into, which R-C-001 reads. A session's start and stop
+            # records carry the address it came from, which R-C-004 binds a transfer to.
             required_columns=("event_uid", "user_principal"),
             variant_columns=(
                 ("travel_status",
@@ -296,6 +297,7 @@ PRODUCED: dict = {
                  "drift_rising_windows",
                  "drift_rise_sigmas"),
                 ("source_ip", "target_host", "target_host_first_seen", "auth_result"),
+                ("source_ip", "session_key", "session_action"),
             ),
         ),
     "morpheus:edge":

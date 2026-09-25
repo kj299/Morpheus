@@ -107,10 +107,10 @@
       ]
     },
     "R-B-L4-005 - Transfer envelope breach": {
-      "expected_rows": 1,
+      "expected_rows": 6,
       "expected_empty": false,
-      "contributing_rows": 1,
-      "why": "One notable, for the triple 10.0.0.80:10.0.1.30:445, which transfers 60000 bytes against an envelope of 1200 -- fifty times its own 99th percentile. The negative control is 10.0.0.90:10.0.1.40:443, which moves more data in total and varies by a factor of two doing it: a global threshold would have to sit above the busy triple and would then sit above the exfiltration too. The envelope is a percentile rather than a maximum because the triple has 120 prior transfers, above the hundred a 99th percentile by nearest rank needs to be one; below that figure it would be the largest transfer ever seen wearing a percentile's name.",
+      "contributing_rows": 6,
+      "why": "One notable, for the triple 10.0.0.80:10.0.1.30:445, which transfers 60000 bytes against an envelope of 1200 -- fifty times its own 99th percentile. The negative control is 10.0.0.90:10.0.1.40:443, which moves more data in total and varies by a factor of two doing it: a global threshold would have to sit above the busy triple and would then sit above the exfiltration too. The envelope is a percentile rather than a maximum because the triple has 120 prior transfers, above the hundred a 99th percentile by nearest rank needs to be one; below that figure it would be the largest transfer ever seen wearing a percentile's name. Five more come from the campaign corpus: each of R-C-004's five actors' hosts uploads 1200 bytes to a sync server a hundred and ten times and then 60000 once, fifty times its envelope. The breach is identical in all five; whether the host belonged to the principal who had just exported, while their session held it, is what R-C-004 adds.",
       "key_values": {
         "transfer_triple": "10.0.0.80:10.0.1.30:445",
         "transferred": 60000,
@@ -263,19 +263,19 @@
       "why": "A chained rule over two detections' notables: R-B-L6-001 at layer 6 and R-B-L3-002 at layer 3. Both halves now have producers and both fire on their own corpora -- which is new, and is what made the search's real defect visible: it grouped `by src_ip dest_ip` while every detection in this fork emits `dst_ip`, so it would have correlated every fingerprint in the window against every beacon through one null group rather than returning nothing. That is fixed. What keeps it empty now is the corpora: layer 3 and layer 6 come from separate seeded runs sharing no host, and the search also reads `rule_id`, which detections write into the index as they fire rather than anything the pipeline emits."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 2947,
+      "expected_rows": 4224,
       "expected_empty": false,
-      "contributing_rows": 6649,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 6649 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus R-C-001 is asserted on adds 208 flows, 70 host logins and 241 process starts on the layer 3, 5 and 7 sourcetypes, sharing entities with one another and with no other corpus."
+      "contributing_rows": 7926,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 7926 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 208 flows, 70 host logins, 108 session records, 555 packets, 59 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 2021,
+      "distinct_lineage_ids": 3298,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 2021 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 3298 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,
@@ -343,15 +343,30 @@
       "why": "Seven principal-days after deduplication, from 21 rows that carry the trajectory. None of them is behaviour, and the search says so in its own comment. Two principals climb for six straight days because the reference scorer's parameters are frozen while `logcount` and the `*increment` features are cumulative: a score whose baseline never moves under a feature that only grows must rise, and that is arithmetic. The third, on the day of the planted multi-factor burst, has a run of four whose first three rises are hundredths and whose fourth is the burst -- a spike the rule's letter admits because the day's mean stays under R-B-L5-001's 2.0. The predicate is evaluated here exactly as the search states it, so a corpus change that adds or removes a firing shows up as a diff rather than as a search that quietly means something else. What a deployment should take from this: the drift path's first false positives are cumulative features under a stale baseline, and a spike at the end of a flat run. Both are visible in `drift_acceleration` and `drift_baseline_sigma`."
     },
     "R-B-L7-002 - Bulk data access": {
-      "expected_rows": 3,
+      "expected_rows": 8,
       "expected_empty": false,
-      "contributing_rows": 3,
-      "why": "Three notables, one per principal, and the classification sets each one's severity rather than deciding whether it fires. nate@example.com exported 5000 records from a restricted object against an export baseline of 54: 75. olga@example.com exported the same multiple from a public price list: 20. pat@example.com exported it from an object the inventory has never heard of: the default 40, with ctx_object_found=false. The controls each fail one condition: quin@example.com's 5000-record export is inside a baseline of 4978; sam@example.com's is 4.9 times theirs; rosa@example.com has twenty exports behind them and so no baseline; tom@example.com's export was denied and read nothing. nate@example.com also queries two to three thousand records all month, which is why the baseline is per operation -- pooled, the export would be under twice their normal.",
+      "contributing_rows": 8,
+      "why": "Three notables, one per principal, and the classification sets each one's severity rather than deciding whether it fires. nate@example.com exported 5000 records from a restricted object against an export baseline of 54: 75. olga@example.com exported the same multiple from a public price list: 20. pat@example.com exported it from an object the inventory has never heard of: the default 40, with ctx_object_found=false. The controls each fail one condition: quin@example.com's 5000-record export is inside a baseline of 4978; sam@example.com's is 4.9 times theirs; rosa@example.com has twenty exports behind them and so no baseline; tom@example.com's export was denied and read nothing. nate@example.com also queries two to three thousand records all month, which is why the baseline is per operation -- pooled, the export would be under twice their normal. Five more come from the campaign corpus: each of R-C-004's five actors exports 5000 records against an export baseline of about 60, from an object no inventory in that corpus classifies, so each fires at the default 40. R-C-004 is what tells the one whose export was followed by a breach and a new issuer from the four that were not.",
       "key_values": [
+        {
+          "user_principal": "kim@example.com",
+          "classification": "unclassified",
+          "risk_score": 40
+        },
+        {
+          "user_principal": "lee@example.com",
+          "classification": "unclassified",
+          "risk_score": 40
+        },
         {
           "user_principal": "nate@example.com",
           "classification": "restricted",
           "risk_score": 75
+        },
+        {
+          "user_principal": "nia@example.com",
+          "classification": "unclassified",
+          "risk_score": 40
         },
         {
           "user_principal": "olga@example.com",
@@ -359,7 +374,17 @@
           "risk_score": 20
         },
         {
+          "user_principal": "oto@example.com",
+          "classification": "unclassified",
+          "risk_score": 40
+        },
+        {
           "user_principal": "pat@example.com",
+          "classification": "unclassified",
+          "risk_score": 40
+        },
+        {
+          "user_principal": "pia@example.com",
           "classification": "unclassified",
           "risk_score": 40
         }
@@ -459,6 +484,17 @@
           "src_ip": "10.20.0.5",
           "user_principal": "dana@example.com",
           "target": "srv-db-02"
+        }
+      ]
+    },
+    "R-C-004 - Staged exfiltration": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "why": "One chain. kim@example.com exported 5000 records, eighty times their own baseline; twenty-five minutes later the address kim's session held open, 10.20.1.5, sent 60000 bytes to its sync server, fifty times that triple's envelope; and twenty minutes after that it connected to a destination presenting an issuer nobody in the estate had seen in thirty days. Four others each do all three with one relation broken, and are quiet: lee's breach and connection came from the address max's session held; nia's came twenty minutes after nia logged off; oto's connection presented the corporate issuer every host sees daily; pia's breach and connection happened before the export. Every one of the five exports is an R-B-L7-002 notable and every breach an R-B-L4-005 notable on its own.",
+      "key_values": [
+        {
+          "user_principal": "kim@example.com",
+          "src_ip": "10.20.1.5"
         }
       ]
     }

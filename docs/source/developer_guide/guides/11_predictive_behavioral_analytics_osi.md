@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is forty-four stages and thirty-nine supporting
-modules, covered by 1,753 distinct tests, itemized in
+modules, covered by 1,763 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1692,13 +1692,18 @@ physical `port_id` values in different `site_id` values, within a window shorter
 time. This is impossible travel with physical-layer corroboration, and it is far stronger than the
 geolocation version because it does not depend on IP geolocation accuracy.
 
-R-C-002 ships as a saved search over its two detections' notables. R-C-001 is built and asserted in
+R-C-002 ships as a saved search over its two detections' notables. R-C-001 and R-C-004 are built and asserted in
 `tests/morpheus/determinism/test_campaign_harness.py`, over a corpus written as one estate seen by three collectors
 -- `tests/morpheus/determinism/campaign_pipeline.py` -- where an attacker completes all three steps and six others
 each fall one step short: the process before the login, the last step thirty-five minutes after the first, a login to
 the principal's own server, a login from another address, a busy host's flat fan-out, and a server running only its
 routine. The attacker reaches twenty-five new addresses, half what R-B-L3-001 fires on, which is what "no individual
-step needs to breach its own threshold" means in practice.
+step needs to breach its own threshold" means in practice. R-C-004's attacker exports, breaches and connects in that
+order inside two hours; four others do all three with one relation broken -- the breach from an address another
+principal's session held, the breach twenty minutes after logging off, the corporate issuer on the last connection,
+and the export last rather than first. Every one of their exports and breaches is an R-B-L7-002 or R-B-L4-005 notable
+on its own, which is the case for the chain: the single-layer rules see five identical exfiltrations and cannot say
+which one was the principal who had just taken the data.
 
 Four decisions come with it. **It reads the scored events, not other rules' notables.** R-C-002 correlates notables,
 which exist only once the detections have run and written them, and has never returned a row anywhere this fork can
@@ -1713,6 +1718,16 @@ names the client device and the application, not the host logged into, so
 {py:class}`~morpheus.stages.telemetry.tc5_novelty_stage.TC5NoveltyStage` gained an optional target host column and
 writes whether the principal had logged into that host before. `morpheus:score:l5` now accepts the two shapes a
 sign-in and a host login have, the way `morpheus:score:l7` accepts its sub-classes.
+
+R-C-004 adds two. **A session binds a transfer only while it is open**: the transfer's source address must be one a
+session of the principal came from, and the session must have started before the transfer and not yet ended, because
+an address outlives its session and the next person on it is not the principal. **"Novel for the environment" is its
+own column**, `cert_issuer_new_to_estate`, kept by
+{py:class}`~morpheus.stages.telemetry.tc6_certificate_stage.TC6CertificateStage` over the whole estate's handshakes
+for thirty days and silent for the estate's first week. The per-destination reference R-D-L6-002 reads cannot answer
+the question, because a destination seen for the first time has no reference and every issuer it presents is equally
+unremarkable to it. The text leaves the third step's host and window open; the rule takes the breach's address and
+the same two hours.
 
 ### Rule governance
 
@@ -1730,7 +1745,9 @@ Three requirements that are usually skipped and always regretted:
 R-C-001 declares 120 seconds, twice an assumed worst offset of sixty seconds, since nothing in this fork measures
 `clock_offset_ms` yet: a step may precede the one it follows by up to that much and still count as after it, and the
 harness moves the attacker's process one minute and then three minutes ahead of the login to show the boundary. Its
-inverse is a change ticket for the target host covering the login, raised for the principal.
+inverse is a change ticket for the target host covering the login, raised for the principal. R-C-004 declares the
+same tolerance; its inverse is the issuer found among the estate's approved vendors, or the transfer matched to a
+scheduled job on the host.
 
 ---
 
@@ -3293,6 +3310,13 @@ What Morpheus provides versus what has to be built, stated plainly.
   existed in a form the rule could use: the layers it joins are sealed on different entities, the trajectory is hours
   long, and the login had no destination. Each is recorded above with what was done instead. The field linter read
   `join type=inner` as a filter on a field named `type`.
+- R-C-004 on the same campaign, extended with session, packet, handshake and SaaS collectors run through the layer
+  4, 6 and SaaS pipelines their own rules are asserted over, and an estate-wide issuer history on
+  {py:class}`~morpheus.stages.telemetry.tc6_certificate_stage.TC6CertificateStage`. **What building it caught that
+  the prose had not.** "Novel for the environment" had no column: the per-destination issuer reference is silent on
+  exactly the destinations an exfiltration reaches, which are new ones. And binding a host to a principal's "active
+  session" needs the session's interval, not its existence -- a breach from the principal's own address after they
+  logged off is the control that shows the difference.
 - The TC-0 identity and asset context store
   ({py:mod}`~morpheus.utils.bitemporal`,
   {py:class}`~morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage`,
@@ -3314,7 +3338,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
   counts are the finding: eleven columns identify a person, eighteen address their device, fourteen locate
-  them, and a hundred and seventy-nine are profile, a hundred and seventy-three of them behavioural,
+  them, and a hundred and eighty are profile, a hundred and seventy-four of them behavioural,
   which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
@@ -3557,7 +3581,7 @@ whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
 fork emits, eleven identify a person, eighteen are addresses, fourteen locate, eleven are pseudonyms -- and
-a hundred and seventy-nine are profile, a hundred and seventy-three of them behavioural; the other
+a hundred and eighty are profile, a hundred and seventy-four of them behavioural; the other
 six are the organisational columns the TC-0 context store and its join carry. **The largest category by far
 is the one the design manufactures rather than collects.** An estate reviewing this will think about the
 authentication logs it ingested; most of what it ends up holding about a person is derived here, from those

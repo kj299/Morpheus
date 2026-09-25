@@ -36,6 +36,12 @@ certificate lifetimes and the guide names the distribution as a feature, but whe
 question: ninety days is Let's Encrypt's normal and a red flag in an estate that issues for a year. The stage
 emits the span in days and the searches put a threshold on it, which is the same division of labour every other
 windowed figure in this fork uses.
+
+**An issuer new to the whole estate is a third, separate question**, which R-C-004 asks: has anyone here seen this
+authority in the last thirty days? The per-destination reference cannot answer it, because a destination seen for
+the first time has no reference and every issuer it presents is equally unremarkable to it. The estate's issuers are
+kept through {py:mod}`~morpheus.utils.pair_history` with the estate as the one entity, and the answer waits for the
+estate's own warm-up, because on its first day every issuer is new to it.
 """
 
 import logging
@@ -64,11 +70,18 @@ from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.established_value import DEFAULT_MIN_SAMPLES
 from morpheus.utils.established_value import ValueHistoryTracker
 from morpheus.utils.established_value import mode_of
+from morpheus.utils.pair_history import PairHistoryTracker
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_WINDOW_SECONDS = 30 * 24 * 3600
 """Trailing window the issuer reference is taken over. Thirty days, which is what the layer 6 rules name."""
+
+DEFAULT_ESTATE_WARMUP_SECONDS = 7 * 24 * 3600
+"""History the estate needs before an issuer can be called new to it."""
+
+ESTATE = "estate"
+"""The one entity the estate-wide issuer history is kept under."""
 
 SELF_SIGNED_RESULTS = frozenset({
     "self-signed",
@@ -96,6 +109,7 @@ SELF_SIGNED = "cert_self_signed"
 DESTINATION_GLOBAL = "cert_destination_is_global"
 SELF_SIGNED_EXTERNAL = "cert_self_signed_external"
 VALIDITY_DAYS = "cert_validity_days"
+ISSUER_NEW_TO_ESTATE = "cert_issuer_new_to_estate"
 
 
 @register_stage("tc6-certificate", ignore_args=["key_columns"])
@@ -134,6 +148,9 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Prior handshakes required before a reference is published.
     max_samples : int, default = 512
         Handshakes retained per destination regardless of the window.
+    estate_warmup_seconds : int, default = 604800
+        History the estate needs before `cert_issuer_new_to_estate` answers. The estate-wide history is kept over
+        `window_seconds`, like the per-destination one.
     """
 
     def __init__(self,
@@ -148,7 +165,8 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_unit: str = "ns",
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_samples: int = DEFAULT_MIN_SAMPLES,
-                 max_samples: int = 512):
+                 max_samples: int = 512,
+                 estate_warmup_seconds: int = DEFAULT_ESTATE_WARMUP_SECONDS):
         super().__init__(c)
 
         if (window_seconds <= 0):
@@ -172,6 +190,9 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                             window_ns=window_seconds * NS_PER_SECOND,
                                             min_samples=min_samples,
                                             max_samples=max_samples)
+        self._estate = PairHistoryTracker(window_ns=window_seconds * NS_PER_SECOND,
+                                          warmup_ns=estate_warmup_seconds * NS_PER_SECOND,
+                                          max_entities=1)
 
         self._needed_columns[DESTINATION_KEY] = TypeId.STRING
         self._needed_columns[ISSUER_ESTABLISHED] = TypeId.STRING
@@ -183,7 +204,8 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                        ISSUER_SATURATED,
                        SELF_SIGNED,
                        DESTINATION_GLOBAL,
-                       SELF_SIGNED_EXTERNAL):
+                       SELF_SIGNED_EXTERNAL,
+                       ISSUER_NEW_TO_ESTATE):
             self._needed_columns[column] = TypeId.BOOL8
 
         self._should_log_timestamps = True
@@ -286,6 +308,7 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             self_signed: list = []
             external_self_signed: list = []
             validity: list = []
+            new_to_estate: list = []
             unusable = 0
             unordered = 0
 
@@ -310,6 +333,12 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 # record does not support.
                 external_self_signed.append(None if (
                     signed is None or is_global is None) else bool(signed and is_global))
+
+                if (issuer is None or event_time_ns is None):
+                    new_to_estate.append(None)
+                else:
+                    sighting = self._estate.observe(ESTATE, event_time_ns, issuer)
+                    new_to_estate.append(None if (sighting.out_of_order or not sighting.mature) else not sighting.seen)
 
                 if (key is None or issuer is None or event_time_ns is None):
                     unusable += 1
@@ -339,6 +368,7 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_bool_column(df, DESTINATION_GLOBAL, globals_by_row)
             assign_nullable_bool_column(df, SELF_SIGNED_EXTERNAL, external_self_signed)
             assign_nullable_float_column(df, VALIDITY_DAYS, validity)
+            assign_nullable_bool_column(df, ISSUER_NEW_TO_ESTATE, new_to_estate)
 
             if (unusable > 0):
                 logger.warning(

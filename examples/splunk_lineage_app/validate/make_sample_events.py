@@ -67,6 +67,17 @@ layer 5 rules read only the authentication columns, and sending the session reco
 what proves those rules stay quiet on rows that carry none of the fields they filter on.
 """
 
+CAMPAIGN_SOURCETYPES = {
+    "tc3": "morpheus:score:l3",
+    "tc5_auth": "morpheus:score:l5",
+    "tc7_endpoint": "morpheus:score:l7",
+    "tc5_session": "morpheus:score:l5",
+    "tc4": "morpheus:score:l4",
+    "tc6": "morpheus:score:l6",
+    "tc7_saas": "morpheus:score:l7",
+}
+"""The campaign's classes, in the order it runs them, and the sourcetype each layer's records always go on."""
+
 
 def _render(frame, sourcetype: str) -> list:
     """Put a frame through the wire stage exactly as a pipeline would, and return the lines a sink would write."""
@@ -162,15 +173,13 @@ def main() -> int:
                                           _render(operations, "morpheus:score:l7") +
                                           _render(processes, "morpheus:score:l7"))
 
-    # The campaign: one estate seen by three collectors, which is what R-C-001 is asserted on. Its records go on the
-    # sourcetypes their layers' records always go on, because that is where a chained rule has to find them, and
-    # they share no entity with any other corpus's records.
+    # The campaign: one estate seen by all its collectors, which is what R-C-001 and R-C-004 are asserted on. Its
+    # records go on the sourcetypes their layers' records always go on, because that is where a chained rule has to
+    # find them, and they share no entity with any other corpus's records.
     campaign = campaign_pipeline.run_pipeline(campaign_pipeline.build_pipeline_config(),
                                               campaign_pipeline.build_corpus())
 
-    for (name, sourcetype) in ((campaign_pipeline.FLOW_CLASS, "morpheus:score:l3"),
-                               (campaign_pipeline.AUTH_CLASS, "morpheus:score:l5"), (campaign_pipeline.PROCESS_CLASS,
-                                                                                     "morpheus:score:l7")):
+    for (name, sourcetype) in CAMPAIGN_SOURCETYPES.items():
         rows = campaign[campaign["telemetry_class"] == name]
         by_sourcetype.setdefault(sourcetype, []).extend(_render(rows.dropna(axis=1, how="all"), sourcetype))
 

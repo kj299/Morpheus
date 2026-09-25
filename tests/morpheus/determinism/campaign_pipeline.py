@@ -44,11 +44,25 @@ evidence. Hosts are compared case-folded, because a login log and an EDR name th
 
 **Each step may precede the one it follows by up to two minutes.** That is the rule's declared join tolerance, twice
 a worst-case clock offset of sixty seconds between collectors, as Part 3's governance asks.
+
+**R-C-004 - Staged exfiltration.** Within two hours, in order: a principal's SaaS export more than five times their
+own baseline; a transfer envelope breach from an address the principal holds a session on at that moment; and a
+connection from that address to a destination whose certificate issuer nobody in the estate has seen in thirty days.
+The same collectors' shapes carry it -- SaaS audit, session start and stop, packets, TLS handshakes -- each through
+its own layer's composed pipeline, and the attacker does all three while four others each do all but one:
+
+- **someone else's host**: the breach and the handshake come from an address another principal's session holds;
+- **outside the session**: the breach comes from the principal's own address twenty minutes after they logged off;
+- **known issuer**: the last connection's certificate is the corporate one every host in the estate sees daily;
+- **wrong order**: the breach and the handshake both happen before the export.
 """
 
 import typing
 
 import pandas as pd
+import presentation_pipeline
+import saas_pipeline
+import transport_pipeline
 
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
@@ -64,6 +78,7 @@ from morpheus.stages.telemetry.tc3_cardinality_stage import TC3CardinalityStage
 from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
 from morpheus.stages.telemetry.tc3_ttl_stage import TC3TtlStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
+from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.bitemporal import BitemporalStore
@@ -82,7 +97,13 @@ IGNORE_COLUMNS: list[str] = []
 FLOW_CLASS = "tc3"
 AUTH_CLASS = "tc5_auth"
 PROCESS_CLASS = "tc7_endpoint"
-CLASSES = (FLOW_CLASS, AUTH_CLASS, PROCESS_CLASS)
+SESSION_CLASS = "tc5_session"
+TRANSFER_CLASS = transport_pipeline.TELEMETRY_CLASS
+HANDSHAKE_CLASS = presentation_pipeline.TELEMETRY_CLASS
+SAAS_CLASS = saas_pipeline.SAAS_CLASS
+CLASSES = (FLOW_CLASS, AUTH_CLASS, PROCESS_CLASS, SESSION_CLASS, TRANSFER_CLASS, HANDSHAKE_CLASS, SAAS_CLASS)
+"""The collectors, in the order they are run. The last four are R-C-004's; each of those runs through its layer's own
+composed pipeline, which is the one its single-layer rules are asserted over."""
 
 # The rule's own figures, stated once so the corpus is built around them deliberately.
 CHAIN_WINDOW_SECONDS = 30 * 60
@@ -151,6 +172,59 @@ def at(day: float, hour: float = 0, minute: float = 0, second: float = 0) -> int
 def novel_image(principal: str) -> str:
     """The process each campaign starts, distinct per actor so one never excuses another in the peer group."""
     return rf"C:\Windows\Temp\{principal.split('@')[0]}-svc.exe"
+
+
+# --- R-C-004's actors ---------------------------------------------------------------------------------------------
+
+EXFIL_WINDOW_SECONDS = 2 * 3600
+RECORD_MULTIPLE = 5.0
+EXFIL_SEVERITY = 80
+PRIOR_EXPORTS = 110
+PRIOR_TRANSFERS = 110
+SYNC_SERVER = "198.51.100.10"
+PORTAL = "198.51.100.20"
+PORTAL_ISSUER = presentation_pipeline.CORP_CA
+
+
+class Exfiltrator(typing.NamedTuple):
+    """A principal, the address their session holds, and when each of R-C-004's steps happens on the last day."""
+
+    principal: str
+    address: str
+    """The address the principal's sessions come from."""
+    breach_address: str
+    """Where the breach and the handshake come from. Another principal's address for the someone-else control."""
+    session_end_minute: typing.Optional[float]
+    """When the last day's session ends, minutes after the campaign hour starts; None for the evening, as usual."""
+    export_minute: float
+    breach_minute: float
+    handshake_minute: float
+    issuer: str
+
+
+KIM = "kim@example.com"
+LEE = "lee@example.com"
+MAX = "max@example.com"
+NIA = "nia@example.com"
+OTO = "oto@example.com"
+PIA = "pia@example.com"
+
+
+def relay_issuer(principal: str) -> str:
+    """An authority nobody in the estate has seen, distinct per actor so one's first sighting never covers another's."""
+    return f"CN={principal.split('@')[0].title()} Relay CA, O=Unknown"
+
+
+EXFILTRATORS = {
+    KIM: Exfiltrator(KIM, "10.20.1.5", "10.20.1.5", None, 5, 30, 50, relay_issuer(KIM)),
+    LEE: Exfiltrator(LEE, "10.20.1.6", "10.20.1.7", None, 5, 30, 50, relay_issuer(LEE)),
+    NIA: Exfiltrator(NIA, "10.20.1.8", "10.20.1.8", 10, 5, 30, 50, relay_issuer(NIA)),
+    OTO: Exfiltrator(OTO, "10.20.1.10", "10.20.1.10", None, 5, 30, 50, PORTAL_ISSUER),
+    PIA: Exfiltrator(PIA, "10.20.1.9", "10.20.1.9", None, 30, 5, 15, relay_issuer(PIA)),
+}
+SESSION_HOLDERS = {**{actor.principal: actor.address for actor in EXFILTRATORS.values()}, MAX: "10.20.1.7"}
+"""Every principal with a daily session and the address it comes from. Max exports nothing; Lee's breach comes from
+Max's address."""
 
 
 def servers() -> list:
@@ -253,8 +327,106 @@ def _flows(rows: list, actor: Actor, index: int):
                 _flow(rows, actor.source, f"{base}{count + 1}", at(LAST_DAY, hour, actor.fanout_minute, count * 10))
 
 
+def _session(rows: list, principal: str, address: str, session_id: str, action: str, when: int):
+    record = _envelope(rows, "vpn-01", "tc5_session.v1", f"{session_id}:{action}", when)
+    record.update({
+        "user_principal": principal, "source_ip": address, "session_id": session_id, "session_action": action
+    })
+    rows.append(record)
+
+
+def _packet(rows: list, source: str, source_port: int, destination: str, data_len: int, when: int):
+    record = _envelope(rows, "pcap-01", "tc4.v1", f"{source}:{source_port}={destination}:443", when)
+    record.update({
+        "src_ip": source,
+        "src_port": source_port,
+        "dst_ip": destination,
+        "dst_port": 443,
+        "protocol": "tcp",
+        "tcp_flags": transport_pipeline.PSH_ACK,
+        "data_len": data_len,
+    })
+    rows.append(record)
+
+
+def _handshake(rows: list, source: str, destination: str, issuer: str, when: int):
+    record = _envelope(rows, "tls-inspect-01", "tc6.v1", f"{source}->{destination}", when)
+    record.update({
+        "src_ip": source,
+        "dst_ip": destination,
+        "dst_port": 443,
+        "tls_version": "TLSv1.3",
+        "ja4_client": presentation_pipeline.CHROME,
+        "certificate_issuer": issuer,
+        "certificate_fingerprint_sha256": f"{destination}|{issuer}",
+        "cipher_suite": presentation_pipeline.MODERN_SUITE,
+        "validation_result": presentation_pipeline.VALID,
+        "certificate_not_before": when - 10 * DAY_SECONDS * NS_PER_SECOND,
+        "certificate_not_after": when + 355 * DAY_SECONDS * NS_PER_SECOND,
+        "content_type_declared": None,
+        "content_type_detected": None,
+    })
+    rows.append(record)
+
+
+def _export(rows: list, principal: str, records: int, when: int):
+    record = _envelope(rows, "saas-audit-01", "tc7_saas.v1", f"{principal}>export@{records}", when)
+    record.update({
+        "user_principal": principal,
+        "operation": saas_pipeline.EXPORT,
+        "target_object": "customer-list",
+        "target_object_type": "Account",
+        "record_count": records,
+        "result": "success",
+        "client_app": "web",
+    })
+    rows.append(record)
+
+
+def _build_exfiltration(sessions: list, packets: list, handshakes: list, exports: list):
+    for (index, (principal, address)) in enumerate(sorted(SESSION_HOLDERS.items())):
+        for day in range(LAST_DAY + 1):
+            session_id = f"{principal.split('@')[0]}-{day}"
+            _session(sessions, principal, address, session_id, "start", at(day, 8, index))
+
+            actor = EXFILTRATORS.get(principal)
+            ends_early = day == LAST_DAY and actor is not None and actor.session_end_minute is not None
+            end = at(day, CAMPAIGN_HOUR, actor.session_end_minute) if ends_early else at(day, 18, index)
+            _session(sessions, principal, address, session_id, "end", end)
+
+            # Every host in the estate reaches the corporate portal every day, so its issuer is the estate's own.
+            _handshake(handshakes, address, PORTAL, PORTAL_ISSUER, at(day, 8, 30 + index))
+
+    for (index, actor) in enumerate(EXFILTRATORS.values()):
+        # A long, even history of exports, ending the day before, so the baseline is mature and small.
+        for count in range(PRIOR_EXPORTS):
+            _export(exports, actor.principal, 40 + (count * 4) % 21, at(0, 12, index) + count * 90 * 60 * NS_PER_SECOND)
+
+        # The breach address's regular uploads to the sync server, inside the envelope's eight-hour window.
+        for count in range(PRIOR_TRANSFERS):
+            _packet(packets,
+                    actor.breach_address,
+                    44000 + count,
+                    SYNC_SERVER,
+                    1200,
+                    at(LAST_DAY, 3, index) + count * 3 * 60 * NS_PER_SECOND)
+
+        _export(exports, actor.principal, 5000, at(LAST_DAY, CAMPAIGN_HOUR, actor.export_minute))
+        _packet(packets,
+                actor.breach_address,
+                45000,
+                SYNC_SERVER,
+                60000,
+                at(LAST_DAY, CAMPAIGN_HOUR, actor.breach_minute))
+        _handshake(handshakes,
+                   actor.breach_address,
+                   f"203.0.113.{10 + index}",
+                   actor.issuer,
+                   at(LAST_DAY, CAMPAIGN_HOUR, actor.handshake_minute))
+
+
 def build_corpus() -> dict[str, pd.DataFrame]:
-    """The campaign, split by collector: flows, logins and process starts."""
+    """The campaign, split by collector."""
     flows: list = []
     logins: list = []
     processes: list = []
@@ -293,7 +465,21 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
         return result
 
-    return {FLOW_CLASS: frame(flows), AUTH_CLASS: frame(logins), PROCESS_CLASS: frame(processes)}
+    sessions: list = []
+    packets: list = []
+    handshakes: list = []
+    exports: list = []
+    _build_exfiltration(sessions, packets, handshakes, exports)
+
+    return {
+        FLOW_CLASS: frame(flows),
+        AUTH_CLASS: frame(logins),
+        PROCESS_CLASS: frame(processes),
+        SESSION_CLASS: frame(sessions),
+        TRANSFER_CLASS: frame(packets),
+        HANDSHAKE_CLASS: frame(handshakes),
+        SAAS_CLASS: frame(exports),
+    }
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -326,6 +512,9 @@ def _stages(config: Config, telemetry_class: str) -> tuple:
             TC3TtlStage(config, window_seconds=2 * PERIOD_SECONDS),
         ],
                 3, ["src_ip"])
+
+    if (telemetry_class == SESSION_CLASS):
+        return ([TC5SessionStage(config)], 5, ["user_principal"])
 
     if (telemetry_class == AUTH_CLASS):
         return ([TC5NoveltyStage(config, target_host_column="target_host")], 5, ["user_principal"])
@@ -409,7 +598,18 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
-    frames = [run_class(config, name, batches[name], impose_order=impose_order) for name in CLASSES]
+    # R-C-004's last three collectors go through the composed pipelines their own rules are asserted over, so the
+    # chain is measured on exactly what R-B-L4-005, the layer 6 stages and R-B-L7-002 see.
+    delegated = {TRANSFER_CLASS: transport_pipeline, HANDSHAKE_CLASS: presentation_pipeline, SAAS_CLASS: saas_pipeline}
+    frames = []
+
+    for name in CLASSES:
+        if (name in delegated):
+            frames.append(delegated[name].run_pipeline(config, {name: batches[name][0]},
+                                                       batches={name: batches[name]},
+                                                       impose_order=impose_order))
+        else:
+            frames.append(run_class(config, name, batches[name], impose_order=impose_order))
 
     return canonicalize(pd.concat(frames, ignore_index=True), key_columns=KEY_COLUMNS, ignore_columns=IGNORE_COLUMNS)
 
@@ -431,7 +631,8 @@ def fanout_rises(result: pd.DataFrame) -> pd.DataFrame:
 
     A source with no flows in the hour before has nothing to rise above and is not counted.
     """
-    flows = result[(result["telemetry_class"] == FLOW_CLASS) & result["dsts_per_src"].notna()].copy()
+    flows = result.loc[(result["telemetry_class"] == FLOW_CLASS) & result["dsts_per_src"].notna(),
+                       ["src_ip", "window_id", "dsts_per_src", "event_time", "lineage_id"]].copy()
     flows["window_id"] = flows["window_id"].astype("int64")
     flows["dsts_per_src"] = flows["dsts_per_src"].astype("int64")
     peaks = flows.groupby(["src_ip", "window_id"])["dsts_per_src"].max().rename("previous_peak").reset_index()
@@ -502,5 +703,80 @@ def lateral_movement(result: pd.DataFrame,
 
                 key = (start["src_ip"], login["user_principal"], host)
                 fired.setdefault(key, (t1, t2, t3))
+
+    return fired
+
+
+# --- R-C-004, evaluated the way its search evaluates it ------------------------------------------------------------
+
+
+def session_intervals(result: pd.DataFrame) -> pd.DataFrame:
+    """Each session's principal, address and the interval it was open over. An unended session is open at the end."""
+    rows = result[result["telemetry_class"] == SESSION_CLASS].copy()
+    rows["event_time"] = rows["event_time"].astype("int64")
+    starts = rows[rows["session_action"] == "start"].groupby(["session_key", "user_principal",
+                                                              "source_ip"])["event_time"].min().rename("opened")
+    ends = rows[rows["session_action"] == "end"].groupby("session_key")["event_time"].max().rename("closed")
+
+    return starts.reset_index().merge(ends.reset_index(), on="session_key", how="left")
+
+
+def staged_exfiltration(result: pd.DataFrame,
+                        in_session: bool = True,
+                        session_bound: bool = True,
+                        new_issuer: bool = True,
+                        ordered: bool = True,
+                        window_seconds: typing.Optional[int] = EXFIL_WINDOW_SECONDS,
+                        tolerance_seconds: int = JOIN_TOLERANCE_SECONDS) -> dict:
+    """(principal, address) chains R-C-004 fires on, each with its three step times.
+
+    `session_bound` off lets a breach from any address count; `in_session` off keeps the address a session of the
+    principal's but drops the requirement that it was open at the breach.
+    """
+    tolerance_ns = tolerance_seconds * NS_PER_SECOND
+    window_ns = None if window_seconds is None else window_seconds * NS_PER_SECOND
+
+    exports = result[(result["telemetry_class"] == SAAS_CLASS)
+                     & result["saas_baseline_mature"].map(_truthy)
+                     & (result["saas_record_ratio"].astype("Float64") > RECORD_MULTIPLE).fillna(False)]
+    breaches = result[(result["telemetry_class"] == TRANSFER_CLASS)
+                      & (result["flow_data_len_envelope_breached"].map(_truthy)
+                         | result["flow_bpp_envelope_breached"].map(_truthy))]
+    handshakes = result[result["telemetry_class"] == HANDSHAKE_CLASS]
+
+    if (new_issuer):
+        handshakes = handshakes[handshakes["cert_issuer_new_to_estate"].map(_truthy)]
+
+    sessions = session_intervals(result)
+    fired: dict = {}
+
+    for (_, export) in exports.iterrows():
+        principal = export["user_principal"]
+        t1 = int(export["event_time"])
+        own = sessions[sessions["user_principal"] == principal]
+
+        for (_, breach) in breaches.iterrows():
+            t2 = int(breach["event_time"])
+            address = breach["src_ip"]
+
+            if (ordered and t2 < t1 - tolerance_ns) or (window_ns is not None and t2 - t1 > window_ns):
+                continue
+
+            if (session_bound):
+                held = own[own["source_ip"] == address]
+
+                if (in_session):
+                    held = held[(held["opened"] <= t2) & (held["closed"].isna() | (held["closed"] >= t2))]
+
+                if (len(held) == 0):
+                    continue
+
+            for (_, handshake) in handshakes[handshakes["src_ip"] == address].iterrows():
+                t3 = int(handshake["event_time"])
+
+                if (ordered and t3 < t2 - tolerance_ns) or (window_ns is not None and t3 - t1 > window_ns):
+                    continue
+
+                fired.setdefault((principal, address), (t1, t2, t3))
 
     return fired

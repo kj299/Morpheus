@@ -290,7 +290,9 @@ def test_the_endpoint_pipeline_produces_a_parsable_timestamp(wire_config: Config
 @pytest.mark.gpu_and_cpu_mode
 @pytest.mark.parametrize("telemetry_class, stanza",
                          [("tc3", "morpheus:score:l3"), ("tc5_auth", "morpheus:score:l5"),
-                          ("tc7_endpoint", "morpheus:score:l7")])
+                          ("tc7_endpoint", "morpheus:score:l7"), ("tc5_session", "morpheus:score:l5"),
+                          ("tc4", "morpheus:score:l4"), ("tc6", "morpheus:score:l6"),
+                          ("tc7_saas", "morpheus:score:l7")])
 def test_the_campaign_pipelines_produce_a_parsable_timestamp(wire_config: Config,
                                                              campaign: pd.DataFrame,
                                                              telemetry_class: str,
