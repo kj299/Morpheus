@@ -61,6 +61,7 @@ TARGETS=(
     tests/morpheus/determinism/test_application_harness.py
     tests/morpheus/determinism/test_context_harness.py
     tests/morpheus/determinism/test_determinism_harness.py
+    tests/morpheus/determinism/test_endpoint_harness.py
     tests/morpheus/determinism/test_estate_harness.py
     tests/morpheus/determinism/test_gpu_parity.py
     tests/morpheus/determinism/test_network_harness.py
@@ -102,6 +103,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc6_content_stage.py
     tests/morpheus/stages/test_tc6_fingerprint_stage.py
     tests/morpheus/stages/test_tc7_dns_stage.py
+    tests/morpheus/stages/test_tc7_endpoint_stage.py
     tests/morpheus/stages/test_tc7_http_stage.py
     tests/morpheus/stages/test_tc7_saas_stage.py
     tests/morpheus/stages/test_tc5_cadence_stage.py
@@ -154,6 +156,7 @@ UNMARKED=(
     tests/morpheus/utils/test_link_flap.py
     tests/morpheus/utils/test_media_type.py
     tests/morpheus/utils/test_optical_baseline.py
+    tests/morpheus/utils/test_pair_history.py
     tests/morpheus/utils/test_query_entropy.py
     tests/morpheus/utils/test_tcp_flags.py
     tests/morpheus/utils/test_transfer_envelope.py

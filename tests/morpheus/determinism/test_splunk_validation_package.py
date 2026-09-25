@@ -408,6 +408,25 @@ def test_the_saas_detections_return_exactly_what_is_written(expected: dict):
     assert entry["key_values"] == watchlisted
 
 
+def test_the_endpoint_detection_returns_exactly_what_is_written(expected: dict):
+    # Evaluated over the events the app is fed, the way the search reads them: one row at a time, the stage's
+    # novelty flag the trigger and the integrity level the severity, with no level at the default.
+    severity = {"system": 70, "high": 55, "medium": 40, "low": 25}
+    novel = [event for event in _layer_7_events() if event.get("endpoint_pair_novel") is True]
+    derived = sorted(({
+        "hostname": event["hostname"],
+        "integrity": event.get("endpoint_integrity") or "unknown",
+        "endpoint_host_only": event["endpoint_host_only"],
+        "risk_score": severity.get(event.get("endpoint_integrity"), 40),
+    } for event in novel),
+                     key=lambda row: row["hostname"])
+    entry = expected["searches"]["R-B-L7-004 - Process ancestry novelty"]
+
+    assert entry["contributing_rows"] == len(novel)
+    assert entry["expected_rows"] == len(derived)
+    assert entry["key_values"] == derived
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -559,6 +578,7 @@ NUMBER_WORDS = {
     "thirty-two": 32,
     "thirty-three": 33,
     "thirty-four": 34,
+    "thirty-five": 35,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""

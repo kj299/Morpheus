@@ -82,6 +82,7 @@ from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
 from morpheus.stages.telemetry.tc0_identity_stage import TC0IdentityStage
 from morpheus.stages.telemetry.tc7_dns_stage import TC7DnsStage
 from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
+from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
@@ -482,6 +483,27 @@ def saas_operations() -> dict:
         "result": [row[3] for row in rows],
         "target_object_type": [row[4] for row in rows],
         "event_time": [row[5] for row in rows],
+    }
+
+
+def process_starts() -> dict:
+    """Three hosts, two in one peer group, returning to pairs after gaps of a day or two.
+
+    The first host alternates between two pairs, so a recall bound of one forgets each before it returns; the two
+    grouped hosts interleave, so an entity bound of one forgets each host between its rows; and the first rows fall
+    inside a day of the group's first sighting, so the warm-up decides whether they are judged at all.
+    """
+    rows = [("h1", "a.exe", 0.0, "g", "High"), ("h2", "b.exe", 0.5, "g", "Medium"), ("h1", "b.exe", 1.5, "g", "Low"),
+            ("h1", "a.exe", 2.0, "g", "System"), ("h3", "a.exe", 2.5, None, "High"),
+            ("h2", "c.exe", 3.0, "g", "Medium"), ("h1", "b.exe", 3.5, "g", None)]
+
+    return {
+        "hostname": [row[0] for row in rows],
+        "parent_image_path": [r"C:\Windows\explorer.exe"] * len(rows),
+        "image_path": [rf"C:\Tools\{row[1]}" for row in rows],
+        "event_time": [int(row[2] * 24 * HOUR) for row in rows],
+        "ctx_peer_group": [row[3] for row in rows],
+        "integrity_level": [row[4] for row in rows],
     }
 
 
@@ -1295,6 +1317,25 @@ REGISTRY: dict = {
                 Knob("max_samples", DIFFERS, benign=4096, extreme=1),
                 Knob("max_entities", DIFFERS, benign=500000, extreme=1),
                 Knob("decimals", DIFFERS, benign=4, extreme=1),
+            ),
+        ),
+    "TC7EndpointStage":
+        Scenario(
+            stage=TC7EndpointStage,
+            frame=process_starts,
+            base={"warmup_days": 1},
+            knobs=(
+                Knob("host_column", INPUT_COLUMN, benign="hostname"),
+                Knob("parent_image_column", INPUT_COLUMN, benign="parent_image_path"),
+                Knob("image_column", INPUT_COLUMN, benign="image_path"),
+                Knob("integrity_column", INPUT_COLUMN, benign="integrity_level"),
+                Knob("peer_group_column", INPUT_COLUMN, benign="ctx_peer_group"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                Knob("window_days", DIFFERS, benign=30, extreme=1),
+                Knob("warmup_days", DIFFERS, benign=1, extreme=0),
+                Knob("max_pairs", DIFFERS, benign=16384, extreme=1),
+                Knob("max_entities", DIFFERS, benign=200000, extreme=1),
             ),
         ),
     "TC5CadenceStage":
