@@ -368,7 +368,7 @@ class TC7SaasStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             if (unordered > 0):
                 logger.warning(
-                    "TC7SaasStage saw %d operations arrive no later than the previous one for the same principal "
+                    "TC7SaasStage saw %d operations arrive earlier than the previous one for the same principal "
                     "and operation; they were compared with nothing and did not join the baseline.",
                     unordered)
 

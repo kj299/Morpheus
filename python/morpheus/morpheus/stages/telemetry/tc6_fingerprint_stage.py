@@ -126,9 +126,12 @@ class TC6FingerprintStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._time_unit = time_unit
         self._max_values = max_values
 
+        # A host opens many connections in one timestamp, so handshakes at one instant are measured rather than
+        # refused as the tracker refuses a port's duplicate poll.
         self._tracker = ValueNoveltyTracker(field_names=[fingerprint_column],
                                             max_values=max_values,
-                                            max_entities=max_entities)
+                                            max_entities=max_entities,
+                                            simultaneous=True)
 
         # Handshakes seen per host before the current one. Kept here rather than inside the novelty tracker,
         # which answers a different question and is shared with layer 1. Bounded and evicted the same way, so
@@ -262,7 +265,7 @@ class TC6FingerprintStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             if (unordered > 0):
                 logger.warning(
-                    "TC6FingerprintStage saw %d of %d handshakes arrive no later than their host's previous "
+                    "TC6FingerprintStage saw %d of %d handshakes arrive earlier than their host's previous "
                     "one; they did not enter the history. Whether a fingerprint is new is a question about what "
                     "came before it, which is what an out-of-order arrival disagrees about.",
                     unordered,

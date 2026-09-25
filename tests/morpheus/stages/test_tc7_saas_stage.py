@@ -95,6 +95,17 @@ def test_an_operation_is_not_part_of_its_own_baseline(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_exports_logged_in_the_same_second_are_each_measured(config: Config):
+    # Audit logs stamp to the second, so a burst of exports can share one. None of them is refused, and none is
+    # part of the baseline another is measured against.
+    times = [MONDAY, MONDAY + HOUR, MONDAY + 2 * HOUR, MONDAY + 3 * HOUR, MONDAY + 3 * HOUR]
+    result = run(config, operations([10, 10, 10, 500, 20], times=times), min_samples=3)
+
+    assert [cell(value) for value in result["saas_record_ratio"]][3:] == [50.0, 2.0]
+    assert [cell(value) for value in result["saas_record_baseline"]][3:] == [10.0, 10.0]
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_a_failed_operation_is_measured_by_nothing(config: Config):
     result = run(config,
                  operations([10, 10, 10, 9000, 20],

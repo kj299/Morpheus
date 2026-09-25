@@ -179,6 +179,37 @@ def test_an_out_of_order_observation_leaves_the_history_alone():
     assert after.reference == ISSUER
 
 
+def test_observations_at_one_instant_share_a_reference_whatever_their_order():
+
+    def tied(order):
+        tracker = ValueHistoryTracker(min_samples=2)
+        feed(tracker, "10.0.1.5", [ISSUER] * 3)
+
+        return {value: tracker.observe("10.0.1.5", 3 * NS_PER_SECOND, value) for value in order}
+
+    forwards = tied([OTHER, OTHER, ISSUER])
+    backwards = tied([ISSUER, OTHER, OTHER])
+
+    for results in (forwards, backwards):
+        for result in results.values():
+            assert not result.out_of_order
+            assert result.reference == ISSUER
+            assert result.samples == 3
+
+
+def test_an_instant_joins_the_history_once_it_has_passed():
+    tracker = ValueHistoryTracker(min_samples=2)
+    feed(tracker, "10.0.1.5", [ISSUER] * 2)
+
+    for _ in range(3):
+        tracker.observe("10.0.1.5", 5 * NS_PER_SECOND, OTHER)
+
+    after = tracker.observe("10.0.1.5", 6 * NS_PER_SECOND, ISSUER)
+
+    assert after.samples == 5
+    assert after.reference == OTHER
+
+
 def test_two_entities_keep_separate_references():
     tracker = ValueHistoryTracker(min_samples=2)
     feed(tracker, "10.0.1.5", [ISSUER] * 3)

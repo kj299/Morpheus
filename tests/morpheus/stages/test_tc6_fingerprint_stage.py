@@ -103,6 +103,18 @@ def test_two_hosts_keep_separate_histories(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_handshakes_in_one_second_are_all_measured(config: Config):
+    # A browser opens several connections in the same second. Each is judged against the history before that
+    # second, so a new stack is first seen and a familiar one is not, whichever the log lists first.
+    payload = handshakes([CHROME, CHROME, CURL, NEW_STACK, CHROME])
+    payload["event_time"] = [START, START + SECOND, START + 2 * SECOND, START + 2 * SECOND, START + 2 * SECOND]
+    result = run(config, payload)
+
+    assert [truthy(value) for value in result["ja4_client_first_seen"]] == [False, False, True, True, False]
+    assert result["ja4_client_first_seen"].notna().sum() == 4
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_a_handshake_without_a_fingerprint_teaches_the_history_nothing(config: Config):
     # A null is not a stack. Learning it would make the next real fingerprint read as a change from nothing.
     result = run(config, handshakes([CHROME, None, CHROME]))
