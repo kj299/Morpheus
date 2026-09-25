@@ -117,6 +117,14 @@ class SiemWireStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         expected = (self._sourcetype.time_column, ) + tuple(self._sourcetype.required_columns)
         missing = [column for column in expected if column not in present]
 
+        # A shared sourcetype: one sub-class's columns in full is enough. When none is complete, the nearest one's
+        # gaps are what the message names, since that is most likely the sub-class the records were meant to be.
+        variants = [[column for column in variant if column not in present]
+                    for variant in self._sourcetype.variant_columns]
+
+        if (len(variants) > 0 and min(len(gaps) for gaps in variants) > 0):
+            missing += [column for column in min(variants, key=len) if column not in missing]
+
         if (len(missing) == 0):
             return
 

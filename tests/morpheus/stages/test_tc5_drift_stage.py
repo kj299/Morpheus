@@ -325,6 +325,18 @@ def test_aggregate_mean_is_the_mean_and_not_the_first_or_last(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_aggregate_max_takes_a_running_count_at_its_total(config: Config):
+    # A running count of distinct things touched this week: 1, 2, 3 on the first week and 1, 4 on the next. The
+    # week's figure is its last value, the maximum, and the mean of a running count is nobody's week.
+    scores = [1.0, 2.0, 3.0, 1.0, 4.0]
+    windows = [100, 100, 100, 101, 101]
+    meta = run(config, frame(scores, windows=windows), aggregate="max")
+
+    assert _as_list(meta, "drift_velocity")[-1] == pytest.approx(1.0)
+    assert _as_list(meta, "drift_rising_windows") == [1, 1, 1, 2, 2]
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_aggregate_mean_does_not_depend_on_row_order_inside_the_window(config: Config):
     # Membership decides the mean, not arrival order, so a reordered window gives the same trajectory.
     forward = run(config,

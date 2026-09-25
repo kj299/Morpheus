@@ -98,6 +98,7 @@ def main() -> int:
     import lineage_pipeline  # pylint: disable=import-outside-toplevel
     import network_pipeline  # pylint: disable=import-outside-toplevel
     import presentation_pipeline  # pylint: disable=import-outside-toplevel
+    import saas_pipeline  # pylint: disable=import-outside-toplevel
     import session_pipeline as sp  # pylint: disable=import-outside-toplevel
     import telemetry_pipeline as tp  # pylint: disable=import-outside-toplevel
     import transport_pipeline  # pylint: disable=import-outside-toplevel
@@ -147,11 +148,14 @@ def main() -> int:
                                                     presentation_pipeline.build_corpus())
     by_sourcetype["morpheus:score:l6"] = _render(handshakes, "morpheus:score:l6")
 
-    # Layer 7's DNS and HTTP classes share one sourcetype, as layer 2's classes do. The SaaS and endpoint
-    # sub-classes will join them with the rules that read the TC-0 context store below.
+    # Layer 7's DNS, HTTP and SaaS classes share one sourcetype, as layer 2's classes do. The SaaS class comes from
+    # its own pipeline, because it is the one that reads the TC-0 context store and seals weekly windows; the
+    # endpoint sub-class will join them when it lands.
     requests = application_pipeline.run_pipeline(application_pipeline.build_pipeline_config(),
                                                  application_pipeline.build_corpus())
-    by_sourcetype["morpheus:score:l7"] = _render(requests, "morpheus:score:l7")
+    operations = saas_pipeline.run_pipeline(saas_pipeline.build_pipeline_config(), saas_pipeline.build_corpus())
+    by_sourcetype["morpheus:score:l7"] = (_render(requests, "morpheus:score:l7") +
+                                          _render(operations, "morpheus:score:l7"))
 
     # The TC-0 context store: every version the two producers recorded, refused ones included, because a count of
     # refusals is something an estate should be able to see on its search head. The probes are the harness's own

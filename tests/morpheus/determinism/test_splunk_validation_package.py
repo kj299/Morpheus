@@ -362,6 +362,52 @@ def test_the_layer_7_detections_return_exactly_what_is_written(expected: dict):
     assert written == derived
 
 
+def test_the_saas_detections_return_exactly_what_is_written(expected: dict):
+    # Evaluated over the events the app is fed, the way the two searches read them. R-B-L7-002 reads one row and
+    # takes its severity from the classification the enrichment attached; R-P-L7-006 reads every week of a
+    # principal at once -- here the whole corpus, which gives the same answer as the four-week dispatch window
+    # because every rise in it fits inside four weeks.
+    events = _layer_7_events()
+    searches = expected["searches"]
+    severity = {"restricted": 75, "confidential": 60, "internal": 40, "public": 20}
+
+    bulk = [
+        event for event in events
+        if event.get("saas_baseline_mature") is True and (event.get("saas_record_ratio") or 0) > 5
+    ]
+    derived = sorted(({
+        "user_principal": event["user_principal"],
+        "classification": event.get("ctx_object_data_classification") or "unclassified",
+        "risk_score": severity.get(event.get("ctx_object_data_classification"), 40),
+    } for event in bulk),
+                     key=lambda row: row["user_principal"])
+    entry = searches["R-B-L7-002 - Bulk data access"]
+
+    assert entry["contributing_rows"] == len(bulk)
+    assert entry["expected_rows"] == len(derived)
+    assert entry["key_values"] == derived
+
+    rising: dict = collections.defaultdict(int)
+    roles: dict = collections.defaultdict(set)
+
+    for event in events:
+        if (event.get("saas_object_types_in_week") is None):
+            continue
+
+        principal = event["user_principal"]
+        rising[principal] = max(rising[principal], event.get("drift_rising_windows") or 0)
+        roles[principal].add(event.get("ctx_groups") or "none")
+
+    watchlisted = sorted(({
+        "user_principal": principal, "rising_weeks": rising[principal], "role": next(iter(roles[principal]))
+    } for principal in rising if rising[principal] >= 4 and len(roles[principal]) == 1),
+                         key=lambda row: row["user_principal"])
+    entry = searches["R-P-L7-006 - Access breadth trajectory"]
+
+    assert entry["expected_rows"] == len(watchlisted)
+    assert entry["key_values"] == watchlisted
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -511,6 +557,8 @@ NUMBER_WORDS = {
     "thirty": 30,
     "thirty-one": 31,
     "thirty-two": 32,
+    "thirty-three": 33,
+    "thirty-four": 34,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -519,7 +567,7 @@ which is the right failure: the document said something nobody here anticipated.
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Seven of thirty-two. That ratio is the honest state of this app, and stating it is the package's main job.
+    # Seven of thirty-four. That ratio is the honest state of this app, and stating it is the package's main job.
     # The seventh is R-P-L3-005, which reads the behavior summary this package does not populate -- the same
     # deployment-step blocker the chain assembly search has, arriving with layer 3 rather than being discovered.
     # It

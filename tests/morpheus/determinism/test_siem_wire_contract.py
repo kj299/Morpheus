@@ -42,6 +42,7 @@ import application_pipeline  # noqa: E402
 import context_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
 import presentation_pipeline  # noqa: E402
+import saas_pipeline  # noqa: E402
 import session_pipeline  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 import transport_pipeline  # noqa: E402
@@ -115,6 +116,13 @@ def application_fixture() -> pd.DataFrame:
     config = application_pipeline.build_pipeline_config()
 
     yield application_pipeline.run_pipeline(config, application_pipeline.build_corpus())
+
+
+@pytest.fixture(name="operations", scope="module")
+def operations_fixture() -> pd.DataFrame:
+    config = saas_pipeline.build_pipeline_config()
+
+    yield saas_pipeline.run_pipeline(config, saas_pipeline.build_corpus())
 
 
 @pytest.fixture(name="context", scope="module")
@@ -243,6 +251,15 @@ def test_the_application_pipeline_produces_a_parsable_timestamp(wire_config: Con
     assert len(rows) > 0, f"the harness emitted no {telemetry_class} rows"
 
     assert_parses_as_its_own_stanza(wire_config, rows, "morpheus:score:l7")
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_saas_pipeline_produces_a_parsable_timestamp(wire_config: Config, operations: pd.DataFrame):
+    # The third layer 7 class on the same stanza, from its own pipeline, because it reads the context store and
+    # seals weekly windows the other two do not.
+    assert len(operations) > 0
+
+    assert_parses_as_its_own_stanza(wire_config, operations.reset_index(drop=True), "morpheus:score:l7")
 
 
 @pytest.mark.gpu_and_cpu_mode

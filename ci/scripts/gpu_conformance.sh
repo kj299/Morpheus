@@ -65,6 +65,7 @@ TARGETS=(
     tests/morpheus/determinism/test_gpu_parity.py
     tests/morpheus/determinism/test_network_harness.py
     tests/morpheus/determinism/test_presentation_harness.py
+    tests/morpheus/determinism/test_saas_harness.py
     tests/morpheus/determinism/test_session_harness.py
     tests/morpheus/determinism/test_siem_wire_contract.py
     tests/morpheus/determinism/test_telemetry_harness.py
@@ -102,6 +103,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc6_fingerprint_stage.py
     tests/morpheus/stages/test_tc7_dns_stage.py
     tests/morpheus/stages/test_tc7_http_stage.py
+    tests/morpheus/stages/test_tc7_saas_stage.py
     tests/morpheus/stages/test_tc5_cadence_stage.py
     tests/morpheus/stages/test_tc5_drift_stage.py
     tests/morpheus/stages/test_tc5_novelty_stage.py

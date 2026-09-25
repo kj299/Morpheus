@@ -42,7 +42,8 @@ logger = logging.getLogger(__name__)
 
 AGGREGATE_NONE = "none"
 AGGREGATE_MEAN = "mean"
-AGGREGATES = (AGGREGATE_NONE, AGGREGATE_MEAN)
+AGGREGATE_MAX = "max"
+AGGREGATES = (AGGREGATE_NONE, AGGREGATE_MEAN, AGGREGATE_MAX)
 
 
 @register_stage("tc5-drift")
@@ -97,7 +98,9 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         of their scores, and stamps that observation's trajectory on every one of them. That is the reduction
         the trajectory needs when the score is per event and the window is a day, and it relies on the message
         holding the whole window, which is what `WindowSealStage` emits: a fragment would give the mean of a
-        fragment, and nothing here can tell the difference.
+        fragment, and nothing here can tell the difference. `"max"` reduces them to the largest score instead,
+        which is the reduction for a running count -- the distinct object types a principal has touched so far
+        this week -- whose last value is the window's total and whose mean is not.
     """
 
     def __init__(self,
@@ -218,7 +221,7 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             # so the mean depends on membership alone, the same property the chain root has.
             reduced: dict = {}
 
-            if (self._aggregate == AGGREGATE_MEAN):
+            if (self._aggregate in (AGGREGATE_MEAN, AGGREGATE_MAX)):
                 members: dict = {}
 
                 for position in range(row_count):
@@ -231,7 +234,8 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
                     members.setdefault((entity, int(window)), []).append(float(score))
 
-                reduced = {key: statistics.fmean(sorted(values)) for (key, values) in members.items()}
+                reduce = statistics.fmean if self._aggregate == AGGREGATE_MEAN else max
+                reduced = {key: reduce(sorted(values)) for (key, values) in members.items()}
 
             observed: dict = {}
 
@@ -254,7 +258,7 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
                 window_id = int(window)
 
-                if (self._aggregate == AGGREGATE_MEAN):
+                if (self._aggregate in (AGGREGATE_MEAN, AGGREGATE_MAX)):
                     key = (entity, window_id)
 
                     if (key not in observed):

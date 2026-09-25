@@ -263,19 +263,19 @@
       "why": "A chained rule over two detections' notables: R-B-L6-001 at layer 6 and R-B-L3-002 at layer 3. Both halves now have producers and both fire on their own corpora -- which is new, and is what made the search's real defect visible: it grouped `by src_ip dest_ip` while every detection in this fork emits `dst_ip`, so it would have correlated every fingerprint in the window against every beacon through one null group rather than returning nothing. That is fixed. What keeps it empty now is the corpora: layer 3 and layer 6 come from separate seeded runs sharing no host, and the search also reads `rule_id`, which detections write into the index as they fire rather than anything the pipeline emits."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 970,
+      "expected_rows": 2091,
       "expected_empty": false,
-      "contributing_rows": 3871,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 3871 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, none of which shares an entity with the estate's ports and principals or with each other."
+      "contributing_rows": 4992,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 4992 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them and 1121 SaaS operations keyed on the principals who performed them, none of which shares an entity with the estate's ports and principals or with each other."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 676,
+      "distinct_lineage_ids": 1553,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 676 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 1553 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,
@@ -341,6 +341,46 @@
         }
       ],
       "why": "Seven principal-days after deduplication, from 21 rows that carry the trajectory. None of them is behaviour, and the search says so in its own comment. Two principals climb for six straight days because the reference scorer's parameters are frozen while `logcount` and the `*increment` features are cumulative: a score whose baseline never moves under a feature that only grows must rise, and that is arithmetic. The third, on the day of the planted multi-factor burst, has a run of four whose first three rises are hundredths and whose fourth is the burst -- a spike the rule's letter admits because the day's mean stays under R-B-L5-001's 2.0. The predicate is evaluated here exactly as the search states it, so a corpus change that adds or removes a firing shows up as a diff rather than as a search that quietly means something else. What a deployment should take from this: the drift path's first false positives are cumulative features under a stale baseline, and a spike at the end of a flat run. Both are visible in `drift_acceleration` and `drift_baseline_sigma`."
+    },
+    "R-B-L7-002 - Bulk data access": {
+      "expected_rows": 3,
+      "expected_empty": false,
+      "contributing_rows": 3,
+      "why": "Three notables, one per principal, and the classification sets each one's severity rather than deciding whether it fires. nate@example.com exported 5000 records from a restricted object against an export baseline of 54: 75. olga@example.com exported the same multiple from a public price list: 20. pat@example.com exported it from an object the inventory has never heard of: the default 40, with ctx_object_found=false. The controls each fail one condition: quin@example.com's 5000-record export is inside a baseline of 4978; sam@example.com's is 4.9 times theirs; rosa@example.com has twenty exports behind them and so no baseline; tom@example.com's export was denied and read nothing. nate@example.com also queries two to three thousand records all month, which is why the baseline is per operation -- pooled, the export would be under twice their normal.",
+      "key_values": [
+        {
+          "user_principal": "nate@example.com",
+          "classification": "restricted",
+          "risk_score": 75
+        },
+        {
+          "user_principal": "olga@example.com",
+          "classification": "public",
+          "risk_score": 20
+        },
+        {
+          "user_principal": "pat@example.com",
+          "classification": "unclassified",
+          "risk_score": 40
+        }
+      ]
+    },
+    "R-P-L7-006 - Access breadth trajectory": {
+      "expected_rows": 2,
+      "expected_empty": false,
+      "why": "Two principals watchlisted, evaluated over the whole corpus rather than the four-week dispatch window, which gives the same principals because every rise in it fits inside four weeks. ivy@example.com reached one more object type every week from week 3 to week 7 with the same group memberships throughout. kate@example.com did the same, and that principal's role did change in week 5 -- but the directory recorded it in week 9, so on every week of the rise the context attached to the operations said sales-users, and the rule could only know what was known. jack@example.com has the same rise with the same role change recorded on time, and is quiet because the memberships differ across the weeks. leo@example.com rises for two weeks only; mia@example.com reaches eight types every week and never rises.",
+      "key_values": [
+        {
+          "user_principal": "ivy@example.com",
+          "rising_weeks": 5,
+          "role": "sales-users"
+        },
+        {
+          "user_principal": "kate@example.com",
+          "rising_weeks": 5,
+          "role": "sales-users"
+        }
+      ]
     }
   }
 }

@@ -206,6 +206,41 @@ def test_a_missing_required_column_raises(config: Config):
 
 
 @pytest.mark.cpu_mode
+@pytest.mark.parametrize("variant", range(3))
+def test_a_shared_sourcetype_accepts_any_one_sub_class_in_full(config: Config, variant: int):
+    # Layer 7's three sub-classes share one sourcetype and a deployment may emit only one of them. Requiring the
+    # union would refuse every such deployment, which is what the check did before sub-classes were declared.
+    columns = siem_sourcetypes.PRODUCED["morpheus:score:l7"].variant_columns[variant]
+    frame = {
+        "event_time": [SAMPLE_NS], "event_uid": ["u"], "entity_key": ["k"], **{
+            column: [None]
+            for column in columns
+        }
+    }
+
+    result = run_stage(config, frame, "morpheus:score:l7")
+
+    assert parse_as_splunk_would(as_lines(result)[0], "morpheus:score:l7") == SAMPLE_TIME
+
+
+@pytest.mark.cpu_mode
+def test_a_shared_sourcetype_refuses_a_record_with_no_sub_class_in_full(config: Config):
+    # One column short of the SaaS set: the message names that column, from the nearest sub-class, rather than
+    # every column of all three.
+    columns = list(siem_sourcetypes.PRODUCED["morpheus:score:l7"].variant_columns[2])
+    dropped = columns.pop()
+    frame = {
+        "event_time": [SAMPLE_NS], "event_uid": ["u"], "entity_key": ["k"], **{
+            column: [None]
+            for column in columns
+        }
+    }
+
+    with pytest.raises(KeyError, match=f"missing {dropped}\\."):
+        run_stage(config, frame, "morpheus:score:l7")
+
+
+@pytest.mark.cpu_mode
 def test_a_missing_anchor_column_names_the_consequence(config: Config):
     with pytest.raises(KeyError, match="stamped at index"):
         run_stage(config, {"bind_start": [SAMPLE_NS]}, "binding:l2")

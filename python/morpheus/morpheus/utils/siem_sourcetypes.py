@@ -72,6 +72,17 @@ class Sourcetype:
     free to add columns; it is not free to drop these.
     """
 
+    variant_columns: tuple = ()
+    """
+    For a sourcetype several sub-classes share, the columns each sub-class's records carry. A record must carry
+    `required_columns` and one of these sets in full.
+
+    Without it, a shared sourcetype's required columns are the union of every sub-class's, and a deployment
+    emitting only one sub-class is refused for lacking the others' fields. The union is what `morpheus:score:l7`
+    carried for its first two classes; the harness never noticed, because a composed frame carries every column,
+    and the third class is what made a frame with only its own columns reach the check.
+    """
+
 
 @dataclasses.dataclass(frozen=True)
 class Unproduced:
@@ -192,25 +203,45 @@ PRODUCED: dict = {
             name="morpheus:score:l7",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-7 DNS and HTTP stages behind WindowSealStage; the `tc7_dns` and `tc7_http` classes of "
-            "`tests/morpheus/determinism/application_pipeline.py`. The SaaS and endpoint sub-classes will share this "
-            "sourcetype when they land.",
-            # R-B-L7-001 and R-D-L7-005 read these. The two count columns are here as well as the ratio because the
-            # ratio is undefined for a client with no successes, and the search reads the counts for that reason.
-            required_columns=("event_uid",
-                              "src_ip",
-                              "query_name",
-                              "dns_registered_domain",
-                              "dns_subdomain",
-                              "dns_subdomain_entropy",
-                              "dns_mean_label_length",
-                              "dns_subdomains_per_domain",
-                              "url_path",
-                              "status_code",
-                              "http_4xx_in_window",
-                              "http_2xx_in_window",
-                              "http_4xx_to_2xx_ratio",
-                              "http_distinct_paths"),
+            producer="The TC-7 DNS and HTTP stages behind WindowSealStage, the `tc7_dns` and `tc7_http` classes of "
+            "`tests/morpheus/determinism/application_pipeline.py`; and TC7SaasStage, enriched by TC0EnrichStage and "
+            "followed by a weekly TC5DriftStage, the `tc7_saas` class of "
+            "`tests/morpheus/determinism/saas_pipeline.py`. The endpoint sub-class will share this sourcetype when it "
+            "lands.",
+            # R-B-L7-001 and R-D-L7-005 read the DNS and HTTP columns. The two count columns are here as well as the
+            # ratio because the ratio is undefined for a client with no successes, and the search reads the counts
+            # for that reason. R-B-L7-002 and R-P-L7-006 read the SaaS columns, the context the enrichment attached,
+            # and the weekly trajectory.
+            required_columns=("event_uid", "entity_key"),
+            variant_columns=(
+                ("src_ip",
+                 "query_name",
+                 "dns_registered_domain",
+                 "dns_subdomain",
+                 "dns_subdomain_entropy",
+                 "dns_mean_label_length",
+                 "dns_subdomains_per_domain"),
+                ("src_ip",
+                 "url_path",
+                 "status_code",
+                 "http_4xx_in_window",
+                 "http_2xx_in_window",
+                 "http_4xx_to_2xx_ratio",
+                 "http_distinct_paths"),
+                ("user_principal",
+                 "operation",
+                 "target_object_type",
+                 "record_count",
+                 "saas_baseline_mature",
+                 "saas_record_baseline",
+                 "saas_record_ratio",
+                 "saas_object_types_in_week",
+                 "ctx_object_data_classification",
+                 "ctx_object_found",
+                 "ctx_groups",
+                 "drift_rising_windows",
+                 "week_window_id"),
+            ),
         ),
     "morpheus:score:l2":
         Sourcetype(
