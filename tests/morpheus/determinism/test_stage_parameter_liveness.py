@@ -82,6 +82,7 @@ from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
 from morpheus.stages.telemetry.tc0_identity_stage import TC0IdentityStage
 from morpheus.stages.telemetry.tc7_dns_stage import TC7DnsStage
 from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
+from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
@@ -454,6 +455,34 @@ def _context_store(correction: str = "Marketing") -> BitemporalStore:
 
 def context_probes() -> dict:
     return {"user_principal": ["carol", "carol", "mallory"], "event_time": [5 * DAY, 25 * DAY, 5 * DAY]}
+
+
+def saas_operations() -> dict:
+    """Two principals' exports and queries across two weeks, one export failing, one far above its history."""
+    monday = 4 * DAY
+    rows = [(principal, operation, count, result, object_type, monday + index * HOUR)
+            for (index,
+                 (principal, operation, count, result,
+                  object_type)) in enumerate([("ann", "Export", 10, "success",
+                                               "A"), ("ann", "Query", 3000, "success",
+                                                      "B"), ("ann", "Export", 12, "success",
+                                                             "A"), ("ann", "Query", 3000, "success",
+                                                                    "C"), ("bob", "Export", 10, "success",
+                                                                           "A"), ("ann", "Export", 11, "success",
+                                                                                  "D"), ("ann", "Export", 400, "denied",
+                                                                                         "E"), ("ann", "Export", 200,
+                                                                                                "success", "F")])]
+    rows.append(("ann", "Export", 30, "success", "A", monday + 6 * DAY + 23 * HOUR))
+    rows.append(("ann", "Export", 30, "success", "B", monday + 7 * DAY + HOUR))
+
+    return {
+        "user_principal": [row[0] for row in rows],
+        "operation": [row[1] for row in rows],
+        "record_count": [row[2] for row in rows],
+        "result": [row[3] for row in rows],
+        "target_object_type": [row[4] for row in rows],
+        "event_time": [row[5] for row in rows],
+    }
 
 
 def handshakes() -> dict:
@@ -1246,6 +1275,28 @@ REGISTRY: dict = {
                      Knob("max_samples", DIFFERS, benign=4096, extreme=2),
                      Knob("max_entities", DIFFERS, benign=500000, extreme=1),
                  )),
+    "TC7SaasStage":
+        Scenario(
+            stage=TC7SaasStage,
+            frame=saas_operations,
+            base={"min_samples": 2},
+            knobs=(
+                Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
+                Knob("operation_column", INPUT_COLUMN, benign="operation"),
+                Knob("object_type_column", INPUT_COLUMN, benign="target_object_type"),
+                Knob("record_count_column", INPUT_COLUMN, benign="record_count"),
+                Knob("result_column", INPUT_COLUMN, benign="result"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                Knob("baseline_days", DIFFERS, benign=30, extreme=1),
+                Knob("quantile", DIFFERS, benign=0.99, extreme=0.0),
+                Knob("min_samples", DIFFERS, benign=2, extreme=3),
+                Knob("week_epoch", DIFFERS, benign="1970-01-05", extreme="1970-01-04"),
+                Knob("max_samples", DIFFERS, benign=4096, extreme=1),
+                Knob("max_entities", DIFFERS, benign=500000, extreme=1),
+                Knob("decimals", DIFFERS, benign=4, extreme=1),
+            ),
+        ),
     "TC5CadenceStage":
         Scenario(
             stage=TC5CadenceStage,

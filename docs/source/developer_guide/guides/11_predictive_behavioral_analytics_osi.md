@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is forty-two stages and thirty-eight supporting
-modules, covered by 1,633 distinct tests, itemized in
+8's total order, and control 13's CI harness. That is forty-three stages and thirty-eight supporting
+modules, covered by 1,672 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1586,10 +1586,18 @@ Two of these six are built and ship as saved searches: R-B-L7-001, reading
 `tests/morpheus/determinism/test_application_harness.py`, and every condition in each rule has a benign case
 beside it that the condition alone keeps quiet: a content delivery network whose labels are random but short, a
 tenant domain with random labels but too few of them, a crawler past two hundred paths that mostly succeeds, and
-a broken client refused on a handful of paths. The other four are not built. R-B-L7-002, R-P-L7-006 and
-R-B-L7-004 read the TC-0 context store -- a classification weight, a role assignment and a peer group -- and
-that store has only now been built; their rules are the next increments. R-B-L7-003 needs a running Triton
-server, and nothing in this fork's CI can fire it.
+a broken client refused on a handful of paths.
+
+Two more are built on the TC-0 context store: R-B-L7-002 and R-P-L7-006, reading
+{py:class}`~morpheus.stages.telemetry.tc7_saas_stage.TC7SaasStage` after
+{py:class}`~morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage` has attached the principal's group
+memberships and the target object's data classification, and a weekly
+{py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` has measured the trajectory. Both are asserted
+in `tests/morpheus/determinism/test_saas_harness.py` with the same one-control-per-condition discipline: a principal
+whose large exports are routine, one exporting just under five times their normal, a newcomer with no baseline and a
+denied export for the first; a rise with a role change in the middle, a rise of two weeks and a principal who has
+always reached everything for the second. Two are not built yet. R-B-L7-004 reads a host's peer group and is the next
+increment. R-B-L7-003 needs a running Triton server, and nothing in this fork's CI can fire it.
 
 Three decisions the text above leaves open are made here. **Entropy is measured below the registered domain.**
 Ordinary names score 3.0 to 3.7 bits per character as whole names but 0 to 2.3 once the registered domain is
@@ -1602,6 +1610,25 @@ conditions on different queries; the search counts distinct subdomains only amon
 entropy and length conditions. And **the enumeration ratio is evaluated as a multiplication**, 4xx above 0.7
 times 2xx, because the ratio is undefined for a client that has never received a success, and that client is
 the enumerator most worth reporting.
+
+Five more decisions come with the SaaS rules. **The baseline is the principal's and the operation's together.** An
+analyst reads a few records at a time all day and exports thousands once a month; a baseline pooling the two calls
+every export a breach or excuses every bulk read, and the corpus's planted exporter, who queries thousands of records
+all month, would be under twice their pooled normal. **No baseline below a hundred priors**, as at layer 4, because
+by nearest rank the 99th percentile of fewer is simply the largest value ever seen. **The classification weights
+the notable rather than gating it**: the trigger is the text above, five times the principal's own 99th percentile,
+and the target's classification sets the severity -- 75 restricted, 60 confidential, 40 internal, 20 public -- with
+an object the inventory has never heard of firing at 40, flagged, rather than dropped. **A week is Monday to Monday
+UTC, and "increasing across consecutive weekly windows" is four weeks**, three rises in a row, measured by the same
+trajectory stage as R-P-L5-006 and, like it, a watchlist rather than a page. And **the role is the principal's
+group memberships as the store recorded them at each operation's time.** That has a consequence the corpus makes
+visible rather than hides: a role change recorded after the rise is not known during it, and the rule watchlists a
+principal whose role did change, because on every week of the rise nothing said it had. Asked with everything
+recorded since, the rule would stay quiet; the harness asserts both answers, and the event-time one is what ships,
+because a rule that revises its own past alerts as the directory catches up cannot be replayed.
+
+A failed operation enters neither measurement: a denied export read no records, and a type the principal was
+refused is not a type they reached.
 
 One departure from Part 2's entity key is recorded where it is made. TC-7 gives `hostname` as the key for DNS;
 both stages seal on the querying client, `src_ip`, because that is the address a resolver log carries and the
@@ -3183,6 +3210,18 @@ What Morpheus provides versus what has to be built, stated plainly.
   names and one random one, since the count and the entropy are then met by different queries; the search counts
   subdomains only among the queries that meet the other two. And R-D-L7-005 written as a ratio never fires on the
   client that received nothing but refusals.
+- Layer 7's SaaS sub-class and its two rules
+  ({py:class}`~morpheus.stages.telemetry.tc7_saas_stage.TC7SaasStage`, composed with two
+  {py:class}`~morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage` passes and a weekly
+  {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` in
+  `tests/morpheus/determinism/saas_pipeline.py`), the first rules in this fork to read the TC-0 context store.
+  `TC5DriftStage` gained a `max` aggregate, because a week's breadth is the last value of a running count and its
+  mean is nobody's week. **What building it caught that the prose had not.** `morpheus:score:l7` is shared by three
+  sub-classes, and its required columns had been the union of the first two's: a deployment emitting only DNS
+  records would have been refused by the wire stage for lacking HTTP fields. The harness never noticed, because a
+  composed frame carries every column. A sourcetype now declares each sub-class's columns separately, and a record
+  must carry one set in full. And R-P-L7-006's "role unchanged" turned out to depend on which knowledge answers it,
+  which is recorded above rather than left to be discovered on an investigation.
 - The TC-0 identity and asset context store
   ({py:mod}`~morpheus.utils.bitemporal`,
   {py:class}`~morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage`,
@@ -3203,8 +3242,8 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`). Every column the reference
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
-  counts are the finding: nine columns identify a person, seventeen address their device, fourteen locate
-  them, and a hundred and sixty are profile, a hundred and fifty-four of them behavioural and derived here,
+  counts are the finding: eleven columns identify a person, seventeen address their device, fourteen locate
+  them, and a hundred and seventy are profile, a hundred and sixty-four of them behavioural,
   which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
@@ -3446,8 +3485,8 @@ That test is the point of it: an inventory nobody checks reads as authoritative 
 whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
-fork emits, nine identify a person, seventeen are addresses, fourteen locate, eight are pseudonyms -- and
-a hundred and sixty are profile, a hundred and fifty-four of them behavioural and derived here; the other
+fork emits, eleven identify a person, seventeen are addresses, fourteen locate, nine are pseudonyms -- and
+a hundred and seventy are profile, a hundred and sixty-four of them behavioural; the other
 six are the organisational columns the TC-0 context store and its join carry. **The largest category by far
 is the one the design manufactures rather than collects.** An estate reviewing this will think about the
 authentication logs it ingested; most of what it ends up holding about a person is derived here, from those
