@@ -278,6 +278,10 @@ SPL_WORDS = {
     # `streamstats current=f` excludes the current row from the running figures, which is how R-P-L3-005 reads
     # each window against the two before it rather than against itself. An argument to the command, not a field.
     "current",
+    # `join type=inner max=0` is how R-C-001 joins its three steps: an inner join keeping every match rather than
+    # the first. Arguments to the command, not fields.
+    "join",
+    "type",
     "key_field",
     "kv_store",
     "local",
@@ -302,6 +306,7 @@ def golden_columns() -> set:
                  "golden_transport_expected.csv",
                  "golden_presentation_expected.csv",
                  "golden_application_expected.csv",
+                 "golden_campaign_expected.csv",
                  "golden_context_expected.csv",
                  "golden_endpoint_expected.csv",
                  "golden_saas_expected.csv",
@@ -354,7 +359,7 @@ def producible() -> set:
 def test_the_app_is_where_we_think_it_is():
     # Without this every assertion below passes over an empty parse, which is the failure mode a linter must not
     # have: it would report a clean bill of health for a file it never read.
-    assert len(searches()) == 35
+    assert len(searches()) == 36
     assert len(lookup_fields()) > 0
     assert len(stage_columns()) > 40
 

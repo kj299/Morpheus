@@ -87,6 +87,9 @@ profile: a dictionary of common command lines reverses it. The process identifie
 nameless and fully re-identifying against the EDR's own records. The integrity level and signature status describe
 the binary, not the person, and are `OPERATIONAL`; each has a handful of values, so both are in `BOUNDED_DOMAIN`.
 
+A host login names the host logged into, `target_host`, which addresses a device the way `hostname` does; whether
+the principal had logged into it before is `target_host_first_seen`, a fact about their history and so a profile.
+
 **The TC-0 context store is personal data of a different kind, and is classified on the same rule.** Department,
 employment status and group membership are organisational facts about an identifiable person rather than behaviour
 this design derived, but they describe the person, so they are `PROFILES`; a manager and an asset's owner are other
@@ -151,6 +154,7 @@ _ADDRESSES = (
     "mac_address",
     "source_ip",
     "src_ip",
+    "target_host",
     "tls_client_key",
     "tls_destination_key",
     "tls_pair_key",
@@ -322,6 +326,7 @@ _PROFILES = (
     "saas_object_types_in_week",
     "saas_record_baseline",
     "saas_record_ratio",
+    "target_host_first_seen",
     "target_object",
     "target_object_type",
     "tls_version",

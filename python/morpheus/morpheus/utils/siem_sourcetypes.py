@@ -273,23 +273,30 @@ PRODUCED: dict = {
             time_column="event_time",
             time_columns=("event_time", ),
             producer="The TC-5 stages (session, novelty, cadence, travel, risk) behind WindowSealStage; the "
-            "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`.",
-            # R-D-L5-003 and R-D-L5-004 filter on the first eight; R-P-L5-006 on the rest, which TC5DriftStage
-            # stamps over the daily windows a second WindowSealStage seals behind the hourly one.
-            required_columns=("event_uid",
-                              "user_principal",
-                              "travel_status",
-                              "travel_kmh",
-                              "travel_elapsed_ns",
-                              "mfa_denied_then_approved",
-                              "mfa_attempts_in_window",
-                              "mfa_denials_in_window",
-                              "mean_abs_z",
-                              "max_abs_z",
-                              "day_window_id",
-                              "drift_mature",
-                              "drift_rising_windows",
-                              "drift_rise_sigmas"),
+            "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`; and host "
+            "logins through TC5NoveltyStage with a target host, the `tc5_auth` class of "
+            "`tests/morpheus/determinism/campaign_pipeline.py`.",
+            # Two sources with different shapes share this sourcetype. An identity provider's sign-ins carry
+            # locations and factors and are scored: R-D-L5-003 and R-D-L5-004 filter on the first six of that set,
+            # and R-P-L5-006 on the rest, which TC5DriftStage stamps over the daily windows a second
+            # WindowSealStage seals behind the hourly one. A host login -- a Windows logon, an SSH session -- has
+            # no location or factor but names the host logged into, which R-C-001 reads.
+            required_columns=("event_uid", "user_principal"),
+            variant_columns=(
+                ("travel_status",
+                 "travel_kmh",
+                 "travel_elapsed_ns",
+                 "mfa_denied_then_approved",
+                 "mfa_attempts_in_window",
+                 "mfa_denials_in_window",
+                 "mean_abs_z",
+                 "max_abs_z",
+                 "day_window_id",
+                 "drift_mature",
+                 "drift_rising_windows",
+                 "drift_rise_sigmas"),
+                ("source_ip", "target_host", "target_host_first_seen", "auth_result"),
+            ),
         ),
     "morpheus:edge":
         Sourcetype(

@@ -51,6 +51,7 @@ SAVEDSEARCHES = os.path.join(REPO_ROOT,
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import campaign_pipeline  # noqa: E402
 import session_pipeline as sp  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 
@@ -427,6 +428,28 @@ def test_the_endpoint_detection_returns_exactly_what_is_written(expected: dict):
     assert entry["key_values"] == derived
 
 
+def test_the_lateral_movement_chain_returns_exactly_what_is_written(expected: dict):
+    # Evaluated over every flow, login and process the app is fed, from every corpus, the way the search reads
+    # them -- not only over the campaign's -- with the same predicate the campaign harness asserts.
+    events = [
+        event for event in _scored_events()
+        if event.get("telemetry_class") in (campaign_pipeline.FLOW_CLASS, campaign_pipeline.AUTH_CLASS,
+                                            campaign_pipeline.PROCESS_CLASS)
+    ]
+    frame = pd.DataFrame(events)
+    stamps = pd.to_datetime(frame["event_time"].str.replace("UTC", "", regex=False), utc=True)
+    frame["event_time"] = (stamps - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(nanoseconds=1)
+
+    chains = sorted(({
+        "src_ip": source, "user_principal": principal, "target": target
+    } for (source, principal, target) in campaign_pipeline.lateral_movement(frame)),
+                    key=lambda row: (row["src_ip"], row["user_principal"]))
+    entry = expected["searches"]["R-C-001 - Lateral movement chain"]
+
+    assert entry["expected_rows"] == len(chains)
+    assert entry["key_values"] == chains
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -579,6 +602,7 @@ NUMBER_WORDS = {
     "thirty-three": 33,
     "thirty-four": 34,
     "thirty-five": 35,
+    "thirty-six": 36,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""

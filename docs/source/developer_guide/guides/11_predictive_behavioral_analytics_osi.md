@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is forty-four stages and thirty-nine supporting
-modules, covered by 1,731 distinct tests, itemized in
+modules, covered by 1,753 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1692,6 +1692,28 @@ physical `port_id` values in different `site_id` values, within a window shorter
 time. This is impossible travel with physical-layer corroboration, and it is far stronger than the
 geolocation version because it does not depend on IP geolocation accuracy.
 
+R-C-002 ships as a saved search over its two detections' notables. R-C-001 is built and asserted in
+`tests/morpheus/determinism/test_campaign_harness.py`, over a corpus written as one estate seen by three collectors
+-- `tests/morpheus/determinism/campaign_pipeline.py` -- where an attacker completes all three steps and six others
+each fall one step short: the process before the login, the last step thirty-five minutes after the first, a login to
+the principal's own server, a login from another address, a busy host's flat fan-out, and a server running only its
+routine. The attacker reaches twenty-five new addresses, half what R-B-L3-001 fires on, which is what "no individual
+step needs to breach its own threshold" means in practice.
+
+Four decisions come with it. **It reads the scored events, not other rules' notables.** R-C-002 correlates notables,
+which exist only once the detections have run and written them, and has never returned a row anywhere this fork can
+test; R-C-001 writes its steps' conditions into its own search and fires on pipeline output alone. **Its steps are joined on values, not
+on the lineage identifiers**, which is a departure from the text above: the three layers are sealed on three
+different entities -- a source address, a principal, a host -- and no lineage chain holds all three. The flow's
+`src_ip` is joined to the login's `source_ip` and the login's `target_host` to the process's `hostname`,
+case-folded, and each step's `lineage_id` is carried on the notable as evidence. **The first step is a rise above
+the source's own previous hour**, not R-P-L3-005, whose trajectory runs over hourly windows for hours and cannot sit
+inside a thirty-minute chain. And **the login needs a field layer 5 did not have**: an identity provider's sign-in
+names the client device and the application, not the host logged into, so
+{py:class}`~morpheus.stages.telemetry.tc5_novelty_stage.TC5NoveltyStage` gained an optional target host column and
+writes whether the principal had logged into that host before. `morpheus:score:l5` now accepts the two shapes a
+sign-in and a host login have, the way `morpheus:score:l7` accepts its sub-classes.
+
 ### Rule governance
 
 Three requirements that are usually skipped and always regretted:
@@ -1704,6 +1726,11 @@ Three requirements that are usually skipped and always regretted:
 3. **Chained rules declare their join tolerance.** `R-C-001` joins across four telemetry classes with
    different clock disciplines. The rule must state its tolerance window explicitly, and the tolerance
    must be at least twice the worst `clock_offset_ms` among the classes it joins.
+
+R-C-001 declares 120 seconds, twice an assumed worst offset of sixty seconds, since nothing in this fork measures
+`clock_offset_ms` yet: a step may precede the one it follows by up to that much and still count as after it, and the
+harness moves the attacker's process one minute and then three minutes ahead of the login to show the boundary. Its
+inverse is a change ticket for the target host covering the login, raised for the principal.
 
 ---
 
@@ -3259,6 +3286,13 @@ What Morpheus provides versus what has to be built, stated plainly.
   first corpus did, twice. And the harness's first predicate re-derived novelty from the stage's "seen" columns
   rather than reading the column the search reads, so a stage that ignored the peer group passed every rule check;
   it now reads that column and asserts that the conditions it switches off, all in place, reproduce it.
+- The first cross-layer chained rule that fires, R-C-001
+  (`tests/morpheus/determinism/campaign_pipeline.py`, and a target host feature on
+  {py:class}`~morpheus.stages.telemetry.tc5_novelty_stage.TC5NoveltyStage`). **What building it caught that the prose
+  had not.** The rule names a lineage chain, a layer 3 trajectory and a layer 5 login to a host, and none of the three
+  existed in a form the rule could use: the layers it joins are sealed on different entities, the trajectory is hours
+  long, and the login had no destination. Each is recorded above with what was done instead. The field linter read
+  `join type=inner` as a filter on a field named `type`.
 - The TC-0 identity and asset context store
   ({py:mod}`~morpheus.utils.bitemporal`,
   {py:class}`~morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage`,
@@ -3279,8 +3313,8 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`). Every column the reference
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
-  counts are the finding: eleven columns identify a person, seventeen address their device, fourteen locate
-  them, and a hundred and seventy-eight are profile, a hundred and seventy-two of them behavioural,
+  counts are the finding: eleven columns identify a person, eighteen address their device, fourteen locate
+  them, and a hundred and seventy-nine are profile, a hundred and seventy-three of them behavioural,
   which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
@@ -3522,8 +3556,8 @@ That test is the point of it: an inventory nobody checks reads as authoritative 
 whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
-fork emits, eleven identify a person, seventeen are addresses, fourteen locate, eleven are pseudonyms -- and
-a hundred and seventy-eight are profile, a hundred and seventy-two of them behavioural; the other
+fork emits, eleven identify a person, eighteen are addresses, fourteen locate, eleven are pseudonyms -- and
+a hundred and seventy-nine are profile, a hundred and seventy-three of them behavioural; the other
 six are the organisational columns the TC-0 context store and its join carry. **The largest category by far
 is the one the design manufactures rather than collects.** An estate reviewing this will think about the
 authentication logs it ingested; most of what it ends up holding about a person is derived here, from those

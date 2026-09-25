@@ -762,6 +762,7 @@ def logins() -> dict:
         "app": ["vpn", "wiki", "wiki", "wiki", "vpn"],
         "device_id": ["laptop-1", "laptop-2", "laptop-1", "laptop-2", "phone-1"],
         "source_asn": ["as5089", "as7018", "as3215", "as7018", "as5089"],
+        "target_host": ["ws-01", "srv-01", "ws-01", "srv-02", "ws-02"],
         "event_time": [0, HOUR, 5 * HOUR, 30 * HOUR, 50 * HOUR],
     }
 
@@ -1135,6 +1136,7 @@ REGISTRY: dict = {
                 Knob("max_samples", DIFFERS, benign=4096, extreme=1),
                 Knob("max_values", DIFFERS, benign=256, extreme=1),
                 Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
+                Knob("target_host_column", DIFFERS, benign=None, extreme="target_host"),
             ),
         ),
     "TC4FlowStage":
