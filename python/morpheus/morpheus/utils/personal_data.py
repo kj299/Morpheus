@@ -201,6 +201,7 @@ _PROFILES = (
     "bytes_out",
     "cadence_mature",
     "cadence_samples",
+    "cert_issuer_new_to_estate",
     "client_app",
     "command_line_hash",
     "consecutive_auth_failures",

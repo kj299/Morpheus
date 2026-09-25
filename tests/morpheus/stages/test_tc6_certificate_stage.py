@@ -63,6 +63,36 @@ def run(config: Config, payload: dict, **kwargs) -> pd.DataFrame:
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_an_issuer_nobody_in_the_estate_has_seen_is_new_to_it(config: Config):
+    # Two destinations, each presenting only the corporate issuer for a week; then a third, never seen before,
+    # presenting an authority nobody in the estate has seen. The per-destination reference cannot say so -- the new
+    # destination has no reference -- and the estate-wide history can.
+    payload = handshakes([CORP, CORP, PROXY, CORP, PROXY],
+                         destinations=[EXTERNAL, INTERNAL, "203.0.113.9", INTERNAL, EXTERNAL])
+    payload["event_time"] = [START, START + DAY, START + 8 * DAY, START + 8 * DAY + SECOND, START + 9 * DAY]
+    result = run(config, payload)
+
+    assert result["cert_issuer_new_to_estate"].tolist()[2:] == [True, False, False]
+    assert pd.isna(result["cert_issuer_established"].iloc[2])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_nothing_is_new_to_the_estate_during_its_warmup(config: Config):
+    result = run(config, handshakes([CORP, PROXY]))
+
+    assert result["cert_issuer_new_to_estate"].isna().all()
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_issuer_last_seen_outside_the_window_is_new_again(config: Config):
+    payload = handshakes([PROXY, CORP, PROXY])
+    payload["event_time"] = [START, START + 8 * DAY, START + 40 * DAY]
+    result = run(config, payload)
+
+    assert bool(result["cert_issuer_new_to_estate"].iloc[2])
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_an_issuer_a_destination_has_never_presented_differs_from_its_reference(config: Config):
     result = run(config, handshakes([CORP] * 6 + [PROXY]), min_samples=3)
 

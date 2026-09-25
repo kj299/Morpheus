@@ -450,6 +450,28 @@ def test_the_lateral_movement_chain_returns_exactly_what_is_written(expected: di
     assert entry["key_values"] == chains
 
 
+def test_the_staged_exfiltration_chain_returns_exactly_what_is_written(expected: dict):
+    # Evaluated over every export, session, transfer and handshake the app is fed, from every corpus, with the
+    # predicate the campaign harness asserts.
+    events = [
+        event for event in _scored_events()
+        if event.get("telemetry_class") in (campaign_pipeline.SAAS_CLASS, campaign_pipeline.SESSION_CLASS,
+                                            campaign_pipeline.TRANSFER_CLASS, campaign_pipeline.HANDSHAKE_CLASS)
+    ]
+    frame = pd.DataFrame(events)
+    stamps = pd.to_datetime(frame["event_time"].str.replace("UTC", "", regex=False), utc=True)
+    frame["event_time"] = (stamps - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(nanoseconds=1)
+
+    chains = sorted(({
+        "user_principal": principal, "src_ip": address
+    } for (principal, address) in campaign_pipeline.staged_exfiltration(frame)),
+                    key=lambda row: (row["user_principal"], row["src_ip"]))
+    entry = expected["searches"]["R-C-004 - Staged exfiltration"]
+
+    assert entry["expected_rows"] == len(chains)
+    assert entry["key_values"] == chains
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -603,6 +625,7 @@ NUMBER_WORDS = {
     "thirty-four": 34,
     "thirty-five": 35,
     "thirty-six": 36,
+    "thirty-seven": 37,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""

@@ -1203,6 +1203,7 @@ REGISTRY: dict = {
                 Knob("window_seconds", DIFFERS, benign=2592000, extreme=120),
                 Knob("min_samples", DIFFERS, benign=3, extreme=100),
                 Knob("max_samples", DIFFERS, benign=512, extreme=3),
+                Knob("estate_warmup_seconds", DIFFERS, benign=604800, extreme=0),
             )),
     "TC6CipherStage":
         Scenario(stage=TC6CipherStage,

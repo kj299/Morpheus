@@ -52,6 +52,7 @@ SAVEDSEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "default",
                              "savedsearches.conf")
 RULE = "R-C-001 - Lateral movement chain"
+EXFIL_RULE = "R-C-004 - Staged exfiltration"
 
 
 @pytest.fixture(name="corpus", scope="module")
@@ -274,6 +275,70 @@ def test_the_join_tolerance_admits_a_step_logged_slightly_early(result: pd.DataF
         assert (cp_.ATTACKER in _principals(cp_.lateral_movement(shifted))) == fires, offset_minutes
 
 
+# --- R-C-004: the staged exfiltration, and one control per condition ------------------------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_the_exfiltration_chain_fires_on_the_attacker_alone(result: pd.DataFrame):
+    assert set(cp_.staged_exfiltration(result)) == {(cp_.KIM, cp_.EXFILTRATORS[cp_.KIM].address)}
+
+
+@pytest.mark.cpu_mode
+@pytest.mark.parametrize("principal, condition",
+                         [(cp_.LEE, {
+                             "session_bound": False
+                         }), (cp_.NIA, {
+                             "in_session": False
+                         }), (cp_.OTO, {
+                             "new_issuer": False
+                         }), (cp_.PIA, {
+                             "ordered": False
+                         })])
+def test_each_exfiltration_control_is_stopped_by_its_one_condition(result: pd.DataFrame,
+                                                                   principal: str,
+                                                                   condition: dict):
+    assert principal not in {who for (who, _) in cp_.staged_exfiltration(result)}
+    assert principal in {who for (who, _) in cp_.staged_exfiltration(result, **condition)}
+
+
+@pytest.mark.cpu_mode
+def test_every_exfiltrator_takes_every_single_layer_step(result: pd.DataFrame):
+    # Each actor's export is a bulk access and each breach is a breach on its own terms -- the controls differ only in
+    # how the steps relate, which is what the chain adds. Only the known-issuer control's handshake is ordinary.
+    exports = result[result["telemetry_class"] == cp_.SAAS_CLASS]
+    bulk = exports[exports["saas_baseline_mature"].astype("boolean").fillna(False).astype(bool)
+                   & (exports["saas_record_ratio"].astype(float) > cp_.RECORD_MULTIPLE)]
+    transfers = result[result["telemetry_class"] == cp_.TRANSFER_CLASS]
+    breached = transfers[transfers["flow_data_len_envelope_breached"].astype("boolean").fillna(False).astype(bool)]
+    handshakes = result[result["telemetry_class"] == cp_.HANDSHAKE_CLASS]
+    novel = handshakes[handshakes["cert_issuer_new_to_estate"].astype("boolean").fillna(False).astype(bool)]
+
+    assert set(bulk["user_principal"]) == set(cp_.EXFILTRATORS)
+    assert set(breached["src_ip"]) == {actor.breach_address for actor in cp_.EXFILTRATORS.values()}
+    assert set(
+        novel["src_ip"]) == {actor.breach_address
+                             for actor in cp_.EXFILTRATORS.values() if actor.principal != cp_.OTO}
+
+
+@pytest.mark.cpu_mode
+def test_a_session_that_ended_before_the_breach_does_not_bind_it(result: pd.DataFrame):
+    nia = cp_.EXFILTRATORS[cp_.NIA]
+    sessions = cp_.session_intervals(result)
+    last = sessions[(sessions["user_principal"] == cp_.NIA)].sort_values("opened").iloc[-1]
+    breach_time = cp_.at(cp_.LAST_DAY, cp_.CAMPAIGN_HOUR, nia.breach_minute)
+
+    assert last["source_ip"] == nia.address
+    assert int(last["closed"]) < breach_time
+
+
+@pytest.mark.cpu_mode
+def test_the_estate_issuer_is_new_only_after_the_estate_has_a_week_of_history(result: pd.DataFrame):
+    handshakes = result[result["telemetry_class"] == cp_.HANDSHAKE_CLASS]
+    early = handshakes[handshakes["event_time"].astype("int64") < cp_.at(7)]
+
+    assert early["cert_issuer_new_to_estate"].isna().all()
+
+
 # --- The search as shipped -----------------------------------------------------------------------------------------
 
 
@@ -298,6 +363,28 @@ def test_the_search_carries_the_conditions_this_harness_asserts():
     assert f"t_login >= t_fanout - {tolerance} AND t_login - t_fanout <= {window}" in search
     assert f"t_process >= t_login - {tolerance} AND t_process - t_fanout <= {window}" in search
     assert f"risk_score = {cp_.SEVERITY}" in search
+
+
+def _exfil_search() -> str:
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        text = handle.read()
+
+    return text.split(f"[{EXFIL_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
+
+
+def test_the_exfiltration_search_carries_the_conditions_this_harness_asserts():
+    search = _exfil_search()
+    tolerance = cp_.JOIN_TOLERANCE_SECONDS
+    window = cp_.EXFIL_WINDOW_SECONDS
+
+    assert f"saas_baseline_mature=true saas_record_ratio>{int(cp_.RECORD_MULTIPLE)}" in search
+    assert "(flow_data_len_envelope_breached=true OR flow_bpp_envelope_breached=true)" in search
+    assert "cert_issuer_new_to_estate=true" in search
+    assert "t_breach >= opened AND (isnull(closed) OR t_breach <= closed)" in search
+    assert f"t_breach >= t_export - {tolerance} AND t_breach - t_export <= {window}" in search
+    assert f"t_handshake >= t_breach - {tolerance} AND t_handshake - t_export <= {window}" in search
+    assert f"risk_score = {cp_.EXFIL_SEVERITY}" in search
+    assert "rule_id" not in search.split("| eval _time = t_handshake, rule_id", 1)[0]
 
 
 def test_the_search_reads_scored_events_rather_than_notables():
