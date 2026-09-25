@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # pylint: disable=wrong-import-position
 import lineage_pipeline  # noqa: E402
 import application_pipeline  # noqa: E402
+import campaign_pipeline  # noqa: E402
 import context_pipeline  # noqa: E402
 import endpoint_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
@@ -124,6 +125,13 @@ def operations_fixture() -> pd.DataFrame:
     config = saas_pipeline.build_pipeline_config()
 
     yield saas_pipeline.run_pipeline(config, saas_pipeline.build_corpus())
+
+
+@pytest.fixture(name="campaign", scope="module")
+def campaign_fixture() -> pd.DataFrame:
+    config = campaign_pipeline.build_pipeline_config()
+
+    yield campaign_pipeline.run_pipeline(config, campaign_pipeline.build_corpus())
 
 
 @pytest.fixture(name="processes", scope="module")
@@ -277,6 +285,24 @@ def test_the_endpoint_pipeline_produces_a_parsable_timestamp(wire_config: Config
     assert len(processes) > 0
 
     assert_parses_as_its_own_stanza(wire_config, processes.reset_index(drop=True), "morpheus:score:l7")
+
+
+@pytest.mark.gpu_and_cpu_mode
+@pytest.mark.parametrize("telemetry_class, stanza",
+                         [("tc3", "morpheus:score:l3"), ("tc5_auth", "morpheus:score:l5"),
+                          ("tc7_endpoint", "morpheus:score:l7")])
+def test_the_campaign_pipelines_produce_a_parsable_timestamp(wire_config: Config,
+                                                             campaign: pd.DataFrame,
+                                                             telemetry_class: str,
+                                                             stanza: str):
+    # The campaign's host logins carry a target host and none of an identity provider's locations, factors or
+    # scores, which is the second shape morpheus:score:l5 accepts. Each layer is checked on its own frame, as a
+    # deployment would send it.
+    rows = campaign[campaign["telemetry_class"] == telemetry_class].reset_index(drop=True)
+
+    assert len(rows) > 0, f"the campaign emitted no {telemetry_class} rows"
+
+    assert_parses_as_its_own_stanza(wire_config, rows, stanza)
 
 
 @pytest.mark.gpu_and_cpu_mode

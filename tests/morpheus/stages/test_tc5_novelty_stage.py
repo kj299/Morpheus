@@ -210,6 +210,43 @@ def test_a_record_with_no_principal_carries_no_counts(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_a_host_the_principal_has_never_logged_into_is_first_seen(config: Config):
+    payload = frame(4)
+    payload["target_host"] = ["ws-01", "WS-01", "ws-02", "ws-01"]
+    meta = run(config, payload, target_host_column="target_host")
+
+    # The first sample establishes normal; case is folded, so WS-01 is the host already seen.
+    assert _as_list(meta, "target_host_first_seen") == [None, False, True, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_target_hosts_are_kept_per_principal(config: Config):
+    payload = frame(3, principals=[ALICE, "bob@example.com", ALICE])
+    payload["target_host"] = ["ws-01", "ws-02", "ws-02"]
+    meta = run(config, payload, target_host_column="target_host")
+
+    assert _as_list(meta, "target_host_first_seen") == [None, None, True]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_row_without_a_target_host_observes_none(config: Config):
+    payload = frame(3)
+    payload["target_host"] = ["ws-01", None, "ws-01"]
+    meta = run(config, payload, target_host_column="target_host")
+
+    assert _as_list(meta, "target_host_first_seen") == [None, None, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_no_target_host_column_is_written_unless_one_is_named(config: Config):
+    payload = frame(2)
+    payload["target_host"] = ["ws-01", "ws-02"]
+    meta = run(config, payload)
+
+    assert "target_host_first_seen" not in meta.get_column_names()
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_state_persists_across_messages(config: Config):
     stage = TC5NoveltyStage(config)
 

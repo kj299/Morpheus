@@ -93,6 +93,7 @@ def main() -> int:
     from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS  # pylint: disable=import-outside-toplevel
 
     import application_pipeline  # pylint: disable=import-outside-toplevel
+    import campaign_pipeline  # pylint: disable=import-outside-toplevel
     import context_pipeline  # pylint: disable=import-outside-toplevel
     import endpoint_pipeline  # pylint: disable=import-outside-toplevel
     import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
@@ -160,6 +161,18 @@ def main() -> int:
     by_sourcetype["morpheus:score:l7"] = (_render(requests, "morpheus:score:l7") +
                                           _render(operations, "morpheus:score:l7") +
                                           _render(processes, "morpheus:score:l7"))
+
+    # The campaign: one estate seen by three collectors, which is what R-C-001 is asserted on. Its records go on the
+    # sourcetypes their layers' records always go on, because that is where a chained rule has to find them, and
+    # they share no entity with any other corpus's records.
+    campaign = campaign_pipeline.run_pipeline(campaign_pipeline.build_pipeline_config(),
+                                              campaign_pipeline.build_corpus())
+
+    for (name, sourcetype) in ((campaign_pipeline.FLOW_CLASS, "morpheus:score:l3"),
+                               (campaign_pipeline.AUTH_CLASS, "morpheus:score:l5"), (campaign_pipeline.PROCESS_CLASS,
+                                                                                     "morpheus:score:l7")):
+        rows = campaign[campaign["telemetry_class"] == name]
+        by_sourcetype.setdefault(sourcetype, []).extend(_render(rows.dropna(axis=1, how="all"), sourcetype))
 
     # The TC-0 context store: every version the two producers recorded, refused ones included, because a count of
     # refusals is something an estate should be able to see on its search head. The probes are the harness's own

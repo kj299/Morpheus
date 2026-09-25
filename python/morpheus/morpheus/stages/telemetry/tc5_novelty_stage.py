@@ -61,6 +61,9 @@ CUMULATIVE_FIELDS = (LOCATION, APP, DEVICE)
 INCREMENT_COLUMNS = {LOCATION: "locincrement", APP: "appincrement", DEVICE: "deviceincrement"}
 """Output column per cumulative field. `locincrement` and `appincrement` keep the digital fingerprinting names."""
 
+TARGET_HOST_FIRST_SEEN = "target_host_first_seen"
+"""Whether the principal has authenticated to this host before. Written only when a target host column is named."""
+
 ACTIVITY_VALUE = "authentication"
 """The constant `logcount`'s window is fed.
 
@@ -140,6 +143,13 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_entities : int, default = 100000
         Principals tracked before the least recently seen is forgotten. Sized for the tens of thousands of users
         the guide puts this telemetry class at.
+    target_host_column : str, optional
+        Column holding the host the principal authenticated *to*, for sources that report one -- a Windows logon, a
+        Kerberos service ticket, an SSH login. When named, the stage writes `target_host_first_seen`: whether the
+        principal had authenticated to that host before, which is the second step of R-C-001. It is not a
+        cumulative feature and gets no increment, because R-C-001 asks about one host and not about how many; and
+        it is off by default, because an identity provider's sign-in log has no such host and an always-null
+        column would read as a feature that was measured.
     """
 
     def __init__(self,
@@ -154,7 +164,8 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  max_samples: int = 4096,
                  max_values: int = 256,
-                 max_entities: int = 100_000):
+                 max_entities: int = 100_000,
+                 target_host_column: typing.Optional[str] = None):
         super().__init__(c)
 
         if (window_seconds <= 0):
@@ -170,6 +181,7 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._asn_column = asn_column
         self._time_column = time_column
         self._time_unit = time_unit
+        self._target_host_column = target_host_column
 
         window_ns = window_seconds * NS_PER_SECOND
 
@@ -179,6 +191,9 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             field: ValueNoveltyTracker([field], max_values=max_values, max_entities=max_entities)
             for field in CUMULATIVE_FIELDS
         }
+        self._target_hosts = ValueNoveltyTracker([TARGET_HOST_FIRST_SEEN],
+                                                 max_values=max_values,
+                                                 max_entities=max_entities)
 
         self._needed_columns["user_location"] = TypeId.STRING
         self._needed_columns["logcount"] = TypeId.INT64
@@ -189,6 +204,9 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         for field in CUMULATIVE_FIELDS:
             self._needed_columns[INCREMENT_COLUMNS[field]] = TypeId.INT64
             self._needed_columns[f"{field}_first_seen"] = TypeId.BOOL8
+
+        if (target_host_column is not None):
+            self._needed_columns[TARGET_HOST_FIRST_SEEN] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -262,6 +280,8 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             apps = optional(self._app_column)
             devices = optional(self._device_column)
             asns = optional(self._asn_column)
+            targets = optional(self._target_host_column) if self._target_host_column is not None else None
+            target_first_seen: list = []
 
             locations: list = []
             logcount: list = []
@@ -295,6 +315,7 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                         increments[field].append(None)
                         first_seen[field].append(None)
 
+                    target_first_seen.append(None)
                     keyless += 1
                     continue
 
@@ -339,6 +360,16 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     increments[field].append(result.distinct_counts[field])
                     first_seen[field].append(result.first_seen[field])
 
+                target = None if targets is None else normalize_text(targets[position])
+
+                if (target is None):
+                    target_first_seen.append(None)
+                else:
+                    # Case-folded, because a host named in one log as WS-12 and in another as ws-12 is one host.
+                    result = self._target_hosts.observe(principal,
+                                                        event_time_ns, {TARGET_HOST_FIRST_SEEN: target.lower()})
+                    target_first_seen.append(None if result.out_of_order else result.first_seen[TARGET_HOST_FIRST_SEEN])
+
             assign_str_column(df, "user_location", locations)
             assign_nullable_int_column(df, "logcount", logcount)
             df["logcount_saturated"] = logcount_saturated
@@ -348,6 +379,9 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             for field in CUMULATIVE_FIELDS:
                 assign_nullable_int_column(df, INCREMENT_COLUMNS[field], increments[field])
                 assign_nullable_bool_column(df, f"{field}_first_seen", first_seen[field])
+
+            if (targets is not None):
+                assign_nullable_bool_column(df, TARGET_HOST_FIRST_SEEN, target_first_seen)
 
         if (keyless > 0):
             logger.warning(
