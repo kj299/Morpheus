@@ -80,6 +80,13 @@ record count against the principal's own baseline, weighted by a classification 
 and R-P-L7-006 reads a count of distinct object *types*. The name can be dropped at the wire and both rules keep
 their answers, which `tests/morpheus/determinism/test_saas_harness.py` asserts against the shipped searches.
 
+The endpoint sub-class adds the paths of the software a host ran, which are `PROFILES` of whoever uses the host and
+often carry their name outright, in a per-user install folder. R-B-L7-004 reads the pair the stage derived from
+them, with those folders collapsed, and never the paths themselves or the command line, whose hash is still a
+profile: a dictionary of common command lines reverses it. The process identifiers are `PSEUDONYMS`, stable and
+nameless and fully re-identifying against the EDR's own records. The integrity level and signature status describe
+the binary, not the person, and are `OPERATIONAL`; each has a handful of values, so both are in `BOUNDED_DOMAIN`.
+
 **The TC-0 context store is personal data of a different kind, and is classified on the same rule.** Department,
 employment status and group membership are organisational facts about an identifiable person rather than behaviour
 this design derived, but they describe the person, so they are `PROFILES`; a manager and an asset's owner are other
@@ -191,6 +198,7 @@ _PROFILES = (
     "cadence_mature",
     "cadence_samples",
     "client_app",
+    "command_line_hash",
     "consecutive_auth_failures",
     "consecutive_mfa_denials",
     "ctx_department",
@@ -245,6 +253,11 @@ _PROFILES = (
     "dst_ports_per_src",
     "dsts_per_src",
     "employment_status",
+    "endpoint_host_seen",
+    "endpoint_mature",
+    "endpoint_pair",
+    "endpoint_pair_novel",
+    "endpoint_peer_seen",
     "flow_ack",
     "flow_ackpush_ratio",
     "flow_all",
@@ -277,6 +290,7 @@ _PROFILES = (
     "http_4xx_in_window",
     "http_4xx_to_2xx_ratio",
     "http_distinct_paths",
+    "image_path",
     "internal_dst_ratio",
     "internal_dsts_in_window",
     "ip_ttl_distinct",
@@ -300,6 +314,7 @@ _PROFILES = (
     "mean_abs_z",
     "mfa_attempts_in_window",
     "operation",
+    "parent_image_path",
     "query_name",
     "record_count",
     "saas_baseline_mature",
@@ -349,6 +364,8 @@ _PSEUDONYMS = (
     "event_uid",
     "lineage_id",
     "origin_hash",
+    "parent_process_guid",
+    "process_guid",
     "row_key",
 )
 
@@ -411,6 +428,9 @@ _OPERATIONAL = (
     "dst_ports_per_src_saturated",
     "dsts_per_src_first_in_window",
     "dsts_per_src_saturated",
+    "endpoint_host_only",
+    "endpoint_integrity",
+    "endpoint_peer_group",
     "event_time",
     "flow_bpp_envelope_mature",
     "flow_data_len_envelope_mature",
@@ -425,6 +445,7 @@ _OPERATIONAL = (
     "if_last_change",
     "input_discards",
     "input_discards_delta",
+    "integrity_level",
     "internal_dst_ratio_saturated",
     "interval_seconds",
     "ip_ttl",
@@ -481,6 +502,7 @@ _OPERATIONAL = (
     "sample_out_of_order",
     "schema_version",
     "sealed_by",
+    "signature_status",
     "source_seq",
     "src_port",
     "srcs_per_dst_first_in_window",
@@ -575,8 +597,10 @@ BOUNDED_DOMAIN = frozenset({
     "ctx_employment_status",
     "dot1x_result",
     "employment_status",
+    "endpoint_integrity",
     "http_method",
     "http_status_class",
+    "integrity_level",
     "local_hour",
     "local_weekday",
     "mfa_result",
@@ -587,6 +611,7 @@ BOUNDED_DOMAIN = frozenset({
     "resolved_vlan_id",
     "result",
     "session_action",
+    "signature_status",
     "source_country",
     "source_region",
     "status_code",

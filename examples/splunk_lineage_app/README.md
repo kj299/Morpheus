@@ -34,7 +34,7 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored on a field the record carries -- `event_time` for scores and edges, an interval bound for bindings, `valid_from` for context |
 | `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, and the bucketed L1 history beside them, with accelerated fields |
 | `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1` and `binding_l1_history` lookups |
-| `default/savedsearches.conf` | Search heads | Thirty-four searches: lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the four layer 2 detections R-D-L2-001, 003, 004 and 005, the five layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004 and the predictive R-P-L3-005, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the four layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002 and the predictive R-P-L7-006, the two layer 5 detections R-D-L5-003 and R-D-L5-004, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric |
+| `default/savedsearches.conf` | Search heads | Thirty-five searches: lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the R-C-002 sequence detection, the four layer 2 detections R-D-L2-001, 003, 004 and 005, the five layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004 and the predictive R-P-L3-005, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the two layer 5 detections R-D-L5-003 and R-D-L5-004, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric |
 | `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
 | `lookups/scanner_allowlist.csv` | Search heads | The estate's own scanners, which R-B-L3-001 excludes: `src_ip,allowed,owner,note`. Ships header-only; until it is populated the rule fires on every scanner, authorized ones included |
 
@@ -162,7 +162,7 @@ Three levels, strongest last:
 2. **Live load.** The app was installed into a fresh Splunk Enterprise 10.2 instance: `btool check`
    reports no errors, all five indexes are created, all seven scheduled searches that existed at the
    time register, and every one of them executes without a parse error against empty indexes. The app
-   ships thirty-four searches now; the twenty-seven added since have not been through this step.
+   ships thirty-five searches now; the twenty-eight added since have not been through this step.
 3. **Functional.** With synthetic JSON telemetry seeded into the indexes and bindings written to the
    KV Store: timestamps anchor to `event_time` as the props intend, the identifier ladder resolves an
    IP through both lookups to a physical port and site, the chain assembly search emits the seeded
@@ -174,8 +174,8 @@ Several things were added after that validation and have **not** been run agains
 detections `R-D-L2-001`, `R-D-L2-003`, `R-D-L2-004` and `R-D-L2-005`, and -- added later still -- the
 `morpheus:score:l5` sourcetype with the two layer 5 detections `R-D-L5-003` and `R-D-L5-004` and the
 predictive watchlist `R-P-L5-006`, then the `morpheus:score:l3` sourcetype with five layer 3 detections,
-then `morpheus:score:l4` with three more, `morpheus:score:l6` with five, and `morpheus:score:l7` with four.
-That is twenty-four of the twenty-five detection searches this app ships, so the live pass above covers
+then `morpheus:score:l4` with three more, `morpheus:score:l6` with five, and `morpheus:score:l7` with five.
+That is twenty-five of the twenty-six detection searches this app ships, so the live pass above covers
 the app's oldest part and almost none of its detections. Their SPL follows
 the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
 Python over the determinism harness's planted corpus (`tests/morpheus/determinism/test_first_detections.py`),

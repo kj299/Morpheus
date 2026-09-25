@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lineage_pipeline  # noqa: E402
 import application_pipeline  # noqa: E402
 import context_pipeline  # noqa: E402
+import endpoint_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
 import presentation_pipeline  # noqa: E402
 import saas_pipeline  # noqa: E402
@@ -123,6 +124,13 @@ def operations_fixture() -> pd.DataFrame:
     config = saas_pipeline.build_pipeline_config()
 
     yield saas_pipeline.run_pipeline(config, saas_pipeline.build_corpus())
+
+
+@pytest.fixture(name="processes", scope="module")
+def processes_fixture() -> pd.DataFrame:
+    config = endpoint_pipeline.build_pipeline_config()
+
+    yield endpoint_pipeline.run_pipeline(config, endpoint_pipeline.build_corpus())
 
 
 @pytest.fixture(name="context", scope="module")
@@ -260,6 +268,15 @@ def test_the_saas_pipeline_produces_a_parsable_timestamp(wire_config: Config, op
     assert len(operations) > 0
 
     assert_parses_as_its_own_stanza(wire_config, operations.reset_index(drop=True), "morpheus:score:l7")
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_endpoint_pipeline_produces_a_parsable_timestamp(wire_config: Config, processes: pd.DataFrame):
+    # The fourth layer 7 class on the same stanza, and the last: its records carry the endpoint columns and none of
+    # the other three sub-classes', which is what the per-sub-class column sets exist to accept.
+    assert len(processes) > 0
+
+    assert_parses_as_its_own_stanza(wire_config, processes.reset_index(drop=True), "morpheus:score:l7")
 
 
 @pytest.mark.gpu_and_cpu_mode

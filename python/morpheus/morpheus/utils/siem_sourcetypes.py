@@ -206,12 +206,13 @@ PRODUCED: dict = {
             producer="The TC-7 DNS and HTTP stages behind WindowSealStage, the `tc7_dns` and `tc7_http` classes of "
             "`tests/morpheus/determinism/application_pipeline.py`; and TC7SaasStage, enriched by TC0EnrichStage and "
             "followed by a weekly TC5DriftStage, the `tc7_saas` class of "
-            "`tests/morpheus/determinism/saas_pipeline.py`. The endpoint sub-class will share this sourcetype when it "
-            "lands.",
+            "`tests/morpheus/determinism/saas_pipeline.py`; and TC7EndpointStage, enriched by TC0EnrichStage with the "
+            "host's asset record, the `tc7_endpoint` class of `tests/morpheus/determinism/endpoint_pipeline.py`.",
             # R-B-L7-001 and R-D-L7-005 read the DNS and HTTP columns. The two count columns are here as well as the
             # ratio because the ratio is undefined for a client with no successes, and the search reads the counts
             # for that reason. R-B-L7-002 and R-P-L7-006 read the SaaS columns, the context the enrichment attached,
-            # and the weekly trajectory.
+            # and the weekly trajectory. R-B-L7-004 reads the endpoint columns, and the peer group the enrichment
+            # attached is carried as the stage recorded it.
             required_columns=("event_uid", "entity_key"),
             variant_columns=(
                 ("src_ip",
@@ -241,6 +242,13 @@ PRODUCED: dict = {
                  "ctx_groups",
                  "drift_rising_windows",
                  "week_window_id"),
+                ("hostname",
+                 "endpoint_pair",
+                 "endpoint_pair_novel",
+                 "endpoint_integrity",
+                 "endpoint_peer_group",
+                 "endpoint_host_only",
+                 "signature_status"),
             ),
         ),
     "morpheus:score:l2":

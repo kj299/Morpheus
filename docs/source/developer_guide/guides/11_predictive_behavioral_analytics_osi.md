@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is forty-three stages and thirty-eight supporting
-modules, covered by 1,682 distinct tests, itemized in
+8's total order, and control 13's CI harness. That is forty-four stages and thirty-nine supporting
+modules, covered by 1,731 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1596,8 +1596,13 @@ memberships and the target object's data classification, and a weekly
 in `tests/morpheus/determinism/test_saas_harness.py` with the same one-control-per-condition discipline: a principal
 whose large exports are routine, one exporting just under five times their normal, a newcomer with no baseline and a
 denied export for the first; a rise with a role change in the middle, a rise of two weeks and a principal who has
-always reached everything for the second. Two are not built yet. R-B-L7-004 reads a host's peer group and is the next
-increment. R-B-L7-003 needs a running Triton server, and nothing in this fork's CI can fire it.
+always reached everything for the second. A fifth reads the same store: R-B-L7-004, reading
+{py:class}`~morpheus.stages.telemetry.tc7_endpoint_stage.TC7EndpointStage` after
+{py:class}`~morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage` has attached the host's peer group, asserted
+in `tests/morpheus/determinism/test_endpoint_harness.py` beside a compile the host has never run and its peer runs
+every day, an editor installed under another user's profile, a pair the host ran the week before, and a machine
+four days old. One is not built. R-B-L7-003 needs a running Triton server, and nothing in this fork's CI can fire
+it.
 
 Three decisions the text above leaves open are made here. **Entropy is measured below the registered domain.**
 Ordinary names score 3.0 to 3.7 bits per character as whole names but 0 to 2.3 once the registered domain is
@@ -1630,11 +1635,32 @@ because a rule that revises its own past alerts as the directory catches up cann
 A failed operation enters neither measurement: a denied export read no records, and a type the principal was
 refused is not a type they reached.
 
+Five more come with the endpoint rule. **Novel means new to the host and to its peer group together**, the group
+being the one the inventory gave the host when the process ran, and a pair is remembered under that group, so a host
+that moves brings no history with it. A pair routine in another group is no excuse: the corpus's build servers
+render documentation through Word and PowerShell every day, and a finance workstation doing it once fires. **A host
+with no peer group is judged on its own history** and carries `endpoint_host_only`, rather than being dropped or
+compared as though it had peers. **The warm-up belongs to whatever the comparison is made against**: seven days of
+the peer group's history, or of the host's when it has no group, so a new laptop in an established group is judged
+from its first process and a machine nobody has classified is not judged for a week. **Paths are compared as the same
+software would be**, case-folded, with the folder under a per-user profile collapsed, so an editor installed per
+user is one pair across the estate rather than one per person. And **the integrity level sets the severity** rather
+than gating the alert -- 70 system, 55 high, 40 medium, 25 low -- with a level nobody recognizes firing at 40 and
+the column left empty, as an unclassified SaaS object does. Processes an EDR logs in the same second are judged
+against what came before that second, never against each other, so the answer does not depend on which of them the
+log lists first.
+
 One departure from Part 2's entity key is recorded where it is made. TC-7 gives `hostname` as the key for DNS;
 both stages seal on the querying client, `src_ip`, because that is the address a resolver log carries and the
 one the lower layers' chains are rooted on. The registered domain is the rule's grouping key rather than the
 sealing entity, for the reason the layer 6 fingerprint is: one tunnel domain is queried by whichever hosts are
 compromised, and sealing on it would merge them.
+
+A second is the endpoint key. TC-7 gives `process_guid`, but a process GUID names one process: keyed on it, every
+pair would be the first its entity had produced. The rule's own words name the entity -- a pair not seen on the host -- and
+the endpoint stage keys and seals on `hostname`. The rule also reads `parent_image_path` and `hostname`, which the
+endpoint fields listed in Part 2 do not include; an EDR that reports only the parent's GUID needs the parent's image
+joined from the parent's own record before this stage.
 
 ### Cross-layer chained rules
 
@@ -3222,6 +3248,17 @@ What Morpheus provides versus what has to be built, stated plainly.
   composed frame carries every column. A sourcetype now declares each sub-class's columns separately, and a record
   must carry one set in full. And R-P-L7-006's "role unchanged" turned out to depend on which knowledge answers it,
   which is recorded above rather than left to be discovered on an investigation.
+- Layer 7's endpoint sub-class and its rule
+  ({py:mod}`~morpheus.utils.pair_history` and
+  {py:class}`~morpheus.stages.telemetry.tc7_endpoint_stage.TC7EndpointStage`, composed with a
+  {py:class}`~morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage` pass in
+  `tests/morpheus/determinism/endpoint_pipeline.py`), which completes the four sub-classes this fork builds at
+  layer 7. **What building it caught that the prose had not.** The key the guide names for the sub-class cannot
+  carry the rule, as recorded above. A pair's first appearance after the warm-up is itself an alert, so a benign
+  "seen on the host" case has to be seen first inside the warm-up, or the corpus fires on its own history -- the
+  first corpus did, twice. And the harness's first predicate re-derived novelty from the stage's "seen" columns
+  rather than reading the column the search reads, so a stage that ignored the peer group passed every rule check;
+  it now reads that column and asserts that the conditions it switches off, all in place, reproduce it.
 - The TC-0 identity and asset context store
   ({py:mod}`~morpheus.utils.bitemporal`,
   {py:class}`~morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage`,
@@ -3243,7 +3280,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
   counts are the finding: eleven columns identify a person, seventeen address their device, fourteen locate
-  them, and a hundred and seventy are profile, a hundred and sixty-four of them behavioural,
+  them, and a hundred and seventy-eight are profile, a hundred and seventy-two of them behavioural,
   which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
@@ -3485,8 +3522,8 @@ That test is the point of it: an inventory nobody checks reads as authoritative 
 whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
-fork emits, eleven identify a person, seventeen are addresses, fourteen locate, nine are pseudonyms -- and
-a hundred and seventy are profile, a hundred and sixty-four of them behavioural; the other
+fork emits, eleven identify a person, seventeen are addresses, fourteen locate, eleven are pseudonyms -- and
+a hundred and seventy-eight are profile, a hundred and seventy-two of them behavioural; the other
 six are the organisational columns the TC-0 context store and its join carry. **The largest category by far
 is the one the design manufactures rather than collects.** An estate reviewing this will think about the
 authentication logs it ingested; most of what it ends up holding about a person is derived here, from those

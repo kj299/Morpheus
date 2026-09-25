@@ -263,19 +263,19 @@
       "why": "A chained rule over two detections' notables: R-B-L6-001 at layer 6 and R-B-L3-002 at layer 3. Both halves now have producers and both fire on their own corpora -- which is new, and is what made the search's real defect visible: it grouped `by src_ip dest_ip` while every detection in this fork emits `dst_ip`, so it would have correlated every fingerprint in the window against every beacon through one null group rather than returning nothing. That is fixed. What keeps it empty now is the corpora: layer 3 and layer 6 come from separate seeded runs sharing no host, and the search also reads `rule_id`, which detections write into the index as they fire rather than anything the pipeline emits."
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 2091,
+      "expected_rows": 2727,
       "expected_empty": false,
-      "contributing_rows": 4992,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 4992 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them and 1121 SaaS operations keyed on the principals who performed them, none of which shares an entity with the estate's ports and principals or with each other."
+      "contributing_rows": 6130,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 6130 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 1553,
+      "distinct_lineage_ids": 1813,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 1553 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 1813 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,
@@ -379,6 +379,38 @@
           "user_principal": "kate@example.com",
           "rising_weeks": 5,
           "role": "sales-users"
+        }
+      ]
+    },
+    "R-B-L7-004 - Process ancestry novelty": {
+      "expected_rows": 4,
+      "expected_empty": false,
+      "contributing_rows": 4,
+      "why": "Four notables, and the integrity level sets each one's severity rather than deciding whether it fires. fin-01 started PowerShell from Word at high integrity, which nothing in the finance workstations' peer group had done in thirty days -- although the build servers do it every day, because another group is not a peer: 55. fin-02 ran a remote-access tool at system integrity that it last ran thirty-eight days earlier: 70. kiosk-01, which the inventory knows but has placed in no peer group, started mshta.exe: judged on its own history, endpoint_host_only=true, 40. build-02's git started curl with no integrity level reported: the default 40, with endpoint_integrity empty. The controls each fail one condition: build-02 compiled with a pair it had never run and its peer runs daily; fin-03 started an editor installed under a different user's profile than the peer who runs it, and per-user folders are collapsed; kiosk-01 started Notepad, which it last ran on day 20; lab-01, four days old and not in the inventory, started nmap before any comparison was possible.",
+      "key_values": [
+        {
+          "hostname": "build-02",
+          "integrity": "unknown",
+          "endpoint_host_only": false,
+          "risk_score": 40
+        },
+        {
+          "hostname": "fin-01",
+          "integrity": "high",
+          "endpoint_host_only": false,
+          "risk_score": 55
+        },
+        {
+          "hostname": "fin-02",
+          "integrity": "system",
+          "endpoint_host_only": false,
+          "risk_score": 70
+        },
+        {
+          "hostname": "kiosk-01",
+          "integrity": "medium",
+          "endpoint_host_only": true,
+          "risk_score": 40
         }
       ]
     }
