@@ -94,7 +94,9 @@ class EnvelopeResult:
     saturated : bool
         The sample cap is binding, so the baseline describes the retained tail rather than the window.
     out_of_order : bool
-        This transfer's event time was not after the previous one's. State is left untouched.
+        This transfer's event time was before the previous one's. State is left untouched. A transfer at the
+        same instant as the previous one is not out of order: it is measured against the transfers before that
+        instant, as the previous one was.
     """
 
     value: float
@@ -115,6 +117,8 @@ class _EntityWindow:
     values: collections.deque = dataclasses.field(default_factory=collections.deque)
     last_time_ns: typing.Optional[int] = None
     saturated: bool = False
+    # The transfers strictly before `last_time_ns`, kept so every transfer at that instant shares one baseline.
+    instant_prior: list = dataclasses.field(default_factory=list)
 
 
 def nearest_rank(values: typing.Sequence[float], quantile: float) -> typing.Optional[float]:
@@ -269,7 +273,7 @@ class TransferEnvelopeTracker:
 
         window = self._window_for(entity_key)
 
-        if (window.last_time_ns is not None and event_time_ns <= window.last_time_ns):
+        if (window.last_time_ns is not None and event_time_ns < window.last_time_ns):
             # Refused rather than repaired, as the other trackers refuse it. The baseline is over prior
             # transfers, and which transfers are prior is exactly what an out-of-order arrival disagrees about.
             prior = list(window.values)
@@ -284,14 +288,22 @@ class TransferEnvelopeTracker:
                                   saturated=window.saturated,
                                   out_of_order=True)
 
-        horizon = event_time_ns - self._window_ns
+        if (event_time_ns == window.last_time_ns):
+            # Transfers at one instant are simultaneous, not ordered, so none of them is prior to another. Each is
+            # measured against what came strictly before the instant, which is the same for all of them whatever
+            # order they arrive in.
+            prior = window.instant_prior
+        else:
+            horizon = event_time_ns - self._window_ns
 
-        while (len(window.times) > 0 and window.times[0] < horizon):
-            window.times.popleft()
-            window.values.popleft()
+            while (len(window.times) > 0 and window.times[0] < horizon):
+                window.times.popleft()
+                window.values.popleft()
 
-        # Taken before this transfer joins them, so one enormous transfer cannot partly excuse itself.
-        prior = list(window.values)
+            # Taken before this transfer joins them, so one enormous transfer cannot partly excuse itself.
+            prior = list(window.values)
+            window.instant_prior = prior
+
         baseline = nearest_rank(prior, self._quantile) if len(prior) >= self._min_samples else None
         ratio = None if (baseline is None or baseline == 0) else magnitude / baseline
 

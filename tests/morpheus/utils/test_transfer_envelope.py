@@ -170,6 +170,40 @@ def test_an_out_of_order_transfer_leaves_the_envelope_alone():
     assert backwards.baseline == ordered.baseline
 
 
+def test_transfers_at_one_instant_share_a_baseline_whatever_their_order():
+    # An export logged in the same second as a run of small ones is not measured against them, and none of the
+    # tied transfers is excused by another.
+    def tied(order):
+        tracker = TransferEnvelopeTracker(min_samples=3)
+        last = run(tracker, [100.0] * 5)
+        instant = START + 5 * HOUR
+
+        return last, {value: tracker.observe(TRIPLE, instant, value) for value in order}
+
+    (before, forwards) = tied([10.0, 900.0, 50.0])
+    (_, backwards) = tied([50.0, 900.0, 10.0])
+
+    for value in (10.0, 900.0, 50.0):
+        assert forwards[value].out_of_order is False
+        assert forwards[value].baseline == 100.0
+        assert forwards[value].ratio == backwards[value].ratio
+
+    assert forwards[900.0].ratio == 9.0
+    assert before.samples + 3 == forwards[50.0].samples
+
+
+def test_an_instant_joins_the_baseline_once_it_has_passed():
+    tracker = TransferEnvelopeTracker(min_samples=1)
+    tracker.observe(TRIPLE, START, 100.0)
+    tracker.observe(TRIPLE, START + HOUR, 400.0)
+    tracker.observe(TRIPLE, START + HOUR, 300.0)
+
+    later = tracker.observe(TRIPLE, START + 2 * HOUR, 1.0)
+
+    assert later.baseline == 400.0
+    assert tracker.observe(TRIPLE, START + HOUR, 5.0).out_of_order is True
+
+
 def test_the_sample_cap_narrows_the_claim_and_says_so():
     tracker = TransferEnvelopeTracker(min_samples=2, max_samples=5)
     result = run(tracker, [100.0] * 20)

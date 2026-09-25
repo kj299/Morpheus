@@ -131,6 +131,57 @@ def test_out_of_order_sample_is_flagged_and_ignored():
     assert following.changed[SERIAL] is False
 
 
+def test_a_tie_is_a_duplicate_poll_unless_samples_are_declared_simultaneous():
+    subject = tracker()
+    feed(subject, ["SN-AAA", "SN-AAA"])
+
+    assert subject.observe(PORT, DAY_NS, {SERIAL: "SN-ZZZ"}).out_of_order is True
+
+
+def test_simultaneous_samples_are_measured_against_the_entity_before_the_instant():
+
+    def tied(order):
+        subject = tracker(simultaneous=True)
+        feed(subject, ["SN-AAA", "SN-BBB"])
+
+        return {serial: subject.observe(PORT, 2 * DAY_NS, {SERIAL: serial}) for serial in order}
+
+    forwards = tied(["SN-BBB", "SN-NEW", "SN-AAA"])
+    backwards = tied(["SN-AAA", "SN-NEW", "SN-BBB"])
+
+    for results in (forwards, backwards):
+        assert results["SN-NEW"].first_seen[SERIAL] is True
+        assert results["SN-NEW"].changed[SERIAL] is True
+        # One tied sample never makes another look familiar or unchanged.
+        assert results["SN-BBB"].changed[SERIAL] is False
+        assert results["SN-AAA"].first_seen[SERIAL] is False
+        assert results["SN-AAA"].changed[SERIAL] is True
+        assert not any(result.out_of_order for result in results.values())
+
+
+def test_an_instant_with_several_values_leaves_no_previous_value():
+    subject = tracker(simultaneous=True)
+    feed(subject, ["SN-AAA"])
+    subject.observe(PORT, DAY_NS, {SERIAL: "SN-AAA"})
+    subject.observe(PORT, DAY_NS, {SERIAL: "SN-BBB"})
+
+    after = subject.observe(PORT, 2 * DAY_NS, {SERIAL: "SN-AAA"})
+
+    assert after.changed[SERIAL] is None
+    assert after.first_seen[SERIAL] is False
+    assert subject.observe(PORT, DAY_NS, {SERIAL: "SN-CCC"}).out_of_order is True
+
+
+def test_the_first_instant_establishes_normal_even_when_it_has_several_samples():
+    subject = tracker(simultaneous=True)
+    first = subject.observe(PORT, 0, {SERIAL: "SN-AAA"})
+    second = subject.observe(PORT, 0, {SERIAL: "SN-BBB"})
+
+    assert first.first_seen[SERIAL] is None
+    assert second.first_seen[SERIAL] is None
+    assert second.changed[SERIAL] is None
+
+
 def test_distinct_count_keeps_rising_past_the_recall_bound():
     subject = tracker(max_values=2)
 

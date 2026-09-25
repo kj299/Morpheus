@@ -31,6 +31,13 @@ Two questions get separate answers, because they are separately actionable:
   situation from one being rotated back in after maintenance. Both are changes; only the first is unexplained by
   the estate's own history.
 
+Two samples at one instant are a duplicate poll for a port, which has one transceiver at any instant, and they are
+refused. They are ordinary for a host, which can open a dozen connections in one timestamp, so a caller can declare
+its samples `simultaneous` and have them measured instead. Each tied sample is compared with the entity as it stood
+before the instant, never with another sample at the same instant. The answer does not depend on the order ties
+arrive in. An instant that carried more than one value leaves no single previous value, so the next instant's
+`changed` is `None`.
+
 A null is a value, not missing data. A port with an empty cage genuinely reports no serial, and going from no optic
 to an optic is a change worth seeing, so `None` is tracked like any other value rather than skipped.
 """
@@ -63,7 +70,8 @@ class NoveltyResult:
     distinct_counts : dict
         Per field, how many distinct values this entity has reported, counting the current one.
     out_of_order : bool
-        The sample's event time was not after the previous sample's. State is left untouched.
+        The sample's event time was before the previous sample's, or equal to it when ties are not accepted. State
+        is left untouched.
     """
 
     changed: dict[str, typing.Optional[bool]]
@@ -78,6 +86,12 @@ class _FieldState:
     has_last: bool = False
     seen: collections.OrderedDict = dataclasses.field(default_factory=collections.OrderedDict)
     distinct: int = 0
+    # Only kept for simultaneous samples: the field as it stood before the current instant, and the values
+    # seen at that instant.
+    before_last: typing.Any = None
+    before_has_last: bool = False
+    before_seen: frozenset = frozenset()
+    instant_values: set = dataclasses.field(default_factory=set)
 
 
 class ValueNoveltyTracker:
@@ -98,6 +112,9 @@ class ValueNoveltyTracker:
     max_entities : int, default = 100000
         Entities retained before the least recently seen is dropped. A dropped entity's next sample is treated as
         its first, answering `None` rather than reporting a change it cannot substantiate.
+    simultaneous : bool, default = False
+        Accept samples at the same instant as the entity's previous one, measuring each against the entity as it
+        stood before that instant. Off by default, since a tie is a duplicate poll for a port.
 
     Notes
     -----
@@ -116,7 +133,8 @@ class ValueNoveltyTracker:
     def __init__(self,
                  field_names: typing.Sequence[str],
                  max_values: int = DEFAULT_MAX_VALUES,
-                 max_entities: int = DEFAULT_MAX_ENTITIES):
+                 max_entities: int = DEFAULT_MAX_ENTITIES,
+                 simultaneous: bool = False):
         if (len(field_names) == 0):
             raise ValueError("At least one field name is required")
 
@@ -129,6 +147,7 @@ class ValueNoveltyTracker:
         self._field_names = list(field_names)
         self._max_values = max_values
         self._max_entities = max_entities
+        self._simultaneous = simultaneous
 
         self._states: collections.OrderedDict[str, dict[str, _FieldState]] = collections.OrderedDict()
         self._last_seen: dict[str, int] = {}
@@ -163,11 +182,14 @@ class ValueNoveltyTracker:
         """
         previous_time = self._last_seen.get(entity_key)
 
-        if (previous_time is not None and event_time_ns <= previous_time):
+        tied = previous_time is not None and event_time_ns == previous_time
+
+        if (previous_time is not None and (event_time_ns < previous_time or (tied and not self._simultaneous))):
             # Admitting this would make the next sample's comparison run against a value that arrived late, so the
             # answer would depend on delivery order rather than on the estate. An equal timestamp is rejected on
             # purpose: a port has one transceiver and one neighbor at any instant, so two values at one time is a
-            # duplicate poll, and "changed" has no meaning between simultaneous samples.
+            # duplicate poll, and "changed" has no meaning between simultaneous samples. A caller whose samples can
+            # be simultaneous says so, and has ties measured rather than refused.
             return NoveltyResult(changed={name: None
                                           for name in self._field_names},
                                  first_seen={name: None
@@ -195,7 +217,22 @@ class ValueNoveltyTracker:
 
             was_new = value not in state.seen
 
-            if (is_first_sample or not state.has_last):
+            if (self._simultaneous):
+                if (not tied):
+                    state.before_last = state.last
+                    state.before_has_last = state.has_last and len(state.instant_values) <= 1
+                    state.before_seen = frozenset(state.seen)
+                    state.instant_values = set()
+
+                state.instant_values.add(value)
+
+                if (is_first_sample or len(state.before_seen) == 0):
+                    changed[name] = None
+                    first_seen[name] = None
+                else:
+                    changed[name] = (value != state.before_last) if state.before_has_last else None
+                    first_seen[name] = value not in state.before_seen
+            elif (is_first_sample or not state.has_last):
                 # The first sample establishes what normal looks like for this entity; it is not itself an event.
                 changed[name] = None
                 first_seen[name] = None

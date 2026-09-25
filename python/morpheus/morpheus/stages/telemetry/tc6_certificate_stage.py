@@ -349,7 +349,7 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             if (unordered > 0):
                 logger.warning(
-                    "TC6CertificateStage saw %d of %d handshakes arrive no later than their destination's "
+                    "TC6CertificateStage saw %d of %d handshakes arrive earlier than their destination's "
                     "previous one; they did not enter the reference.",
                     unordered,
                     rows)

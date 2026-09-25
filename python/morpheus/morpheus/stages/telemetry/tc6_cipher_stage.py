@@ -275,7 +275,7 @@ class TC6CipherStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             if (unordered > 0):
                 logger.warning(
-                    "TC6CipherStage saw %d of %d handshakes arrive no later than their pair's previous one; "
+                    "TC6CipherStage saw %d of %d handshakes arrive earlier than their pair's previous one; "
                     "they did not enter the floor.",
                     unordered,
                     len(suites))

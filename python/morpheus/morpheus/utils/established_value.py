@@ -39,7 +39,9 @@ destination nobody has seen enough of to have expectations about.
 
 **An out-of-order arrival is refused rather than repaired.** The reference is over prior observations, and which
 observations are prior is exactly what an out-of-order arrival disagrees about. The result carries the flag so a
-caller can tell a refusal from an answer.
+caller can tell a refusal from an answer. Observations at the same instant are not out of order: none of them is
+prior to another, so each is measured against the observations strictly before that instant, and the answer does
+not depend on the order they arrive in.
 
 This module overlaps `morpheus.utils.ttl_profile`, which keeps the same trailing window and takes the same mode
 over it. They are separate because their answers are different in kind: a TTL profile reports a magnitude -- how
@@ -138,7 +140,7 @@ class HistoryResult:
         Whether observations were dropped to stay inside `max_samples`, making the reference a reduction over a
         suffix of the entity's history rather than over all of it.
     out_of_order : bool
-        Whether this observation arrived no later than the entity's previous one, in which case it was refused.
+        Whether this observation is earlier than the entity's previous one, in which case it was refused.
     """
 
     value: typing.Any
@@ -158,6 +160,8 @@ class _EntityWindow:
     values: collections.deque = dataclasses.field(default_factory=collections.deque)
     last_time_ns: typing.Optional[int] = None
     saturated: bool = False
+    # The observations strictly before `last_time_ns`, so every observation at that instant shares one reference.
+    instant_prior: list = dataclasses.field(default_factory=list)
 
 
 class ValueHistoryTracker:
@@ -257,18 +261,22 @@ class ValueHistoryTracker:
 
         window = self._window_for(entity_key)
 
-        if (window.last_time_ns is not None and event_time_ns <= window.last_time_ns):
+        if (window.last_time_ns is not None and event_time_ns < window.last_time_ns):
             return self._result(value, list(window.values), window.saturated, out_of_order=True)
 
-        horizon = event_time_ns - self._window_ns
+        if (event_time_ns == window.last_time_ns):
+            prior = window.instant_prior
+        else:
+            horizon = event_time_ns - self._window_ns
 
-        while (len(window.times) > 0 and window.times[0] < horizon):
-            window.times.popleft()
-            window.values.popleft()
+            while (len(window.times) > 0 and window.times[0] < horizon):
+                window.times.popleft()
+                window.values.popleft()
 
-        # Taken before this observation joins them, so the reference is the entity's history rather than a
-        # figure this observation has already pulled towards itself.
-        prior = list(window.values)
+            # Taken before this observation joins them, so the reference is the entity's history rather than a
+            # figure this observation has already pulled towards itself.
+            prior = list(window.values)
+            window.instant_prior = prior
 
         window.times.append(event_time_ns)
         window.values.append(value)
