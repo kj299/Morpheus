@@ -41,7 +41,9 @@ zero exactly when the feature matters most.
 
 The destination ASN's novelty is per source and permanent, not windowed --
 {py:mod}`~morpheus.utils.value_novelty` answers "has this source ever reached this network", which is the
-question worth asking about a first contact.
+question worth asking about a first contact. A source opens many flows in one timestamp, so flows at one instant
+are measured against the networks it reached before that instant, never against each other, and a burst to a new
+network reads as novel in every flow of it whatever order the collector listed them in.
 """
 
 import logging
@@ -151,7 +153,7 @@ class TC3ReachStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._ratios = RatioWindowTracker(window_ns=window_seconds * NS_PER_SECOND,
                                           min_denominator=min_denominator,
                                           max_samples=max_samples)
-        self._novelty = ValueNoveltyTracker(field_names=[asn_column])
+        self._novelty = ValueNoveltyTracker(field_names=[asn_column], simultaneous=True)
 
         self._needed_columns[INTERNAL_RATIO] = TypeId.FLOAT64
         self._needed_columns[INTERNAL_COUNT] = TypeId.INT64
