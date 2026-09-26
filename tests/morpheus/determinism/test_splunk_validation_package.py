@@ -95,6 +95,19 @@ def _searches() -> set:
     return {name for name in parser.sections() if parser.has_option(name, "search")}
 
 
+def _search_text(name: str) -> str:
+    import configparser
+    import re
+
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
+
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.read_string(folded)
+
+    return parser[name]["search"]
+
+
 def test_every_shipped_search_has_a_written_expectation(expected: dict):
     # A search with no entry is one nobody has said what to expect from, which on this app means nobody can tell
     # its correct empty result from a broken one.
@@ -578,11 +591,20 @@ def test_the_chain_assembly_blocker_is_the_risk_and_not_the_span(expected: dict)
     with open(os.path.join(EVENTS, "morpheus_edge.jsonlines"), encoding="utf-8") as handle:
         edges = [json.loads(line) for line in handle if line.strip()]
 
+    # Read from the search rather than assumed, so a search collecting a field the events do not carry fails here.
+    import re  # pylint: disable=import-outside-toplevel
+
+    method_field = re.search(r"values\((\w+)\)\s+AS\s+methods",
+                             _search_text("Chain assembly - cross-layer risk")).group(1)
     layers = collections.defaultdict(set)
+    methods = collections.defaultdict(set)
 
     for event in events + edges:
         if (event.get("lineage_id") is not None):
             layers[event["lineage_id"]].add(event.get("osi_layer"))
+
+            if (event.get(method_field) is not None):
+                methods[event["lineage_id"]].add(event[method_field])
 
     spans = [len(seen - {None}) for seen in layers.values()]
 
@@ -590,6 +612,15 @@ def test_the_chain_assembly_blocker_is_the_risk_and_not_the_span(expected: dict)
     assert entry["maximum_layer_span"] == max(spans)
     assert entry["two_layer_chains"] == spans.count(2)
     assert entry["three_layer_chains"] == sum(1 for span in spans if span >= 3)
+
+    # `methods` is how an analyst tells an exact attribution from an inferred one. It read a field nothing wrote,
+    # so it was blank on every chain; every chain that reaches the span threshold must now say how it was joined.
+    assert entry["chains_with_a_method"] == len(methods)
+    assert entry["three_layer_chain_methods"] == sorted({
+        method
+        for (lineage, seen) in layers.items() if len(seen - {None}) >= 3 for method in methods.get(lineage, ())
+    })
+    assert all(methods.get(lineage) for (lineage, seen) in layers.items() if len(seen - {None}) >= 3)
 
     assert max(spans) >= 3, "the search's own threshold is dc(osi_layer) >= 3, and nothing reaches it"
     assert max(spans) < 4, "a span of four would fire through the peak_z branch, so empty would be wrong"

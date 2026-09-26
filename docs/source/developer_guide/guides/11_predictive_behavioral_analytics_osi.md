@@ -2421,7 +2421,8 @@ index=behavior_lineage sourcetype=morpheus:edge earliest=-30m
 To attach the scores, do not reach for `join`. Its subsearch silently truncates at 50,000 rows by
 default, which is the same failure mode this document rejects `transaction` for, and it fails exactly
 when the environment is busy enough to matter. Union the two sources and let a single `stats` do the
-correlation:
+correlation. The scored events carry no parent-child edge, so their method is the one the binding resolver
+recorded when it attributed them, `resolution_method`, rather than an edge's `join_method`:
 
 ```spl
 (index=behavior_lineage sourcetype=morpheus:edge) OR (index=behavior_events) earliest=-30m
@@ -2431,7 +2432,7 @@ correlation:
         max(max_abs_z)  AS peak_z
         sum(risk_score) AS total_risk
         values(rule_id) AS rules
-        values(join_method) AS methods
+        values(resolution_method) AS methods
   by lineage_id
 | where layer_span >= 3
 | where total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)
@@ -2998,10 +2999,12 @@ could name anything; and it treated a search as one bag of fields, when `stats` 
 output and a field it neither aggregates nor groups by is null for the rest of the pipeline. A walk of each
 pipeline now tracks which fields survive every command, subsearches included, and flags a read of one a `stats`
 dropped. None of the 37 searches does that. The aggregate check found one real gap: Chain assembly collects
-`values(join_method) AS methods`, and no reference pipeline stamps the parent-child edges
-{py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage` writes `join_method` on, so the column
-is always empty. It is registered as a known gap, with that reason, until a pipeline records how its edges were
-joined.
+`values(join_method) AS methods`, the name
+{py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage` gives a parent-child edge's method, and
+no reference pipeline stamps parent-child edges, so the column was always empty. The method every scored event does
+carry is the one {py:class}`~morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage` records as
+`resolution_method` -- `soft:mac_table`, `soft:dhcp_lease` or `unresolved`, the same vocabulary. The search now
+collects that, and all 15 of the validation package's three-layer chains say `soft:mac_table`.
 
 `tests/morpheus/determinism/test_representation_invariance.py` is check 6 one level down. Row order must not
 decide the output; neither must the type the values arrived in. Each key-bearing column is presented as an
