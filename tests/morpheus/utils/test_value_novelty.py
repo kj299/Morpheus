@@ -182,6 +182,29 @@ def test_the_first_instant_establishes_normal_even_when_it_has_several_samples()
     assert second.changed[SERIAL] is None
 
 
+def test_simultaneous_samples_count_distinct_values_as_of_the_instant():
+
+    def tied(order):
+        subject = tracker(simultaneous=True)
+        feed(subject, ["SN-AAA", "SN-BBB"])
+        counts = {
+            serial: subject.observe(PORT, 2 * DAY_NS, {
+                SERIAL: serial
+            }).distinct_counts[SERIAL]
+            for serial in order
+        }
+
+        return (counts, subject.observe(PORT, 3 * DAY_NS, {SERIAL: "SN-AAA"}).distinct_counts[SERIAL])
+
+    for order in (["SN-NEW", "SN-OTHER", "SN-AAA"], ["SN-AAA", "SN-OTHER", "SN-NEW"]):
+        (counts, following) = tied(order)
+
+        # Each new value counts the two seen before the instant and itself, never the other new one.
+        assert counts == {"SN-NEW": 3, "SN-OTHER": 3, "SN-AAA": 2}
+        # Both joined the history, so the next instant counts them.
+        assert following == 4
+
+
 def test_distinct_count_keeps_rising_past_the_recall_bound():
     subject = tracker(max_values=2)
 

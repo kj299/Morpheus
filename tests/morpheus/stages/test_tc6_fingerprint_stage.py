@@ -134,6 +134,28 @@ def test_the_prior_handshake_count_is_the_history_behind_the_row(config: Config)
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_handshakes_in_one_second_share_the_count_before_it(config: Config):
+    # A burst in one timestamp is not ordered, so no handshake in it is further into the host's history than
+    # another. Each reads the count from before the second, and the next second counts the whole burst.
+    payload = handshakes([CHROME] * 6)
+    payload["event_time"] = [
+        START, START + SECOND, START + 2 * SECOND, START + 2 * SECOND, START + 2 * SECOND, START + 3 * SECOND
+    ]
+    result = run(config, payload)
+
+    assert list(result["ja4_client_observations"]) == [0, 1, 2, 2, 2, 5]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_late_handshake_does_not_move_the_instant_back(config: Config):
+    payload = handshakes([CHROME] * 4)
+    payload["event_time"] = [START, START + 2 * SECOND, START + SECOND, START + 2 * SECOND]
+    result = run(config, payload)
+
+    assert list(result["ja4_client_observations"]) == [0, 1, 2, 1]
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_a_host_the_estate_has_just_started_seeing_is_novel_in_every_direction(config: Config):
     # What the corpus caught. Every fingerprint is new to a host that has just appeared, so novelty alone fires
     # on a laptop back from repair, a new starter, anything behind a fresh lease. The count is what a rule uses
