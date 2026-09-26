@@ -47,19 +47,16 @@ PROPS = os.path.join(APP, "props.conf")
 # Splunk's own, plus the ones every search may lean on.
 SPLUNK_INTRINSICS = {"_time", "_key", "_raw", "_indextime", "index", "sourcetype", "source", "host", "count"}
 
-KNOWN_UNPRODUCED: dict = {
-    "join_method":
-        "Chain assembly aggregates it into `methods`, the column that tells an analyst an exact attribution from "
-        "an inferred one. LineageStampStage writes it only when stamping a parent-child edge (`parent_uid_column`), "
-        "and no reference pipeline stamps edges: the morpheus:edge events CommunityIdStage produces carry none. "
-        "The column is empty in the validation package until a pipeline records how its edges were joined.",
-}
+KNOWN_UNPRODUCED: dict = {}
 """Fields the searches read that nothing in this repository writes, each with the reason it is still referenced.
 
 When this file was written it named two: `lineage_id`, selected by all four detections and computed by no stage,
 and `binding_table`, the field the L2/L3 refresh search filters on and which `to_bucketed_records` emitted only
-when a caller remembered to ask for it. Both are now produced. `join_method` arrived when the linter learned to read
-an aggregate's argument, which it had skipped: Chain assembly had read it inside `values()` all along.
+when a caller remembered to ask for it. Both are now produced. A third, `join_method`, appeared when the linter
+learned to read an aggregate's argument: Chain assembly collected it into `methods`, and it is the name
+LineageStampStage gives a parent-child edge's method, which no pipeline stamps. The attribution method every scored
+event does carry is BindingResolverStage's `resolution_method`, so the search now reads that and the registry is
+empty again.
 
 An entry here is a claim that a gap is known and deliberate, and the tests below make it an uncomfortable one: it
 must be read by some search, it must carry a real reason, and it must stop being registered the moment something
