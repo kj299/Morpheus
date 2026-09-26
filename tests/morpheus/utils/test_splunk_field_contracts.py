@@ -47,13 +47,19 @@ PROPS = os.path.join(APP, "props.conf")
 # Splunk's own, plus the ones every search may lean on.
 SPLUNK_INTRINSICS = {"_time", "_key", "_raw", "_indextime", "index", "sourcetype", "source", "host", "count"}
 
-KNOWN_UNPRODUCED: dict = {}
+KNOWN_UNPRODUCED: dict = {
+    "join_method":
+        "Chain assembly aggregates it into `methods`, the column that tells an analyst an exact attribution from "
+        "an inferred one. LineageStampStage writes it only when stamping a parent-child edge (`parent_uid_column`), "
+        "and no reference pipeline stamps edges: the morpheus:edge events CommunityIdStage produces carry none. "
+        "The column is empty in the validation package until a pipeline records how its edges were joined.",
+}
 """Fields the searches read that nothing in this repository writes, each with the reason it is still referenced.
 
-Empty, which was not true when this file was written. It named two: `lineage_id`, selected by all four detections
-and computed by no stage, and `binding_table`, the field the L2/L3 refresh search filters on and which
-`to_bucketed_records` emitted only when a caller remembered to ask for it. Both are now produced, so the honest
-registry is empty rather than decorative.
+When this file was written it named two: `lineage_id`, selected by all four detections and computed by no stage,
+and `binding_table`, the field the L2/L3 refresh search filters on and which `to_bucketed_records` emitted only
+when a caller remembered to ask for it. Both are now produced. `join_method` arrived when the linter learned to read
+an aggregate's argument, which it had skipped: Chain assembly had read it inside `values()` all along.
 
 An entry here is a claim that a gap is known and deliberate, and the tests below make it an uncomfortable one: it
 must be read by some search, it must carry a real reason, and it must stop being registered the moment something
@@ -184,12 +190,41 @@ def _identifiers(expression: str) -> set:
     return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", without_calls))
 
 
+def _parenthesised(text: str) -> list:
+    """The contents of each top-level parenthesised group, so `max(eval(if(a, b, c)))` yields its whole argument."""
+    (groups, depth, start) = ([], 0, 0)
+
+    for (position, character) in enumerate(text):
+        if (character == "("):
+            if (depth == 0):
+                start = position + 1
+
+            depth += 1
+        elif (character == ")" and depth > 0):
+            depth -= 1
+
+            if (depth == 0):
+                groups.append(text[start:position])
+
+    return groups
+
+
 def referenced_in(search: str) -> set:
     """Fields the search reads: filter terms, table and dedup lists, and where expressions."""
     referenced = set()
 
     # `field=value`, the shape of every filter term.
     referenced.update(re.findall(r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\s*=", search))
+
+    # `field>=20`, `field<0.2`, `field!=x`: a threshold is a filter term too. Missing these was a blind spot, and
+    # the worst kind -- a threshold on a field nothing emits compares a null with a number and drops every row.
+    referenced.update(re.findall(r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\s*(?:[<>]=?|!=)", search))
+
+    # An aggregate's argument is read as surely as a filter's: `max(flow_data_len) AS transferred` reads
+    # flow_data_len, and naming a column nothing writes there yields a null aggregate rather than an error.
+    for clause in re.findall(r"\|\s*(?:stats|eventstats|streamstats|tstats|chart|timechart)\s+([^|\]]*)", search):
+        for argument in _parenthesised(clause):
+            referenced.update(_identifiers(argument))
 
     for clause in re.findall(r"\|\s*(?:table|dedup|fields)\s+([^|]*)", search):
         referenced.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", clause))
@@ -341,6 +376,121 @@ def producible() -> set:
     """Everything a field reference can legitimately resolve to."""
     return (stage_columns() | golden_columns() | bucketed_columns() | lookup_fields() | notable_fields()
             | SPLUNK_INTRINSICS | set(KNOWN_UNPRODUCED) | SPL_WORDS)
+
+
+STATS_COMMANDS = {"stats", "tstats", "chart", "timechart"}
+"""Commands that replace the rows with their own output, keeping only the aggregates and the group-by fields."""
+
+JOINING_COMMANDS = {"join", "append", "appendcols"}
+"""Commands that bring a subsearch's fields into the pipeline."""
+
+OPTION_COMMANDS = {"collect", "outputlookup"}
+"""Commands whose `name=value` arguments are options, not fields: `collect index=behavior_summary` reads nothing."""
+
+
+def _split_top_level(text: str) -> list:
+    """Split a pipeline on `|`, leaving pipes inside a quoted string or a `[subsearch]` alone."""
+    (parts, depth, quote, current) = ([], 0, None, [])
+
+    for character in text:
+        if (quote is not None):
+            quote = None if character == quote else quote
+        elif (character in "\"'"):
+            quote = character
+        elif (character == "["):
+            depth += 1
+        elif (character == "]"):
+            depth -= 1
+        elif (character == "|" and depth == 0):
+            parts.append("".join(current))
+            current = []
+            continue
+
+        current.append(character)
+
+    parts.append("".join(current))
+
+    return [part.strip() for part in parts]
+
+
+def _subsearches(command: str) -> tuple:
+    """(the command with its top-level subsearches removed, the text of each subsearch)."""
+    (outside, inside, depth, current) = ([], [], 0, [])
+
+    for character in command:
+        if (character == "["):
+            depth += 1
+
+            if (depth == 1):
+                continue
+        elif (character == "]"):
+            depth -= 1
+
+            if (depth == 0):
+                inside.append("".join(current).strip())
+                current = []
+                continue
+
+        (current if depth > 0 else outside).append(character)
+
+    return ("".join(outside), [re.sub(r"^search\s+", "", sub) for sub in inside])
+
+
+def _stats_outputs(body: str) -> set:
+    """The fields a `stats` leaves: its named aggregates, its group-by fields, and `count` if it counts unnamed."""
+    head = re.split(r"\bby\b", body, maxsplit=1, flags=re.IGNORECASE)
+    outputs = set(re.findall(r"\bas\s+([A-Za-z_][A-Za-z0-9_]*)", head[0], flags=re.IGNORECASE))
+
+    if (len(head) > 1):
+        outputs.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", head[1]))
+
+    if (re.search(r"\bcount\b(?!\s*\()(?!\s+as\b)", head[0], flags=re.IGNORECASE)):
+        outputs.add("count")
+
+    return outputs
+
+
+def walk_pipeline(search: str) -> tuple:
+    """
+    Follow which fields exist at each command, and report every field read after a `stats` removed it.
+
+    `stats` replaces the rows with its own output. A field it neither aggregates into a name nor groups by is gone
+    for the rest of the pipeline, and reading it afterwards does not fail: every row reads null, a `where` on it
+    drops them all, and a `table` shows an empty column. Checking a search's fields against what the stages write
+    cannot see this, because the field *is* written -- just not by anything still in the pipeline.
+
+    Returns (fields read after they were dropped, the fields the pipeline ends with). The second is None while no
+    `stats` has narrowed the pipeline, meaning every upstream field may still be present.
+    """
+    (missing, available) = (set(), None)
+
+    for command in _split_top_level(search)[1:]:
+        (body, subsearches) = _subsearches(command)
+        words = body.split()
+        name = words[0].lower() if words else ""
+        piece = "| " + body
+        sub_outputs = []
+
+        for subsearch in subsearches:
+            (sub_missing, sub_available) = walk_pipeline(subsearch)
+            missing |= sub_missing
+            sub_outputs.append(sub_available)
+
+        if (available is not None and name not in OPTION_COMMANDS):
+            missing |= referenced_in(piece) - created_in(piece) - available - SPL_WORDS
+
+        if (name in STATS_COMMANDS):
+            available = _stats_outputs(" ".join(words[1:]))
+        elif (name in ("table", "fields") and words[1:2] != ["-"]):
+            available = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", " ".join(words[1:])))
+        elif (name in JOINING_COMMANDS):
+            for sub_available in sub_outputs:
+                if (available is not None):
+                    available = None if sub_available is None else available | sub_available
+        elif (available is not None):
+            available |= created_in(piece)
+
+    return (missing, available)
 
 
 # --- The checks -----------------------------------------------------------------------------------------------
@@ -498,6 +648,41 @@ def test_every_time_prefix_field_is_named_by_a_producer(stanza: str):
     assert anchor in producible() - SPL_WORDS - SPLUNK_INTRINSICS, (
         f"{stanza} anchors _time on {anchor!r} and no stage writes it; every event on this sourcetype would be "
         f"stamped at index time.")
+
+
+@pytest.mark.parametrize("name", sorted(searches()))
+def test_no_search_reads_a_field_its_own_stats_dropped(name: str):
+    (dropped, _) = walk_pipeline(searches()[name])
+
+    assert not dropped, (
+        f"{name} reads {sorted(dropped)} after a stats that neither aggregates nor groups by it. Every row reads "
+        f"null there; aggregate it, group by it, or read it before the stats.")
+
+
+def test_a_threshold_on_a_field_nothing_writes_would_be_caught():
+    invented = "a_field_no_stage_will_ever_emit"
+    # A bare filter term, with no `where` or `table` to catch it another way.
+    search = f"index=behavior_events sourcetype=morpheus:score:l3 {invented}>=20 | stats count BY src_ip"
+
+    assert invented in referenced_in(search) - created_in(search) - producible()
+
+
+def test_an_aggregate_of_a_field_nothing_writes_would_be_caught():
+    invented = "a_field_no_stage_will_ever_emit"
+    search = (f"index=behavior_events sourcetype=morpheus:score:l3 "
+              f"| stats max({invented}) AS peak min(eval(if(dsts_per_src > 3, _time, null()))) AS first BY src_ip")
+
+    assert invented in referenced_in(search) - created_in(search) - producible()
+
+
+def test_a_field_read_after_the_stats_that_dropped_it_would_be_caught():
+    # dst_ip exists before the stats, which keeps only src_ip and the two named aggregates; reading it afterwards
+    # reads null. peak and eval'd fields remain readable, and a joined subsearch's fields join the pipeline.
+    search = ("index=behavior_events sourcetype=morpheus:score:l3 | stats max(dsts_per_src) AS peak count BY src_ip "
+              "| eval doubled = peak * 2 | join type=inner src_ip [search index=behavior_events | stats "
+              "min(_time) AS t_login BY src_ip] | where doubled > count AND t_login > 0 AND dst_ip != \"10.0.0.1\"")
+
+    assert walk_pipeline(search) == ({"dst_ip"}, {"src_ip", "peak", "count", "doubled", "t_login"})
 
 
 def test_a_bogus_field_would_be_caught():

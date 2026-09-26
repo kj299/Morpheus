@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is forty-four stages and thirty-nine supporting
-modules, covered by 1,775 distinct tests, itemized in
+modules, covered by 1,779 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -2991,6 +2991,17 @@ source with, and `to_bucketed_records` emitted it only when a caller passed `tab
 refresh matched no rows. It now defaults to the table's own name, which the table has been required to have since
 an earlier fix. And `dot1x_identity` is on R-D-L2-005's alert so an analyst can tell which device authorized, and
 the corpus sent none, so the composed pipeline never covered the identity path the stage prefers over the MAC.
+
+The linter had three blind spots of its own, now closed. It read `field=value` but not a threshold, so
+`ja4_client_observations>=20` went unchecked; it skipped the argument of an aggregate, so `max(flow_data_len)`
+could name anything; and it treated a search as one bag of fields, when `stats` replaces the rows with its own
+output and a field it neither aggregates nor groups by is null for the rest of the pipeline. A walk of each
+pipeline now tracks which fields survive every command, subsearches included, and flags a read of one a `stats`
+dropped. None of the 37 searches does that. The aggregate check found one real gap: Chain assembly collects
+`values(join_method) AS methods`, and no reference pipeline stamps the parent-child edges
+{py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage` writes `join_method` on, so the column
+is always empty. It is registered as a known gap, with that reason, until a pipeline records how its edges were
+joined.
 
 `tests/morpheus/determinism/test_representation_invariance.py` is check 6 one level down. Row order must not
 decide the output; neither must the type the values arrived in. Each key-bearing column is presented as an
