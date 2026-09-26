@@ -108,6 +108,32 @@ def test_a_returning_location_does_not_raise_the_increment(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+@pytest.mark.parametrize("order", [(0, 1, 2), (2, 1, 0)])
+def test_authentications_in_one_second_are_measured_against_the_history_before_it(config: Config, order):
+    # An identity provider stamps to the second. Two logins from Paris in one second are both a new location, and
+    # the increments come out the same whichever order the log lists the second's records in.
+    burst = [("fr", "paris", "ws-09"), ("gb", "london", "ws-01"), ("fr", "paris", "ws-09")]
+    rows = [("gb", "london", "ws-01")] + [burst[index] for index in order]
+    payload = frame(4,
+                    countries=[row[0] for row in rows],
+                    cities=[row[1] for row in rows],
+                    times=[0, MINUTE_NS, MINUTE_NS, MINUTE_NS])
+    payload["target_host"] = [row[2] for row in rows]
+    meta = run(config, payload, target_host_column="target_host")
+
+    by_city = {}
+    for (city, increment, location_new, host_new) in zip(_as_list(meta, "source_city"),
+                                                         _as_list(meta, "locincrement"),
+                                                         _as_list(meta, "location_first_seen"),
+                                                         _as_list(meta, "target_host_first_seen")):
+        by_city.setdefault(city, set()).add((increment, location_new, host_new))
+
+    assert by_city["paris"] == {(2, True, True)}
+    assert by_city["london"] == {(1, None, None), (1, False, False)}
+    assert _as_list(meta, "logcount") == [1, 2, 3, 4]
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_the_first_sample_answers_null_rather_than_true(config: Config):
     # The first sample establishes what normal looks like and is not itself an event. The increment beside it
     # already reads one, which carries the same fact without answering a question the history cannot yet answer.

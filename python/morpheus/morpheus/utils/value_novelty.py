@@ -35,8 +35,9 @@ Two samples at one instant are a duplicate poll for a port, which has one transc
 refused. They are ordinary for a host, which can open a dozen connections in one timestamp, so a caller can declare
 its samples `simultaneous` and have them measured instead. Each tied sample is compared with the entity as it stood
 before the instant, never with another sample at the same instant. The answer does not depend on the order ties
-arrive in. An instant that carried more than one value leaves no single previous value, so the next instant's
-`changed` is `None`.
+arrive in, and that includes the distinct count: a tied sample counts the values seen before the instant, plus its
+own if that is new. An instant that carried more than one value leaves no single previous value, so the next
+instant's `changed` is `None`.
 
 A null is a value, not missing data. A port with an empty cage genuinely reports no serial, and going from no optic
 to an optic is a change worth seeing, so `None` is tracked like any other value rather than skipped.
@@ -68,7 +69,9 @@ class NoveltyResult:
     first_seen : dict
         Per field, whether this entity has never reported this value before. `None` wherever `changed` is.
     distinct_counts : dict
-        Per field, how many distinct values this entity has reported, counting the current one.
+        Per field, how many distinct values this entity has reported, counting the current one. For a simultaneous
+        sample, the values reported before its instant plus its own if that is new, so that no tied sample's count
+        includes another's.
     out_of_order : bool
         The sample's event time was before the previous sample's, or equal to it when ties are not accepted. State
         is left untouched.
@@ -91,6 +94,7 @@ class _FieldState:
     before_last: typing.Any = None
     before_has_last: bool = False
     before_seen: frozenset = frozenset()
+    before_distinct: int = 0
     instant_values: set = dataclasses.field(default_factory=set)
 
 
@@ -222,6 +226,7 @@ class ValueNoveltyTracker:
                     state.before_last = state.last
                     state.before_has_last = state.has_last and len(state.instant_values) <= 1
                     state.before_seen = frozenset(state.seen)
+                    state.before_distinct = state.distinct
                     state.instant_values = set()
 
                 state.instant_values.add(value)
@@ -251,7 +256,11 @@ class ValueNoveltyTracker:
 
             state.last = value
             state.has_last = True
-            distinct[name] = state.distinct
+
+            if (self._simultaneous):
+                distinct[name] = state.before_distinct + int(value not in state.before_seen)
+            else:
+                distinct[name] = state.distinct
 
         self._last_seen[entity_key] = event_time_ns
         self._evict()

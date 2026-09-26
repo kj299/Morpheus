@@ -32,7 +32,9 @@ estate has recently started seeing -- a laptop back from repair, a new starter, 
 lease. The corpus found this: a host alternating between two stacks it has always had was reported the first
 time the second one appeared, identically to a host that had presented one stack for two hours and then acquired
 another. What separates them is not the novelty but the history behind it, so `ja4_client_observations` carries
-how many handshakes the host had made before this one and the rule requires a settled history.
+how many handshakes the host had made before this one and the rule requires a settled history. Handshakes in one
+timestamp are simultaneous, so each carries the count from before that instant rather than a place in the order the
+collector happened to list them; the rule's threshold must not depend on which of a burst was logged first.
 
 **The rule says thirty days and this is permanent recall, bounded by a value cap rather than by a clock.** The
 difference is deliberate and is the same one `TC3ReachStage` makes for destination-network novelty. A host whose
@@ -133,9 +135,10 @@ class TC6FingerprintStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                             max_entities=max_entities,
                                             simultaneous=True)
 
-        # Handshakes seen per host before the current one. Kept here rather than inside the novelty tracker,
-        # which answers a different question and is shared with layer 1. Bounded and evicted the same way, so
-        # the two cannot disagree about which hosts they remember.
+        # Per host: handshakes counted, the latest instant seen, and how many had been counted before that
+        # instant. Kept here rather than inside the novelty tracker, which answers a different question and is
+        # shared with layer 1. Bounded and evicted the same way, so the two cannot disagree about which hosts
+        # they remember.
         self._observations: collections.OrderedDict = collections.OrderedDict()
         self._max_entities = max_entities
 
@@ -237,8 +240,7 @@ class TC6FingerprintStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
                 # Read before this handshake is counted, so the figure is the history behind the row rather
                 # than one this row has already joined.
-                observations.append(self._observations.get(key, 0))
-                self._seen(key)
+                observations.append(self._seen(key, event_time_ns))
 
                 result = self._tracker.observe(key, event_time_ns, {self._fingerprint_column: fingerprint})
                 count = result.distinct_counts.get(self._fingerprint_column, 0)
@@ -273,13 +275,27 @@ class TC6FingerprintStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         return message
 
-    def _seen(self, key: str) -> None:
-        """Count one handshake for a host, evicting the least recently seen when the cap is reached."""
-        count = self._observations.pop(key, 0)
-        self._observations[key] = count + 1
+    def _seen(self, key: str, event_time_ns: int) -> int:
+        """
+        Count one handshake for a host and return how many it had made before this one's instant.
+
+        A handshake at the host's latest instant reads the count from before that instant, as every other
+        handshake at it did. One earlier than the latest is counted but cannot move the instant back, so it reads
+        the whole count, as it did before ties were measured. The least recently seen host is evicted when the cap
+        is reached.
+        """
+        (count, instant_ns, before_instant) = self._observations.pop(key, (0, None, 0))
+
+        if (instant_ns is None or event_time_ns > instant_ns):
+            (instant_ns, before_instant) = (event_time_ns, count)
+
+        prior = before_instant if event_time_ns == instant_ns else count
+        self._observations[key] = (count + 1, instant_ns, before_instant)
 
         while (len(self._observations) > self._max_entities):
             self._observations.pop(next(iter(self._observations)))
+
+        return prior
 
     def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
         node = builder.make_node(self.unique_name, ops.map(self.on_data))

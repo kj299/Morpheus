@@ -111,6 +111,22 @@ def test_a_networks_novelty_is_permanent_rather_than_windowed(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+@pytest.mark.parametrize("order", [(0, 1, 2), (2, 1, 0)])
+def test_flows_at_one_instant_do_not_excuse_each_other(config: Config, order):
+    # Three flows in one timestamp, two to a network the source has never reached. Neither makes the other look
+    # familiar, and the answer is the same whichever order the collector listed them in.
+    burst = [("8.8.8.8", "15169"), ("8.8.4.4", "15169"), ("1.1.1.1", "13335")]
+    rows = [("9.9.9.9", "19281")] + [burst[index] for index in order]
+    payload = flows([row[0] for row in rows], asns=[row[1] for row in rows])
+    payload["event_time"] = [START] + [START + SECOND] * 3
+    result = run(config, payload)
+
+    novel = dict(zip(result["dst_ip"], result["dst_asn_first_seen"]))
+
+    assert (novel["8.8.8.8"], novel["8.8.4.4"], novel["1.1.1.1"]) == (True, True, True)
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_a_missing_network_is_not_a_new_one(config: Config):
     # A collector that stopped populating the field would otherwise look like a host that started roaming.
     result = run(config, flows(["8.8.8.8", "1.1.1.1"], asns=["15169", None]))

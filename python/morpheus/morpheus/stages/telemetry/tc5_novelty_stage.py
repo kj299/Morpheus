@@ -105,6 +105,10 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     looks like for an entity and is not itself an event, and the increment column beside it already reads one,
     which carries the same fact without answering a question the history cannot yet answer.
 
+    Authentications logged in the same second are simultaneous rather than ordered. Each is measured against the
+    principal's history before that second, so none of them makes another look familiar, and the increments and
+    `*_first_seen` come out the same whichever order the log lists them in.
+
     The stage is stateful across messages and must run single-engine, or sharded by principal -- determinism
     control 4, on the key this telemetry class is already organized around.
 
@@ -188,12 +192,13 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._activity = DistinctWindowTracker(window_ns=window_ns, max_samples=max_samples, max_entities=max_entities)
         self._asns = DistinctWindowTracker(window_ns=window_ns, max_samples=max_samples, max_entities=max_entities)
         self._novelty = {
-            field: ValueNoveltyTracker([field], max_values=max_values, max_entities=max_entities)
+            field: ValueNoveltyTracker([field], max_values=max_values, max_entities=max_entities, simultaneous=True)
             for field in CUMULATIVE_FIELDS
         }
         self._target_hosts = ValueNoveltyTracker([TARGET_HOST_FIRST_SEEN],
                                                  max_values=max_values,
-                                                 max_entities=max_entities)
+                                                 max_entities=max_entities,
+                                                 simultaneous=True)
 
         self._needed_columns["user_location"] = TypeId.STRING
         self._needed_columns["logcount"] = TypeId.INT64
