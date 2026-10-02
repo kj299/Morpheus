@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is forty-four stages and thirty-nine supporting
-modules, covered by 1,794 distinct tests, itemized in
+8's total order, and control 13's CI harness. That is forty-five stages and forty supporting
+modules, covered by 1,845 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -887,6 +887,16 @@ half the retained samples sit on the new level. A degradation slower than the wi
 because the baseline drifts down with it. Catching that needs a commissioning value to
 compare against, which is asset context and belongs in TC-0.
 
+Where the baseline asks how far the level sits from what it was,
+{py:class}`~morpheus.stages.telemetry.tc1_forecast_stage.TC1ForecastStage` over
+{py:mod}`~morpheus.utils.optical_forecast` asks where it is going: a line fitted through the port's readings
+over a trailing week, its slope in decibels per day, and the day that line meets the floor the optic's data sheet
+gives, supplied to the stage per transceiver type. It publishes a projection only where the readings sit on the
+line, since a tap's step tilts a fitted line steeply and is reported `nonlinear` instead, and only where the
+slope stands several of its own standard errors clear of flat, since a dozen readings of a healthy optic fit a
+line whose slope is whatever the noise leaned. A replaced optic starts the port's history over. That is what
+R-P-L1-004 reads, and it is the slow degradation the baseline cannot see.
+
 Link flap counting ships as {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage` over
 {py:mod}`~morpheus.utils.link_flap`, and the reason it is not a status comparison is worth stating: a
 port that drops and recovers inside one sixty-second polling gap shows the same `oper_status` at both
@@ -1364,18 +1374,29 @@ bypass takes the pending slot of the device it is bridged behind and reads as an
 is reported. On ports where MAB is configured deliberately, suppress by port designation rather than by
 loosening the rule. Tier D1. Ships as a saved search in the Splunk app.
 
-These five, R-D-L1-001 and R-D-L2-001, 003, 004 and 005, are the rules in this part that exist as code rather
-than as specification. R-D-L1-001, 004 and 005 read columns the shipped stages produce and depend on nothing
-outside the pipeline; 001 and 003 depend on a list the estate owns, and each ships with the hook for that list and
-fires on nothing until it is populated, while R-D-L2-003 fires on every first-hop redundancy address until its
-exclusion list is supplied. All five predicates are asserted in Python over the determinism
-harness's planted corpus: R-D-L1-001, 004 and 005 fire exactly once, 001 once per offending MAC, and 003 on the
-flooded gateway and not on the redundancy pair.
+These six, R-D-L1-001, R-P-L1-004 and R-D-L2-001, 003, 004 and 005, are the rules in this part that exist as
+code rather than as specification. The two layer 1 rules, 004 and 005 read columns the shipped stages produce and
+depend on nothing outside the pipeline; 001 and 003 depend on a list the estate owns, and each ships with the hook
+for that list and fires on nothing until it is populated, while R-D-L2-003 fires on every first-hop redundancy
+address until its exclusion list is supplied. All six predicates are asserted in Python over the determinism
+harness's planted corpus: R-D-L1-001, 004 and 005 fire exactly once, R-P-L1-004 on the one failing optic, 001
+once per offending MAC, and 003 on the flooded gateway and not on the redundancy pair.
 
 **R-P-L1-004 - Optical degradation forecast.** Linear extrapolation of `optical_rx_dbm` per port
 projects a crossing of the transceiver's minimum receive threshold within 14 days. This is an operations
 rule, not a security rule, but it costs nothing once the telemetry class exists and it earns the layer 1
 pipeline its budget.
+
+Ships as a saved search over `optical_rx_dbm_forecast_status` and `optical_rx_dbm_days_to_floor` from
+{py:class}`~morpheus.stages.telemetry.tc1_forecast_stage.TC1ForecastStage`, which fits the line and declines
+to project it where the readings are not on it or the slope is within the noise; the search is the fourteen-day
+threshold and nothing more, one row per port, hourly and a watchlist like R-P-L3-005. The floor is the optic's
+own, looked up per `transceiver_type` from a mapping the deployment supplies, because a 10GBASE-LR receiver and
+a 1000BASE-LX one stop working five decibels apart. The harness corpus plants a failing optic whose level slides
+a few hundredths of a decibel every poll until a swap replaces it, and the fitted line gives it hours, which
+fires; the tap's three-decibel step on another port is reported as a step rather than a trend, the steady ports'
+jitter is not significant, and the replacement optic begins a history of its own. None of those four projects
+anything.
 
 ### Layer 3
 
@@ -3137,6 +3158,9 @@ What Morpheus provides versus what has to be built, stated plainly.
 - TC-1 optical power deviation against a per-port rolling baseline
   ({py:mod}`~morpheus.utils.optical_baseline` and
   {py:class}`~morpheus.stages.telemetry.tc1_optical_stage.TC1OpticalStage`).
+- TC-1 optical degradation forecast, a line fitted through each port's receive level and projected to the
+  floor its optic's data sheet gives ({py:mod}`~morpheus.utils.optical_forecast` and
+  {py:class}`~morpheus.stages.telemetry.tc1_forecast_stage.TC1ForecastStage`), which R-P-L1-004 reads.
 - TC-1 link flap counting, including the flaps that begin and end between two polls
   ({py:mod}`~morpheus.utils.link_flap` and
   {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage`). This completes the four
@@ -3416,7 +3440,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   repairing it, and this is what imposes the order they depend on.
 - The composed telemetry pipeline under control 13's six checks
   (`tests/morpheus/determinism/telemetry_pipeline.py`): a snapshot-shaped layer 1 and layer 2 corpus with a
-  hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap, two optic swaps and two 802.1X bypasses planted in it, run
+  hub, a spoof, an ARP flood, a reboot, a tap, a failing optic, an unpolled flap, two optic swaps and two 802.1X bypasses planted in it, run
   through every TC-1 and TC-2 stage, with the layer 2 bindings resolving the ARP stream onto the layer 1
   `entity_key`. Each planted anomaly is asserted as the column a rule would read, and nothing else fires.
   The second bypass arrives while a legitimate exchange on its own port is still open, and beside it sits a
@@ -3436,7 +3460,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
   the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
   and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Six of the
-  eleven searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
+  forty searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
   empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
   is working from a rule that is broken.
 - One rule run end to end offline, from a file to bytes a SIEM parses
@@ -3455,6 +3479,9 @@ What Morpheus provides versus what has to be built, stated plainly.
 - The layer 1 detection R-D-L1-001, a transceiver serial that changed on a poll the flap count says the link
   never moved for, asserted the same way: the corpus's optic swap fires it, and a second swap whose link
   dropped between the polls, recorded by the device's own `ifLastChange`, does not.
+- The layer 1 forecast R-P-L1-004, each port's receive level fitted over a trailing week and projected to its
+  optic's floor, firing on the corpus's failing optic and on neither the tap's step nor the steady ports'
+  jitter nor the optic that replaces the failing one.
 - Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
   answer inside the idle window, capped by a duration the consumer states rather than one the stage
   invents.

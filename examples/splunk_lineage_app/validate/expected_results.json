@@ -14,6 +14,19 @@
         }
       ]
     },
+    "R-P-L1-004 - Optical degradation forecast": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 34,
+      "why": "One port, the one whose optic was failing. hq:sw1:Gi1/0/6's receive level slid 0.04 dB every poll from the start of the hour until the swap at minute forty-five; the line TC1ForecastStage fits through its readings falls about 58 dB a day, and from the twelfth poll on the stage projects it reaching the 10GBASE-LR floor of -14.4 dBm within hours. Thirty-four polls carry that projection, and the search's stats BY entity_key reduces them to one row carrying the shortest. Nothing else projects: the tapped port's three-decibel step reads not_degrading on the poll it lands, where the slope is still within the noise, and nonlinear on every poll after, where the readings no longer sit on a line; the steady ports' jitter never stands more than two and a half standard errors from flat against the bar of four; and the optic that replaces the failing one begins a history of its own, too short to fit for eleven polls and not degrading after.",
+      "key_values": [
+        {
+          "entity_key": "hq:sw1:Gi1/0/6",
+          "transceiver_type": "10GBASE-LR",
+          "floor_dbm": -14.4
+        }
+      ]
+    },
     "R-D-L2-001 - MAC address count exceeded on an access port": {
       "expected_rows": 0,
       "expected_empty": true,

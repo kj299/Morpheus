@@ -84,6 +84,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc1_change_stage.py
     tests/morpheus/stages/test_tc1_feature_stage.py
     tests/morpheus/stages/test_tc1_flap_stage.py
+    tests/morpheus/stages/test_tc1_forecast_stage.py
     tests/morpheus/stages/test_tc1_normalize_stage.py
     tests/morpheus/stages/test_tc1_optical_stage.py
     tests/morpheus/stages/test_tc2_arp_stage.py
@@ -157,6 +158,7 @@ UNMARKED=(
     tests/morpheus/utils/test_link_flap.py
     tests/morpheus/utils/test_media_type.py
     tests/morpheus/utils/test_optical_baseline.py
+    tests/morpheus/utils/test_optical_forecast.py
     tests/morpheus/utils/test_pair_history.py
     tests/morpheus/utils/test_query_entropy.py
     tests/morpheus/utils/test_tcp_flags.py

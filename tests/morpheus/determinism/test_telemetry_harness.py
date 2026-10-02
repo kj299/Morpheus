@@ -34,6 +34,10 @@ from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
 from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.lineage import window_id_from_timestamp
+from morpheus.utils.optical_forecast import DEFAULT_MIN_SAMPLES
+from morpheus.utils.optical_forecast import STATUS_IMMATURE
+from morpheus.utils.optical_forecast import STATUS_NONLINEAR
+from morpheus.utils.optical_forecast import STATUS_PROJECTED
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -434,6 +438,60 @@ def test_the_optic_swap_closes_one_binding_and_opens_another(result: pd.DataFram
 
 
 @pytest.mark.cpu_mode
+def test_the_failing_optic_is_given_hours_and_its_replacement_starts_over(result: pd.DataFrame):
+    # The forecast, as R-P-L1-004 reads it. The optic on the maintenance port loses light a little faster every
+    # poll; a line through its readings reaches the floor within the day, and the stage says so from the first poll
+    # with enough history for a fit until the swap. The optic that replaces it has a history of its own.
+    layer_1 = _rows(result, "tc1")
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"
+    on_port = layer_1[layer_1["entity_key"] == port].sort_values("event_time")
+    swap = tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS
+
+    before = on_port[on_port["event_time"] < swap]
+    statuses = list(before["optical_rx_dbm_forecast_status"])
+
+    assert statuses[:DEFAULT_MIN_SAMPLES - 1] == [STATUS_IMMATURE] * (DEFAULT_MIN_SAMPLES - 1)
+    assert set(statuses[DEFAULT_MIN_SAMPLES - 1:]) == {STATUS_PROJECTED}
+
+    last = before.iloc[-1]
+    assert last["optical_rx_dbm_trend_db_per_day"] == pytest.approx(-tp.DEGRADATION_DB_PER_MINUTE * 24 * 60, rel=0.05)
+    assert last["optical_rx_dbm_trend_residual_db"] < 0.1
+    assert last["optical_rx_dbm_floor_dbm"] == tp.OPTIC_FLOOR_DBM
+    assert 0 < last["optical_rx_dbm_days_to_floor"] < 0.2
+    # The time to the floor shortens over the hour as the optic fails. Not poll by poll -- the fitted slope wobbles
+    # with the diagnostics' jitter, and so does a figure divided by it -- but the first projection gives the optic
+    # longer than the last, and every one of them gives it less than three hours.
+    days = list(before["optical_rx_dbm_days_to_floor"].dropna())
+    assert len(days) == tp.MAINTENANCE_SWAP_AT_MINUTE - DEFAULT_MIN_SAMPLES + 1
+    assert days[-1] < days[0]
+    assert max(days) < 0.125
+
+    # The slide is too shallow for the baseline stage to call a step, which is the point of having both: the
+    # degradation is the forecast's and the tap is the baseline's.
+    assert before["optical_rx_dbm_deviation"].min() > -1.0
+
+    after = on_port[on_port["event_time"] >= swap]
+    assert after.iloc[0]["optical_rx_dbm_trend_samples"] == 1
+    assert STATUS_PROJECTED not in set(after["optical_rx_dbm_forecast_status"])
+
+
+@pytest.mark.cpu_mode
+def test_the_tap_is_a_step_and_not_a_forecast(result: pd.DataFrame):
+    # The forecast's negative control, which needed no planting. A line fitted through forty steady readings and
+    # a three-decibel drop is steep, and read as a forecast would give the optic hours. The readings do not sit on
+    # that line, and the stage says so rather than projecting it.
+    layer_1 = _rows(result, "tc1")
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"
+    tapped = layer_1[layer_1["entity_key"] == port].sort_values("event_time")
+    after = tapped[tapped["event_time"] > tp.TAP_AT_MINUTE * 60 * NS]
+
+    assert STATUS_PROJECTED not in set(tapped["optical_rx_dbm_forecast_status"])
+    assert set(after["optical_rx_dbm_forecast_status"]) == {STATUS_NONLINEAR}
+    assert after["optical_rx_dbm_trend_residual_db"].min() > 0.5
+    assert after["optical_rx_dbm_days_to_floor"].isna().all()
+
+
+@pytest.mark.cpu_mode
 def test_the_maintenance_swap_is_a_change_the_device_saw_the_link_drop_for(result: pd.DataFrame):
     # The second replaced optic, as R-D-L1-001 reads it. The serial changes exactly as it does on the other swapped
     # port, and the device's own `ifLastChange` says the link went down and came back between the two polls, so
@@ -571,6 +629,11 @@ def test_nothing_else_fired(result: pd.DataFrame):
     assert set(lost_light["entity_key"]) == {f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"}
     assert lost_light["event_time"].min() == tp.TAP_AT_MINUTE * 60 * NS
     assert len(lost_light) == tp.CORPUS_SECONDS // 60 - tp.TAP_AT_MINUTE + 1
+
+    # One optic is given a forecast, the failing one, and only while it was in its port.
+    projected = layer_1[layer_1["optical_rx_dbm_forecast_status"] == STATUS_PROJECTED]
+    assert set(projected["entity_key"]) == {f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"}
+    assert projected["event_time"].max() < tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS
 
     # Two serials change in the hour, one on each replaced optic's port, and the link transitions nobody polled
     # are the maintenance swap's two and the planted flap's two. The reboot's transitions are unpolled too, and

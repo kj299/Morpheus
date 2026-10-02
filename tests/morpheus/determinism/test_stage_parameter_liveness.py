@@ -61,6 +61,7 @@ from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_feature_stage import TC1FeatureStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
+from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
 from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
 from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
@@ -236,6 +237,26 @@ def optics() -> dict:
         "event_time": [index * MINUTE for index in range(len(levels))],
         "optical_rx_dbm": levels,
         "optical_tx_dbm": [-2.0] * len(levels),
+    }
+
+
+OPTIC_FLOORS = {"10GBASE-LR": -14.4}
+
+
+def failing_optic() -> dict:
+    # A receive level sliding down a tenth of a decibel a poll, with the small jitter optical diagnostics report so
+    # the fit has a residual to measure, and the optic replaced two-thirds of the way through: a column whose
+    # reading of the parameters below can only be seen if the fit both projects and restarts.
+    jitter = [0.01, -0.01, 0.02, -0.02, 0.0, 0.01, -0.01, 0.02, -0.02, 0.0, 0.01, -0.01, 0.02, -0.02, 0.0]
+    levels = [-7.0 - 0.1 * index + jitter[index] for index in range(len(jitter))]
+
+    return {
+        "entity_key": ["hq:sw1:Gi1/0/1"] * len(levels),
+        "event_time": [index * MINUTE for index in range(len(levels))],
+        "optical_rx_dbm": levels,
+        "optical_tx_dbm": [-2.0] * len(levels),
+        "transceiver_serial": ["SN-A"] * 10 + ["SN-B"] * 5,
+        "transceiver_type": ["10GBASE-LR"] * len(levels),
     }
 
 
@@ -932,6 +953,31 @@ REGISTRY: dict = {
                      extreme=["optical_rx_dbm", "optical_tx_dbm"]),
                 Knob("window_seconds", DIFFERS, benign=3600, extreme=120),
                 Knob("min_samples", DIFFERS, benign=2, extreme=11),
+            ),
+        ),
+    "TC1ForecastStage":
+        Scenario(
+            stage=TC1ForecastStage,
+            frame=failing_optic,
+            base={
+                "floors": OPTIC_FLOORS, "min_samples": 4
+            },
+            knobs=(
+                Knob("entity_key_column", INPUT_COLUMN, benign="entity_key"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("channel_column", DIFFERS, benign="optical_rx_dbm", extreme="optical_tx_dbm"),
+                Knob("type_column", DIFFERS, benign="transceiver_type", extreme="absent_type"),
+                Knob("floors", DIFFERS, benign=OPTIC_FLOORS, extreme={"10GBASE-LR": -30.0}),
+                # The default is read only for a type the mapping does not name, so the mapping is emptied for it.
+                Knob("default_floor_dbm", DIFFERS, benign=None, extreme=-20.0, also={"floors": {}}),
+                Knob("optic_column", DIFFERS, benign="transceiver_serial", extreme=None),
+                Knob("window_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=180),
+                Knob("min_samples", DIFFERS, benign=4, extreme=12),
+                Knob("max_samples", DIFFERS, benign=2048, extreme=4),
+                Knob("max_residual_db", DIFFERS, benign=0.5, extreme=0.001),
+                Knob("min_significance", DIFFERS, benign=4.0, extreme=1e9),
+                Knob("decimals", DIFFERS, benign=4, extreme=1),
             ),
         ),
     "TC1FlapStage":

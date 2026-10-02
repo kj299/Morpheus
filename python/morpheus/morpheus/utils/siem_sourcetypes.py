@@ -104,10 +104,11 @@ PRODUCED: dict = {
             name="morpheus:score:l1",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-1 stages (normalize, optical, flap, change) behind WindowSealStage; the `tc1` class of "
-            "`tests/morpheus/determinism/telemetry_pipeline.py`.",
-            # R-D-L1-001 reads the last three: a serial that changed on a poll the flap count says the link never
-            # moved for. `oper_status` is the collector's own field, carried through rather than derived.
+            producer="The TC-1 stages (normalize, optical, forecast, flap, change) behind WindowSealStage; the `tc1` "
+            "class of `tests/morpheus/determinism/telemetry_pipeline.py`.",
+            # R-D-L1-001 reads the serial change, the flap count and the collector's own `oper_status`, carried
+            # through rather than derived: a serial that changed on a poll the flap count says the link never moved
+            # for. R-P-L1-004 reads the forecast status and the days the fitted trend gives the optic.
             required_columns=("event_uid",
                               "entity_key",
                               "site_id",
@@ -115,7 +116,9 @@ PRODUCED: dict = {
                               "port_id",
                               "transceiver_serial_changed",
                               "link_flaps",
-                              "oper_status"),
+                              "oper_status",
+                              "optical_rx_dbm_forecast_status",
+                              "optical_rx_dbm_days_to_floor"),
         ),
     "morpheus:score:l3":
         Sourcetype(

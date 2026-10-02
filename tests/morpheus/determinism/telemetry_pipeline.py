@@ -34,6 +34,8 @@ Into that corpus are planted the things the layer 1 and layer 2 features exist t
 - a **flood**: twenty gratuitous ARP replies from one host in one second, claiming the gateway;
 - a **reboot**: a device whose uptime and counters restart mid-corpus;
 - a **tap**: a step loss of receive power on one port, with transmit power unchanged;
+- a **failing optic**: a receive level sliding down a few hundredths of a decibel every poll until the maintenance
+  swap below replaces it, which is what R-P-L1-004 fires on, where the tap's step must not;
 - a **flap**: a link that went down and up between two polls, visible only through `ifLastChange`;
 - an **optic swap**: a transceiver serial that changes on a port while the device records no link transition,
   which is what R-D-L1-001 fires on, and beside it a **maintenance swap** whose serial changes with the link's
@@ -71,6 +73,7 @@ from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
+from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
 from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
 from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
@@ -167,6 +170,25 @@ swap in the estate is not the rule the guide specifies.
 
 SWAPS = {XCVR_SWAP_PORT: XCVR_SWAP_AT_MINUTE, MAINTENANCE_PORT: MAINTENANCE_SWAP_AT_MINUTE}
 """The minute each replaced optic's new serial first appears, per port."""
+
+OPTIC_TYPE = "10GBASE-LR"
+OPTIC_FLOOR_DBM = -14.4
+OPTIC_FLOORS = {OPTIC_TYPE: OPTIC_FLOOR_DBM}
+"""The one optic type this estate runs, and the level its receiver stops working at, from the datasheet.
+
+Supplied to `TC1ForecastStage` the way the estate's site coordinates are supplied to the travel stage: a fact about
+the hardware rather than about any poll, so it is not carried on the event.
+"""
+
+DEGRADATION_DB_PER_MINUTE = 0.04
+"""The optic on `MAINTENANCE_PORT` is failing: its receive level slides down by this much every poll until the swap
+replaces it, which is why it was replaced, and which is what R-P-L1-004 fires on.
+
+Forty-four minutes of it is 1.76 dB, and a line through the readings reaches the floor within hours. The tap on
+`HUB_PORT` loses more light than that at once and must not fire the forecast, because a step is not a trend; and
+the slide is kept shallower than what the baseline stage reports as a step, so the two signals stay distinct. The
+degradation is the forecast's and the tap is the baseline's.
+"""
 BYPASS_AT_SECONDS = 1500
 BYPASS_PORT = "Gi1/0/2"
 BYPASS_MAC = "de:ad:be:ef:01:01"
@@ -273,7 +295,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
 
 def _build_layer_1(rng: random.Random) -> pd.DataFrame:
-    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, an unpolled flap and two optic swaps."""
+    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, a failing optic, an unpolled flap and two
+    optic swaps."""
     devices = [(SWITCH, port) for port in PORTS] + [(SWITCH, MAINTENANCE_PORT), (REBOOTING_SWITCH, "Gi1/0/1")]
     counters = {
         key: {
@@ -324,6 +347,10 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
             if (device == SWITCH and port == HUB_PORT and minute >= TAP_AT_MINUTE):
                 rx_dbm -= TAP_LOSS_DB
 
+            # The failing optic loses a little more light every poll until it is replaced; its replacement is healthy.
+            if (device == SWITCH and port == MAINTENANCE_PORT and minute < MAINTENANCE_SWAP_AT_MINUTE):
+                rx_dbm -= DEGRADATION_DB_PER_MINUTE * minute
+
             seq += 1
             rows.append({
                 "event_time": time_s * NS_PER_SECOND,
@@ -336,6 +363,7 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
                 "optical_tx_dbm": round(-2.0 + rng.uniform(-0.05, 0.05), 3),
                 "optical_rx_dbm": round(rx_dbm, 3),
                 "transceiver_serial": serial,
+                "transceiver_type": OPTIC_TYPE,
                 "lldp_neighbor_chassis_id": f"nbr-{device}-{port}",
                 **counters[(device, port)],
                 **_envelope(rng, "snmp-poller", "TC-1/1.0.0", seq),
@@ -731,6 +759,7 @@ def run_classes(config: Config,
                                 [
                                     TC1NormalizeStage(config, uptime_column="uptime", uptime_unit="cs"),
                                     TC1OpticalStage(config),
+                                    TC1ForecastStage(config, floors=OPTIC_FLOORS),
                                     TC1FlapStage(config, last_change_column="if_last_change", last_change_unit="cs"),
                                     TC1ChangeStage(config),
                                 ],

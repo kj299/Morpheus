@@ -21,8 +21,8 @@ corpus with the anomalies planted in it. Each must fire exactly where it was pla
 fields an analyst needs to trace it. The stanzas are then read from the app itself, so the SPL and the Python
 cannot drift apart silently.
 
-The layer 1 rule and the four layer 2 rules are asserted end to end here, corpus and stanza both. The two layer 5
-rules are asserted against their own corpus in `test_session_harness.py` and against their expected row counts in
+The two layer 1 rules and the four layer 2 rules are asserted end to end here, corpus and stanza both. The two layer
+5 rules are asserted against their own corpus in `test_session_harness.py` and against their expected row counts in
 `test_splunk_validation_package.py`, because both of those already hold the layer 5 pipeline; what they are
 checked for here is the half neither of those covers -- that the SPL names the columns the stages emit, and that
 the scheduling follows Part 5's discipline.
@@ -37,6 +37,11 @@ import pytest
 
 from morpheus.utils.binding_closer import CONFLICT
 from morpheus.utils.binding_closer import DISPLACED
+from morpheus.utils.optical_forecast import DEFAULT_MIN_SAMPLES
+from morpheus.utils.optical_forecast import STATUS_IMMATURE
+from morpheus.utils.optical_forecast import STATUS_NONLINEAR
+from morpheus.utils.optical_forecast import STATUS_NOT_DEGRADING
+from morpheus.utils.optical_forecast import STATUS_PROJECTED
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -52,6 +57,7 @@ NS = tp.NS_PER_SECOND
 
 RULES = {
     "R-D-L1-001": "R-D-L1-001 - Transceiver substitution",
+    "R-P-L1-004": "R-P-L1-004 - Optical degradation forecast",
     "R-D-L2-001": "R-D-L2-001 - MAC address count exceeded on an access port",
     "R-D-L2-003": "R-D-L2-003 - ARP anomaly",
     "R-D-L2-004": "R-D-L2-004 - MAC in two places at once",
@@ -170,6 +176,55 @@ def test_r_d_l1_001_fires_on_the_swap_the_link_never_dropped_for_and_not_on_the_
                    "event_uid",
                    "lineage_id"):
         assert pd.notna(hit[column]), column
+
+
+@pytest.mark.cpu_mode
+def test_r_p_l1_004_fires_on_the_failing_optic_and_not_on_the_tap(result: pd.DataFrame):
+    # The rule's predicate: a poll whose fitted trend is projected to reach the optic's floor within fourteen
+    # days. The search then takes one row per port, with the shortest time to the floor in the window.
+    layer_1 = result[result["telemetry_class"] == "tc1"]
+    projected = layer_1[(layer_1["optical_rx_dbm_forecast_status"] == STATUS_PROJECTED)
+                        & (layer_1["optical_rx_dbm_days_to_floor"] <= 14)]
+
+    failing = f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"
+    swap = tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS
+
+    # One port, and only while the failing optic was in it: from the first poll with enough history for a fit
+    # until the poll before the swap.
+    assert set(projected["entity_key"]) == {failing}
+    assert projected["event_time"].max() < swap
+    assert len(projected) == tp.MAINTENANCE_SWAP_AT_MINUTE - DEFAULT_MIN_SAMPLES + 1
+    assert set(projected["transceiver_serial"]) == {f"XCVR-{tp.SWITCH}-{tp.MAINTENANCE_PORT}"}
+
+    # The slope is the planted slide, in the rule's unit, and the floor is the optic's own.
+    last = projected.sort_values("event_time").iloc[-1]
+    assert last["optical_rx_dbm_trend_db_per_day"] == pytest.approx(-tp.DEGRADATION_DB_PER_MINUTE * 24 * 60, rel=0.05)
+    assert last["optical_rx_dbm_floor_dbm"] == tp.OPTIC_FLOOR_DBM
+    assert 0 < last["optical_rx_dbm_days_to_floor"] < 1
+
+    # The tap on the hub port loses three decibels at once, which a line fitted through it would call a slope
+    # steep enough to fire this rule within the hour. The stage reports it as a step instead, and never projects it.
+    tapped = layer_1[layer_1["entity_key"] == f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"]
+    after_tap = tapped[tapped["event_time"] > tp.TAP_AT_MINUTE * 60 * NS]
+
+    assert STATUS_PROJECTED not in set(tapped["optical_rx_dbm_forecast_status"])
+    assert set(after_tap["optical_rx_dbm_forecast_status"]) == {STATUS_NONLINEAR}
+
+    # The replacement optic begins a history of its own, and the steady ports' jitter is not a trend.
+    replaced = layer_1[(layer_1["entity_key"] == failing) & (layer_1["event_time"] >= swap)]
+    assert set(replaced["optical_rx_dbm_forecast_status"]) <= {STATUS_IMMATURE, STATUS_NOT_DEGRADING}
+
+    for column in ("entity_key",
+                   "optical_rx_dbm_days_to_floor",
+                   "optical_rx_dbm_trend_db_per_day",
+                   "optical_rx_dbm",
+                   "optical_rx_dbm_floor_dbm",
+                   "optical_rx_dbm_trend_samples",
+                   "transceiver_type",
+                   "transceiver_serial",
+                   "event_uid",
+                   "lineage_id"):
+        assert pd.notna(last[column]), column
 
 
 @pytest.mark.cpu_mode
@@ -307,6 +362,11 @@ def test_the_search_reads_the_column_the_stage_emits(rule_id: str, searches: dic
                        "link_flaps=0",
                        'oper_status!="down"',
                        "last(transceiver_serial) AS previous_serial BY entity_key"),
+        "R-P-L1-004": ("sourcetype=morpheus:score:l1",
+                       'optical_rx_dbm_forecast_status="projected"',
+                       "optical_rx_dbm_days_to_floor<=14",
+                       "min(optical_rx_dbm_days_to_floor) AS days_to_floor",
+                       "BY entity_key"),
         "R-D-L2-001": ("sourcetype=morpheus:score:l2",
                        "macs_per_port_first_in_window=true",
                        "lookup port_designations port_key",
@@ -353,9 +413,15 @@ def test_the_search_follows_the_scheduling_discipline(rule_id: str, searches: di
     trailing_minutes = int(re.fullmatch(r"-(\d+)m@m", stanza["dispatch.latest_time"]).group(1))
     assert trailing_minutes >= tp.LATENESS_SECONDS // 60, "the window must trail by at least the lateness horizon"
 
-    # Window width equals the cadence, so consecutive runs are disjoint and a detection is emitted once.
+    # Window width equals the cadence, so consecutive runs are disjoint and a detection is emitted once. The
+    # watchlist rules run once an hour, at a fixed minute, over the hour before.
     earliest_minutes = int(re.fullmatch(r"-(\d+)m@m", stanza["dispatch.earliest_time"]).group(1))
-    cadence_minutes = int(re.fullmatch(r"\*/(\d+) \* \* \* \*", stanza["cron_schedule"]).group(1))
+    every = re.fullmatch(r"\*/(\d+) \* \* \* \*", stanza["cron_schedule"])
+    hourly = re.fullmatch(r"\d+ \* \* \* \*", stanza["cron_schedule"])
+
+    assert every is not None or hourly is not None, stanza["cron_schedule"]
+
+    cadence_minutes = int(every.group(1)) if every is not None else 60
     assert earliest_minutes - trailing_minutes == cadence_minutes
 
 

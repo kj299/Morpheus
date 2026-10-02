@@ -62,6 +62,7 @@ MFA_DENIAL_THRESHOLD = 4
 DRIFT_RISING_THRESHOLD = 4
 DRIFT_SIGMA_THRESHOLD = 1.5
 DRIFT_MEAN_CEILING = 2.0
+FORECAST_DAYS_THRESHOLD = 14
 """The thresholds the saved searches state, repeated here so the predicate this file evaluates is the
 predicate the app ships rather than an approximation of it."""
 
@@ -169,6 +170,27 @@ def test_the_layer_1_detection_returns_exactly_what_is_written(expected: dict, t
 
     assert len(quiet) == 1
     assert (quiet["link_flaps"] >= 2).all()
+
+
+def test_the_forecast_returns_exactly_what_is_written(expected: dict, telemetry: pd.DataFrame):
+    # R-P-L1-004's predicate as the search states it, then its `stats ... BY entity_key`: one row per port whose
+    # fitted trend reaches the floor within fourteen days, carrying the shortest time to it in the window.
+    layer_1 = telemetry[telemetry["telemetry_class"] == "tc1"]
+    projected = layer_1[(layer_1["optical_rx_dbm_forecast_status"] == "projected")
+                        & (layer_1["optical_rx_dbm_days_to_floor"] <= FORECAST_DAYS_THRESHOLD)]
+
+    entry = expected["searches"]["R-P-L1-004 - Optical degradation forecast"]
+
+    assert entry["expected_rows"] == projected["entity_key"].nunique()
+    assert entry["contributing_rows"] == len(projected)
+
+    written = {(row["entity_key"], row["transceiver_type"], row["floor_dbm"]) for row in entry["key_values"]}
+    assert written == set(
+        zip(projected["entity_key"], projected["transceiver_type"], projected["optical_rx_dbm_floor_dbm"]))
+
+    # The controls are in the data under the statuses the expectation names, so a stage that started projecting
+    # the tap's step or the steady ports' jitter would be caught here as extra rows rather than read as a feature.
+    assert set(layer_1["optical_rx_dbm_forecast_status"]) >= {"projected", "nonlinear", "not_degrading", "immature"}
 
 
 def test_the_layer_5_detections_return_exactly_what_is_written(expected: dict, sessions: pd.DataFrame):
@@ -779,8 +801,9 @@ def test_every_expected_empty_search_says_why(expected: dict):
     #
     # Six of thirty-seven now: R-C-002 left the list when it was rewritten to read scored events rather than
     # notables and the campaign corpus gave it a chain to find.
-    # Six of thirty-eight after R-C-005, which arrived with a chain to find, and six of thirty-nine after
-    # R-D-L1-001, whose optic swap the corpus already held.
+    # Six of thirty-eight after R-C-005, which arrived with a chain to find, six of thirty-nine after
+    # R-D-L1-001, whose optic swap the corpus already held, and six of forty after R-P-L1-004, which arrived with
+    # a failing optic planted for it.
     assert len(empty) == 6
 
     for (name, entry) in empty.items():
