@@ -53,6 +53,7 @@ SAVEDSEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "savedsearches.conf")
 RULE = "R-C-001 - Lateral movement chain"
 EXFIL_RULE = "R-C-004 - Staged exfiltration"
+REPLAY_RULE = "R-C-005 - Credential replay across the stack"
 C2_RULE = "R-C-002 - TLS anomaly precedes beaconing"
 
 
@@ -108,9 +109,9 @@ def _permuted(corpus: dict, seed: int) -> dict:
 def test_corpus_is_fixed(corpus: dict[str, pd.DataFrame]):
     again = cp_.build_corpus()
 
-    assert set(again) == set(corpus) == set(cp_.CLASSES)
+    assert set(again) == set(corpus) == set(cp_.CORPUS_CLASSES)
 
-    for name in cp_.CLASSES:
+    for name in cp_.CORPUS_CLASSES:
         pd.testing.assert_frame_equal(corpus[name], again[name])
 
 
@@ -124,7 +125,10 @@ def test_the_three_collectors_share_their_entities(corpus: dict[str, pd.DataFram
     lateral = flows[flows["src_ip"].isin({actor.source for actor in cp_.ACTORS.values()})]
 
     assert set(lateral["src_ip"]) <= set(logins["source_ip"])
-    assert {host.lower() for host in logins["target_host"]} == set(processes["hostname"])
+
+    # R-C-001's actors' logins, that is: R-C-005's principals sign in to the intranet, which no EDR reports.
+    actor_logins = logins[logins["user_principal"].isin({actor.principal for actor in cp_.ACTORS.values()})]
+    assert {host.lower() for host in actor_logins["target_host"]} == set(processes["hostname"])
 
     for frame in corpus.values():
         assert set(cp_.ID_COLUMNS) <= set(frame.columns)
@@ -389,6 +393,119 @@ def test_every_beaconer_presents_a_new_fingerprint_and_beacons(result: pd.DataFr
 
 
 # --- The search as shipped -----------------------------------------------------------------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_the_credential_replay_fires_on_the_attacker_alone(result: pd.DataFrame):
+    fired = cp_.credential_replays(result)
+
+    assert set(fired) == {cp_.QUIN}
+
+    (previous_port, port, kmh) = fired[cp_.QUIN]
+    replay = cp_.REPLAYERS[cp_.QUIN]
+
+    assert previous_port == f"hq:hq-sw1:{replay.first.port}"
+    assert port == f"edinburgh:edi-sw1:{replay.second.port}"
+    assert kmh > 1500
+
+
+def _second_sign_in(result: pd.DataFrame, principal: str) -> pd.Series:
+    logins = result[(result["telemetry_class"] == cp_.AUTH_CLASS)
+                    & (result["user_principal"] == principal)].sort_values("event_time")
+
+    assert len(logins) == 2, f"{principal} should sign in exactly twice"
+
+    return logins.iloc[1]
+
+
+@pytest.mark.cpu_mode
+def test_every_desk_address_resolves_to_its_own_port(result: pd.DataFrame):
+    # The ladder itself, before any rule reads it: a leased address goes to its workstation and the workstation to
+    # the port the switch saw it on. A ladder that resolved to the wrong port would make every journey wrong.
+    logins = result[result["telemetry_class"] == cp_.AUTH_CLASS]
+    checked = 0
+
+    for (index, replay) in enumerate(cp_.REPLAYERS.values()):
+        (first_time, _) = cp_._replay_times(index, replay)  # pylint: disable=protected-access
+        first = logins[(logins["user_principal"] == replay.principal) & (logins["event_time"] == first_time)].iloc[0]
+
+        assert first["login_mac"] == replay.first.mac
+        assert first["login_port_key"] == f"{replay.first.site}:{cp_.SITE_SWITCHES[replay.first.site]}:"\
+            f"{replay.first.port}"
+        assert first["login_site_id"] == replay.first.site
+        checked += 1
+
+    assert checked == len(cp_.REPLAYERS)
+
+
+@pytest.mark.cpu_mode
+def test_the_same_site_is_no_journey(result: pd.DataFrame):
+    second = _second_sign_in(result, cp_.RHEA)
+
+    assert second["login_site_id"] == "hq"
+    assert second["site_travel_status"] == "measured"
+    assert float(second["site_travel_distance_km"]) == 0
+
+
+@pytest.mark.cpu_mode
+def test_a_journey_with_time_to_make_it_is_not_impossible(result: pd.DataFrame):
+    second = _second_sign_in(result, cp_.SAM)
+
+    assert second["login_site_id"] == "edinburgh"
+    assert second["site_travel_status"] == "measured"
+    assert 100 < float(second["site_travel_kmh"]) < cp_.REPLAY_KMH
+
+
+@pytest.mark.cpu_mode
+@pytest.mark.parametrize("principal", [cp_.TIA, cp_.UMA])
+def test_an_address_no_current_lease_names_claims_no_port(result: pd.DataFrame, principal: str):
+    # The geolocated rule would measure this sign-in; this one cannot, because no switch port is behind it. That is
+    # the corroboration the rule exists for, not a gap in it.
+    second = _second_sign_in(result, principal)
+
+    assert second[cp_.LEASE_METHOD_COLUMN] == "unresolved"
+    assert pd.isna(second["login_site_id"])
+    assert second["site_travel_status"] == "no_coordinate"
+
+
+@pytest.mark.cpu_mode
+def test_the_expired_lease_did_name_the_address_until_an_hour_before(result: pd.DataFrame):
+    # What separates the expired lease from the remote address: the address was leased to an Edinburgh desk, and
+    # resolving it against the sign-in's own time rather than against what the lease once said is what refuses it.
+    replay = cp_.REPLAYERS[cp_.UMA]
+    leases = cp_.build_lease_table()
+    second = _second_sign_in(result, cp_.UMA)
+    earlier = int(second["event_time"]) - 61 * 60 * 10**9
+
+    assert leases.resolve(replay.second.address, earlier) is not None
+    assert leases.resolve(replay.second.address, int(second["event_time"])) is None
+    assert leases.resolve(cp_.REMOTE_ADDRESS, earlier) is None
+
+
+@pytest.mark.cpu_mode
+def test_a_refused_sign_in_proves_nobody_was_there(result: pd.DataFrame):
+    second = _second_sign_in(result, cp_.VIC)
+
+    assert second["auth_result"] == "failure"
+    assert second["login_site_id"] == "edinburgh"
+    assert second["site_travel_status"] == "not_successful"
+
+
+def _replay_search() -> str:
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        text = handle.read()
+
+    return text.split(f"[{REPLAY_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
+
+
+def test_the_credential_replay_search_carries_the_conditions_this_harness_asserts():
+    search = _replay_search()
+
+    assert "sourcetype=morpheus:score:l5" in search
+    assert 'site_travel_status="measured" OR site_travel_status="first_for_principal"' in search
+    assert "streamstats current=f window=1" in search
+    assert f"site_travel_kmh >= {cp_.REPLAY_KMH}" in search
+    assert "notable" not in search
 
 
 def _search() -> str:

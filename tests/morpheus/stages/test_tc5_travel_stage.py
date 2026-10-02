@@ -272,6 +272,44 @@ def test_missing_column_raises(config: Config):
         run(config, payload)
 
 
+@pytest.mark.gpu_and_cpu_mode
+def test_a_second_instance_writes_its_own_columns(config: Config):
+    # R-C-005 measures the journey between the sites a principal's logins resolve to, beside the geolocated one
+    # R-D-L5-003 reads; the second must not overwrite the first.
+    payload = frame([LONDON, NEW_YORK], times=[0, HOUR_NS])
+    payload["site"] = ["hq", "hq"]
+    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
+    TC5TravelStage(config).on_data(meta)
+    TC5TravelStage(config, column_prefix="site_travel", location_column="site", locations={"hq": LONDON}).on_data(meta)
+
+    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured"]
+    assert _as_list(meta, "travel_kmh")[1] > 5000
+    assert _as_list(meta, "site_travel_status") == ["first_for_principal", "measured"]
+    assert _as_list(meta, "site_travel_distance_km")[1] == 0
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_named_location_is_measured_from_the_estates_own_record(config: Config):
+    payload = frame([None, None, None], times=[0, HOUR_NS // 4, HOUR_NS // 2])
+    payload["site"] = ["HQ", "branch-ny", "nowhere"]
+    meta = run(config, payload, location_column="site", locations={"hq": LONDON, "branch-ny": NEW_YORK})
+
+    # Case-folded like every other key here; a site the record does not name is not a coordinate.
+    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured", "no_coordinate"]
+    assert _as_list(meta, "travel_kmh")[1] > 20000
+
+
+def test_a_location_column_needs_its_locations(config: Config):
+    with pytest.raises(ValueError, match="go together"):
+        TC5TravelStage(config, location_column="site")
+
+    with pytest.raises(ValueError, match="go together"):
+        TC5TravelStage(config, locations={"hq": LONDON})
+
+    with pytest.raises(ValueError, match="column_prefix"):
+        TC5TravelStage(config, column_prefix="")
+
+
 def test_constructor_validation(config: Config):
     with pytest.raises(ValueError, match="min_elapsed_seconds must be positive"):
         TC5TravelStage(config, min_elapsed_seconds=0)

@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is forty-four stages and thirty-nine supporting
-modules, covered by 1,779 distinct tests, itemized in
+modules, covered by 1,791 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1692,7 +1692,7 @@ physical `port_id` values in different `site_id` values, within a window shorter
 time. This is impossible travel with physical-layer corroboration, and it is far stronger than the
 geolocation version because it does not depend on IP geolocation accuracy.
 
-All three chains that ship are asserted in
+All four chains that ship are asserted in
 `tests/morpheus/determinism/test_campaign_harness.py`, over a corpus written as one estate seen by three collectors
 -- `tests/morpheus/determinism/campaign_pipeline.py` -- where an attacker completes all three steps and six others
 each fall one step short: the process before the login, the last step thirty-five minutes after the first, a login to
@@ -1708,6 +1708,23 @@ which one was the principal who had just taken the data.
 R-C-002 is asserted there too, rewritten to read events: a settled host's new stack to a destination and, fourteen
 minutes later, its beacon there maturing, beside a beacon already running an hour before, a beacon to another
 address, one maturing after sixty-seven minutes, and a host with five handshakes behind it.
+
+R-C-005 is asserted there as well, on a principal who signs in at headquarters and, twenty minutes later, in Edinburgh, 534 km away.
+Five others fall one step short: two ports at headquarters, the same journey in three hours, a second address no
+lease names, a lease that had ended an hour before the sign-in, and a refused second attempt. Unlike the other three
+it is **joined in the pipeline, not in the search**. The ladder above the rule is the identifier ladder: the
+sign-in's `source_ip` goes to a workstation through the estate's DHCP leases, supplied the way the estate
+harness supplies its directory, and the workstation to a `port_key` and `site_id` through the MAC bindings
+{py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage` closes from the switches, both hops by
+{py:class}`~morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage` at the sign-in's own time. A
+lease that has ended resolves nothing, which is the control that shows the binding is time-bounded rather than
+remembered. **The window "shorter than physical travel time" is the impossible-travel speed**, R-D-L5-003's
+900 km/h, measured between the sites rather than between geolocations:
+{py:class}`~morpheus.stages.telemetry.tc5_travel_stage.TC5TravelStage` gained `location_column` and `locations`,
+the estate's own record of where its sites are, and `column_prefix`, so the site journey is written to
+`site_travel_*` beside the geolocation-based one rather than over it. The search reads only the sign-ins the stage
+measured or anchored on, and carries the anchor forward so the notable names both ports. Its inverse is the
+second sign-in made at a shared workstation the asset inventory names as one, at the principal's request.
 
 Four decisions come with R-C-001. **It reads the scored events, not other rules' notables.** R-C-002 first
 correlated notables, which exist only once the detections have run and written them, and never returned a row
@@ -2998,7 +3015,7 @@ The linter had three blind spots of its own, now closed. It read `field=value` b
 could name anything; and it treated a search as one bag of fields, when `stats` replaces the rows with its own
 output and a field it neither aggregates nor groups by is null for the rest of the pipeline. A walk of each
 pipeline now tracks which fields survive every command, subsearches included, and flags a read of one a `stats`
-dropped. None of the 37 searches does that. The aggregate check found one real gap: Chain assembly collects
+dropped. None of the 38 searches does that. The aggregate check found one real gap: Chain assembly collects
 `values(join_method) AS methods`, the name
 {py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage` gives a parent-child edge's method, and
 no reference pipeline stamps parent-child edges, so the column was always empty. The method every scored event does
@@ -3343,6 +3360,14 @@ What Morpheus provides versus what has to be built, stated plainly.
   exactly the destinations an exfiltration reaches, which are new ones. And binding a host to a principal's "active
   session" needs the session's interval, not its existence -- a breach from the principal's own address after they
   logged off is the control that shows the difference.
+- R-C-005 on the same campaign, with two sites' MAC tables closed into bindings, supplied DHCP leases, and named
+  locations and a column prefix on {py:class}`~morpheus.stages.telemetry.tc5_travel_stage.TC5TravelStage`. **What
+  building it caught that the prose had not.** "Within a window shorter than physical travel time" needs to know
+  where a site is, and a resolved site arrives as a name: a binding resolver writes every value as text, and the travel
+  stage rightly refuses a coordinate that is not a number, so the site's location is the estate's own record handed to
+  the stage rather than a column on the event. And a second travel stage over the same sign-ins would have written
+  over the first, so the geolocation journey R-D-L5-003 reads and the port-to-port one R-C-005 reads now sit side by
+  side.
 - The TC-0 identity and asset context store
   ({py:mod}`~morpheus.utils.bitemporal`,
   {py:class}`~morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage`,
@@ -3363,8 +3388,8 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`). Every column the reference
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
-  counts are the finding: eleven columns identify a person, eighteen address their device, fourteen locate
-  them, and a hundred and eighty are profile, a hundred and seventy-four of them behavioural,
+  counts are the finding: eleven columns identify a person, nineteen address their device, sixteen locate
+  them, and a hundred and eighty-five are profile, a hundred and seventy-nine of them behavioural,
   which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
@@ -3606,8 +3631,8 @@ That test is the point of it: an inventory nobody checks reads as authoritative 
 whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
-fork emits, eleven identify a person, eighteen are addresses, fourteen locate, eleven are pseudonyms -- and
-a hundred and eighty are profile, a hundred and seventy-four of them behavioural; the other
+fork emits, eleven identify a person, nineteen are addresses, sixteen locate, eleven are pseudonyms -- and
+a hundred and eighty-five are profile, a hundred and seventy-nine of them behavioural; the other
 six are the organisational columns the TC-0 context store and its join carry. **The largest category by far
 is the one the design manufactures rather than collects.** An estate reviewing this will think about the
 authentication logs it ingested; most of what it ends up holding about a person is derived here, from those

@@ -126,7 +126,8 @@ class Knob:
     """A frame for this parameter alone, where the scenario's own frame cannot make it bite."""
 
     also: typing.Optional[dict] = None
-    """Companion overrides, for a column that more than one parameter names."""
+    """Companion overrides, for a column that more than one parameter names, or a parameter that is only valid
+    alongside another."""
 
     def __post_init__(self):
         if (self.kind == INERT and len(self.reason) < 30):
@@ -787,6 +788,18 @@ def journeys() -> dict:
     }
 
 
+SITES = {"hq": (51.5074, -0.1278), "branch": (55.9533, -3.1883)}
+
+
+def sited_journeys() -> dict:
+    # The same journeys, each also naming the site its login resolved to and the site its principal sits at.
+    frame = journeys()
+    frame["login_site"] = ["hq", "hq", "branch", "branch", "hq"]
+    frame["desk_site"] = ["hq"] * 5
+
+    return frame
+
+
 def denials() -> dict:
     # R-D-L5-004's shape: denials inside ten minutes and an approval at the end, with a record carrying no factor
     # so the proportion is not one for every row, and a second principal so evicting the first is observable.
@@ -1392,6 +1405,22 @@ REGISTRY: dict = {
                 Knob("min_elapsed_seconds", DIFFERS, benign=1, extreme=7200),
                 Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
                 Knob("decimals", DIFFERS, benign=4, extreme=1),
+                Knob("column_prefix", DIFFERS, benign="travel", extreme="site_travel"),
+                # The pair is enforced together, so each is varied with the other held fixed.
+                Knob("location_column",
+                     DIFFERS,
+                     benign="desk_site",
+                     extreme="login_site",
+                     frame=sited_journeys,
+                     also={"locations": SITES}),
+                Knob("locations",
+                     DIFFERS,
+                     benign={
+                         "hq": SITES["hq"], "branch": SITES["hq"]
+                     },
+                     extreme=SITES,
+                     frame=sited_journeys,
+                     also={"location_column": "login_site"}),
             ),
         ),
     "TC5RiskStage":
@@ -1810,8 +1839,8 @@ def test_changing_the_parameter_changes_the_output(stage_name: str, knob: Knob):
     """Two values, one corpus built to make the parameter bite. A parameter nothing reads produces one answer."""
     scenario = REGISTRY[stage_name]
     frame = knob.frame() if knob.frame is not None else None
-    benign = _outcome(scenario, {knob.name: knob.benign}, frame=frame)
-    extreme = _outcome(scenario, {knob.name: knob.extreme}, frame=frame)
+    benign = _outcome(scenario, {knob.name: knob.benign, **(knob.also or {})}, frame=frame)
+    extreme = _outcome(scenario, {knob.name: knob.extreme, **(knob.also or {})}, frame=frame)
 
     assert benign != extreme, (f"{stage_name}.{knob.name} behaved identically at {knob.benign!r} and "
                                f"{knob.extreme!r}. Either the stage does not read it, or this corpus does not "

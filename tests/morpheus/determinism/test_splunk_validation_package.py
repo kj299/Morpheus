@@ -537,6 +537,23 @@ def test_the_command_and_control_chain_returns_exactly_what_is_written(expected:
     assert entry["key_values"] == chains
 
 
+def test_the_credential_replay_returns_exactly_what_is_written(expected: dict):
+    # Read from the indexed sign-ins, so a column the search needs and the wire dropped shows up here as a miss.
+    events = [event for event in _scored_events() if event.get("telemetry_class") == campaign_pipeline.AUTH_CLASS]
+    frame = pd.DataFrame(events)
+    stamps = pd.to_datetime(frame["event_time"].str.replace("UTC", "", regex=False), utc=True)
+    frame["event_time"] = (stamps - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(nanoseconds=1)
+
+    replays = sorted(({
+        "user_principal": principal, "previous_port": previous_port, "login_port_key": port
+    } for (principal, (previous_port, port, _)) in campaign_pipeline.credential_replays(frame).items()),
+                     key=lambda row: row["user_principal"])
+    entry = expected["searches"]["R-C-005 - Credential replay across the stack"]
+
+    assert entry["expected_rows"] == len(replays)
+    assert entry["key_values"] == replays
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -709,6 +726,7 @@ NUMBER_WORDS = {
     "thirty-five": 35,
     "thirty-six": 36,
     "thirty-seven": 37,
+    "thirty-eight": 38,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -734,6 +752,7 @@ def test_every_expected_empty_search_says_why(expected: dict):
     #
     # Six of thirty-seven now: R-C-002 left the list when it was rewritten to read scored events rather than
     # notables and the campaign corpus gave it a chain to find.
+    # Six of thirty-eight after R-C-005, which arrived with a chain to find.
     assert len(empty) == 6
 
     for (name, entry) in empty.items():

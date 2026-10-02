@@ -310,6 +310,9 @@ SPL_WORDS = {
     # `streamstats current=f` excludes the current row from the running figures, which is how R-P-L3-005 reads
     # each window against the two before it rather than against itself. An argument to the command, not a field.
     "current",
+    # `streamstats window=1` carries exactly the previous row forward, which is how R-C-005 reads the sign-in a
+    # journey was measured from. An argument to the command, not a field.
+    "window",
     # `join type=inner max=0` is how R-C-001 joins its three steps: an inner join keeping every match rather than
     # the first. Arguments to the command, not fields.
     "join",
@@ -496,7 +499,7 @@ def walk_pipeline(search: str) -> tuple:
 def test_the_app_is_where_we_think_it_is():
     # Without this every assertion below passes over an empty parse, which is the failure mode a linter must not
     # have: it would report a clean bill of health for a file it never read.
-    assert len(searches()) == 37
+    assert len(searches()) == 38
     assert len(lookup_fields()) > 0
     assert len(stage_columns()) > 40
 
@@ -572,6 +575,14 @@ def unread_by_layer(search: str, columns: dict) -> dict:
     return missing
 
 
+JOINED_IN_THE_PIPELINE = {
+    "R-C-005 - Credential replay across the stack":
+        "layer 5 sign-ins resolved to layer 2 ports and sites by BindingResolverStage through the leases and MAC "
+        "bindings, so the search reads one layer's events that already carry the other's answer",
+}
+"""Chained rules whose join is made before the events are written, so their search reads a single layer."""
+
+
 def test_a_chained_rule_reads_each_step_from_a_layer_that_writes_it():
     """
     The defect this test was written for, which the check above could not see.
@@ -593,7 +604,8 @@ def test_a_chained_rule_reads_each_step_from_a_layer_that_writes_it():
     assert len(chains) >= 3, "fewer chained rules than this fork ships; this test has stopped covering them"
 
     for (name, search) in chains.items():
-        assert len(chain_steps(search)) >= 2, f"{name} has fewer than two steps this test can read"
+        steps = 1 if name in JOINED_IN_THE_PIPELINE else 2
+        assert len(chain_steps(search)) >= steps, f"{name} has fewer than {steps} steps this test can read"
         assert not unread_by_layer(search, columns), (
             f"{name} reads fields no event of that layer carries: {unread_by_layer(search, columns)}. A chain "
             f"joining on a field its step does not write does not fail -- it joins nulls and correlates the wrong "

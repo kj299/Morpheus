@@ -89,6 +89,10 @@ the binary, not the person, and are `OPERATIONAL`; each has a handful of values,
 
 A host login names the host logged into, `target_host`, which addresses a device the way `hostname` does; whether
 the principal had logged into it before is `target_host_first_seen`, a fact about their history and so a profile.
+R-C-005 resolves the login's address to the workstation it was leased to, `login_mac`, which addresses a device the
+way `mac_address` does, and on to the port and site the switch saw it at, `login_port_key` and `login_site_id`, which
+place a person the way `desk_port_key` does. The journey between a principal's sites, `site_travel_*`, is the
+geolocated journey's twin and a profile on the same reasoning; how each hop resolved is operational.
 
 **The TC-0 context store is personal data of a different kind, and is classified on the same rule.** Department,
 employment status and group membership are organisational facts about an identifiable person rather than behaviour
@@ -150,6 +154,7 @@ _ADDRESSES = (
     "flow_pair_key",
     "hostname",
     "http_client_key",
+    "login_mac",
     "mac",
     "mac_address",
     "source_ip",
@@ -164,6 +169,8 @@ _ADDRESSES = (
 _LOCATES = (
     "auth_port_key",
     "desk_port_key",
+    "login_port_key",
+    "login_site_id",
     "port_id",
     "port_key",
     "resolved_port_key",
@@ -327,6 +334,11 @@ _PROFILES = (
     "saas_object_types_in_week",
     "saas_record_baseline",
     "saas_record_ratio",
+    "site_travel_distance_km",
+    "site_travel_elapsed_floored",
+    "site_travel_elapsed_ns",
+    "site_travel_kmh",
+    "site_travel_status",
     "target_host_first_seen",
     "target_object",
     "target_object_type",
@@ -468,6 +480,8 @@ _OPERATIONAL = (
     "lldp_neighbor_chassis_id_changed",
     "lldp_neighbor_chassis_id_distinct_count",
     "lldp_neighbor_chassis_id_first_seen",
+    "login_lease_resolution",
+    "login_port_resolution",
     "macs_claiming_sender_ip",
     "macs_claiming_sender_ip_saturated",
     "macs_per_port",
@@ -618,6 +632,7 @@ BOUNDED_DOMAIN = frozenset({
     "result",
     "session_action",
     "signature_status",
+    "site_travel_status",
     "source_country",
     "source_region",
     "status_code",
