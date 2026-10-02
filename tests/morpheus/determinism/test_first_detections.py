@@ -21,7 +21,7 @@ corpus with the anomalies planted in it. Each must fire exactly where it was pla
 fields an analyst needs to trace it. The stanzas are then read from the app itself, so the SPL and the Python
 cannot drift apart silently.
 
-The two layer 1 rules and the four layer 2 rules are asserted end to end here, corpus and stanza both. The two layer
+The two layer 1 rules and the five layer 2 rules are asserted end to end here, corpus and stanza both. The two layer
 5 rules are asserted against their own corpus in `test_session_harness.py` and against their expected row counts in
 `test_splunk_validation_package.py`, because both of those already hold the layer 5 pipeline; what they are
 checked for here is the half neither of those covers -- that the SPL names the columns the stages emit, and that
@@ -58,6 +58,7 @@ NS = tp.NS_PER_SECOND
 RULES = {
     "R-D-L1-001": "R-D-L1-001 - Transceiver substitution",
     "R-P-L1-004": "R-P-L1-004 - Optical degradation forecast",
+    "R-B-L2-002": "R-B-L2-002 - Port-to-MAC binding novelty",
     "R-D-L2-001": "R-D-L2-001 - MAC address count exceeded on an access port",
     "R-D-L2-003": "R-D-L2-003 - ARP anomaly",
     "R-D-L2-004": "R-D-L2-004 - MAC in two places at once",
@@ -328,6 +329,56 @@ def test_r_d_l2_001_fires_once_per_offending_mac_on_designated_ports(result: pd.
 
 
 @pytest.mark.cpu_mode
+def test_r_b_l2_002_finds_the_hub_and_the_spoof_without_a_designation_list(result: pd.DataFrame):
+    # The search: first-in-window rows whose count the port has never reached in any period of its own history,
+    # grouped by port. No lookup, no list.
+    rows = result[result["telemetry_class"] == "tc2_mac"]
+    detections = rows[(rows["macs_per_port_first_in_window"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                      & (rows["macs_per_port_step"] > 0)]
+
+    hub_port = f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"
+    spoofed_port = f"{tp.SITE}:{tp.SWITCH}:Gi1/0/2"
+
+    # The same two ports R-D-L2-001 names, found from the ports' own histories: the hub's four addresses in the
+    # snapshot that carried them, four above the one address the port had in each of the six snapshots before,
+    # and the spoofed address when it turned up on a second port, one above that port's record.
+    assert set(detections["port_key"]) == {hub_port, spoofed_port}
+
+    hub = detections[detections["port_key"] == hub_port]
+    assert sorted(hub["mac_address"]) == sorted(tp.HUB_MACS)
+    assert set(hub["event_time"]) == {tp.HUB_FROM_SECONDS * NS}
+    assert sorted(hub["macs_per_port_step"]) == list(range(1, len(tp.HUB_MACS) + 1))
+    assert set(hub["macs_per_port_baseline_max"]) == {1}
+    assert set(hub["macs_per_port_baseline_buckets"]) == {tp.HUB_FROM_SECONDS // tp.PERIOD_SECONDS}
+
+    spoof = detections[detections["port_key"] == spoofed_port]
+    assert list(spoof["mac_address"]) == [tp.MAC_A]
+    assert list(spoof["macs_per_port_step"]) == [1]
+    assert list(spoof["event_time"]) == [tp.SPOOF_AT_SECONDS * NS]
+
+    # The next snapshot's baseline has absorbed the hub, so the rule fires once per step rather than once per
+    # snapshot for as long as the hub stays plugged in.
+    later = rows[(rows["port_key"] == hub_port) & (rows["event_time"] > tp.HUB_FROM_SECONDS * NS)]
+    assert (later["macs_per_port_step"] == 0).all()
+    assert set(later["macs_per_port_baseline_max"]) == {1 + len(tp.HUB_MACS)}
+
+    # The peer switch's ports were met inside this hour. The one the roaming device left has a baseline and
+    # nothing above it; the ones it arrived on have no baseline at all, and neither is a step.
+    peer = rows[rows["switch_id"] == tp.PEER_SWITCH]
+    assert not (peer["macs_per_port_step"].fillna(0) > 0).any()
+
+    for column in ("port_key",
+                   "macs_per_port",
+                   "macs_per_port_baseline_max",
+                   "macs_per_port_step",
+                   "mac_address",
+                   "macs_per_port_saturated",
+                   "event_uid",
+                   "lineage_id"):
+        assert pd.notna(hub.iloc[-1][column]), column
+
+
+@pytest.mark.cpu_mode
 def test_r_d_l2_003_fires_on_the_flooded_gateway_and_not_on_the_redundancy_pair(result: pd.DataFrame):
     arp = result[result["telemetry_class"] == "tc2_arp"]
     candidates = arp[(arp["macs_claiming_sender_ip"].fillna(0) > 1) & (arp["arp_sender_ip_excluded"] == False)]  # noqa: E712  pylint: disable=singleton-comparison
@@ -367,6 +418,11 @@ def test_the_search_reads_the_column_the_stage_emits(rule_id: str, searches: dic
                        "optical_rx_dbm_days_to_floor<=14",
                        "min(optical_rx_dbm_days_to_floor) AS days_to_floor",
                        "BY entity_key"),
+        "R-B-L2-002": ("sourcetype=morpheus:score:l2",
+                       "macs_per_port_first_in_window=true",
+                       "macs_per_port_step>0",
+                       "max(macs_per_port_baseline_max) AS baseline_max",
+                       "BY port_key"),
         "R-D-L2-001": ("sourcetype=morpheus:score:l2",
                        "macs_per_port_first_in_window=true",
                        "lookup port_designations port_key",

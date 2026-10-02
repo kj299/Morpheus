@@ -50,6 +50,7 @@ def tracker(**kwargs) -> OpticalForecastTracker:
 
 def feed(subject: OpticalForecastTracker,
          levels: list,
+         *,
          entity: str = PORT,
          floor: float = FLOOR,
          optic: str = "SN-A",

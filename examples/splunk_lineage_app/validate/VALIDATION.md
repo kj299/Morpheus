@@ -48,6 +48,7 @@ should return nothing:
 | R-D-L1-001, transceiver substitution | **1** | One port: `hq:sw1:Gi1/0/2`'s serial changed on a poll the flap count says the link never moved for. The other optic replaced this hour, on `Gi1/0/6`, is quiet because the device recorded the link dropping between the two polls, which is what a swap does. |
 | R-P-L1-004, optical degradation forecast | **1** | One port, the failing optic on `Gi1/0/6`: the line through its readings gives it hours, and the search's one row per port carries the shortest time to the floor. The tap's step, the steady ports' jitter and the replacement optic project nothing. |
 | R-D-L2-001, MAC count on an access port | **0** | Correct. Joins `port_designations`, which ships header-only; 11 candidate rows are waiting behind it. |
+| R-B-L2-002, port-to-MAC binding novelty | **2** | The hub port, four above the one address it carried in every earlier snapshot, and the spoofed port, one above its own record: the two ports R-D-L2-001 would name, found without its designation list. Once each, because the next snapshot's baseline has absorbed the step. |
 | R-D-L2-003, ARP anomaly | **1** | 24 contested observations aggregate to one notable on `10.0.0.1`. |
 | R-D-L2-004, MAC in two places | **2** | A conflict at zero gap and a displacement at two seconds. The roaming device, displaced a full poll cadence later, is deliberately outside the threshold. |
 | R-D-L2-005, authorization without authentication | **2** | One bypass on a quiet port, one that arrived while a legitimate exchange was open. |
@@ -86,7 +87,7 @@ should return nothing:
 | Binding health, unresolved rate | **1** | An operational metric; the value matters, not whether it fired. |
 | R-P-L5-006, drift trajectory | **7** | Three principals, none of them behaviour, each explained in `expected_results.json`: two climb for six days because the reference scorer's baseline is frozen under cumulative features, one has a shallow run ended by the planted burst. Watchlist, never a page. |
 
-**Six of the forty should return nothing.** That is the point of writing them down. An empty result is
+**Six of the forty-one should return nothing.** That is the point of writing them down. An empty result is
 this app's characteristic failure, and without a list saying which emptiness is correct, a deployment cannot
 tell a rule that is working from a rule that is broken. The ratio has moved both ways, which is what makes it
 worth stating: it improved as layers 3, 4, 5, 6 and 7 gained producers, and went the other way when the L2/L3 refresh

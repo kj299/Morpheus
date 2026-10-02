@@ -25,7 +25,8 @@ whole burst landing on one tick.
 
 Into that corpus are planted the things the layer 1 and layer 2 features exist to see:
 
-- a **hub**: five MAC addresses behind one access port from the seventh snapshot onward;
+- a **hub**: five MAC addresses behind one access port from the seventh snapshot onward, four above the most the
+  port had carried in any of the six before, which is the step R-B-L2-002 fires on;
 - a **spoof**: one MAC reported on two ports in the same snapshot;
 - a **cross-switch spoof**: one MAC claimed on a second switch two seconds after it was seen on its own, which is
   the shape a sequentially polled estate actually produces and the one the simultaneous case cannot stand in for;
@@ -79,6 +80,7 @@ from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
 from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
+from morpheus.stages.telemetry.tc2_baseline_stage import TC2BaselineStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
 from morpheus.utils.binding_table import NS_PER_SECOND
@@ -130,6 +132,15 @@ VRRP_MACS = ["00:00:5e:00:01:fe", "00:00:5e:00:01:ff"]
 
 SINGLE_HOST_PORTS = {f"{SITE}:{SWITCH}:{port}" for port in PORTS}
 """The corpus's own port designations, standing in for the inventory-supplied list R-D-L2-001 reads."""
+
+BASELINE_MIN_BUCKETS = 6
+"""Snapshot periods a port must have been seen in before R-B-L2-002 has a baseline to measure it against.
+
+Half an hour of five-minute snapshots. A deployment keeps a month of hourly peaks and asks for a day of them, which
+is what `TC2BaselineStage` defaults to; this corpus is one hour long, so its periods are the sealing period and its
+floor is the six snapshots before the hub arrives. The parameters say so rather than the corpus pretending to be a
+month.
+"""
 HOST_IPS = {MAC_A: "10.0.0.11", MAC_B: "10.0.0.12", MAC_C: "10.0.0.13"}
 
 HUB_PORT = "Gi1/0/3"
@@ -780,13 +791,19 @@ def run_classes(config: Config,
     port_bindings["row_key"] = port_bindings["binding_uid"]
     outputs["tc1_binding"] = port_bindings
 
-    # Layer 2, from the same snapshots: the cardinality features, and the closed bindings.
-    outputs["tc2_mac"] = _run_class(config,
-                                    batches["tc2_mac"], [TC2CardinalityStage(config)],
-                                    impose_order,
-                                    seal=False,
-                                    chain=CHAIN_ROOTS["tc2_mac"],
-                                    envelope=CLASS_ENVELOPE["tc2_mac"])
+    # Layer 2, from the same snapshots: the cardinality features, each port's count against the peaks of its own
+    # earlier periods, and the closed bindings.
+    outputs["tc2_mac"] = _run_class(
+        config,
+        batches["tc2_mac"],
+        [
+            TC2CardinalityStage(config),
+            TC2BaselineStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
+        ],
+        impose_order,
+        seal=False,
+        chain=CHAIN_ROOTS["tc2_mac"],
+        envelope=CLASS_ENVELOPE["tc2_mac"])
     bindings = _run_class(config,
                           batches["tc2_mac"], [TC2BindingStage(config)],
                           impose_order,

@@ -56,8 +56,8 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is forty-five stages and forty supporting
-modules, covered by 1,845 distinct tests, itemized in
+8's total order, and control 13's CI harness. That is forty-six stages and forty-one supporting
+modules, covered by 1,880 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1332,6 +1332,17 @@ until the inventory populates it the rule fires on nothing.
 `port_id` produces a step change relative to the port's 30-day baseline. Catches the same condition as
 R-D-L2-001 without requiring an accurate port designation database, at the cost of precision.
 
+Ships as a saved search over `macs_per_port_step` from
+{py:class}`~morpheus.stages.telemetry.tc2_baseline_stage.TC2BaselineStage`, which keeps, per port, the peak the
+hourly distinct-MAC count reached in each hour of the last thirty days and measures the current count against the
+highest of them: positive only when the port has never, in any hour of its history, carried this many. The history
+is of periods rather than rows, so it is bounded by time however many devices sit behind a trunk, and the open
+period never raises the reference it is measured against, so every row of a period sees the same baseline whichever
+batch carried it. A port the estate has only just met has no baseline and stays quiet, which is the case R-D-L2-001
+and its designation list exist for. On the harness corpus it fires on the same two ports R-D-L2-001 does -- the hub,
+four above the one address its port had carried in every earlier snapshot, and the spoofed address on a second
+port, one above that port's record -- and once each, since the next snapshot's baseline has absorbed the step.
+
 **R-D-L2-003 - ARP anomaly.** A `arp_sender_ip` maps to more than one `arp_sender_mac` within a
 5-minute window, excluding known HSRP and VRRP virtual addresses. Explicitly maintain the exclusion list;
 this rule is unusable without it. `TC2ArpStage` emits the count as `macs_claiming_sender_ip` and marks
@@ -1374,13 +1385,14 @@ bypass takes the pending slot of the device it is bridged behind and reads as an
 is reported. On ports where MAB is configured deliberately, suppress by port designation rather than by
 loosening the rule. Tier D1. Ships as a saved search in the Splunk app.
 
-These six, R-D-L1-001, R-P-L1-004 and R-D-L2-001, 003, 004 and 005, are the rules in this part that exist as
-code rather than as specification. The two layer 1 rules, 004 and 005 read columns the shipped stages produce and
-depend on nothing outside the pipeline; 001 and 003 depend on a list the estate owns, and each ships with the hook
-for that list and fires on nothing until it is populated, while R-D-L2-003 fires on every first-hop redundancy
-address until its exclusion list is supplied. All six predicates are asserted in Python over the determinism
-harness's planted corpus: R-D-L1-001, 004 and 005 fire exactly once, R-P-L1-004 on the one failing optic, 001
-once per offending MAC, and 003 on the flooded gateway and not on the redundancy pair.
+These seven, R-D-L1-001, R-P-L1-004, R-B-L2-002 and R-D-L2-001, 003, 004 and 005, are the rules in this part
+that exist as code rather than as specification. The two layer 1 rules, R-B-L2-002, 004 and 005 read columns the
+shipped stages produce and depend on nothing outside the pipeline; 001 and 003 depend on a list the estate owns,
+and each ships with the hook for that list and fires on nothing until it is populated, while R-D-L2-003 fires on
+every first-hop redundancy address until its exclusion list is supplied. All seven predicates are asserted in
+Python over the determinism harness's planted corpus: R-D-L1-001, 004 and 005 fire exactly once, R-P-L1-004 on
+the one failing optic, R-B-L2-002 once each on the hub and the spoofed port, 001 once per offending MAC, and 003
+on the flooded gateway and not on the redundancy pair.
 
 **R-P-L1-004 - Optical degradation forecast.** Linear extrapolation of `optical_rx_dbm` per port
 projects a crossing of the transceiver's minimum receive threshold within 14 days. This is an operations
@@ -3176,6 +3188,10 @@ What Morpheus provides versus what has to be built, stated plainly.
   trailing window with saturation reported rather than hidden
   ({py:mod}`~morpheus.utils.distinct_window` and
   {py:class}`~morpheus.stages.telemetry.tc2_cardinality_stage.TC2CardinalityStage`).
+- The baseline the first of those is measured against: the peak each port's hourly count reached in every
+  hour of the last thirty days, and the current count's step above the highest of them, which is what
+  R-B-L2-002 reads ({py:mod}`~morpheus.utils.bucket_peak` and
+  {py:class}`~morpheus.stages.telemetry.tc2_baseline_stage.TC2BaselineStage`).
 - The remaining two TC-2 behavioral features: the gratuitous ARP proportion with the multi-claimant
   count R-D-L2-003 needs ({py:mod}`~morpheus.utils.ratio_window` and
   {py:class}`~morpheus.stages.telemetry.tc2_arp_stage.TC2ArpStage`), and 802.1X authorization timing
@@ -3460,7 +3476,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
   the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
   and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Six of the
-  forty searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
+  forty-one searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
   empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
   is working from a rule that is broken.
 - One rule run end to end offline, from a file to bytes a SIEM parses
@@ -3482,6 +3498,9 @@ What Morpheus provides versus what has to be built, stated plainly.
 - The layer 1 forecast R-P-L1-004, each port's receive level fitted over a trailing week and projected to its
   optic's floor, firing on the corpus's failing optic and on neither the tap's step nor the steady ports'
   jitter nor the optic that replaces the failing one.
+- The layer 2 behavioural detection R-B-L2-002, a port's distinct-MAC count above the most it has carried in any
+  hour of its own history, firing on the hub and the spoofed port -- the two R-D-L2-001 names -- without the
+  designation list that rule needs.
 - Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
   answer inside the idle window, capped by a duration the consumer states rather than one the stage
   invents.

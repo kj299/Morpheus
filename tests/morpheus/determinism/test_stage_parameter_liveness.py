@@ -66,6 +66,7 @@ from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
 from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
+from morpheus.stages.telemetry.tc2_baseline_stage import TC2BaselineStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
 from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
@@ -686,6 +687,22 @@ def macs() -> dict:
     }
 
 
+def mac_counts() -> dict:
+    # What the cardinality stage writes for one port, two rows a minute apart in each of nine five-minute periods:
+    # two addresses in the first period, one in the next seven, and a hub of three in the ninth. The first period's
+    # peak is what a capped history forgets, and the pair of rows per period is what the time unit decides the
+    # grouping of: read a thousand times too large, each row is a period of its own.
+    peaks = [2, 1, 1, 1, 1, 1, 1, 1, 3]
+    counts = [peak for peak in peaks for _ in range(2)]
+
+    return {
+        "port_key": ["hq:sw1:Gi1/0/3"] * len(counts),
+        "event_time": [period * 5 * MINUTE + offset * MINUTE for period in range(len(peaks)) for offset in range(2)],
+        "macs_per_port": counts,
+        "ports_per_mac": [1] * len(counts),
+    }
+
+
 def arp() -> dict:
     senders = ["10.0.0.1"] * 6 + ["10.0.0.254"]
     macs_ = ["de:ad:00:00:00:01"] * 3 + ["de:ad:00:00:00:02"] * 3 + ["00:00:5e:00:01:fe"]
@@ -746,6 +763,8 @@ def wire() -> dict:
         "event_uid": ["a", "b"],
         "port_key": ["hq:sw1:Gi1/0/1"] * 2,
         "macs_per_port_first_in_window": [True, False],
+        "macs_per_port_step": [None, 1],
+        "macs_per_port_baseline_max": [None, 1],
         "macs_claiming_sender_ip": [1, 2],
         "arp_sender_ip_excluded": [False, False],
         "auth_unpaired": [False, True],
@@ -1063,6 +1082,24 @@ REGISTRY: dict = {
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
                 Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
                 Knob("max_samples", DIFFERS, benign=1024, extreme=1),
+            ),
+        ),
+    "TC2BaselineStage":
+        Scenario(
+            stage=TC2BaselineStage,
+            frame=mac_counts,
+            base={
+                "bucket_seconds": 300, "min_buckets": 4
+            },
+            knobs=(
+                Knob("entity_column", INPUT_COLUMN, benign="port_key"),
+                Knob("value_column", DIFFERS, benign="macs_per_port", extreme="ports_per_mac"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("bucket_seconds", DIFFERS, benign=300, extreme=3600),
+                Knob("window_seconds", DIFFERS, benign=30 * 24 * 3600, extreme=900),
+                Knob("min_buckets", DIFFERS, benign=4, extreme=100),
+                Knob("max_buckets", DIFFERS, benign=1024, extreme=4),
             ),
         ),
     "TC2ArpStage":

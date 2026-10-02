@@ -89,6 +89,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc1_optical_stage.py
     tests/morpheus/stages/test_tc2_arp_stage.py
     tests/morpheus/stages/test_tc2_auth_stage.py
+    tests/morpheus/stages/test_tc2_baseline_stage.py
     tests/morpheus/stages/test_tc2_binding_stage.py
     tests/morpheus/stages/test_tc2_cardinality_stage.py
     tests/morpheus/stages/test_tc3_beacon_stage.py
@@ -138,6 +139,7 @@ UNMARKED=(
     tests/morpheus/utils/test_cipher_strength.py
     tests/morpheus/utils/test_binding_table.py
     tests/morpheus/utils/test_bitemporal.py
+    tests/morpheus/utils/test_bucket_peak.py
     tests/morpheus/utils/test_community_id.py
     tests/morpheus/utils/test_counter_delta.py
     tests/morpheus/utils/test_cyclic_histogram.py

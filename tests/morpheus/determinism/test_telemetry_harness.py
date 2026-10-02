@@ -363,6 +363,27 @@ def test_the_hub_is_visible(result: pd.DataFrame):
 
 
 @pytest.mark.cpu_mode
+def test_the_hub_is_a_step_above_the_ports_own_history(result: pd.DataFrame):
+    # The hub as R-B-L2-002 reads it: against the one address the port carried in each of the six snapshots before,
+    # the snapshot that brings the hub is a step of four, and every snapshot after it has a baseline that absorbed
+    # the hub and reads as nothing new.
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"
+    on_port = _rows(result, "tc2_mac")
+    on_port = on_port[on_port["port_key"] == port]
+
+    before = on_port[on_port["event_time"] < tp.HUB_FROM_SECONDS * NS]
+    at_hub = on_port[on_port["event_time"] == tp.HUB_FROM_SECONDS * NS].sort_values("macs_per_port")
+    after = on_port[on_port["event_time"] > tp.HUB_FROM_SECONDS * NS]
+
+    assert (before["macs_per_port_step"].dropna() == 0).all()
+    assert set(at_hub["macs_per_port_baseline_buckets"]) == {tp.BASELINE_MIN_BUCKETS}
+    assert (at_hub["macs_per_port_baseline_mature"] == True).all()  # noqa: E712  pylint: disable=singleton-comparison
+    assert list(at_hub["macs_per_port_step"]) == [0, 1, 2, 3, 4]
+    assert (after["macs_per_port_step"] == 0).all()
+    assert set(after["macs_per_port_baseline_max"]) == {1 + len(tp.HUB_MACS)}
+
+
+@pytest.mark.cpu_mode
 def test_the_spoof_is_a_conflict(result: pd.DataFrame):
     bindings = _rows(result, "tc2_binding")
     conflicts = bindings[bindings["bind_end_reason"] == CONFLICT]
@@ -647,6 +668,13 @@ def test_nothing_else_fired(result: pd.DataFrame):
 
     bindings = _rows(result, "tc2_binding")
     assert (bindings["bind_end_reason"] == CONFLICT).sum() == 1
+
+    # Two ports ever carry more than their own history: the hub's four addresses as they arrive, and the spoofed
+    # address on its second port. Nothing else steps, including the ports the roaming device visits.
+    stepped = _rows(result, "tc2_mac")
+    stepped = stepped[stepped["macs_per_port_step"].fillna(0) > 0]
+    assert set(stepped["port_key"]) == {f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}", f"{tp.SITE}:{tp.SWITCH}:Gi1/0/2"}
+    assert len(stepped) == len(tp.HUB_MACS) + 1
 
     # The gateway is contested from the flood until the flood leaves the window, whoever is sending: the router's
     # own announcements in that span read two claimants too, which is the right input for R-D-L2-003. Nothing else

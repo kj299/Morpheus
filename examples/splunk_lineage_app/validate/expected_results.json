@@ -33,6 +33,24 @@
       "why": "The rule joins port_designations, which ships header-only. Until an inventory populates it the lookup returns nothing and the join yields nothing. 11 candidate rows carry macs_per_port_first_in_window=true, so a non-zero result after populating the lookup is the signal that the join works.",
       "candidate_rows_before_the_lookup": 11
     },
+    "R-B-L2-002 - Port-to-MAC binding novelty": {
+      "expected_rows": 2,
+      "expected_empty": false,
+      "contributing_rows": 5,
+      "why": "Two ports, the same two R-D-L2-001 would name if its designation list were populated, found without it. hq:sw1:Gi1/0/3 carried one address in each of the six snapshots before the hub arrived at minute thirty; the snapshot that carried the hub's four addresses raised its count to five, four above the most the port had ever carried, and each of those four rows is new to the window and a step. hq:sw1:Gi1/0/2 carried one address for nine snapshots and then the spoofed address beside it at minute forty-five, one above its own record. The search's stats BY port_key reduces the five rows to one notable per port. Every later snapshot on both ports has a baseline that absorbed the step, so the rule fires once per step rather than once per snapshot; and the peer switch's ports, which the estate met inside this hour, have no baseline to step above.",
+      "key_values": [
+        {
+          "port_key": "hq:sw1:Gi1/0/3",
+          "step": 4,
+          "new_mac_count": 4
+        },
+        {
+          "port_key": "hq:sw1:Gi1/0/2",
+          "step": 1,
+          "new_mac_count": 1
+        }
+      ]
+    },
     "R-D-L2-003 - ARP anomaly": {
       "expected_rows": 1,
       "why": "The search aggregates BY arp_sender_ip, so the 24 contested observations collapse to one notable for the one address that is contested by two MACs.",

@@ -268,12 +268,15 @@ PRODUCED: dict = {
             name="morpheus:score:l2",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-2 stages (cardinality, ARP, auth) behind WindowSealStage; the `tc2_mac`, `tc2_arp` and "
-            "`tc2_auth` classes of `tests/morpheus/determinism/telemetry_pipeline.py`.",
-            # R-D-L2-001, R-D-L2-003 and R-D-L2-005 read these off this sourcetype.
+            producer="The TC-2 stages (cardinality, baseline, ARP, auth) behind WindowSealStage; the `tc2_mac`, "
+            "`tc2_arp` and `tc2_auth` classes of `tests/morpheus/determinism/telemetry_pipeline.py`.",
+            # R-D-L2-001, R-D-L2-003 and R-D-L2-005 read these off this sourcetype, and R-B-L2-002 reads the step
+            # and the baseline it is a step above.
             required_columns=("event_uid",
                               "port_key",
                               "macs_per_port_first_in_window",
+                              "macs_per_port_step",
+                              "macs_per_port_baseline_max",
                               "macs_claiming_sender_ip",
                               "arp_sender_ip_excluded",
                               "auth_unpaired",

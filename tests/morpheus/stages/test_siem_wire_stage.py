@@ -51,6 +51,8 @@ SCORE_L2_COLUMNS = {
     "event_uid": ["a", "b"],
     "port_key": ["site-1:sw1:Gi1/0/1", "site-1:sw1:Gi1/0/2"],
     "macs_per_port_first_in_window": [True, False],
+    "macs_per_port_step": [0, 1],
+    "macs_per_port_baseline_max": [1, 1],
     "macs_claiming_sender_ip": [1, 2],
     "arp_sender_ip_excluded": [False, False],
     "auth_unpaired": [False, True],

@@ -147,6 +147,18 @@ def test_the_detections_return_exactly_what_is_written(expected: dict, telemetry
     assert searches["R-D-L2-001 - MAC address count exceeded on an access port"][
         "candidate_rows_before_the_lookup"] == first_in_window
 
+    # R-B-L2-002 needs no gate: the first-in-window rows whose count the port has never reached, one notable per
+    # port with the largest step and the addresses that made it.
+    stepped = scored[(scored["macs_per_port_first_in_window"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                     & (scored["macs_per_port_step"] > 0)]
+    novelty = searches["R-B-L2-002 - Port-to-MAC binding novelty"]
+
+    assert novelty["expected_rows"] == stepped["port_key"].nunique()
+    assert novelty["contributing_rows"] == len(stepped)
+    written = {(row["port_key"], row["step"], row["new_mac_count"]) for row in novelty["key_values"]}
+    assert written == {(port, int(group["macs_per_port_step"].max()), group["mac_address"].nunique())
+                       for (port, group) in stepped.groupby("port_key")}
+
 
 def test_the_layer_1_detection_returns_exactly_what_is_written(expected: dict, telemetry: pd.DataFrame):
     # R-D-L1-001's predicate as the search states it: a serial that differs from the port's previous poll, on a
@@ -802,8 +814,8 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # Six of thirty-seven now: R-C-002 left the list when it was rewritten to read scored events rather than
     # notables and the campaign corpus gave it a chain to find.
     # Six of thirty-eight after R-C-005, which arrived with a chain to find, six of thirty-nine after
-    # R-D-L1-001, whose optic swap the corpus already held, and six of forty after R-P-L1-004, which arrived with
-    # a failing optic planted for it.
+    # R-D-L1-001, whose optic swap the corpus already held, six of forty after R-P-L1-004, which arrived with a
+    # failing optic planted for it, and six of forty-one after R-B-L2-002, whose hub the corpus already held.
     assert len(empty) == 6
 
     for (name, entry) in empty.items():
