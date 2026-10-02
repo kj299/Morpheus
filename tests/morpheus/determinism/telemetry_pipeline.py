@@ -35,6 +35,9 @@ Into that corpus are planted the things the layer 1 and layer 2 features exist t
 - a **reboot**: a device whose uptime and counters restart mid-corpus;
 - a **tap**: a step loss of receive power on one port, with transmit power unchanged;
 - a **flap**: a link that went down and up between two polls, visible only through `ifLastChange`;
+- an **optic swap**: a transceiver serial that changes on a port while the device records no link transition,
+  which is what R-D-L1-001 fires on, and beside it a **maintenance swap** whose serial changes with the link's
+  drop recorded in `ifLastChange`, which it must not;
 - a **bypass**: an 802.1X success on a port that never started an exchange;
 - and one thing that must **not** fire: a VRRP pair whose two MACs legitimately share one address, carried on the
   exclusion list, so the ARP rule's exclusion path is exercised rather than assumed.
@@ -144,7 +147,26 @@ a transceiver at all -- so every port bound once and drained, and the displaceme
 Its negative control is already here and needed no planting: the tap on `HUB_PORT` moves that port's receive
 power by three decibels without touching its serial, and must leave its binding whole. A binding that split on a
 changing optical reading would produce a new interval every poll.
+
+It is also what R-D-L1-001 fires on, as recorded: the serial changes while `oper_status` reads "up" on both polls
+and `ifLastChange` never moves, so the device says the link was never down. Replacing an optic means pulling it,
+and pulling it takes the link down, so a serial that changes without that transition is a change the port cannot
+physically have produced. The swap below is the one that can.
 """
+
+MAINTENANCE_PORT = "Gi1/0/6"
+MAINTENANCE_SWAP_AT_MINUTE = 45
+"""A second optic replaced, the way a technician replaces one.
+
+The serial changes between two polls that both read "up", exactly as on `XCVR_SWAP_PORT`, with one difference:
+the device's `ifLastChange` advanced between them, because the link dropped while the cage was empty and came back
+with the new optic. `TC1FlapStage` reads that as two transitions nobody polled, and R-D-L1-001 must stay quiet on
+it. Without this port the rule could only be asserted in one direction, and a rule that fires on every optic
+swap in the estate is not the rule the guide specifies.
+"""
+
+SWAPS = {XCVR_SWAP_PORT: XCVR_SWAP_AT_MINUTE, MAINTENANCE_PORT: MAINTENANCE_SWAP_AT_MINUTE}
+"""The minute each replaced optic's new serial first appears, per port."""
 BYPASS_AT_SECONDS = 1500
 BYPASS_PORT = "Gi1/0/2"
 BYPASS_MAC = "de:ad:be:ef:01:01"
@@ -251,8 +273,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
 
 def _build_layer_1(rng: random.Random) -> pd.DataFrame:
-    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, an unpolled flap and an optic swap."""
-    devices = [(SWITCH, port) for port in PORTS] + [(REBOOTING_SWITCH, "Gi1/0/1")]
+    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, an unpolled flap and two optic swaps."""
+    devices = [(SWITCH, port) for port in PORTS] + [(SWITCH, MAINTENANCE_PORT), (REBOOTING_SWITCH, "Gi1/0/1")]
     counters = {
         key: {
             "crc_errors": 100, "symbol_errors": 0, "input_discards": 5, "output_discards": 1
@@ -282,15 +304,19 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
             # gap while the state reads "up" both sides, which is the case only the device's own record can reveal.
             if (device == SWITCH and port == "Gi1/0/1" and minute >= FLAP_AT_MINUTE):
                 last_change_cs = FLAP_AT_MINUTE * 60 * CS_PER_SECOND - 30 * CS_PER_SECOND
+            elif (device == SWITCH and port == MAINTENANCE_PORT and minute >= MAINTENANCE_SWAP_AT_MINUTE):
+                # The link came back up with the new optic, twenty seconds before the poll that first saw it.
+                last_change_cs = MAINTENANCE_SWAP_AT_MINUTE * 60 * CS_PER_SECOND - 20 * CS_PER_SECOND
             elif (rebooted):
                 last_change_cs = 5 * CS_PER_SECOND
             else:
                 last_change_cs = 10 * CS_PER_SECOND
 
-            # The optic itself is replaced on one port, which closes that port's binding and opens the next.
+            # The optic itself is replaced on two ports, which closes each port's binding and opens the next. On
+            # one of them the device recorded the link dropping for the swap, above; on the other it did not.
             serial = f"XCVR-{device}-{port}"
 
-            if (device == SWITCH and port == XCVR_SWAP_PORT and minute >= XCVR_SWAP_AT_MINUTE):
+            if (device == SWITCH and port in SWAPS and minute >= SWAPS[port]):
                 serial = f"{serial}-B"
 
             rx_dbm = -7.0 + rng.uniform(-0.05, 0.05)

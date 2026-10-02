@@ -434,6 +434,36 @@ def test_the_optic_swap_closes_one_binding_and_opens_another(result: pd.DataFram
 
 
 @pytest.mark.cpu_mode
+def test_the_maintenance_swap_is_a_change_the_device_saw_the_link_drop_for(result: pd.DataFrame):
+    # The second replaced optic, as R-D-L1-001 reads it. The serial changes exactly as it does on the other swapped
+    # port, and the device's own `ifLastChange` says the link went down and came back between the two polls, so
+    # the flap count is two where the other swap's is zero. That difference is the whole rule.
+    layer_1 = _rows(result, "tc1")
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"
+    on_port = layer_1[layer_1["entity_key"] == port].sort_values("event_time")
+    at_swap = on_port[on_port["event_time"] == tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS].iloc[0]
+
+    assert at_swap["transceiver_serial_changed"] == True  # noqa: E712  pylint: disable=singleton-comparison
+    assert at_swap["transceiver_serial_first_seen"] == True  # noqa: E712  pylint: disable=singleton-comparison
+    assert at_swap["link_flaps"] == 2
+    assert at_swap["link_flap_unpolled"] == True  # noqa: E712  pylint: disable=singleton-comparison
+    assert (on_port["oper_status"] == "up").all()
+
+    # The serial changed once on this port, and that is the only transition its link ever made.
+    assert (on_port["transceiver_serial_changed"] == True).sum() == 1  # noqa: E712  pylint: disable=singleton-comparison
+    assert on_port["link_flaps"].fillna(0).sum() == 2
+
+    # The binding table records the swap as the other one is recorded: two intervals, the first displaced.
+    bindings = _rows(result, "tc1_binding")
+    swapped = bindings[bindings["entity_key"] == port].sort_values("bind_start")
+
+    assert list(swapped["transceiver_serial"]) == [
+        f"XCVR-{tp.SWITCH}-{tp.MAINTENANCE_PORT}", f"XCVR-{tp.SWITCH}-{tp.MAINTENANCE_PORT}-B"
+    ]
+    assert swapped["bind_end_reason"].iloc[0] == "displaced"
+
+
+@pytest.mark.cpu_mode
 def test_a_port_whose_light_changed_keeps_one_binding(result: pd.DataFrame):
     # The negative control, and it needed no planting: the tap already moves this port's receive power by three
     # decibels without touching its serial. A binding that split on a changing optical reading would produce a new
@@ -541,6 +571,16 @@ def test_nothing_else_fired(result: pd.DataFrame):
     assert set(lost_light["entity_key"]) == {f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"}
     assert lost_light["event_time"].min() == tp.TAP_AT_MINUTE * 60 * NS
     assert len(lost_light) == tp.CORPUS_SECONDS // 60 - tp.TAP_AT_MINUTE + 1
+
+    # Two serials change in the hour, one on each replaced optic's port, and the link transitions nobody polled
+    # are the maintenance swap's two and the planted flap's two. The reboot's transitions are unpolled too, and
+    # labelled as a device reset, which is what lets a planned reboot be excluded by rule; they are set aside here.
+    changed = layer_1[layer_1["transceiver_serial_changed"] == True]  # noqa: E712  pylint: disable=singleton-comparison
+    assert sorted(changed["port_id"]) == sorted(tp.SWAPS)
+    unpolled = layer_1[(layer_1["link_flap_unpolled"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                       & (layer_1["link_flap_device_reset"] == False)]  # noqa: E712  pylint: disable=singleton-comparison
+    assert sorted(unpolled["entity_key"]) == sorted(
+        [f"{tp.SITE}:{tp.SWITCH}:Gi1/0/1", f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"])
 
     bindings = _rows(result, "tc2_binding")
     assert (bindings["bind_end_reason"] == CONFLICT).sum() == 1

@@ -106,7 +106,16 @@ PRODUCED: dict = {
             time_columns=("event_time", ),
             producer="The TC-1 stages (normalize, optical, flap, change) behind WindowSealStage; the `tc1` class of "
             "`tests/morpheus/determinism/telemetry_pipeline.py`.",
-            required_columns=("event_uid", "entity_key", "site_id", "device_id", "port_id"),
+            # R-D-L1-001 reads the last three: a serial that changed on a poll the flap count says the link never
+            # moved for. `oper_status` is the collector's own field, carried through rather than derived.
+            required_columns=("event_uid",
+                              "entity_key",
+                              "site_id",
+                              "device_id",
+                              "port_id",
+                              "transceiver_serial_changed",
+                              "link_flaps",
+                              "oper_status"),
         ),
     "morpheus:score:l3":
         Sourcetype(

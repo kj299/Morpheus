@@ -21,8 +21,8 @@ corpus with the anomalies planted in it. Each must fire exactly where it was pla
 fields an analyst needs to trace it. The stanzas are then read from the app itself, so the SPL and the Python
 cannot drift apart silently.
 
-The four layer 2 rules are asserted end to end here, corpus and stanza both. The two layer 5 rules are asserted
-against their own corpus in `test_session_harness.py` and against their expected row counts in
+The layer 1 rule and the four layer 2 rules are asserted end to end here, corpus and stanza both. The two layer 5
+rules are asserted against their own corpus in `test_session_harness.py` and against their expected row counts in
 `test_splunk_validation_package.py`, because both of those already hold the layer 5 pipeline; what they are
 checked for here is the half neither of those covers -- that the SPL names the columns the stages emit, and that
 the scheduling follows Part 5's discipline.
@@ -51,6 +51,7 @@ PROPS = os.path.join(APP_DEFAULT, "props.conf")
 NS = tp.NS_PER_SECOND
 
 RULES = {
+    "R-D-L1-001": "R-D-L1-001 - Transceiver substitution",
     "R-D-L2-001": "R-D-L2-001 - MAC address count exceeded on an access port",
     "R-D-L2-003": "R-D-L2-003 - ARP anomaly",
     "R-D-L2-004": "R-D-L2-004 - MAC in two places at once",
@@ -116,6 +117,59 @@ def searches_fixture() -> dict[str, dict[str, str]]:
 
 
 # --- The predicates, in Python, over the planted corpus ---------------------------------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_r_d_l1_001_fires_on_the_swap_the_link_never_dropped_for_and_not_on_the_other(result: pd.DataFrame):
+    # The rule's predicate: a serial that differs from the port's previous poll, on a poll the flap count says the
+    # link never moved for. Two optics are replaced in this hour and the serial changes once on each port; what
+    # separates them is whether the device recorded the link dropping in between.
+    layer_1 = result[result["telemetry_class"] == "tc1"].sort_values(["entity_key", "event_time"])
+    changed = layer_1[layer_1["transceiver_serial_changed"] == True]  # noqa: E712  pylint: disable=singleton-comparison
+
+    swapped_port = f"{tp.SITE}:{tp.SWITCH}:{tp.XCVR_SWAP_PORT}"
+    maintained_port = f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"
+
+    assert set(changed["entity_key"]) == {swapped_port, maintained_port}
+    assert len(changed) == 2
+
+    detections = changed[(changed["link_flaps"] == 0) & (changed["oper_status"] != "down")]
+
+    assert len(detections) == 1, "the swap nothing polled a transition for, and not the maintenance swap"
+
+    hit = detections.iloc[0]
+    assert hit["entity_key"] == swapped_port
+    assert hit["event_time"] == tp.XCVR_SWAP_AT_MINUTE * 60 * NS
+    assert hit["transceiver_serial"] == f"XCVR-{tp.SWITCH}-{tp.XCVR_SWAP_PORT}-B"
+    assert hit["transceiver_serial_first_seen"] == True  # noqa: E712  pylint: disable=singleton-comparison
+    assert hit["transceiver_serial_distinct_count"] == 2
+
+    # The search carries the serial from the port's preceding poll onto the notable, so it names both optics.
+    # The same shift, in pandas: the previous row of the same port.
+    previous = layer_1.groupby("entity_key")["transceiver_serial"].shift(1)
+    assert previous.loc[hit.name] == f"XCVR-{tp.SWITCH}-{tp.XCVR_SWAP_PORT}"
+
+    # The negative control. The serial changed just the same, but the device's own record of the link says it
+    # dropped and came back between the two polls -- which is what replacing an optic does to a link.
+    maintained = changed[changed["entity_key"] == maintained_port].iloc[0]
+    assert maintained["event_time"] == tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS
+    assert maintained["link_flaps"] >= 2
+    assert maintained["link_flap_unpolled"] == True  # noqa: E712  pylint: disable=singleton-comparison
+    assert maintained["oper_status"] == "up", "both polls read up; only ifLastChange reveals the transition"
+
+    # Everything the search's `table` names is present, so an analyst can trace it without a second query.
+    for column in ("entity_key",
+                   "site_id",
+                   "device_id",
+                   "port_id",
+                   "transceiver_serial",
+                   "transceiver_serial_first_seen",
+                   "transceiver_serial_distinct_count",
+                   "oper_status",
+                   "link_flaps",
+                   "event_uid",
+                   "lineage_id"):
+        assert pd.notna(hit[column]), column
 
 
 @pytest.mark.cpu_mode
@@ -248,6 +302,11 @@ def test_the_search_reads_the_column_the_stage_emits(rule_id: str, searches: dic
     spl = searches[RULES[rule_id]]["search"]
 
     expected = {
+        "R-D-L1-001": ("sourcetype=morpheus:score:l1",
+                       'transceiver_serial_changed="true"',
+                       "link_flaps=0",
+                       'oper_status!="down"',
+                       "last(transceiver_serial) AS previous_serial BY entity_key"),
         "R-D-L2-001": ("sourcetype=morpheus:score:l2",
                        "macs_per_port_first_in_window=true",
                        "lookup port_designations port_key",

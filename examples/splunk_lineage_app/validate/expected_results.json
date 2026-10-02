@@ -2,6 +2,18 @@
   "description": "What each shipped saved search should return when the app is deployed against sample_events/. Generated numbers come from the same run_pipeline the determinism tests call; the expected-empty entries are stated with the reason, because a search returning nothing is the failure mode this whole app is careful about and it must be possible to tell a correct empty from a broken one.",
   "corpus": "tests/morpheus/determinism/estate_pipeline.py, lineage_pipeline.py, network_pipeline.py, transport_pipeline.py, presentation_pipeline.py, application_pipeline.py and session_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
   "searches": {
+    "R-D-L1-001 - Transceiver substitution": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "why": "One port. hq:sw1:Gi1/0/2's serial changed at minute fifty, from XCVR-sw1-Gi1/0/2 to XCVR-sw1-Gi1/0/2-B, on a poll whose link_flaps is 0: oper_status read up on both polls and the device's ifLastChange never moved, so the device says the link was never down, which replacing an optic cannot avoid. The other optic replaced this hour, on hq:sw1:Gi1/0/6 at minute forty-five, is quiet: its serial changed just the same, but ifLastChange advanced between the two polls and TC1FlapStage counted the drop (link_flaps=2, link_flap_unpolled=true), which is what a swap looks like. The notable names both serials, the replaced one carried from the port's preceding poll.",
+      "key_values": [
+        {
+          "entity_key": "hq:sw1:Gi1/0/2",
+          "previous_serial": "XCVR-sw1-Gi1/0/2",
+          "transceiver_serial": "XCVR-sw1-Gi1/0/2-B"
+        }
+      ]
+    },
     "R-D-L2-001 - MAC address count exceeded on an access port": {
       "expected_rows": 0,
       "expected_empty": true,
@@ -269,15 +281,15 @@
       ]
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 4306,
+      "expected_rows": 4319,
       "expected_empty": false,
-      "contributing_rows": 8144,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 8144 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus."
+      "contributing_rows": 8205,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 8205 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 3321,
+      "distinct_lineage_ids": 3334,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
@@ -285,7 +297,7 @@
       "three_layer_chain_methods": [
         "soft:mac_table"
       ],
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 3321 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything. `methods` once read `join_method`, which no pipeline writes, and was blank on every chain; it now reads the `resolution_method` the binding resolver records, so all 15 three-layer chains say `soft:mac_table` and 60 chains in all carry a method."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 3334 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything. `methods` once read `join_method`, which no pipeline writes, and was blank on every chain; it now reads the `resolution_method` the binding resolver records, so all 15 three-layer chains say `soft:mac_table` and 60 chains in all carry a method."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,
@@ -293,14 +305,14 @@
       "expected_empty": true
     },
     "Binding lookup - L1 refresh": {
-      "expected_rows": 5,
+      "expected_rows": 7,
       "expected_empty": false,
-      "why": "Five port intervals across four ports: three stable, and two on the port whose optic is swapped partway through the corpus. Produced by TC1BindingStage from the TC-1 stream. The lookup is keyed on port_id and switch_id with no bucket, so the two intervals on the swapped port collapse to one document and the row that survives is whichever the search wrote last -- which is why the search sorts ascending on bind_start before writing, making the surviving row the later optic rather than the earlier one. This lookup answers what is in a port now. What was in it on a given day is the history lookup below."
+      "why": "Seven port intervals across five ports: three stable, and two on each of the two ports whose optics are swapped partway through the corpus. Produced by TC1BindingStage from the TC-1 stream. The lookup is keyed on port_id and switch_id with no bucket, so a swapped port's two intervals collapse to one document and the row that survives is whichever the search wrote last -- which is why the search sorts ascending on bind_start before writing, making the surviving row the later optic rather than the earlier one. This lookup answers what is in a port now. What was in it on a given day is the history lookup below."
     },
     "Binding lookup - L1 history refresh": {
-      "expected_rows": 1,
+      "expected_rows": 2,
       "expected_empty": false,
-      "why": "One row, and one row is the whole point. Of the four ports in the corpus only Gi1/0/2 has its optic replaced, so only its first interval is superseded, and only superseded intervals are expanded into day-wide buckets by BindingTable.superseded(). The other three ports are described correctly for all time by the row the current-state lookup holds and cost nothing here. A number close to the port count would mean the superseded filter had been dropped and the history collection had started carrying the whole estate once per day."
+      "why": "Two rows, and two rows is the whole point. Of the five ports in the corpus only Gi1/0/2 and Gi1/0/6 have their optics replaced, so only their first intervals are superseded, and only superseded intervals are expanded into day-wide buckets by BindingTable.superseded(). The other three ports are described correctly for all time by the row the current-state lookup holds and cost nothing here. A number close to the port count would mean the superseded filter had been dropped and the history collection had started carrying the whole estate once per day."
     },
     "Binding lookup - L1 history expiry": {
       "expected_rows": 0,

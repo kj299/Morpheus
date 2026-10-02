@@ -57,7 +57,7 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
 8's total order, and control 13's CI harness. That is forty-four stages and thirty-nine supporting
-modules, covered by 1,791 distinct tests, itemized in
+modules, covered by 1,794 distinct tests, itemized in
 [Part 6](#provided). The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -1298,6 +1298,20 @@ false_positive_notes: >
 did not transition to down. Near-zero false positive rate outside of maintenance windows. Suppress by
 change ticket, not by threshold.
 
+Ships as a saved search over `transceiver_serial_changed` from
+{py:class}`~morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage` and `link_flaps` from
+{py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage`. "Did not transition to down" is read from
+the flap count rather than from `oper_status` alone, because the transition a replacement causes is usually over
+before the next poll: pulling an optic takes the link down and seating the new one brings it back, and a poller on
+a minute cadence sees "up" both sides. The device's own `ifLastChange` records the drop anyway, and the flap stage
+counts it, so a serial that changes on a poll with `link_flaps = 0` is a change the port cannot physically have
+produced, while one that changes with the transition recorded is a swap. The harness corpus carries one of each:
+the optic swap planted for the `binding_l1` lookup changes its serial with `ifLastChange` unmoved and is the
+detection, and a second swap, whose link dropped between the two polls, is the control the rule must stay quiet
+on. The search carries the serial from the port's preceding poll onto the notable, so it names both optics. On a
+collector that does not report `ifLastChange`, a swap made inside one polling gap and no transition at all are
+indistinguishable, and the rule fires on every quick swap; that is the maintenance-window qualification above.
+
 **R-D-L2-001 - MAC address count exceeded on an access port.** More than one non-voice MAC observed on
 a port designated as single-host. Classic unauthorized-switch detection. Ships as a saved search over
 `macs_per_port` from `TC2CardinalityStage`, firing once per MAC new to the window, against a
@@ -1350,12 +1364,12 @@ bypass takes the pending slot of the device it is bridged behind and reads as an
 is reported. On ports where MAB is configured deliberately, suppress by port designation rather than by
 loosening the rule. Tier D1. Ships as a saved search in the Splunk app.
 
-These four, R-D-L2-001, 003, 004 and 005, are the rules in this part that exist as code rather than as
-specification. 004 and 005 read columns the shipped stages produce and depend on nothing outside the
-pipeline; 001 and 003 depend on a list the estate owns, and each ships with the hook for that list and
+These five, R-D-L1-001 and R-D-L2-001, 003, 004 and 005, are the rules in this part that exist as code rather
+than as specification. R-D-L1-001, 004 and 005 read columns the shipped stages produce and depend on nothing
+outside the pipeline; 001 and 003 depend on a list the estate owns, and each ships with the hook for that list and
 fires on nothing until it is populated, while R-D-L2-003 fires on every first-hop redundancy address until its
-exclusion list is supplied. All four predicates are asserted in Python over the determinism
-harness's planted corpus: 004 and 005 fire exactly once, 001 once per offending MAC, and 003 on the
+exclusion list is supplied. All five predicates are asserted in Python over the determinism
+harness's planted corpus: R-D-L1-001, 004 and 005 fire exactly once, 001 once per offending MAC, and 003 on the
 flooded gateway and not on the redundancy pair.
 
 **R-P-L1-004 - Optical degradation forecast.** Linear extrapolation of `optical_rx_dbm` per port
@@ -3402,7 +3416,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   repairing it, and this is what imposes the order they depend on.
 - The composed telemetry pipeline under control 13's six checks
   (`tests/morpheus/determinism/telemetry_pipeline.py`): a snapshot-shaped layer 1 and layer 2 corpus with a
-  hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap and two 802.1X bypasses planted in it, run
+  hub, a spoof, an ARP flood, a reboot, a tap, an unpolled flap, two optic swaps and two 802.1X bypasses planted in it, run
   through every TC-1 and TC-2 stage, with the layer 2 bindings resolving the ARP stream onto the layer 1
   `entity_key`. Each planted anomaly is asserted as the column a rule would read, and nothing else fires.
   The second bypass arrives while a legitimate exchange on its own port is still open, and beside it sits a
@@ -3438,6 +3452,9 @@ What Morpheus provides versus what has to be built, stated plainly.
   their predicates asserted in Python over the planted corpus. 001 and 003 ship with the hook for the
   list each depends on. Until that list exists R-D-L2-001 fires on nothing and R-D-L2-003 fires on every
   redundancy gateway, so the two need the inventory for opposite reasons.
+- The layer 1 detection R-D-L1-001, a transceiver serial that changed on a poll the flap count says the link
+  never moved for, asserted the same way: the corpus's optic swap fires it, and a second swap whose link
+  dropped between the polls, recorded by the device's own `ifLastChange`, does not.
 - Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
   answer inside the idle window, capped by a duration the consumer states rather than one the stage
   invents.
