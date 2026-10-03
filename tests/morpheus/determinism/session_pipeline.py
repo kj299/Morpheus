@@ -478,7 +478,7 @@ SETTINGS = {
     "excluded_source_networks": [VPN_EGRESS_NETWORK],
 }
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-D-L5-003", "R-D-L5-004", "R-P-L5-006")
+RULES = ("R-D-L5-003", "R-D-L5-004", "R-D-L5-007", "R-D-L5-008", "R-D-L5-009", "R-B-L5-001", "R-B-L5-002", "R-P-L5-006")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 

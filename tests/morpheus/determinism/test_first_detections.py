@@ -65,14 +65,19 @@ RULES = {
     "R-D-L2-005": "R-D-L2-005 - Authorization without authentication",
     "R-D-L5-003": "R-D-L5-003 - Impossible travel",
     "R-D-L5-004": "R-D-L5-004 - Multi-factor fatigue",
+    "R-D-L5-007": "R-D-L5-007 - Off-hours authentication",
+    "R-D-L5-008": "R-D-L5-008 - New authentication location or device",
+    "R-D-L5-009": "R-D-L5-009 - Failed authentication run ending in success",
+    "R-B-L5-001": "R-B-L5-001 - Composite authentication anomaly",
+    "R-B-L5-002": "R-B-L5-002 - Location novelty anomaly",
     "R-P-L5-006": "R-P-L5-006 - Drift trajectory",
     "R-B-L7-002": "R-B-L7-002 - Bulk data access",
     "R-P-L7-006": "R-P-L7-006 - Access breadth trajectory",
     "R-C-005": "R-C-005 - Credential replay across the stack",
 }
-"""The rules whose stanzas this file reads back: the layer 1, 2 and 5 rules whose predicates it asserts over the
-telemetry corpus, and the four whose predicates live in the session, SaaS and campaign harnesses but whose SPL had
-no reader here until the retrospective's step 2."""
+"""The rules whose stanzas this file reads back: the layer 1 and 2 rules whose predicates it asserts over the
+telemetry corpus, and the layer 5, 7 and chained rules whose predicates live in the session, SaaS and campaign
+harnesses but whose SPL had no reader here until the retrospective's steps 2 and 4."""
 
 
 def _gap_threshold_ns() -> int:
@@ -460,18 +465,42 @@ def test_the_search_reads_the_column_the_stage_emits(rule_id: str, searches: dic
                        "drift_rising_windows >= rising_threshold",
                        "drift_rise_sigmas > sigma_threshold",
                        "mean_abs_z < mean_ceiling",
-                       "dedup user_principal day_window_id"),
+                       "abs(drift_acceleration) < acceleration_ceiling",
+                       "dedup user_principal day_window_id",
+                       "outputlookup principal_watchlist"),
+        "R-D-L5-007": ("sourcetype=morpheus:score:l5",
+                       "hour_unseen=true",
+                       "cadence_mature=true",
+                       "auth_result=success",
+                       "hour_surprise_bits"),
+        "R-D-L5-008": ("sourcetype=morpheus:score:l5",
+                       "auth_result=success",
+                       "cadence_mature=true",
+                       'location_first_seen == "true"',
+                       'device_first_seen == "true"'),
+        "R-D-L5-009": ("sourcetype=morpheus:score:l5",
+                       "auth_failed_then_succeeded=true",
+                       "consecutive_auth_failures >= failure_threshold",
+                       "auth_failures_in_window"),
+        "R-B-L5-001": ("sourcetype=morpheus:score:l5",
+                       "model_fallback_used=false",
+                       "max_abs_z >= max_threshold",
+                       "mean_abs_z >= mean_threshold"),
+        "R-B-L5-002":
+            ("sourcetype=morpheus:score:l5", "model_fallback_used=false", "locincrement_z_loss >= loss_threshold"),
         "R-B-L7-002": ("sourcetype=morpheus:score:l7",
                        "saas_baseline_mature=true",
                        "saas_record_ratio>5",
                        "ctx_object_data_classification",
-                       "saas_record_baseline"),
+                       "saas_record_baseline",
+                       "lookup principal_watchlist user_principal"),
         "R-P-L7-006": ("sourcetype=morpheus:score:l7",
                        "saas_object_types_in_week=*",
                        "max(drift_rising_windows) AS rising_weeks",
                        "dc(role) AS role_versions",
                        "values(week_window_id) AS weeks",
-                       "BY user_principal"),
+                       "BY user_principal",
+                       "outputlookup principal_watchlist"),
         "R-C-005": ("sourcetype=morpheus:score:l5",
                     'site_travel_status="measured"',
                     "last(login_port_key) AS previous_port",

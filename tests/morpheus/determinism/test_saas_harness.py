@@ -82,8 +82,14 @@ def result_fixture(pipeline_config: Config, corpus: dict[str, pd.DataFrame]) -> 
     yield _RESULTS[mode]
 
 
-def _bulk(result: pd.DataFrame, multiple: bool = True, history: bool = True) -> dict:
+def _bulk(result: pd.DataFrame,
+          multiple: bool = True,
+          history: bool = True,
+          watchlist: frozenset = frozenset()) -> dict:
     """Principals R-B-L7-002 fires on, with the severity its search gives them.
+
+    `watchlist` is the principals the predictive rules have put on the `principal_watchlist` lookup; a watched
+    principal's severity is raised by the boost the search states, capped at 100.
 
     Either condition can be switched off, which is how the counterfactual checks ask what a control would have done
     without the one condition that stops it. Without the history condition, a principal with no baseline is read as
@@ -108,9 +114,21 @@ def _bulk(result: pd.DataFrame, multiple: bool = True, history: bool = True) -> 
     for (_, row) in rows[keep].iterrows():
         classification = row["ctx_object_data_classification"]
         classification = None if pd.isna(classification) else classification
-        fired[row["user_principal"]] = sp_.SEVERITY.get(classification, sp_.UNCLASSIFIED_SEVERITY)
+        severity = sp_.SEVERITY.get(classification, sp_.UNCLASSIFIED_SEVERITY)
+
+        if (row["user_principal"] in watchlist):
+            severity = min(severity + _watchlist_boost(), 100)
+
+        fired[row["user_principal"]] = severity
 
     return fired
+
+
+def _watchlist_boost() -> int:
+    """The severity R-B-L7-002 adds for a watched principal, read from the search rather than repeated here."""
+    import re  # pylint: disable=import-outside-toplevel
+
+    return int(re.search(r"watchlist_boost\s*=\s*(\d+)", _search("R-B-L7-002 - Bulk data access")).group(1))
 
 
 def _creeping(result: pd.DataFrame, role: bool = True) -> dict:
@@ -395,6 +413,42 @@ def test_neither_saas_rule_reads_the_object_name():
 
         assert "target_object " not in search and not search.rstrip().endswith("target_object"), name
         assert "target_object," not in search, name
+
+
+@pytest.mark.cpu_mode
+def test_the_breadth_rule_writes_one_watchlist_entry_per_principal(result: pd.DataFrame):
+    # R-P-L7-006 puts a principal on watch by writing the principal_watchlist lookup: one entry per principal and
+    # rule, so the weekly re-run overwrites rather than duplicates, with the reason the bulk rule reports beside
+    # the notable. The entries are what the search's last two commands write from the principals it returns.
+    breadth = _search("R-P-L7-006 - Access breadth trajectory")
+
+    assert '_key = user_principal . ":" . rule_id' in breadth
+    assert 'reason = "access-breadth"' in breadth
+    assert "outputlookup principal_watchlist append=true key_field=_key" in breadth
+
+    entries = {f"{principal}:R-P-L7-006" for principal in _creeping(result)}
+
+    assert entries == {f"{sp_.CREEPER}:R-P-L7-006", f"{sp_.LATE_ROLE_CHANGER}:R-P-L7-006"}
+
+
+@pytest.mark.cpu_mode
+def test_a_watched_principal_s_export_is_reported_more_loudly_and_still_only_when_it_fires(result: pd.DataFrame):
+    # The watchlist R-P-L7-006 writes is what R-B-L7-002 reads. In this corpus the two populations are apart --
+    # the creeping principals export nothing large -- so the list as written moves no severity. Putting the
+    # restricted exporter and the public one on it shows the weighting, and putting a control on it shows the
+    # watchlist decides how loudly an export is reported and never whether it fires.
+    watched = frozenset(_creeping(result))
+    boost = _watchlist_boost()
+
+    assert _bulk(result, watchlist=watched) == _bulk(result)
+
+    weighted = _bulk(result, watchlist=frozenset({sp_.EXFILTRATOR, sp_.PUBLIC_EXPORTER, sp_.ROUTINE_EXPORTER}))
+    plain = _bulk(result)
+
+    assert weighted[sp_.EXFILTRATOR] == min(plain[sp_.EXFILTRATOR] + boost, 100)
+    assert weighted[sp_.PUBLIC_EXPORTER] == plain[sp_.PUBLIC_EXPORTER] + boost
+    assert sp_.ROUTINE_EXPORTER not in weighted
+    assert set(weighted) == set(plain)
 
 
 def test_the_searches_carry_the_thresholds_this_harness_asserts():

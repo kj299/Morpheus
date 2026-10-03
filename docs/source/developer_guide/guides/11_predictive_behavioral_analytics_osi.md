@@ -59,35 +59,37 @@ resolution, window sealing), feature stages for every telemetry class from TC-0 
 scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's six
 checks over twelve composed corpora, which run under pytest on developer machines and have not yet run in
 any CI this fork has executed. That is forty-six stages and forty-one supporting
-modules, covered by 1,899 distinct tests, itemized in
-[Part 6](#provided). Thirty-two of the thirty-nine rules Part 3 specifies ship as saved searches, four of
+modules, covered by 1,908 distinct tests, itemized in
+[Part 6](#provided). Thirty-seven of the forty-two rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
 ([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)); that pass covered
-the seven searches then present, and the thirty-four added since, every detection among them, have been
+the seven searches then present, and the forty added since, every detection among them, have been
 validated by recomputation in Python only. [The retrospective](./12_behavioral_analytics_retrospective.md)
 scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
-What remains design rather than a running system: seven of the thirty-nine rules (R-B-L4-001 and
+What remains design rather than a running system: five of the forty-two rules (R-B-L4-001 and
 R-B-L7-003, which need a Triton endpoint; R-B-L4-004, which needs a stack fingerprint on the flow and a
-flow identifier on the request that rode it; R-B-L5-001, R-B-L5-002 and R-B-L5-005, whose columns are
-produced and whose searches are not written; and R-C-003), a trained model in the composed pipeline, the
+flow identifier on the request that rode it; R-B-L5-005, whose columns are produced and whose search is
+not written; and R-C-003), a trained model in the composed pipeline, the
 hysteresis half of control 9, controls 10 and 11 as code, the sharding router's wiring, and clock
 correction, since `clock_source` and `clock_offset_ms` are schema that nothing produces or checks. Layer 5
 is the case to state precisely: **there is no trained per-user model in any shipped artifact.**
 `mean_abs_z` and `max_abs_z` have a producer,
 {py:class}`~morpheus.stages.telemetry.tc5_score_stage.TC5ScoreStage`, but in every composed pipeline the
 scorer behind it is `ReferenceScorer`, ten frozen population constants, so what R-P-L5-006 fires on is
-arithmetic, and the three behavioral rules that read the same columns ship no search. The drift
+arithmetic. R-B-L5-001 and R-B-L5-002 read the same columns and ship gated on `model_fallback_used=false`,
+so they return nothing until a trained per-user model is pinned in the manifest; R-B-L5-005 ships no
+search. The drift
 trajectory that is this document's flagship predictive claim is built and tested --
 {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` reports the velocity, the
 acceleration, the length of the rising run and its total rise in the principal's own standard deviations
 -- against those reference scores, so the rule's shape is settled before there is a model to argue
 about. Given no score column at all it carries a null in every drift column and says so once in the log.
 Everything else at this layer is built: the session assembly and the six feature stages run under
-control 13's six checks against a week-long corpus, the two deterministic rules ship as saved searches
+control 13's six checks against a week-long corpus, the five deterministic rules ship as saved searches
 with their predicates asserted against that corpus, and `morpheus:score:l5` is a produced sourcetype.
 Controls 1, 2, 4 and 12 now ship as code, ahead of the model
 that will consume them. Control 9 is a partial exception, since `determinism.quantize_value` ships but
@@ -1542,10 +1544,20 @@ one packet where the only flag yet seen was the SYN.
 model, with `mean_abs_z` at or above 2.0. Requiring both suppresses the common case where a single
 feature spikes for a benign reason.
 
+The saved search reads only rows whose `model_fallback_used` is false. A reconstruction error is a
+statement about a principal only when the model behind it was fitted to that principal, and a score from a
+population fallback crossing these thresholds would be an alert about the population. Every composed corpus
+scores under the reference arithmetic's fallback, so the search returns nothing today; it returns nothing
+without the gate as well, because the reference scores reach a `max_abs_z` of 6.1 and never a
+`mean_abs_z` of 2.0, and the validation package records both counts so the gate cannot quietly become
+the only thing keeping it empty.
+
 **R-B-L5-002 - Location novelty.** `locincrement_z_loss` at or above 4.0. Note that `locincrement` is
 cumulative-distinct, so it rises permanently after a legitimate relocation; the z-score handles this
 correctly because the loss scaler is fit per user, but the rule should still carry a 7-day suppression
-after a confirmed benign relocation.
+after a confirmed benign relocation. It ships gated on `model_fallback_used=false` for the same reason as
+R-B-L5-001, and is empty on the reference corpus with or without the gate: the reference losses peak at
+1.4. R-D-L5-008 asks the deterministic form of the question and fires today.
 
 **R-D-L5-003 - Impossible travel.** Two successful authentications for one principal from locations
 whose great-circle distance divided by the elapsed time exceeds 900 km/h. Exclude authentications from
@@ -1563,6 +1575,12 @@ accounts, whose duration distribution is bimodal and uninformative.
 windows with a total increase above 1.5 standard deviations, without any single window crossing the
 R-B-L5-001 threshold. This is the flagship predictive rule for insider risk. It should never page; it
 should place the principal on a watchlist and raise the sensitivity of layer 7 rules for that principal.
+In the app the watchlist is the `principal_watchlist` KV Store lookup: the search writes an entry per
+firing, keyed on principal, rule and day so a re-run overwrites, expiring thirty days after the day that
+put the principal there; R-P-L7-006 writes the same lookup; and R-B-L7-002 reads it and raises a watched
+principal's severity by 15, capped at 100. The watchlist changes how loudly an export is reported and
+never whether it fires, so a trajectory that is arithmetic rather than behaviour can cost an analyst
+attention but cannot invent an alert.
 
 The trajectory this reads is built: {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`
 emits `drift_rising_windows`, `drift_total_rise` and `drift_rise_sigmas` -- the quantity this rule
@@ -1571,16 +1589,43 @@ The trajectory is wired into the composed layer 5 pipeline: a second `WindowSeal
 one seals the scored events into days, with its columns prefixed `day_` so the hourly windows keep their
 identity, and the drift stage reduces each complete day to one observation per principal -- the mean of the
 day's per-event scores -- and stamps it on every row of the day. The saved search `R-P-L5-006 - Drift
-trajectory` reads those columns and deduplicates on principal and day. On the reference corpus it fires on
-three principals, none of them behaviour: two climb for six straight days because the reference scorer's
-parameters are frozen while `logcount` and the `*increment` features are cumulative, and the third has a
-run of four whose first three rises are hundredths and whose fourth is the planted multi-factor burst -- a
-spike the rule's letter admits because the day's mean stays under 2.0. `drift_acceleration` separates the
-two shapes, and is the column to read first when tuning this rule. Three of the definitions are load-bearing and easy to get wrong in a way that reads
+trajectory` reads those columns and deduplicates on principal and day. Without a condition on its shape
+it fires on three principals of the reference corpus, none of them behaviour: two climb for six straight
+days because the reference scorer's parameters are frozen while `logcount` and the `*increment` features
+are cumulative, and the third has a run of four whose first three rises are hundredths and whose fourth is
+the planted multi-factor burst -- a spike the rule's letter admits because the day's mean stays under 2.0.
+`drift_acceleration` separates the two shapes, and the search now reads it: it keeps a rise only while
+`|drift_acceleration|` is under 0.1. The burst accelerates by 0.81 and leaves; the climbs accelerate by
+hundredths and stay, documented as arithmetic. That is the decision this rule's text implies -- drift is
+the slow climb no single day gives away, and a spike is R-D-L5-004's and R-B-L5-001's to report -- and it
+is a starting value, not a calibrated one. Three of the definitions are load-bearing and easy to get wrong in a way that reads
 plausibly: a gap in the windows restarts the run rather than extending it, the standard deviation is
 taken over prior windows only so a rise cannot inflate its own denominator, and a score that has never
 varied yields no rise in sigmas rather than an infinite one. Note also where the run begins: four
 increases means five windows, because a rise is measured from the window before it.
+
+The three deterministic rules below read the per-principal baselines the layer 5 stages already compute.
+Each is the cheapest detection at this layer, because the baseline is the principal's own and the stage
+has done the work; each was asserted in the corpus as a feature before it became a rule.
+
+**R-D-L5-007 - Off-hours authentication.** A successful authentication at an hour of the day the
+principal's own history holds no sign-in at (`hour_unseen`), once that history is mature
+(`cadence_mature`). The histogram is per principal, so a service account that signs in at 03:00 every
+night is ordinary at 03:00 and an office worker signing in at 03:00 for the first time is not. Refused
+attempts are excluded; a run of them at an odd hour is R-D-L5-004's or R-D-L5-009's.
+
+**R-D-L5-008 - New authentication location or device.** A successful authentication from a location
+(`location_first_seen`) or a device (`device_first_seen`) the principal has never used, once their
+history is mature. Below maturity every place is new because nothing is old yet. `logcount` is not a
+history gate: it counts the trailing day's sign-ins. The set is cumulative, so a legitimate relocation
+fires once, on the day it happens -- which R-B-L5-002's model-based form cannot promise.
+
+**R-D-L5-009 - Failed authentication run ending in success.** A successful authentication immediately
+after at least three consecutive failures for the same principal (`auth_failed_then_succeeded`,
+`consecutive_auth_failures`). The success is what makes it actionable. Two failures and a success is
+what most of an estate does on a Monday and stays below the threshold. A run that is also a run of
+multi-factor denials fires this and R-D-L5-004 both, which is correct: one reads the password and the
+other the factor.
 
 ### Layer 6
 
@@ -1713,7 +1758,8 @@ the notable rather than gating it**: the trigger is the text above, five times t
 and the target's classification sets the severity -- 75 restricted, 60 confidential, 40 internal, 20 public -- with
 an object the inventory has never heard of firing at 40, flagged, rather than dropped. **A week is Monday to Monday
 UTC, and "increasing across consecutive weekly windows" is four weeks**, three rises in a row, measured by the same
-trajectory stage as R-P-L5-006 and, like it, a watchlist rather than a page. And **the role is the principal's
+trajectory stage as R-P-L5-006 and, like it, a watchlist rather than a page, written to the same
+`principal_watchlist` lookup that R-B-L7-002 reads. And **the role is the principal's
 group memberships as the store recorded them at each operation's time.** That has a consequence the corpus makes
 visible rather than hides: a role change recorded after the rise is not known during it, and the rule watchlists a
 principal whose role did change, because on every week of the rise nothing said it had. Asked with everything
@@ -3115,7 +3161,7 @@ The linter had three blind spots of its own, now closed. It read `field=value` b
 could name anything; and it treated a search as one bag of fields, when `stats` replaces the rows with its own
 output and a field it neither aggregates nor groups by is null for the rest of the pipeline. A walk of each
 pipeline now tracks which fields survive every command, subsearches included, and flags a read of one a `stats`
-dropped. None of the 41 searches does that. The aggregate check found one real gap: Chain assembly collects
+dropped. None of the 47 searches does that. The aggregate check found one real gap: Chain assembly collects
 `values(join_method) AS methods`, the name
 {py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage` gives a parent-child edge's method, and
 no reference pipeline stamps parent-child edges, so the column was always empty. The method every scored event does
@@ -3305,7 +3351,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   window of a given width, the composed pipelines re-run over the same corpora, and a report of which columns
   moved and at what width each shipped rule changed what it accuses. It runs anywhere in about forty seconds,
   needs no card, and answers the open question this document had left open since it was written.
-- R-D-L5-003 and R-D-L5-004 as saved searches, two of the thirty-two detections that now ship. Their
+- R-D-L5-003 and R-D-L5-004 as saved searches, two of the thirty-seven detections that now ship. Their
   predicates are asserted in Python over the corpus and their row counts written into the validation
   package, so an expectation cannot go stale without a test failing. Both fire on the planted cases and
   neither fires on the negative controls beside them. R-D-L5-003 ships with an empty egress exclusion
@@ -3321,6 +3367,13 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.telemetry.tc5_risk_stage.TC5RiskStage`), which is the same primitive
   R-D-L5-004 and the plain failure-then-success feature both read, counted over different subsets of
   the stream.
+- Searches over the per-principal baselines those stages compute: R-D-L5-007 reads the cadence histogram,
+  R-D-L5-008 the cumulative location and device sets, and R-D-L5-009 the failure run, each with its planted
+  case firing and its control quiet. R-B-L5-001 and R-B-L5-002 ship gated on `model_fallback_used=false`
+  and return nothing until a trained model is pinned, with what each would return without the gate
+  recorded beside it. R-P-L5-006 gained an acceleration ceiling, and it and R-P-L7-006 write the `principal_watchlist`
+  KV Store lookup that R-B-L7-002 reads to report a watched principal's exports more loudly. Every column
+  these searches read is in the scored `morpheus:score:l5` contract.
 - The trajectory R-P-L5-006 reads, built against scores supplied directly and now wired into the composed
   layer 5 pipeline over daily windows sealed behind the hourly ones
   ({py:mod}`~morpheus.utils.drift_trajectory` and
@@ -3532,8 +3585,8 @@ What Morpheus provides versus what has to be built, stated plainly.
   It has since been run, and the verdict it rendered is the one recorded at the top of this guide.
   [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
   the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
-  and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Six of the
-  forty-one searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
+  and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Nine of the
+  forty-seven searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
   empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
   is working from a rule that is broken.
 - One rule run end to end offline, from a file to bytes a SIEM parses
@@ -3598,11 +3651,10 @@ verified; each row names the GitHub issue that tracks it, and the retrospective'
 | Upstream reuse decision | Small | A recorded reuse-or-reject decision, with a measured reason, for `morpheus_dfp`'s rolling window, training and inference stages, the identity-provider and CloudTrail source stages, `TimeSeriesStage` and `MLFlowDriftStage`, all named by this document and used by no fork code. Precedes the model, normalization and health rows. Tracked in #67 |
 | Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
 | **The per-entity learned model in the pipeline (principals, then hosts)** | Large | Still the largest gap and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory, `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, and `examples/layer5_model/run_model.py` has trained and run it once on one card, scoring the week it trained on. What fills the slot in every composed pipeline and every shipped artifact is `ReferenceScorer`, frozen population arithmetic the class itself calls not a model. Three things remain: the run's artifact and weight digests committed beside the README that quotes them; a CPU inference path (`state_dict` load or an exported forward pass) so the composed pipeline runs with a pinned real model in CI; a corpus with a train window and a disjoint score window, so R-B-L5-001, R-B-L5-002 and R-P-L5-006 are evaluated against a learned baseline for the first time. Then `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame gives hosts the score and drift principals have. Tracked in #59, after #67 |
-| Searches over the per-principal baselines the TC-5 stages compute | Medium | `TC5CadenceStage`, `TC5NoveltyStage`, `TC5RiskStage` and `TC5DriftStage` emit `hour_unseen`, `hour_surprise_bits`, the `_first_seen` and `increment` columns, `auth_failed_then_succeeded`, `drift_velocity` and `drift_acceleration`; the corpus plants and asserts the off-hours login and the new country; no saved search reads any of them and none is in the `morpheus:score:l5` contract. Three deterministic layer 5 rules, R-B-L5-001/002 gated on `model_fallback_used=false`, an acceleration condition on R-P-L5-006, and a `principal_watchlist` lookup that R-B-L7-002 reads so the watchlist half of R-P-L5-006 does something. Tracked in #55 |
 | Layer 5 context, account type and session duration | Medium | `TC0EnrichStage` runs on SaaS principals and EDR hosts and not on sign-ins, so no `ctx_` column reaches `morpheus:score:l5`; nothing distinguishes a service principal from a human; R-B-L5-005 needs a per-principal duration percentile that `TransferEnvelopeTracker` already implements and nothing keys on a principal's sessions; `TC5SessionStage` writes no normalized lifecycle column so R-C-004 breaks on an IdP that says `logon`/`logoff`, and the single-record session shape produces no duration. Tracked in #56 |
-| Risk write path and suppression for the shipped detections | Small | Every one of the 32 detection stanzas ends in `/ table` with only `action.correlationsearch.enabled`; none collects, so `risk_score` and `rule_id` never land in an index and "Chain assembly - cross-layer risk" and "Behavior summary" sum null by construction. A `behavior_risk` index, a `collect` per detection, `alert.suppress` keyed on each rule's documented deduplication key (control 9's suppression half; without it R-C-005 would emit the same chain 96 times a day), the chain search reading the risk index, and one `resolution_methods` field so the chain's `methods` names every hop. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
+| Risk write path and suppression for the shipped detections | Small | Every one of the 37 detection stanzas ends in `/ table` with only `action.correlationsearch.enabled`; none collects, so `risk_score` and `rule_id` never land in an index and "Chain assembly - cross-layer risk" and "Behavior summary" sum null by construction. A `behavior_risk` index, a `collect` per detection, `alert.suppress` keyed on each rule's documented deduplication key (control 9's suppression half; without it R-C-005 would emit the same chain 96 times a day), the chain search reading the risk index, and one `resolution_methods` field so the chain's `methods` names every hop. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
 | Per-sourcetype read contracts and fork CI | Medium | No workflow has executed the suite on this fork; `required_columns` are narrower than the fields the searches read (l3 and l6 omit ten columns, none requires `lineage_id` or `osi_layer`); the estate golden is not linted; layer 5 thresholds are duplicated as test constants; the one health search reads a column its sourcetype never carries; R-C-001's "previous hour" rests on an unstated hourly seal. A CPU workflow over the two tiers and a test that every field a search reads from its sourcetype is in that sourcetype's contract. Tracked in #53 |
-| Live search-head run, GPU conformance over twelve pipelines, clock skew over every rule | Medium | Seven of forty-one searches have run on a search head and none of the thirty-two detections as they now stand; GPU conformance covers four of twelve composed pipelines and the 2026-09-20 verdict predates most of the tree; clock skew is measured for seven of thirty-two rules; the GPU and model verdict artifacts quoted in the README are ignored by git. One recorded pass of each, with the artifacts committed under dated paths and tied to the quoted numbers by test. Tracked in #58 |
+| Live search-head run, GPU conformance over twelve pipelines, clock skew over every rule | Medium | Seven of forty-seven searches have run on a search head and none of the thirty-seven detections as they now stand; GPU conformance covers four of twelve composed pipelines and the 2026-09-20 verdict predates most of the tree; clock skew is measured for seven of thirty-seven rules; the GPU and model verdict artifacts quoted in the README are ignored by git. One recorded pass of each, with the artifacts committed under dated paths and tied to the quoted numbers by test. Tracked in #58 |
 | Host baselines at layers 3, 4 and 6 | Medium | R-B-L3-001 reads a literal 50 where the design specifies the source's own fourteen-day 99.5th percentile; the `bucket_peak` pattern `TC2BaselineStage` uses for ports was never applied to hosts, and fan-in per destination has no history. Fan-in, distinct ports, byte asymmetry, first-contact ASN, JA4 change and the endpoint host-seen flags are emitted and read by no search; asset criticality, owner and classification are attached to host rows and read by nothing; `device_role` and `os_family` are absent from the asset record; `community_id` is absent from layer 3; `hostname` is case-folded in the chain SPL and not in the stages; R-B-L6-001 dropped its managed-endpoint gate. Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | A host is `src_ip` at layers 3, 6 and 7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint, and nothing bridges them: no time-bounded `hostname`-to-address binding exists, the network, transport, presentation and application corpora run no `BindingResolverStage`, and asset context cannot attach to a network-layer event. The SIEM `binding_l2_l3` refresh selects `binding_table=dhcp_lease` rows nothing produces, `morpheus:edge` carries no `lineage_id`, `osi_layer`, parent or child `uid` or `join_method`, the principal-to-desk rung the estate corpus proves is a Python dict, and only one resolver passes `uid_column`. A lease stage emitting bucketed `dhcp_lease` rows, a `host_inventory` binding and a `host_key` on every layer 3-7 event, an `EdgeEmitStage` behind the resolvers, MAC and 802.1X lookups in the SIEM, and `community_id`/`session_key` joins above layer 3. The DHCP collector itself is not Morpheus. Tracked in #63 |
 | Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | The optical tap step (`optical_rx_dbm_deviation`, the TC-1 section's stated security signal), flap instability, the device reboot flags, the four error and discard deltas and `lldp_neighbor_chassis_id_changed` are computed, asserted in Python and read by no search; no stage divides a delta by its interval; `lldp_neighbor_port_id` is required and unread. No octet counter is designed and `link_speed_bps` is required and unread, so the interface as a thing that carries traffic has no behaviour; `ouis_per_vlan` has no consumer, history or corpus case; `TC2AuthStage` emits a raw elapsed time with no distribution; `BindingCloser.close()` and `reconcile()` are called by no stage so `bind_end_observed` is false on every record. Rules, a rate feature, a link key, a per-VLAN baseline, a per-port auth quantile, and a stop column and snapshot mode on the binding stage. Tracked in #61 |
@@ -3624,7 +3676,7 @@ raises and should not be assumed away. Two of them have since been answered; the
 the question that produced them, rather than moving somewhere tidier, because what a question turned out
 to be is worth more to the next reader than a clean list of open ones.
 
-**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Measured, for seven of the thirty-two shipped rules over three of the twelve pipelines. Every join here
+**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Measured, for seven of the thirty-seven shipped rules over three of the twelve pipelines. Every join here
 is a join on time across sources that do not share a clock, and the
 [collection section](../../../../README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
 qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0`, as it was first

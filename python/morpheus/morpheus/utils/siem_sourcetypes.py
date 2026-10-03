@@ -354,9 +354,11 @@ PRODUCED: dict = {
             "TC5TravelStage, and sessions through TC5SessionStage, the `tc5_auth` and `tc5_session` classes of "
             "`tests/morpheus/determinism/campaign_pipeline.py`.",
             # Two sources with different shapes share this sourcetype. An identity provider's sign-ins carry
-            # locations and factors and are scored: R-D-L5-003 and R-D-L5-004 filter on the first six of that set,
-            # and R-P-L5-006 on the rest, which TC5DriftStage stamps over the daily windows a second
-            # WindowSealStage seals behind the hourly one. A host login -- a Windows logon, an SSH session -- has
+            # locations and factors and are scored: R-D-L5-003 and R-D-L5-004 read the travel and factor columns,
+            # R-D-L5-007, R-D-L5-008 and R-D-L5-009 the principal's own cadence, novelty and failure-run columns,
+            # R-B-L5-001 and R-B-L5-002 the scores and the model columns that gate them, and R-P-L5-006 the
+            # trajectory TC5DriftStage stamps over the daily windows a second WindowSealStage seals behind the
+            # hourly one. A host login -- a Windows logon, an SSH session -- has
             # no location or factor but names the host logged into, which R-C-001 reads, and its source address
             # resolved through the DHCP leases and the layer 2 MAC bindings to a switch port and site, with the
             # journey between the sites of a principal's sign-ins, which R-C-005 reads. A session's start and stop
@@ -368,19 +370,32 @@ PRODUCED: dict = {
                               "window_id",
                               *PROVENANCE_COLUMNS),
             variant_columns=(
-                ("travel_status",
+                ("auth_result",
+                 "travel_status",
                  "travel_kmh",
                  "travel_elapsed_ns",
                  "mfa_denied_then_approved",
                  "mfa_attempts_in_window",
                  "mfa_denials_in_window",
+                 "hour_unseen",
+                 "hour_surprise_bits",
+                 "cadence_mature",
+                 "location_first_seen",
+                 "device_first_seen",
+                 "logcount",
+                 "locincrement",
+                 "auth_failed_then_succeeded",
+                 "consecutive_auth_failures",
                  "mean_abs_z",
                  "max_abs_z",
+                 "locincrement_z_loss",
                  *MODEL_COLUMNS,
                  "day_window_id",
                  "drift_mature",
                  "drift_rising_windows",
-                 "drift_rise_sigmas"),
+                 "drift_rise_sigmas",
+                 "drift_velocity",
+                 "drift_acceleration"),
                 ("source_ip",
                  "target_host",
                  "target_host_first_seen",

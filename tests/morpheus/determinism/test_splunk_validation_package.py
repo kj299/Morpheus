@@ -94,6 +94,12 @@ MFA_DENIAL_THRESHOLD = threshold("R-D-L5-004 - Multi-factor fatigue", r"denial_t
 DRIFT_RISING_THRESHOLD = threshold("R-P-L5-006 - Drift trajectory", r"rising_threshold\s*=\s*([\d.]+)")
 DRIFT_SIGMA_THRESHOLD = threshold("R-P-L5-006 - Drift trajectory", r"sigma_threshold\s*=\s*([\d.]+)")
 DRIFT_MEAN_CEILING = threshold("R-P-L5-006 - Drift trajectory", r"mean_ceiling\s*=\s*([\d.]+)")
+DRIFT_ACCELERATION_CEILING = threshold("R-P-L5-006 - Drift trajectory", r"acceleration_ceiling\s*=\s*([\d.]+)")
+FAILURE_RUN_THRESHOLD = threshold("R-D-L5-009 - Failed authentication run ending in success",
+                                  r"failure_threshold\s*=\s*([\d.]+)")
+COMPOSITE_MAX_THRESHOLD = threshold("R-B-L5-001 - Composite authentication anomaly", r"max_threshold\s*=\s*([\d.]+)")
+COMPOSITE_MEAN_THRESHOLD = threshold("R-B-L5-001 - Composite authentication anomaly", r"mean_threshold\s*=\s*([\d.]+)")
+LOCATION_LOSS_THRESHOLD = threshold("R-B-L5-002 - Location novelty anomaly", r"loss_threshold\s*=\s*([\d.]+)")
 FORECAST_DAYS_THRESHOLD = threshold("R-P-L1-004 - Optical degradation forecast",
                                     r"optical_rx_dbm_days_to_floor\s*<=\s*([\d.]+)")
 """The thresholds the saved searches state, read from the stanzas rather than repeated here."""
@@ -269,7 +275,8 @@ def test_the_drift_rule_returns_exactly_what_is_written(expected: dict, sessions
     fires = auth[(auth["drift_mature"] == True)  # noqa: E712  pylint: disable=singleton-comparison
                  & (auth["drift_rising_windows"].astype(float) >= DRIFT_RISING_THRESHOLD)
                  & (auth["drift_rise_sigmas"].astype(float) > DRIFT_SIGMA_THRESHOLD)
-                 & (auth["mean_abs_z"].astype(float) < DRIFT_MEAN_CEILING)]
+                 & (auth["mean_abs_z"].astype(float) < DRIFT_MEAN_CEILING)
+                 & (auth["drift_acceleration"].astype(float).abs() < DRIFT_ACCELERATION_CEILING)]
     deduplicated = fires.drop_duplicates(["user_principal", "day_window_id"])
 
     assert entry["contributing_rows"] == len(fires)
@@ -277,6 +284,108 @@ def test_the_drift_rule_returns_exactly_what_is_written(expected: dict, sessions
 
     written = {(row["user_principal"], row["day_window_id"]) for row in entry["key_values"]}
     assert written == set(zip(deduplicated["user_principal"], deduplicated["day_window_id"].astype(int)))
+
+
+def _true(frame: pd.DataFrame, column: str) -> pd.Series:
+    return frame[column].astype("boolean").fillna(False)
+
+
+def test_the_principal_baseline_rules_return_exactly_what_is_written(expected: dict, sessions: pd.DataFrame):
+    # R-D-L5-007, R-D-L5-008 and R-D-L5-009, each evaluated as its search states it. The three read columns the
+    # layer 5 stages had computed for weeks with no search reading any of them.
+    auth = sessions[sessions["telemetry_class"] == "tc5_auth"]
+    searches = expected["searches"]
+    success = auth["auth_result"] == "success"
+
+    off_hours = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature") & success]
+    novelty = auth[success & _true(auth, "cadence_mature")
+                   & (_true(auth, "location_first_seen") | _true(auth, "device_first_seen"))]
+    failures = auth[_true(auth, "auth_failed_then_succeeded")
+                    & (auth["consecutive_auth_failures"].astype(float) >= FAILURE_RUN_THRESHOLD)]
+
+    entry = searches["R-D-L5-007 - Off-hours authentication"]
+    assert entry["expected_rows"] == len(off_hours)
+    assert {(row["user_principal"], row["local_hour"])
+            for row in entry["key_values"]} == set(zip(off_hours["user_principal"],
+                                                       off_hours["local_hour"].astype(int)))
+
+    entry = searches["R-D-L5-008 - New authentication location or device"]
+    assert entry["expected_rows"] == len(novelty)
+    assert {(row["user_principal"], row["user_location"], row["cadence_samples"])
+            for row in entry["key_values"]
+            } == set(zip(novelty["user_principal"], novelty["user_location"], novelty["cadence_samples"].astype(int)))
+
+    entry = searches["R-D-L5-009 - Failed authentication run ending in success"]
+    assert entry["expected_rows"] == len(failures)
+    assert {(row["user_principal"], row["consecutive_auth_failures"])
+            for row in entry["key_values"]
+            } == set(zip(failures["user_principal"], failures["consecutive_auth_failures"].astype(int)))
+
+
+def test_the_model_rules_are_empty_for_the_reason_they_state(expected: dict, sessions: pd.DataFrame):
+    # R-B-L5-001 and R-B-L5-002 read only rows a principal's own model scored. Their expectations record what the
+    # search returns and, separately, what it would return without the gate, so a reference scorer that one day
+    # crosses a threshold shows up as a changed count rather than as a gate that was quietly doing the work.
+    auth = sessions[sessions["telemetry_class"] == "tc5_auth"]
+    scored = auth[auth["mean_abs_z"].notna()]
+    owned = scored[scored["model_fallback_used"].astype("boolean") == False]  # noqa: E712  pylint: disable=singleton-comparison
+
+    composite = scored[(scored["max_abs_z"].astype(float) >= COMPOSITE_MAX_THRESHOLD)
+                       & (scored["mean_abs_z"].astype(float) >= COMPOSITE_MEAN_THRESHOLD)]
+    location = scored[scored["locincrement_z_loss"].astype(float) >= LOCATION_LOSS_THRESHOLD]
+
+    for (name, ungated) in (("R-B-L5-001 - Composite authentication anomaly", composite),
+                            ("R-B-L5-002 - Location novelty anomaly", location)):
+        entry = expected["searches"][name]
+
+        assert entry["expected_rows"] == len(ungated.index.intersection(owned.index)) == 0, name
+        assert entry["candidate_rows_without_the_gate"] == len(ungated), name
+        assert "model_fallback_used=false" in _stanza_search(name), name
+
+
+def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: dict):
+    # The watchlist is a KV Store lookup, so what this package can check is the contract around it: both
+    # predictive searches write the lookup the app defines, keyed so a re-run overwrites, and the bulk-access
+    # search reads that lookup by the field the writers key it on. The entries R-P-L5-006 writes are recomputed;
+    # VALIDATION.md states the count a search head should hold, and it is checked against that here.
+    import configparser  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+
+    transforms = configparser.ConfigParser(interpolation=None, strict=False)
+    transforms.read(os.path.join(os.path.dirname(SAVEDSEARCHES), "transforms.conf"))
+    kvstore = configparser.ConfigParser(interpolation=None, strict=False)
+    kvstore.read(os.path.join(os.path.dirname(SAVEDSEARCHES), "collections.conf"))
+
+    fields = [name.strip() for name in transforms["principal_watchlist"]["fields_list"].split(",")]
+    collection = transforms["principal_watchlist"]["collection"]
+
+    assert fields[0] == "_key"
+    assert {f"field.{name}" for name in fields[1:]} <= set(kvstore[collection])
+
+    for name in ("R-P-L5-006 - Drift trajectory", "R-P-L7-006 - Access breadth trajectory"):
+        search = _stanza_search(name)
+
+        assert "outputlookup principal_watchlist append=true key_field=_key" in search, name
+
+        for field in fields[1:]:
+            assert re.search(rf"\b{field}\b", search), f"{name} writes no {field}"
+
+    assert "lookup principal_watchlist user_principal OUTPUT" in _stanza_search("R-B-L7-002 - Bulk data access")
+
+    drift = expected["searches"]["R-P-L5-006 - Drift trajectory"]
+    breadth = expected["searches"]["R-P-L7-006 - Access breadth trajectory"]
+
+    with open(VALIDATION, encoding="utf-8") as handle:
+        document = handle.read()
+
+    assert f"`R-P-L5-006` with `drift-trajectory` and {drift['expected_rows']} entries" in document
+    assert f"`R-P-L7-006` with `access-breadth` and {breadth['expected_rows']}" in document
+
+    # None of the principals the bulk rule reports is watched, which is why its severities stand as written.
+    watched = {row["user_principal"] for row in drift["key_values"] + breadth["key_values"]}
+    bulk = {row["user_principal"] for row in expected["searches"]["R-B-L7-002 - Bulk data access"]["key_values"]}
+
+    assert watched and not watched & bulk
 
 
 SCAN_SYN_RATIO = 0.9
@@ -820,6 +929,12 @@ NUMBER_WORDS = {
     "thirty-nine": 39,
     "forty": 40,
     "forty-one": 41,
+    "forty-two": 42,
+    "forty-three": 43,
+    "forty-four": 44,
+    "forty-five": 45,
+    "forty-six": 46,
+    "forty-seven": 47,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -848,7 +963,11 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # Six of thirty-eight after R-C-005, which arrived with a chain to find, six of thirty-nine after
     # R-D-L1-001, whose optic swap the corpus already held, six of forty after R-P-L1-004, which arrived with a
     # failing optic planted for it, and six of forty-one after R-B-L2-002, whose hub the corpus already held.
-    assert len(empty) == 6
+    #
+    # Nine of forty-seven after the layer 5 baseline searches, and every one of the three new empties is correct
+    # for a reason it states: R-B-L5-001 and R-B-L5-002 read only rows a principal's own model scored, and none
+    # here was; the watchlist expiry drops entries for events that are years old.
+    assert len(empty) == 9
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name

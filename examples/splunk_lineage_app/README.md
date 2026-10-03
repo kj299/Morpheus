@@ -32,9 +32,9 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | --- | --- | --- |
 | `default/indexes.conf` | Indexers | `behavior_events`, `behavior_lineage`, `behavior_bindings`, `behavior_context`, `behavior_summary`, with deliberately asymmetric retention, and a statement of what each one holds about a person beside the period it holds it for |
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored on a field the record carries -- `event_time` for scores and edges, an interval bound for bindings, `valid_from` for context |
-| `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, and the bucketed L1 history beside them, with accelerated fields |
-| `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1` and `binding_l1_history` lookups |
-| `default/savedsearches.conf` | Search heads | Forty-one searches: lookup refresh and expiry jobs, the 5-minute summary rollup, chain assembly, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the two layer 1 detections R-D-L1-001 and the predictive R-P-L1-004, the five layer 2 detections R-B-L2-002 and R-D-L2-001, 003, 004 and 005, the five layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004 and the predictive R-P-L3-005, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the two layer 5 detections R-D-L5-003 and R-D-L5-004, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric |
+| `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, the bucketed L1 history beside them, and the principal watchlist the predictive rules write, with accelerated fields |
+| `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1`, `binding_l1_history` and `principal_watchlist` lookups |
+| `default/savedsearches.conf` | Search heads | Forty-seven searches: lookup refresh and expiry jobs, including the principal watchlist's, the 5-minute summary rollup, chain assembly, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the two layer 1 detections R-D-L1-001 and the predictive R-P-L1-004, the five layer 2 detections R-B-L2-002 and R-D-L2-001, 003, 004 and 005, the five layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004 and the predictive R-P-L3-005, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the five deterministic layer 5 detections R-D-L5-003, R-D-L5-004, R-D-L5-007, R-D-L5-008 and R-D-L5-009, the two layer 5 model rules R-B-L5-001 and R-B-L5-002, gated on a principal's own model and empty until one is pinned, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric |
 | `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
 | `lookups/scanner_allowlist.csv` | Search heads | The estate's own scanners, which R-B-L3-001 excludes: `src_ip,allowed,owner,note`. Ships header-only; until it is populated the rule fires on every scanner, authorized ones included |
 
@@ -164,7 +164,7 @@ Three levels, strongest last:
 2. **Live load.** The app was installed into a fresh Splunk Enterprise 10.2 instance: `btool check`
    reports no errors, all five indexes are created, all seven scheduled searches that existed at the
    time register, and every one of them executes without a parse error against empty indexes. The app
-   ships forty-one searches now; the thirty-four added since have not been through this step.
+   ships forty-seven searches now; the forty added since have not been through this step.
 3. **Functional.** With synthetic JSON telemetry seeded into the indexes and bindings written to the
    KV Store: timestamps anchor to `event_time` as the props intend, the identifier ladder resolves an
    IP through both lookups to a physical port and site, the chain assembly search emits the seeded
@@ -179,7 +179,7 @@ detections `R-D-L2-001`, `R-D-L2-003`, `R-D-L2-004`, `R-D-L2-005` and, later, `R
 `morpheus:score:l5` sourcetype with the two layer 5 detections `R-D-L5-003` and `R-D-L5-004` and the
 predictive watchlist `R-P-L5-006`, then the `morpheus:score:l3` sourcetype with five layer 3 detections,
 then `morpheus:score:l4` with three more, `morpheus:score:l6` with five, `morpheus:score:l7` with five, the chained `R-C-001`, `R-C-004`
-and `R-C-005`, with `R-C-002` as rewritten, and the layer 1 detections `R-D-L1-001` and `R-P-L1-004`. That is all thirty-two detection searches this app ships, so the live
+and `R-C-005`, with `R-C-002` as rewritten, the layer 1 detections `R-D-L1-001` and `R-P-L1-004`, and the layer 5 baseline searches `R-D-L5-007`, `R-D-L5-008` and `R-D-L5-009` with the gated `R-B-L5-001` and `R-B-L5-002`, together with the `principal_watchlist` lookup and its expiry job. That is all thirty-seven detection searches this app ships, so the live
 pass above covers the app's oldest part and none of its detections as they now stand. Their SPL follows
 the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
 Python over the determinism harnesses' planted corpora (`tests/morpheus/determinism/test_first_detections.py` for

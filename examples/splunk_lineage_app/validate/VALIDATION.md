@@ -73,6 +73,11 @@ should return nothing:
 | R-B-L7-004, process ancestry novelty | **10** | Ten notables at three severity levels, because the integrity level weights the notable rather than gating it: Word starting PowerShell on a finance workstation at 55, although the build servers do it daily; a remote-access tool last run thirty-eight days earlier at 70; `mshta.exe` on a kiosk with no peer group at 40, flagged as judged on its own history; and `git` starting `curl` with no integrity level at the default 40. The compile a build server's peer runs daily, the editor under another user's profile, the kiosk's Notepad and the four-day-old lab machine each fail exactly one condition. The other six are the campaign corpus's servers, each starting a process at system integrity that no server in its group had run: R-B-L7-004 cannot tell the one that followed a fan-out and a first login from the five that did not, which is what R-C-001 is for. |
 | R-D-L5-003, impossible travel | **2** | One principal in New York half an hour after her own London office login, and back in London ninety minutes later. Two rows is what one interloper produces. The eight-hour flight beside it, and the VPN user changing country twice a day, do not appear. |
 | R-D-L5-004, multi-factor fatigue | **1** | Five denials in eight minutes and then an approval. The fumbled password beside it -- two failures and a success with the factor never challenged -- does not appear. |
+| R-D-L5-007, off-hours authentication | **2** | The planted 03:00 sign-in by an office worker, and a traveller's 08:00 sign-in before his flight, an hour his office week never used. The service account signing in at 03:00 every night does not appear: the hour is ordinary in its own history. |
+| R-D-L5-008, new authentication location or device | **2** | Two first sign-ins from New York by principals with mature histories: the impossible journey's far end and the traveller's arrival. The VPN user's first concentrator sign-in comes one sign-in into his history, before it is mature. |
+| R-D-L5-009, failed authentication run ending in success | **1** | Five refused attempts and then the approval, the same burst R-D-L5-004 reports from the factor's side. The fumbled password's two failures are below the threshold of three. |
+| R-B-L5-001, composite authentication anomaly | **0** | Correct. Reads only rows a principal's own model scored, and every row here was scored by the reference arithmetic under a fallback. Empty without the gate too: the reference scores never reach a mean of 2.0. |
+| R-B-L5-002, location novelty anomaly | **0** | Correct, for the same reason. Empty without the gate too: the reference losses peak at 1.4 against 4.0. |
 | R-C-001, lateral movement chain | **1** | One chain, and the first chained rule here to return a row, because it reads scored events rather than notables: a fan-out rising to twenty-five new addresses -- half R-B-L3-001's threshold -- then a first login from that address to a server, then a process on the server no peer had run, inside thirty minutes. Six actors each miss one step and are quiet: the process before the login, the last step at thirty-five minutes, the principal's own server, a login from another address, a flat fan-out, and a server running only its routine. |
 | R-C-004, staged exfiltration | **1** | One chain: a bulk export, twenty-five minutes later a fifty-times breach from the address the exporter's open session held, and twenty minutes after that a connection to a destination whose issuer nobody in the estate had seen. Four actors each do all three with one relation broken and are quiet: another principal's address, a breach after logging off, the corporate issuer, and the export last rather than first. |
 | R-C-002, TLS before beaconing | **1** | One chain, and the first this rule has ever returned: it now reads the scored events rather than the two detections' notables. A settled host presents a new stack to a destination and fourteen minutes later its beacon there matures. Four hosts do both halves with one condition broken and are quiet: a beacon already running an hour before, a beacon to another address, a beacon maturing after sixty-seven minutes, and a host with five handshakes behind it. |
@@ -83,11 +88,12 @@ should return nothing:
 | Binding lookup, L1 refresh | **7** | Seven port intervals across five ports: three stable, two on each of the two ports whose optics are swapped. The lookup keys on port and switch with no bucket, so a swapped port's two collapse to one row and the later optic wins -- it answers what is in a port now, not what was in it then. |
 | Binding lookup, L1 history refresh | **2** | Two rows, and two rows is the point. Only the ports whose optics were replaced have a superseded interval; the other three are described for all time by the current-state row and cost the history nothing. |
 | Binding lookup, L1 history expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
+| Principal watchlist, expiry | **0** | Correct. The entries the predictive searches write expire thirty days after events that are years old, so the job drops all of them. Run it last: run before R-B-L7-002, it empties the list that search reads. |
 | Binding lookup, L2/L3 expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
 | Binding health, unresolved rate | **5** | One row per sourcetype and telemetry class that resolves bindings (layer 1, the three layer 2 streams, the campaign's host logins). The ARP stream's rate is 0.148, under the 0.2 that marks a class degraded. The search used to read `morpheus:score:l3` alone, whose producer never writes `resolution_method`, and could only return nothing. An operational metric; the value matters, not whether it fired. |
-| R-P-L5-006, drift trajectory | **7** | Three principals, none of them behaviour, each explained in `expected_results.json`: two climb for six days because the reference scorer's baseline is frozen under cumulative features, one has a shallow run ended by the planted burst. Watchlist, never a page. |
+| R-P-L5-006, drift trajectory | **6** | Two principals, neither of them behaviour, explained in `expected_results.json`: both climb for six days because the reference scorer's baseline is frozen under cumulative features. The shallow run ended by the planted burst is a spike rather than a climb, and the acceleration ceiling keeps it out. Watchlist, never a page: every firing is written to `principal_watchlist`. |
 
-**Six of the forty-one should return nothing.** That is the point of writing them down. An empty result is
+**Nine of the forty-seven should return nothing.** That is the point of writing them down. An empty result is
 this app's characteristic failure, and without a list saying which emptiness is correct, a deployment cannot
 tell a rule that is working from a rule that is broken. The ratio has moved both ways, which is what makes it
 worth stating: it improved as layers 3, 4, 5, 6 and 7 gained producers, and went the other way when the L2/L3 refresh
@@ -95,6 +101,22 @@ was found to have been empty all along under a note that credited it with 80 row
 worth following, because it has now been empty for three different reasons in turn: a missing `osi_layer`, then
 lineage that never left one layer, and now a risk sum no pipeline event contributes to. Each fix made the next
 blocker visible, which is what an expectation file is for.
+
+## The watchlist the predictive searches write
+
+R-P-L5-006 and R-P-L7-006 write the `principal_watchlist` KV Store lookup as they run, and R-B-L7-002 reads
+it. Run the two predictive searches first, then
+
+```
+| inputlookup principal_watchlist | stats count BY rule_id reason
+```
+
+should return two rows: `R-P-L5-006` with `drift-trajectory` and 6 entries, one per principal-day it fired
+on, and `R-P-L7-006` with `access-breadth` and 2, one per principal. An empty lookup means the writers'
+`outputlookup` was refused -- most often a collection missing from `collections.conf` on the search head -- and
+R-B-L7-002 has been reading an empty list. None of the eight principals R-B-L7-002 reports is on the list, so
+the severity of its notables does not move here; `test_saas_harness.py` asserts the weighting by putting a bulk exporter on it.
+Run the expiry job last, because the events are historical and it drops every entry.
 
 ## Where the sample events come from
 

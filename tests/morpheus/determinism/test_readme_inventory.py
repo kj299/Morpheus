@@ -324,10 +324,18 @@ def test_the_readme_states_the_shipped_detection_count():
     with open(DOCUMENTS["README"], encoding="utf-8") as handle:
         readme = handle.read()
 
-    match = re.search(r"Ten of the app's ([\w-]+) detection searches", readme)
+    match = re.search(r"\| ([\w-]+) of the app's ([\w-]+) detection searches", readme)
 
     assert match is not None, "the README's first-detections row no longer states the app's detection count"
-    assert from_words(match.group(1)) == len(shipped), f"the README says {match.group(1)}; {len(shipped)} stanzas ship"
+    assert from_words(match.group(2)) == len(shipped), f"the README says {match.group(2)}; {len(shipped)} stanzas ship"
+
+    # The row names its own rules; their number is the first figure, and every one of them has to be a rule that
+    # ships.
+    row = readme[match.start():readme.index("\n", match.start())]
+    named = set(RULE_ID.findall(row))
+
+    assert from_words(match.group(1)) == len({rule for rule in named if re.match(r"R-[BDP]-L[125]-", rule)})
+    assert named <= set(shipped), sorted(named - set(shipped))
 
 
 def test_the_summary_names_every_telemetry_class_that_has_a_stage():

@@ -55,7 +55,8 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     monotonically across four consecutive windows, by more than one and a half of the principal's own standard
     deviations in total, without any single window crossing the alerting threshold. The guide is explicit that
     it should never page -- it puts a principal on a watchlist and raises the sensitivity of layer 7 rules for
-    them -- and equally explicit that the premise behind it is a hypothesis this work does not establish.
+    them, which in the Splunk app is the `principal_watchlist` lookup R-P-L5-006 writes and R-B-L7-002 reads --
+    and equally explicit that the premise behind it is a hypothesis this work does not establish.
     Nothing in this stage establishes it either. What it does is measure the trajectory exactly, so a deployment
     can test the premise against its own incident history before promising prediction to anybody.
 

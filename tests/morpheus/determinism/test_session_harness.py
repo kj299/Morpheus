@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import session_pipeline as sp  # noqa: E402
+import stamping  # noqa: E402
 
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_session_expected.csv")
 DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_session_pipeline.py")
@@ -618,30 +619,103 @@ def test_the_drift_rule_fires_on_exactly_the_reference_arithmetic_it_should(resu
     # trajectory rather than in the rule. The third is the fatigue burst: three rises of hundredths and then the
     # burst, a spike the rule's letter admits because the day's mean stays under 2.0. `drift_acceleration` tells
     # the two shapes apart, and that is the column a deployment tuning this rule should read first.
+    #
+    # The search now carries that reading as a condition: a steady rise only, |drift_acceleration| under a
+    # ceiling. The burst is a spike, which R-D-L5-004 and R-B-L5-001 exist to report, and it leaves; the two
+    # climbs stay, and stay documented as arithmetic. All three are asserted, so the ceiling cannot quietly grow
+    # to admit the spike or shrink to drop the climbs.
     auth = _rows(result, "tc5_auth")
     days = _days(auth)
+    limits = stamping.rule_thresholds(["R-P-L5-006"])["R-P-L5-006"]
 
-    fires = days[(days["drift_mature"] == True)  # noqa: E712  pylint: disable=singleton-comparison
-                 & (days["drift_rising_windows"].astype(float) >= 4)
-                 & (days["drift_rise_sigmas"].astype(float) > 1.5)
-                 & (days["mean_abs_z"].astype(float) < 2.0)]
+    trajectory = days[(days["drift_mature"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                      & (days["drift_rising_windows"].astype(float) >= limits["rising_threshold"])
+                      & (days["drift_rise_sigmas"].astype(float) > limits["sigma_threshold"])
+                      & (days["mean_abs_z"].astype(float) < limits["mean_ceiling"])]
+    fires = trajectory[trajectory["drift_acceleration"].astype(float).abs() < limits["acceleration_ceiling"]]
 
-    assert set(zip(fires["user_principal"], fires["day_window_id"].astype(int))) == {
-        (sp.CAROL, 9),
-        (sp.DAVE, 8),
-        (sp.DAVE, 9),
-        (sp.DAVE, 10),
-        (sp.BATCH, 8),
-        (sp.BATCH, 9),
-        (sp.BATCH, 10),
-    }
+    climbs = {(sp.DAVE, 8), (sp.DAVE, 9), (sp.DAVE, 10), (sp.BATCH, 8), (sp.BATCH, 9), (sp.BATCH, 10)}
+
+    assert set(zip(trajectory["user_principal"], trajectory["day_window_id"].astype(int))) == climbs | {(sp.CAROL, 9)}
+    assert set(zip(fires["user_principal"], fires["day_window_id"].astype(int))) == climbs
 
     # The two shapes. The climbers accelerate by hundredths; the burst accelerates by most of a unit.
-    burst = fires[fires["user_principal"] == sp.CAROL]
-    climbers = fires[fires["user_principal"] != sp.CAROL]
+    burst = trajectory[trajectory["user_principal"] == sp.CAROL]
 
     assert float(burst["drift_acceleration"].iloc[0]) > 0.5
-    assert climbers["drift_acceleration"].astype(float).abs().max() < 0.1
+    assert fires["drift_acceleration"].astype(float).abs().max() < limits["acceleration_ceiling"]
+
+
+def _true(frame: pd.DataFrame, column: str) -> pd.Series:
+    return frame[column].astype("boolean").fillna(False)
+
+
+@pytest.mark.cpu_mode
+def test_the_off_hours_rule_fires_on_the_planted_login_and_not_on_the_nightly_batch(result: pd.DataFrame):
+    # R-D-L5-007 as the search states it. The planted 03:00 sign-in fires and the service account's 03:00 does
+    # not, which is the cadence feature's own negative control turned into a rule. The traveller's sign-in before
+    # his flight fires too: 08:00 is an hour his office week never used, and a real change of habit.
+    auth = _rows(result, "tc5_auth")
+    fires = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature") & (auth["auth_result"] == "success")]
+
+    assert set(zip(fires["user_principal"], fires["local_hour"].astype(int))) == {
+        (sp.ALICE, sp.OFF_HOURS_HOUR),
+        (sp.BOB, sp.FLIGHT_DEPART_HOUR),
+    }
+    assert sp.BATCH not in set(fires["user_principal"])
+
+    # The fatigue burst is at an unseen hour too, and its rows are refusals: R-D-L5-004's and R-D-L5-009's.
+    unseen = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature")]
+    assert set(unseen["user_principal"]) == {sp.ALICE, sp.BOB, sp.CAROL}
+
+
+@pytest.mark.cpu_mode
+def test_the_novelty_rule_fires_on_the_new_country_and_not_on_the_controls(result: pd.DataFrame):
+    # R-D-L5-008. The new country fires for the principal whose journey was impossible and for the one who flew;
+    # the VPN user's first concentrator sign-in is new too and is stopped by the maturity gate alone, which is
+    # the control that makes the gate a condition rather than a decoration.
+    auth = _rows(result, "tc5_auth")
+    new = auth[(auth["auth_result"] == "success")
+               & (_true(auth, "location_first_seen") | _true(auth, "device_first_seen"))]
+    fires = new[_true(new, "cadence_mature")]
+
+    assert set(zip(fires["user_principal"], fires["user_location"])) == {
+        (sp.ALICE, "us:ny:new-york"),
+        (sp.BOB, "us:ny:new-york"),
+    }
+    assert set(new["user_principal"]) - set(fires["user_principal"]) == {sp.DAVE}
+
+
+@pytest.mark.cpu_mode
+def test_the_failure_run_rule_fires_on_the_burst_and_not_on_the_fumbled_password(result: pd.DataFrame):
+    # R-D-L5-009. Both are failure-then-success; only the threshold separates them.
+    auth = _rows(result, "tc5_auth")
+    threshold = stamping.rule_thresholds(["R-D-L5-009"])["R-D-L5-009"]["failure_threshold"]
+    runs = auth[_true(auth, "auth_failed_then_succeeded")]
+    fires = runs[runs["consecutive_auth_failures"].astype(float) >= threshold]
+
+    assert list(fires["user_principal"]) == [sp.CAROL]
+    assert set(runs["user_principal"]) == {sp.ALICE, sp.CAROL}
+    assert int(runs[runs["user_principal"] == sp.ALICE]["consecutive_auth_failures"].iloc[0]) < threshold
+
+
+@pytest.mark.cpu_mode
+def test_the_model_rules_read_nothing_a_fallback_scored(result: pd.DataFrame):
+    # R-B-L5-001 and R-B-L5-002 read only rows whose model was fitted to the principal. Every row here was scored
+    # by the reference arithmetic under the manifest's fallback, so both are empty -- and nothing was tuned to
+    # make them so: with the gate removed they are empty as well, which is asserted rather than assumed.
+    auth = _rows(result, "tc5_auth")
+    limits = stamping.rule_thresholds(["R-B-L5-001", "R-B-L5-002"])
+    scored = auth[auth["mean_abs_z"].notna()]
+
+    assert scored["model_fallback_used"].astype("boolean").all()
+
+    composite = scored[(scored["max_abs_z"].astype(float) >= limits["R-B-L5-001"]["max_threshold"])
+                       & (scored["mean_abs_z"].astype(float) >= limits["R-B-L5-001"]["mean_threshold"])]
+    location = scored[scored["locincrement_z_loss"].astype(float) >= limits["R-B-L5-002"]["loss_threshold"]]
+
+    assert composite.empty
+    assert location.empty
 
 
 @pytest.mark.cpu_mode
