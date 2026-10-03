@@ -64,6 +64,21 @@ both with one condition broken:
 - **other destination**: the beacon goes somewhere other than where the new fingerprint went;
 - **too slow**: the beacon matures sixty-seven minutes after the fingerprint;
 - **unsettled host**: five handshakes of history, so the new fingerprint is only new because the host is.
+
+**R-C-005 - Credential replay across the stack.** One principal authenticates successfully from two addresses that
+resolve, through the layer 2 bindings, to switch ports at two sites further apart than anyone could have travelled in
+the time between. The address goes to a MAC through the estate's DHCP leases, supplied the way the directory is in
+the estate harness; the MAC goes to a port through the bindings
+{py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage` closes from the two sites' MAC tables; and
+{py:class}`~morpheus.stages.telemetry.tc5_travel_stage.TC5TravelStage` measures the journey between the ports' sites,
+from the estate's own record of where its sites are. Nothing here is a geolocation guess: both ends are switch ports.
+The attacker signs in at headquarters and, twenty minutes later, in Edinburgh. Five others each fall one step short:
+
+- **same site**: two ports, both at headquarters;
+- **time to travel**: Edinburgh three hours later, which a train covers;
+- **unresolved address**: the second sign-in comes from an address no lease names, so no port can be claimed;
+- **expired lease**: the second address was leased to an Edinburgh desk, but the lease ended an hour earlier;
+- **failed sign-in**: the second attempt at Edinburgh is refused, and a failure proves nobody was there.
 """
 
 import typing
@@ -76,20 +91,24 @@ import transport_pipeline
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
+from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
 from morpheus.stages.telemetry.tc3_cardinality_stage import TC3CardinalityStage
 from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
 from morpheus.stages.telemetry.tc3_ttl_stage import TC3TtlStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
+from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
@@ -332,14 +351,14 @@ def _flow(rows: list, source: str, destination: str, when: int):
     rows.append(record)
 
 
-def _login(rows: list, principal: str, source: str, target: str, when: int):
+def _login(rows: list, principal: str, source: str, target: str, when: int, *, result: str = "success"):
     record = _envelope(rows, "dc-01", "tc5_auth.v1", f"{principal}>{target}", when)
     record.update({
         "user_principal": principal,
         "source_ip": source,
         "target_host": target,
         "app": "windows-logon",
-        "auth_result": "success",
+        "auth_result": result,
     })
     rows.append(record)
 
@@ -508,6 +527,175 @@ def _build_command_and_control(flows: list, handshakes: list):
             flows.append(record)
 
 
+# --- R-C-005: credential replay across the stack ------------------------------------------------------------------
+
+MAC_CLASS = "tc2_mac"
+"""The two sites' MAC table snapshots. Closed into bindings and resolved through, not emitted as events."""
+
+CORPUS_CLASSES = CLASSES + (MAC_CLASS, )
+"""Every collector in the corpus: the emitted classes, and the MAC tables R-C-005 resolves through."""
+
+REPLAY_KMH = 900
+"""R-C-005's speed, the guide's and R-D-L5-003's: above any commercial aircraft."""
+
+REPLAY_SEVERITY = 90
+REPLAY_HOUR = 14
+
+HQ = "hq"
+EDINBURGH = "edinburgh"
+
+SITE_LOCATIONS = {HQ: (51.5074, -0.1278), EDINBURGH: (55.9533, -3.1883)}
+"""The estate's own record of where its sites are, which a deployment supplies as it supplies the directory."""
+
+SITE_SWITCHES = {HQ: "hq-sw1", EDINBURGH: "edi-sw1"}
+
+QUIN = "quin@example.com"
+RHEA = "rhea@example.com"
+SAM = "sam@example.com"
+TIA = "tia@example.com"
+UMA = "uma@example.com"
+VIC = "vic@example.com"
+
+
+class Desk(typing.NamedTuple):
+    site: str
+    port: str
+    address: str
+
+    @property
+    def mac(self) -> str:
+        """The desk's workstation, numbered from its address so two desks never share one."""
+        octets = [int(part) for part in self.address.split(".")]
+
+        return "aa:30:" + ":".join(f"{octet:02x}" for octet in octets)
+
+
+class Replay(typing.NamedTuple):
+    principal: str
+    first: Desk
+    second: Desk
+    minutes_later: int
+    second_result: str = "success"
+    second_leased: bool = True
+    lease_ended_minutes_before: typing.Optional[int] = None
+
+
+REMOTE_ADDRESS = "198.51.100.77"
+
+REPLAYERS = {
+    QUIN:
+        Replay(QUIN, Desk(HQ, "Gi1/0/11", "10.30.1.11"), Desk(EDINBURGH, "Gi2/0/21", "10.30.2.21"), 20),
+    RHEA:
+        Replay(RHEA, Desk(HQ, "Gi1/0/12", "10.30.1.12"), Desk(HQ, "Gi1/0/13", "10.30.1.13"), 20),
+    SAM:
+        Replay(SAM, Desk(HQ, "Gi1/0/14", "10.30.1.14"), Desk(EDINBURGH, "Gi2/0/24", "10.30.2.24"), 180),
+    TIA:
+        Replay(TIA,
+               Desk(HQ, "Gi1/0/15", "10.30.1.15"),
+               Desk(EDINBURGH, "Gi2/0/25", REMOTE_ADDRESS),
+               20,
+               second_leased=False),
+    UMA:
+        Replay(UMA,
+               Desk(HQ, "Gi1/0/16", "10.30.1.16"),
+               Desk(EDINBURGH, "Gi2/0/26", "10.30.2.26"),
+               20,
+               lease_ended_minutes_before=60),
+    VIC:
+        Replay(VIC,
+               Desk(HQ, "Gi1/0/17", "10.30.1.17"),
+               Desk(EDINBURGH, "Gi2/0/27", "10.30.2.27"),
+               20,
+               second_result="failure"),
+}
+"""The attacker, then the five who each fall one step short of R-C-005."""
+
+
+def _replay_times(index: int, replay: Replay) -> tuple:
+    first = at(LAST_DAY, REPLAY_HOUR, index)
+
+    return (first, first + replay.minutes_later * 60 * NS_PER_SECOND)
+
+
+def _desks() -> list:
+    """Every desk the replay corpus has a workstation at, once, in a fixed order."""
+    desks = {}
+
+    for replay in REPLAYERS.values():
+        for desk in (replay.first, replay.second):
+            if (desk.address != REMOTE_ADDRESS):
+                desks[(desk.site, desk.port)] = desk
+
+    return [desks[key] for key in sorted(desks)]
+
+
+def _build_mac_tables(rows: list):
+    """Both sites' MAC tables every five minutes, from an hour before the sign-ins until after the last of them."""
+    start = at(LAST_DAY, REPLAY_HOUR - 1)
+    end = at(LAST_DAY, REPLAY_HOUR + 5)
+
+    for when in range(start, end + 1, 300 * NS_PER_SECOND):
+        for desk in _desks():
+            record = _envelope(rows, f"{desk.site}-mac", "tc2_mac.v1", desk.mac, when)
+            record.update({
+                "mac_address": desk.mac,
+                "site_id": desk.site,
+                "switch_id": SITE_SWITCHES[desk.site],
+                "port_id": desk.port,
+                "vlan_id": 30,
+            })
+            rows.append(record)
+
+
+def build_lease_table() -> BindingTable:
+    """
+    The estate's DHCP leases: which workstation each desk address was handed to, and for how long.
+
+    Supplied rather than derived, the way the estate harness supplies its directory: a lease is a DHCP server's
+    record, and no switch telemetry produces it. Every lease covers the afternoon except the one the expired-lease
+    control's second sign-in comes from, which ended an hour before it, and the remote address has none.
+    """
+    rows = []
+
+    for (index, replay) in enumerate(REPLAYERS.values()):
+        (_, second_time) = _replay_times(index, replay)
+
+        for (desk, ends) in ((replay.first, None), (replay.second, replay.lease_ended_minutes_before)):
+            if (desk.address == REMOTE_ADDRESS):
+                continue
+
+            rows.append({
+                "address": desk.address,
+                "mac_address": desk.mac,
+                "bind_start": at(LAST_DAY, 8),
+                "bind_end": at(LAST_DAY, 20) if ends is None else second_time - ends * 60 * NS_PER_SECOND,
+            })
+
+    return BindingTable.from_dataframe(pd.DataFrame(rows),
+                                       name="dhcp_lease",
+                                       key_column="address",
+                                       value_columns=["mac_address"],
+                                       start_column="bind_start",
+                                       end_column="bind_end")
+
+
+def build_mac_table(bindings: pd.DataFrame) -> BindingTable:
+    """Which port, at which site, a workstation was plugged into, as TC2BindingStage closed it."""
+    return BindingTable.from_dataframe(bindings,
+                                       name="mac_table",
+                                       key_column="mac_address",
+                                       value_columns=["port_key", "site_id"],
+                                       start_column="bind_start",
+                                       end_column="bind_end")
+
+
+def _build_replays(logins: list):
+    for (index, replay) in enumerate(REPLAYERS.values()):
+        (first, second) = _replay_times(index, replay)
+        _login(logins, replay.principal, replay.first.address, "intranet", first)
+        _login(logins, replay.principal, replay.second.address, "intranet", second, result=replay.second_result)
+
+
 def build_corpus() -> dict[str, pd.DataFrame]:
     """The campaign, split by collector."""
     flows: list = []
@@ -554,6 +742,9 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     exports: list = []
     _build_exfiltration(sessions, packets, handshakes, exports)
     _build_command_and_control(flows, handshakes)
+    _build_replays(logins)
+    mac_tables: list = []
+    _build_mac_tables(mac_tables)
 
     return {
         FLOW_CLASS: frame(flows),
@@ -563,6 +754,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
         TRANSFER_CLASS: frame(packets),
         HANDSHAKE_CLASS: frame(handshakes),
         SAAS_CLASS: frame(exports),
+        MAC_CLASS: frame(mac_tables),
     }
 
 
@@ -586,7 +778,31 @@ def build_pipeline_config(execution_mode=None) -> Config:
     return config
 
 
-def _stages(config: Config, telemetry_class: str) -> tuple:
+LEASE_METHOD_COLUMN = "login_lease_resolution"
+PORT_METHOD_COLUMN = "login_port_resolution"
+
+
+def _login_ladder(config: Config, mac_table: BindingTable) -> list:
+    """A sign-in's source address to a workstation through the leases, to a port and site through the MAC bindings,
+    and the journey between the sites of a principal's consecutive sign-ins."""
+    return [
+        BindingResolverStage(config,
+                             binding_table=build_lease_table(),
+                             key_column="source_ip",
+                             output_columns={"mac_address": "login_mac"},
+                             method_column=LEASE_METHOD_COLUMN),
+        BindingResolverStage(config,
+                             binding_table=mac_table,
+                             key_column="login_mac",
+                             output_columns={
+                                 "port_key": "login_port_key", "site_id": "login_site_id"
+                             },
+                             method_column=PORT_METHOD_COLUMN),
+        TC5TravelStage(config, column_prefix="site_travel", location_column="login_site_id", locations=SITE_LOCATIONS),
+    ]
+
+
+def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[BindingTable] = None) -> tuple:
     """Each layer's own stages, its OSI layer and the entity it is sealed on."""
     if (telemetry_class == FLOW_CLASS):
         return ([
@@ -601,7 +817,9 @@ def _stages(config: Config, telemetry_class: str) -> tuple:
         return ([TC5SessionStage(config)], 5, ["user_principal"])
 
     if (telemetry_class == AUTH_CLASS):
-        return ([TC5NoveltyStage(config, target_host_column="target_host")], 5, ["user_principal"])
+        ladder = [] if mac_table is None else _login_ladder(config, mac_table)
+
+        return ([TC5NoveltyStage(config, target_host_column="target_host")] + ladder, 5, ["user_principal"])
 
     return ([TC0EnrichStage(config, store=build_store(), entity_column="hostname"), TC7EndpointStage(config)],
             7, ["hostname"])
@@ -621,12 +839,29 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def close_mac_bindings(config: Config, dataframes: list[pd.DataFrame], impose_order: bool = True) -> pd.DataFrame:
+    """The two sites' MAC tables, closed into bindings by the stage that closes every MAC binding in this fork."""
+    pipe = LinearPipeline(config)
+    pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
+    pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
+
+    if (impose_order):
+        pipe.add_stage(TotalOrderStage(config))
+
+    pipe.add_stage(TC2BindingStage(config))
+    sink = pipe.add_stage(InMemorySinkStage(config))
+    pipe.run()
+
+    return _collect(sink)
+
+
 def run_class(config: Config,
               telemetry_class: str,
               dataframes: list[pd.DataFrame],
-              impose_order: bool = True) -> pd.DataFrame:
+              impose_order: bool = True,
+              mac_table: typing.Optional[BindingTable] = None) -> pd.DataFrame:
     """Source, stamp, total order, the layer's stages, envelope, seal hourly, sink, for one collector."""
-    (stages, osi_layer, entity_columns) = _stages(config, telemetry_class)
+    (stages, osi_layer, entity_columns) = _stages(config, telemetry_class, mac_table)
 
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
@@ -687,13 +922,17 @@ def run_pipeline(config: Config,
     delegated = {TRANSFER_CLASS: transport_pipeline, HANDSHAKE_CLASS: presentation_pipeline, SAAS_CLASS: saas_pipeline}
     frames = []
 
+    # R-C-005's ladder resolves through bindings the layer 2 collector closes, so those are closed first, the way
+    # the estate harness closes its supplicant bindings before resolving through them.
+    mac_table = build_mac_table(close_mac_bindings(config, batches[MAC_CLASS], impose_order=impose_order))
+
     for name in CLASSES:
         if (name in delegated):
             frames.append(delegated[name].run_pipeline(config, {name: batches[name][0]},
                                                        batches={name: batches[name]},
                                                        impose_order=impose_order))
         else:
-            frames.append(run_class(config, name, batches[name], impose_order=impose_order))
+            frames.append(run_class(config, name, batches[name], impose_order=impose_order, mac_table=mac_table))
 
     return canonicalize(pd.concat(frames, ignore_index=True), key_columns=KEY_COLUMNS, ignore_columns=IGNORE_COLUMNS)
 
@@ -904,5 +1143,31 @@ def tls_before_beaconing(result: pd.DataFrame,
                 continue
 
             fired.setdefault((source, destination), (t1, int(t2)))
+
+    return fired
+
+
+# --- R-C-005, evaluated the way its search evaluates it ------------------------------------------------------------
+
+
+def credential_replays(result: pd.DataFrame, kmh_threshold: float = REPLAY_KMH) -> dict:
+    """Principals R-C-005 fires on, each with the port and site it was last seen at and the one it appeared at.
+
+    The search orders each principal's measurable sign-ins and carries the previous one forward, which is the anchor
+    the travel stage measured from: a sign-in the stage did not measure or anchor on is neither end of a journey.
+    """
+    logins = result[(result["telemetry_class"] == AUTH_CLASS)
+                    & result["site_travel_status"].isin(["measured", "first_for_principal"])]
+    fired: dict = {}
+
+    for (principal, rows) in logins.sort_values("event_time").groupby("user_principal"):
+        previous_port = None
+
+        for (index, (_, row)) in enumerate(rows.iterrows()):
+            if (index > 0 and row["site_travel_status"] == "measured"
+                    and float(row["site_travel_kmh"]) >= kmh_threshold):
+                fired.setdefault(principal, (previous_port, row["login_port_key"], float(row["site_travel_kmh"])))
+
+            previous_port = row["login_port_key"]
 
     return fired

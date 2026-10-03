@@ -104,9 +104,21 @@ PRODUCED: dict = {
             name="morpheus:score:l1",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-1 stages (normalize, optical, flap, change) behind WindowSealStage; the `tc1` class of "
-            "`tests/morpheus/determinism/telemetry_pipeline.py`.",
-            required_columns=("event_uid", "entity_key", "site_id", "device_id", "port_id"),
+            producer="The TC-1 stages (normalize, optical, forecast, flap, change) behind WindowSealStage; the `tc1` "
+            "class of `tests/morpheus/determinism/telemetry_pipeline.py`.",
+            # R-D-L1-001 reads the serial change, the flap count and the collector's own `oper_status`, carried
+            # through rather than derived: a serial that changed on a poll the flap count says the link never moved
+            # for. R-P-L1-004 reads the forecast status and the days the fitted trend gives the optic.
+            required_columns=("event_uid",
+                              "entity_key",
+                              "site_id",
+                              "device_id",
+                              "port_id",
+                              "transceiver_serial_changed",
+                              "link_flaps",
+                              "oper_status",
+                              "optical_rx_dbm_forecast_status",
+                              "optical_rx_dbm_days_to_floor"),
         ),
     "morpheus:score:l3":
         Sourcetype(
@@ -256,12 +268,15 @@ PRODUCED: dict = {
             name="morpheus:score:l2",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-2 stages (cardinality, ARP, auth) behind WindowSealStage; the `tc2_mac`, `tc2_arp` and "
-            "`tc2_auth` classes of `tests/morpheus/determinism/telemetry_pipeline.py`.",
-            # R-D-L2-001, R-D-L2-003 and R-D-L2-005 read these off this sourcetype.
+            producer="The TC-2 stages (cardinality, baseline, ARP, auth) behind WindowSealStage; the `tc2_mac`, "
+            "`tc2_arp` and `tc2_auth` classes of `tests/morpheus/determinism/telemetry_pipeline.py`.",
+            # R-D-L2-001, R-D-L2-003 and R-D-L2-005 read these off this sourcetype, and R-B-L2-002 reads the step
+            # and the baseline it is a step above.
             required_columns=("event_uid",
                               "port_key",
                               "macs_per_port_first_in_window",
+                              "macs_per_port_step",
+                              "macs_per_port_baseline_max",
                               "macs_claiming_sender_ip",
                               "arp_sender_ip_excluded",
                               "auth_unpaired",
@@ -274,13 +289,16 @@ PRODUCED: dict = {
             time_columns=("event_time", ),
             producer="The TC-5 stages (session, novelty, cadence, travel, risk) behind WindowSealStage; the "
             "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`; and host "
-            "logins through TC5NoveltyStage with a target host and sessions through TC5SessionStage, the `tc5_auth` "
-            "and `tc5_session` classes of `tests/morpheus/determinism/campaign_pipeline.py`.",
+            "logins through TC5NoveltyStage with a target host, BindingResolverStage and a site-measuring "
+            "TC5TravelStage, and sessions through TC5SessionStage, the `tc5_auth` and `tc5_session` classes of "
+            "`tests/morpheus/determinism/campaign_pipeline.py`.",
             # Two sources with different shapes share this sourcetype. An identity provider's sign-ins carry
             # locations and factors and are scored: R-D-L5-003 and R-D-L5-004 filter on the first six of that set,
             # and R-P-L5-006 on the rest, which TC5DriftStage stamps over the daily windows a second
             # WindowSealStage seals behind the hourly one. A host login -- a Windows logon, an SSH session -- has
-            # no location or factor but names the host logged into, which R-C-001 reads. A session's start and stop
+            # no location or factor but names the host logged into, which R-C-001 reads, and its source address
+            # resolved through the DHCP leases and the layer 2 MAC bindings to a switch port and site, with the
+            # journey between the sites of a principal's sign-ins, which R-C-005 reads. A session's start and stop
             # records carry the address it came from, which R-C-004 binds a transfer to.
             required_columns=("event_uid", "user_principal"),
             variant_columns=(
@@ -296,7 +314,15 @@ PRODUCED: dict = {
                  "drift_mature",
                  "drift_rising_windows",
                  "drift_rise_sigmas"),
-                ("source_ip", "target_host", "target_host_first_seen", "auth_result"),
+                ("source_ip",
+                 "target_host",
+                 "target_host_first_seen",
+                 "auth_result",
+                 "login_port_key",
+                 "login_site_id",
+                 "site_travel_status",
+                 "site_travel_kmh",
+                 "site_travel_elapsed_ns"),
                 ("source_ip", "session_key", "session_action"),
             ),
         ),

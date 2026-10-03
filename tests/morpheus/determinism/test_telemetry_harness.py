@@ -34,6 +34,10 @@ from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
 from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.lineage import window_id_from_timestamp
+from morpheus.utils.optical_forecast import DEFAULT_MIN_SAMPLES
+from morpheus.utils.optical_forecast import STATUS_IMMATURE
+from morpheus.utils.optical_forecast import STATUS_NONLINEAR
+from morpheus.utils.optical_forecast import STATUS_PROJECTED
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -359,6 +363,27 @@ def test_the_hub_is_visible(result: pd.DataFrame):
 
 
 @pytest.mark.cpu_mode
+def test_the_hub_is_a_step_above_the_ports_own_history(result: pd.DataFrame):
+    # The hub as R-B-L2-002 reads it: against the one address the port carried in each of the six snapshots before,
+    # the snapshot that brings the hub is a step of four, and every snapshot after it has a baseline that absorbed
+    # the hub and reads as nothing new.
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"
+    on_port = _rows(result, "tc2_mac")
+    on_port = on_port[on_port["port_key"] == port]
+
+    before = on_port[on_port["event_time"] < tp.HUB_FROM_SECONDS * NS]
+    at_hub = on_port[on_port["event_time"] == tp.HUB_FROM_SECONDS * NS].sort_values("macs_per_port")
+    after = on_port[on_port["event_time"] > tp.HUB_FROM_SECONDS * NS]
+
+    assert (before["macs_per_port_step"].dropna() == 0).all()
+    assert set(at_hub["macs_per_port_baseline_buckets"]) == {tp.BASELINE_MIN_BUCKETS}
+    assert (at_hub["macs_per_port_baseline_mature"] == True).all()  # noqa: E712  pylint: disable=singleton-comparison
+    assert list(at_hub["macs_per_port_step"]) == [0, 1, 2, 3, 4]
+    assert (after["macs_per_port_step"] == 0).all()
+    assert set(after["macs_per_port_baseline_max"]) == {1 + len(tp.HUB_MACS)}
+
+
+@pytest.mark.cpu_mode
 def test_the_spoof_is_a_conflict(result: pd.DataFrame):
     bindings = _rows(result, "tc2_binding")
     conflicts = bindings[bindings["bind_end_reason"] == CONFLICT]
@@ -431,6 +456,90 @@ def test_the_optic_swap_closes_one_binding_and_opens_another(result: pd.DataFram
     # The minute between them is silence, and silence is not evidence the old optic was still there.
     assert swapped["bind_end"].iloc[0] == (tp.XCVR_SWAP_AT_MINUTE - 1) * 60 * NS + 1
     assert swapped["bind_start"].iloc[1] == tp.XCVR_SWAP_AT_MINUTE * 60 * NS
+
+
+@pytest.mark.cpu_mode
+def test_the_failing_optic_is_given_hours_and_its_replacement_starts_over(result: pd.DataFrame):
+    # The forecast, as R-P-L1-004 reads it. The optic on the maintenance port loses light a little faster every
+    # poll; a line through its readings reaches the floor within the day, and the stage says so from the first poll
+    # with enough history for a fit until the swap. The optic that replaces it has a history of its own.
+    layer_1 = _rows(result, "tc1")
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"
+    on_port = layer_1[layer_1["entity_key"] == port].sort_values("event_time")
+    swap = tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS
+
+    before = on_port[on_port["event_time"] < swap]
+    statuses = list(before["optical_rx_dbm_forecast_status"])
+
+    assert statuses[:DEFAULT_MIN_SAMPLES - 1] == [STATUS_IMMATURE] * (DEFAULT_MIN_SAMPLES - 1)
+    assert set(statuses[DEFAULT_MIN_SAMPLES - 1:]) == {STATUS_PROJECTED}
+
+    last = before.iloc[-1]
+    assert last["optical_rx_dbm_trend_db_per_day"] == pytest.approx(-tp.DEGRADATION_DB_PER_MINUTE * 24 * 60, rel=0.05)
+    assert last["optical_rx_dbm_trend_residual_db"] < 0.1
+    assert last["optical_rx_dbm_floor_dbm"] == tp.OPTIC_FLOOR_DBM
+    assert 0 < last["optical_rx_dbm_days_to_floor"] < 0.2
+    # The time to the floor shortens over the hour as the optic fails. Not poll by poll -- the fitted slope wobbles
+    # with the diagnostics' jitter, and so does a figure divided by it -- but the first projection gives the optic
+    # longer than the last, and every one of them gives it less than three hours.
+    days = list(before["optical_rx_dbm_days_to_floor"].dropna())
+    assert len(days) == tp.MAINTENANCE_SWAP_AT_MINUTE - DEFAULT_MIN_SAMPLES + 1
+    assert days[-1] < days[0]
+    assert max(days) < 0.125
+
+    # The slide is too shallow for the baseline stage to call a step, which is the point of having both: the
+    # degradation is the forecast's and the tap is the baseline's.
+    assert before["optical_rx_dbm_deviation"].min() > -1.0
+
+    after = on_port[on_port["event_time"] >= swap]
+    assert after.iloc[0]["optical_rx_dbm_trend_samples"] == 1
+    assert STATUS_PROJECTED not in set(after["optical_rx_dbm_forecast_status"])
+
+
+@pytest.mark.cpu_mode
+def test_the_tap_is_a_step_and_not_a_forecast(result: pd.DataFrame):
+    # The forecast's negative control, which needed no planting. A line fitted through forty steady readings and
+    # a three-decibel drop is steep, and read as a forecast would give the optic hours. The readings do not sit on
+    # that line, and the stage says so rather than projecting it.
+    layer_1 = _rows(result, "tc1")
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"
+    tapped = layer_1[layer_1["entity_key"] == port].sort_values("event_time")
+    after = tapped[tapped["event_time"] > tp.TAP_AT_MINUTE * 60 * NS]
+
+    assert STATUS_PROJECTED not in set(tapped["optical_rx_dbm_forecast_status"])
+    assert set(after["optical_rx_dbm_forecast_status"]) == {STATUS_NONLINEAR}
+    assert after["optical_rx_dbm_trend_residual_db"].min() > 0.5
+    assert after["optical_rx_dbm_days_to_floor"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_the_maintenance_swap_is_a_change_the_device_saw_the_link_drop_for(result: pd.DataFrame):
+    # The second replaced optic, as R-D-L1-001 reads it. The serial changes exactly as it does on the other swapped
+    # port, and the device's own `ifLastChange` says the link went down and came back between the two polls, so
+    # the flap count is two where the other swap's is zero. That difference is the whole rule.
+    layer_1 = _rows(result, "tc1")
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"
+    on_port = layer_1[layer_1["entity_key"] == port].sort_values("event_time")
+    at_swap = on_port[on_port["event_time"] == tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS].iloc[0]
+
+    assert at_swap["transceiver_serial_changed"] == True  # noqa: E712  pylint: disable=singleton-comparison
+    assert at_swap["transceiver_serial_first_seen"] == True  # noqa: E712  pylint: disable=singleton-comparison
+    assert at_swap["link_flaps"] == 2
+    assert at_swap["link_flap_unpolled"] == True  # noqa: E712  pylint: disable=singleton-comparison
+    assert (on_port["oper_status"] == "up").all()
+
+    # The serial changed once on this port, and that is the only transition its link ever made.
+    assert (on_port["transceiver_serial_changed"] == True).sum() == 1  # noqa: E712  pylint: disable=singleton-comparison
+    assert on_port["link_flaps"].fillna(0).sum() == 2
+
+    # The binding table records the swap as the other one is recorded: two intervals, the first displaced.
+    bindings = _rows(result, "tc1_binding")
+    swapped = bindings[bindings["entity_key"] == port].sort_values("bind_start")
+
+    assert list(swapped["transceiver_serial"]) == [
+        f"XCVR-{tp.SWITCH}-{tp.MAINTENANCE_PORT}", f"XCVR-{tp.SWITCH}-{tp.MAINTENANCE_PORT}-B"
+    ]
+    assert swapped["bind_end_reason"].iloc[0] == "displaced"
 
 
 @pytest.mark.cpu_mode
@@ -542,8 +651,30 @@ def test_nothing_else_fired(result: pd.DataFrame):
     assert lost_light["event_time"].min() == tp.TAP_AT_MINUTE * 60 * NS
     assert len(lost_light) == tp.CORPUS_SECONDS // 60 - tp.TAP_AT_MINUTE + 1
 
+    # One optic is given a forecast, the failing one, and only while it was in its port.
+    projected = layer_1[layer_1["optical_rx_dbm_forecast_status"] == STATUS_PROJECTED]
+    assert set(projected["entity_key"]) == {f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"}
+    assert projected["event_time"].max() < tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS
+
+    # Two serials change in the hour, one on each replaced optic's port, and the link transitions nobody polled
+    # are the maintenance swap's two and the planted flap's two. The reboot's transitions are unpolled too, and
+    # labelled as a device reset, which is what lets a planned reboot be excluded by rule; they are set aside here.
+    changed = layer_1[layer_1["transceiver_serial_changed"] == True]  # noqa: E712  pylint: disable=singleton-comparison
+    assert sorted(changed["port_id"]) == sorted(tp.SWAPS)
+    unpolled = layer_1[(layer_1["link_flap_unpolled"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                       & (layer_1["link_flap_device_reset"] == False)]  # noqa: E712  pylint: disable=singleton-comparison
+    assert sorted(unpolled["entity_key"]) == sorted(
+        [f"{tp.SITE}:{tp.SWITCH}:Gi1/0/1", f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"])
+
     bindings = _rows(result, "tc2_binding")
     assert (bindings["bind_end_reason"] == CONFLICT).sum() == 1
+
+    # Two ports ever carry more than their own history: the hub's four addresses as they arrive, and the spoofed
+    # address on its second port. Nothing else steps, including the ports the roaming device visits.
+    stepped = _rows(result, "tc2_mac")
+    stepped = stepped[stepped["macs_per_port_step"].fillna(0) > 0]
+    assert set(stepped["port_key"]) == {f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}", f"{tp.SITE}:{tp.SWITCH}:Gi1/0/2"}
+    assert len(stepped) == len(tp.HUB_MACS) + 1
 
     # The gateway is contested from the flood until the flood leaves the window, whoever is sending: the router's
     # own announcements in that span read two claimants too, which is the right input for R-D-L2-003. Nothing else

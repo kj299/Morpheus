@@ -25,7 +25,8 @@ whole burst landing on one tick.
 
 Into that corpus are planted the things the layer 1 and layer 2 features exist to see:
 
-- a **hub**: five MAC addresses behind one access port from the seventh snapshot onward;
+- a **hub**: five MAC addresses behind one access port from the seventh snapshot onward, four above the most the
+  port had carried in any of the six before, which is the step R-B-L2-002 fires on;
 - a **spoof**: one MAC reported on two ports in the same snapshot;
 - a **cross-switch spoof**: one MAC claimed on a second switch two seconds after it was seen on its own, which is
   the shape a sequentially polled estate actually produces and the one the simultaneous case cannot stand in for;
@@ -34,7 +35,12 @@ Into that corpus are planted the things the layer 1 and layer 2 features exist t
 - a **flood**: twenty gratuitous ARP replies from one host in one second, claiming the gateway;
 - a **reboot**: a device whose uptime and counters restart mid-corpus;
 - a **tap**: a step loss of receive power on one port, with transmit power unchanged;
+- a **failing optic**: a receive level sliding down a few hundredths of a decibel every poll until the maintenance
+  swap below replaces it, which is what R-P-L1-004 fires on, where the tap's step must not;
 - a **flap**: a link that went down and up between two polls, visible only through `ifLastChange`;
+- an **optic swap**: a transceiver serial that changes on a port while the device records no link transition,
+  which is what R-D-L1-001 fires on, and beside it a **maintenance swap** whose serial changes with the link's
+  drop recorded in `ifLastChange`, which it must not;
 - a **bypass**: an 802.1X success on a port that never started an exchange;
 - and one thing that must **not** fire: a VRRP pair whose two MACs legitimately share one address, carried on the
   exclusion list, so the ARP rule's exclusion path is exercised rather than assumed.
@@ -68,11 +74,13 @@ from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
+from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
 from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
 from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
 from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
+from morpheus.stages.telemetry.tc2_baseline_stage import TC2BaselineStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
 from morpheus.utils.binding_table import NS_PER_SECOND
@@ -124,6 +132,15 @@ VRRP_MACS = ["00:00:5e:00:01:fe", "00:00:5e:00:01:ff"]
 
 SINGLE_HOST_PORTS = {f"{SITE}:{SWITCH}:{port}" for port in PORTS}
 """The corpus's own port designations, standing in for the inventory-supplied list R-D-L2-001 reads."""
+
+BASELINE_MIN_BUCKETS = 6
+"""Snapshot periods a port must have been seen in before R-B-L2-002 has a baseline to measure it against.
+
+Half an hour of five-minute snapshots. A deployment keeps a month of hourly peaks and asks for a day of them, which
+is what `TC2BaselineStage` defaults to; this corpus is one hour long, so its periods are the sealing period and its
+floor is the six snapshots before the hub arrives. The parameters say so rather than the corpus pretending to be a
+month.
+"""
 HOST_IPS = {MAC_A: "10.0.0.11", MAC_B: "10.0.0.12", MAC_C: "10.0.0.13"}
 
 HUB_PORT = "Gi1/0/3"
@@ -144,6 +161,44 @@ a transceiver at all -- so every port bound once and drained, and the displaceme
 Its negative control is already here and needed no planting: the tap on `HUB_PORT` moves that port's receive
 power by three decibels without touching its serial, and must leave its binding whole. A binding that split on a
 changing optical reading would produce a new interval every poll.
+
+It is also what R-D-L1-001 fires on, as recorded: the serial changes while `oper_status` reads "up" on both polls
+and `ifLastChange` never moves, so the device says the link was never down. Replacing an optic means pulling it,
+and pulling it takes the link down, so a serial that changes without that transition is a change the port cannot
+physically have produced. The swap below is the one that can.
+"""
+
+MAINTENANCE_PORT = "Gi1/0/6"
+MAINTENANCE_SWAP_AT_MINUTE = 45
+"""A second optic replaced, the way a technician replaces one.
+
+The serial changes between two polls that both read "up", exactly as on `XCVR_SWAP_PORT`, with one difference:
+the device's `ifLastChange` advanced between them, because the link dropped while the cage was empty and came back
+with the new optic. `TC1FlapStage` reads that as two transitions nobody polled, and R-D-L1-001 must stay quiet on
+it. Without this port the rule could only be asserted in one direction, and a rule that fires on every optic
+swap in the estate is not the rule the guide specifies.
+"""
+
+SWAPS = {XCVR_SWAP_PORT: XCVR_SWAP_AT_MINUTE, MAINTENANCE_PORT: MAINTENANCE_SWAP_AT_MINUTE}
+"""The minute each replaced optic's new serial first appears, per port."""
+
+OPTIC_TYPE = "10GBASE-LR"
+OPTIC_FLOOR_DBM = -14.4
+OPTIC_FLOORS = {OPTIC_TYPE: OPTIC_FLOOR_DBM}
+"""The one optic type this estate runs, and the level its receiver stops working at, from the datasheet.
+
+Supplied to `TC1ForecastStage` the way the estate's site coordinates are supplied to the travel stage: a fact about
+the hardware rather than about any poll, so it is not carried on the event.
+"""
+
+DEGRADATION_DB_PER_MINUTE = 0.04
+"""The optic on `MAINTENANCE_PORT` is failing: its receive level slides down by this much every poll until the swap
+replaces it, which is why it was replaced, and which is what R-P-L1-004 fires on.
+
+Forty-four minutes of it is 1.76 dB, and a line through the readings reaches the floor within hours. The tap on
+`HUB_PORT` loses more light than that at once and must not fire the forecast, because a step is not a trend; and
+the slide is kept shallower than what the baseline stage reports as a step, so the two signals stay distinct. The
+degradation is the forecast's and the tap is the baseline's.
 """
 BYPASS_AT_SECONDS = 1500
 BYPASS_PORT = "Gi1/0/2"
@@ -251,8 +306,9 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
 
 def _build_layer_1(rng: random.Random) -> pd.DataFrame:
-    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, an unpolled flap and an optic swap."""
-    devices = [(SWITCH, port) for port in PORTS] + [(REBOOTING_SWITCH, "Gi1/0/1")]
+    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, a failing optic, an unpolled flap and two
+    optic swaps."""
+    devices = [(SWITCH, port) for port in PORTS] + [(SWITCH, MAINTENANCE_PORT), (REBOOTING_SWITCH, "Gi1/0/1")]
     counters = {
         key: {
             "crc_errors": 100, "symbol_errors": 0, "input_discards": 5, "output_discards": 1
@@ -282,21 +338,29 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
             # gap while the state reads "up" both sides, which is the case only the device's own record can reveal.
             if (device == SWITCH and port == "Gi1/0/1" and minute >= FLAP_AT_MINUTE):
                 last_change_cs = FLAP_AT_MINUTE * 60 * CS_PER_SECOND - 30 * CS_PER_SECOND
+            elif (device == SWITCH and port == MAINTENANCE_PORT and minute >= MAINTENANCE_SWAP_AT_MINUTE):
+                # The link came back up with the new optic, twenty seconds before the poll that first saw it.
+                last_change_cs = MAINTENANCE_SWAP_AT_MINUTE * 60 * CS_PER_SECOND - 20 * CS_PER_SECOND
             elif (rebooted):
                 last_change_cs = 5 * CS_PER_SECOND
             else:
                 last_change_cs = 10 * CS_PER_SECOND
 
-            # The optic itself is replaced on one port, which closes that port's binding and opens the next.
+            # The optic itself is replaced on two ports, which closes each port's binding and opens the next. On
+            # one of them the device recorded the link dropping for the swap, above; on the other it did not.
             serial = f"XCVR-{device}-{port}"
 
-            if (device == SWITCH and port == XCVR_SWAP_PORT and minute >= XCVR_SWAP_AT_MINUTE):
+            if (device == SWITCH and port in SWAPS and minute >= SWAPS[port]):
                 serial = f"{serial}-B"
 
             rx_dbm = -7.0 + rng.uniform(-0.05, 0.05)
 
             if (device == SWITCH and port == HUB_PORT and minute >= TAP_AT_MINUTE):
                 rx_dbm -= TAP_LOSS_DB
+
+            # The failing optic loses a little more light every poll until it is replaced; its replacement is healthy.
+            if (device == SWITCH and port == MAINTENANCE_PORT and minute < MAINTENANCE_SWAP_AT_MINUTE):
+                rx_dbm -= DEGRADATION_DB_PER_MINUTE * minute
 
             seq += 1
             rows.append({
@@ -310,6 +374,7 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
                 "optical_tx_dbm": round(-2.0 + rng.uniform(-0.05, 0.05), 3),
                 "optical_rx_dbm": round(rx_dbm, 3),
                 "transceiver_serial": serial,
+                "transceiver_type": OPTIC_TYPE,
                 "lldp_neighbor_chassis_id": f"nbr-{device}-{port}",
                 **counters[(device, port)],
                 **_envelope(rng, "snmp-poller", "TC-1/1.0.0", seq),
@@ -705,6 +770,7 @@ def run_classes(config: Config,
                                 [
                                     TC1NormalizeStage(config, uptime_column="uptime", uptime_unit="cs"),
                                     TC1OpticalStage(config),
+                                    TC1ForecastStage(config, floors=OPTIC_FLOORS),
                                     TC1FlapStage(config, last_change_column="if_last_change", last_change_unit="cs"),
                                     TC1ChangeStage(config),
                                 ],
@@ -725,13 +791,19 @@ def run_classes(config: Config,
     port_bindings["row_key"] = port_bindings["binding_uid"]
     outputs["tc1_binding"] = port_bindings
 
-    # Layer 2, from the same snapshots: the cardinality features, and the closed bindings.
-    outputs["tc2_mac"] = _run_class(config,
-                                    batches["tc2_mac"], [TC2CardinalityStage(config)],
-                                    impose_order,
-                                    seal=False,
-                                    chain=CHAIN_ROOTS["tc2_mac"],
-                                    envelope=CLASS_ENVELOPE["tc2_mac"])
+    # Layer 2, from the same snapshots: the cardinality features, each port's count against the peaks of its own
+    # earlier periods, and the closed bindings.
+    outputs["tc2_mac"] = _run_class(
+        config,
+        batches["tc2_mac"],
+        [
+            TC2CardinalityStage(config),
+            TC2BaselineStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
+        ],
+        impose_order,
+        seal=False,
+        chain=CHAIN_ROOTS["tc2_mac"],
+        envelope=CLASS_ENVELOPE["tc2_mac"])
     bindings = _run_class(config,
                           batches["tc2_mac"], [TC2BindingStage(config)],
                           impose_order,

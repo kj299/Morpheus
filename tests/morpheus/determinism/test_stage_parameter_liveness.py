@@ -61,10 +61,12 @@ from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_feature_stage import TC1FeatureStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
+from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
 from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
 from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
+from morpheus.stages.telemetry.tc2_baseline_stage import TC2BaselineStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
 from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
@@ -126,7 +128,8 @@ class Knob:
     """A frame for this parameter alone, where the scenario's own frame cannot make it bite."""
 
     also: typing.Optional[dict] = None
-    """Companion overrides, for a column that more than one parameter names."""
+    """Companion overrides, for a column that more than one parameter names, or a parameter that is only valid
+    alongside another."""
 
     def __post_init__(self):
         if (self.kind == INERT and len(self.reason) < 30):
@@ -235,6 +238,26 @@ def optics() -> dict:
         "event_time": [index * MINUTE for index in range(len(levels))],
         "optical_rx_dbm": levels,
         "optical_tx_dbm": [-2.0] * len(levels),
+    }
+
+
+OPTIC_FLOORS = {"10GBASE-LR": -14.4}
+
+
+def failing_optic() -> dict:
+    # A receive level sliding down a tenth of a decibel a poll, with the small jitter optical diagnostics report so
+    # the fit has a residual to measure, and the optic replaced two-thirds of the way through: a column whose
+    # reading of the parameters below can only be seen if the fit both projects and restarts.
+    jitter = [0.01, -0.01, 0.02, -0.02, 0.0, 0.01, -0.01, 0.02, -0.02, 0.0, 0.01, -0.01, 0.02, -0.02, 0.0]
+    levels = [-7.0 - 0.1 * index + jitter[index] for index in range(len(jitter))]
+
+    return {
+        "entity_key": ["hq:sw1:Gi1/0/1"] * len(levels),
+        "event_time": [index * MINUTE for index in range(len(levels))],
+        "optical_rx_dbm": levels,
+        "optical_tx_dbm": [-2.0] * len(levels),
+        "transceiver_serial": ["SN-A"] * 10 + ["SN-B"] * 5,
+        "transceiver_type": ["10GBASE-LR"] * len(levels),
     }
 
 
@@ -664,6 +687,22 @@ def macs() -> dict:
     }
 
 
+def mac_counts() -> dict:
+    # What the cardinality stage writes for one port, two rows a minute apart in each of nine five-minute periods:
+    # two addresses in the first period, one in the next seven, and a hub of three in the ninth. The first period's
+    # peak is what a capped history forgets, and the pair of rows per period is what the time unit decides the
+    # grouping of: read a thousand times too large, each row is a period of its own.
+    peaks = [2, 1, 1, 1, 1, 1, 1, 1, 3]
+    counts = [peak for peak in peaks for _ in range(2)]
+
+    return {
+        "port_key": ["hq:sw1:Gi1/0/3"] * len(counts),
+        "event_time": [period * 5 * MINUTE + offset * MINUTE for period in range(len(peaks)) for offset in range(2)],
+        "macs_per_port": counts,
+        "ports_per_mac": [1] * len(counts),
+    }
+
+
 def arp() -> dict:
     senders = ["10.0.0.1"] * 6 + ["10.0.0.254"]
     macs_ = ["de:ad:00:00:00:01"] * 3 + ["de:ad:00:00:00:02"] * 3 + ["00:00:5e:00:01:fe"]
@@ -724,6 +763,8 @@ def wire() -> dict:
         "event_uid": ["a", "b"],
         "port_key": ["hq:sw1:Gi1/0/1"] * 2,
         "macs_per_port_first_in_window": [True, False],
+        "macs_per_port_step": [None, 1],
+        "macs_per_port_baseline_max": [None, 1],
         "macs_claiming_sender_ip": [1, 2],
         "arp_sender_ip_excluded": [False, False],
         "auth_unpaired": [False, True],
@@ -785,6 +826,18 @@ def journeys() -> dict:
         "source_ip": ["203.0.113.10", "203.0.113.11", "203.0.113.12", "198.51.100.7", "203.0.113.13"],
         "event_time": [0, 30 * MINUTE, HOUR, 2 * HOUR, 3 * HOUR],
     }
+
+
+SITES = {"hq": (51.5074, -0.1278), "branch": (55.9533, -3.1883)}
+
+
+def sited_journeys() -> dict:
+    # The same journeys, each also naming the site its login resolved to and the site its principal sits at.
+    frame = journeys()
+    frame["login_site"] = ["hq", "hq", "branch", "branch", "hq"]
+    frame["desk_site"] = ["hq"] * 5
+
+    return frame
 
 
 def denials() -> dict:
@@ -921,6 +974,31 @@ REGISTRY: dict = {
                 Knob("min_samples", DIFFERS, benign=2, extreme=11),
             ),
         ),
+    "TC1ForecastStage":
+        Scenario(
+            stage=TC1ForecastStage,
+            frame=failing_optic,
+            base={
+                "floors": OPTIC_FLOORS, "min_samples": 4
+            },
+            knobs=(
+                Knob("entity_key_column", INPUT_COLUMN, benign="entity_key"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("channel_column", DIFFERS, benign="optical_rx_dbm", extreme="optical_tx_dbm"),
+                Knob("type_column", DIFFERS, benign="transceiver_type", extreme="absent_type"),
+                Knob("floors", DIFFERS, benign=OPTIC_FLOORS, extreme={"10GBASE-LR": -30.0}),
+                # The default is read only for a type the mapping does not name, so the mapping is emptied for it.
+                Knob("default_floor_dbm", DIFFERS, benign=None, extreme=-20.0, also={"floors": {}}),
+                Knob("optic_column", DIFFERS, benign="transceiver_serial", extreme=None),
+                Knob("window_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=180),
+                Knob("min_samples", DIFFERS, benign=4, extreme=12),
+                Knob("max_samples", DIFFERS, benign=2048, extreme=4),
+                Knob("max_residual_db", DIFFERS, benign=0.5, extreme=0.001),
+                Knob("min_significance", DIFFERS, benign=4.0, extreme=1e9),
+                Knob("decimals", DIFFERS, benign=4, extreme=1),
+            ),
+        ),
     "TC1FlapStage":
         Scenario(
             stage=TC1FlapStage,
@@ -1004,6 +1082,24 @@ REGISTRY: dict = {
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
                 Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
                 Knob("max_samples", DIFFERS, benign=1024, extreme=1),
+            ),
+        ),
+    "TC2BaselineStage":
+        Scenario(
+            stage=TC2BaselineStage,
+            frame=mac_counts,
+            base={
+                "bucket_seconds": 300, "min_buckets": 4
+            },
+            knobs=(
+                Knob("entity_column", INPUT_COLUMN, benign="port_key"),
+                Knob("value_column", DIFFERS, benign="macs_per_port", extreme="ports_per_mac"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("bucket_seconds", DIFFERS, benign=300, extreme=3600),
+                Knob("window_seconds", DIFFERS, benign=30 * 24 * 3600, extreme=900),
+                Knob("min_buckets", DIFFERS, benign=4, extreme=100),
+                Knob("max_buckets", DIFFERS, benign=1024, extreme=4),
             ),
         ),
     "TC2ArpStage":
@@ -1392,6 +1488,22 @@ REGISTRY: dict = {
                 Knob("min_elapsed_seconds", DIFFERS, benign=1, extreme=7200),
                 Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
                 Knob("decimals", DIFFERS, benign=4, extreme=1),
+                Knob("column_prefix", DIFFERS, benign="travel", extreme="site_travel"),
+                # The pair is enforced together, so each is varied with the other held fixed.
+                Knob("location_column",
+                     DIFFERS,
+                     benign="desk_site",
+                     extreme="login_site",
+                     frame=sited_journeys,
+                     also={"locations": SITES}),
+                Knob("locations",
+                     DIFFERS,
+                     benign={
+                         "hq": SITES["hq"], "branch": SITES["hq"]
+                     },
+                     extreme=SITES,
+                     frame=sited_journeys,
+                     also={"location_column": "login_site"}),
             ),
         ),
     "TC5RiskStage":
@@ -1810,8 +1922,8 @@ def test_changing_the_parameter_changes_the_output(stage_name: str, knob: Knob):
     """Two values, one corpus built to make the parameter bite. A parameter nothing reads produces one answer."""
     scenario = REGISTRY[stage_name]
     frame = knob.frame() if knob.frame is not None else None
-    benign = _outcome(scenario, {knob.name: knob.benign}, frame=frame)
-    extreme = _outcome(scenario, {knob.name: knob.extreme}, frame=frame)
+    benign = _outcome(scenario, {knob.name: knob.benign, **(knob.also or {})}, frame=frame)
+    extreme = _outcome(scenario, {knob.name: knob.extreme, **(knob.also or {})}, frame=frame)
 
     assert benign != extreme, (f"{stage_name}.{knob.name} behaved identically at {knob.benign!r} and "
                                f"{knob.extreme!r}. Either the stage does not read it, or this corpus does not "

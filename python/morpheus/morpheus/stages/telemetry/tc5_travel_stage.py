@@ -58,7 +58,7 @@ DEFAULT_REFRESH_VALUES = ("refresh", "refresh_token", "renew")
 """Values of the token type column that mark a record as a refresh rather than a fresh authentication."""
 
 
-@register_stage("tc5-travel")
+@register_stage("tc5-travel", ignore_args=["locations"])
 class TC5TravelStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write the implied travel speed between a principal's consecutive successful authentications.
@@ -133,6 +133,19 @@ class TC5TravelStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Principals holding a previous location before the least recently seen is forgotten.
     decimals : int, default = 4
         Decimal places the distance and speed are rounded to, under determinism control 9.
+    column_prefix : str, default = "travel"
+        Prefix of the five output columns, `<prefix>_status` through `<prefix>_elapsed_floored`. A second instance
+        over other coordinates needs its own: R-C-005 measures the journey between the sites of the switch ports a
+        principal's logins resolve to, alongside the geolocated journey R-D-L5-003 reads, and the two must not
+        overwrite each other.
+    location_column : str, optional
+        Column naming a place, measured from `locations` rather than from the coordinate columns. R-C-005 sets it to
+        the site a login's source address resolves to through the layer 2 bindings, so the journey measured is
+        between switch ports rather than between geolocation guesses. Unset, the coordinate columns are read.
+    locations : dict, optional
+        Place name to `(latitude, longitude)`, the estate's own record of where its sites are. Required with
+        `location_column` and meaningless without it. A place it does not name reads as `no_coordinate`, which is
+        the honest answer for a port the estate has not located.
     """
 
     def __init__(self,
@@ -150,8 +163,25 @@ class TC5TravelStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  excluded_source_networks: typing.Sequence[str] = (),
                  min_elapsed_seconds: int = 1,
                  max_entities: int = 100_000,
-                 decimals: int = DEFAULT_FLOAT_DECIMALS):
+                 decimals: int = DEFAULT_FLOAT_DECIMALS,
+                 column_prefix: str = "travel",
+                 location_column: typing.Optional[str] = None,
+                 locations: typing.Optional[typing.Mapping[str, tuple]] = None):
         super().__init__(c)
+
+        if ((location_column is None) != (locations is None)):
+            raise ValueError("location_column and locations go together: one names the place, the other says where it "
+                             "is")
+
+        self._location_column = location_column
+        # Case-folded: a site called HQ in the asset register and hq on the switch is one site.
+        self._locations = None if locations is None else {
+            self._place_key(name): (float(latitude), float(longitude))
+            for (name, (latitude, longitude)) in locations.items()
+        }
+
+        if (not column_prefix):
+            raise ValueError("column_prefix must name something; the output columns would start with an underscore")
 
         if (min_elapsed_seconds <= 0):
             raise ValueError(f"min_elapsed_seconds must be positive, received {min_elapsed_seconds}")
@@ -166,6 +196,7 @@ class TC5TravelStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._refresh_column = refresh_column
         self._refresh_values = {value.lower() for value in refresh_values}
         self._source_ip_column = source_ip_column
+        self._column_prefix = column_prefix
 
         # Parsed once, at build time. A malformed range is a configuration error, and finding it when the pipeline
         # is assembled is better than finding it as a per-row exception that quietly excludes nothing.
@@ -182,14 +213,20 @@ class TC5TravelStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                            max_entities=max_entities,
                                            decimals=decimals)
 
-        self._needed_columns["travel_status"] = TypeId.STRING
-        self._needed_columns["travel_distance_km"] = TypeId.FLOAT64
-        self._needed_columns["travel_elapsed_ns"] = TypeId.INT64
-        self._needed_columns["travel_kmh"] = TypeId.FLOAT64
-        self._needed_columns["travel_elapsed_floored"] = TypeId.BOOL8
+        self._needed_columns[f"{column_prefix}_status"] = TypeId.STRING
+        self._needed_columns[f"{column_prefix}_distance_km"] = TypeId.FLOAT64
+        self._needed_columns[f"{column_prefix}_elapsed_ns"] = TypeId.INT64
+        self._needed_columns[f"{column_prefix}_kmh"] = TypeId.FLOAT64
+        self._needed_columns[f"{column_prefix}_elapsed_floored"] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
+
+    @staticmethod
+    def _place_key(name: typing.Any) -> typing.Optional[str]:
+        normalized = normalize_text(name)
+
+        return None if normalized is None else normalized.lower()
 
     @property
     def name(self) -> str:
@@ -273,8 +310,15 @@ class TC5TravelStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             def optional(column: str) -> list:
                 return to_host_list(df, column) if column in df.columns else [None] * row_count
 
-            latitudes = optional(self._latitude_column)
-            longitudes = optional(self._longitude_column)
+            if (self._location_column is None):
+                latitudes = optional(self._latitude_column)
+                longitudes = optional(self._longitude_column)
+            else:
+                places = [
+                    self._locations.get(self._place_key(name), (None, None)) for name in optional(self._location_column)
+                ]
+                latitudes = [place[0] for place in places]
+                longitudes = [place[1] for place in places]
             results = optional(self._result_column)
             refreshes = optional(self._refresh_column)
             addresses = optional(self._source_ip_column)
@@ -351,11 +395,11 @@ class TC5TravelStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 speed.append(measurement.implied_kmh)
                 floored.append(measurement.elapsed_floored)
 
-            assign_str_column(df, "travel_status", status)
-            assign_nullable_float_column(df, "travel_distance_km", distance)
-            assign_nullable_int_column(df, "travel_elapsed_ns", elapsed)
-            assign_nullable_float_column(df, "travel_kmh", speed)
-            df["travel_elapsed_floored"] = floored
+            assign_str_column(df, f"{self._column_prefix}_status", status)
+            assign_nullable_float_column(df, f"{self._column_prefix}_distance_km", distance)
+            assign_nullable_int_column(df, f"{self._column_prefix}_elapsed_ns", elapsed)
+            assign_nullable_float_column(df, f"{self._column_prefix}_kmh", speed)
+            df[f"{self._column_prefix}_elapsed_floored"] = floored
 
         if (unparseable_addresses > 0):
             logger.warning(
