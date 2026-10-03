@@ -84,7 +84,7 @@ should return nothing:
 | Binding lookup, L1 history refresh | **2** | Two rows, and two rows is the point. Only the ports whose optics were replaced have a superseded interval; the other three are described for all time by the current-state row and cost the history nothing. |
 | Binding lookup, L1 history expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
 | Binding lookup, L2/L3 expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
-| Binding health, unresolved rate | **1** | An operational metric; the value matters, not whether it fired. |
+| Binding health, unresolved rate | **5** | One row per sourcetype and telemetry class that resolves bindings (layer 1, the three layer 2 streams, the campaign's host logins). The ARP stream's rate is 0.148, under the 0.2 that marks a class degraded. The search used to read `morpheus:score:l3` alone, whose producer never writes `resolution_method`, and could only return nothing. An operational metric; the value matters, not whether it fired. |
 | R-P-L5-006, drift trajectory | **7** | Three principals, none of them behaviour, each explained in `expected_results.json`: two climb for six days because the reference scorer's baseline is frozen under cumulative features, one has a shallow run ended by the planted burst. Watchlist, never a page. |
 
 **Six of the forty-one should return nothing.** That is the point of writing them down. An empty result is

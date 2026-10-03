@@ -111,38 +111,56 @@ PRODUCED: dict = {
             # for. R-P-L1-004 reads the forecast status and the days the fitted trend gives the optic.
             required_columns=("event_uid",
                               "entity_key",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
                               "site_id",
                               "device_id",
                               "port_id",
+                              "transceiver_serial",
                               "transceiver_serial_changed",
                               "link_flaps",
                               "oper_status",
                               "optical_rx_dbm_forecast_status",
-                              "optical_rx_dbm_days_to_floor"),
+                              "optical_rx_dbm_days_to_floor",
+                              "optical_rx_dbm_floor_dbm",
+                              "optical_rx_dbm_trend_db_per_day",
+                              "optical_rx_dbm_trend_samples",
+                              "resolution_method"),
         ),
     "morpheus:score:l3":
         Sourcetype(
             name="morpheus:score:l3",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-3 stages (cardinality, reach, beacon, TTL) behind WindowSealStage; the `tc3` class "
+            producer="The TC-3 stages (cardinality, reach, beacon, TTL) behind a WindowSealStage sealing hourly, which "
+            "R-C-001's `window_id + 1` depends on; the `tc3` class "
             "of `tests/morpheus/determinism/network_pipeline.py`.",
             # The five layer 3 detections read these off this sourcetype. `flow_pair_key` is here because
             # R-B-L3-002 is about a conversation rather than about a host, and a search grouping by `src_ip`
             # would average a beacon in with everything else that host does.
             required_columns=("event_uid",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
                               "src_ip",
                               "dst_ip",
                               "flow_pair_key",
                               "dsts_per_src",
+                              "dsts_per_src_saturated",
                               "internal_dst_ratio",
+                              "flow_intervals",
+                              "flow_mean_interval_ns",
                               "flow_interval_cv",
                               "flow_size_cv",
                               "flow_regularity_mature",
                               "dst_is_reserved",
                               "dst_is_multicast",
                               "ip_ttl_shift",
-                              "ip_ttl_shifted"),
+                              "ip_ttl_shifted",
+                              "ip_ttl_established",
+                              "ip_ttl_distinct",
+                              "ip_ttl_mature"),
         ),
     "morpheus:score:l4":
         Sourcetype(
@@ -155,6 +173,9 @@ PRODUCED: dict = {
             # ratio columns are not, because a running ratio is not monotone and a search that summarizes a bin
             # has to divide the counts' maxima rather than aggregate the ratio -- see `tc4_flow_stage`.
             required_columns=("event_uid",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
                               "src_ip",
                               "dst_ip",
                               "dst_port",
@@ -186,16 +207,22 @@ PRODUCED: dict = {
             # estate has just started seeing, and an issuer difference alone fires on every delivery host behind
             # more than one authority.
             required_columns=("event_uid",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
                               "src_ip",
                               "dst_ip",
                               "ja4_client",
                               "ja4_client_first_seen",
                               "ja4_client_observations",
+                              "ja4_client_distinct",
+                              "ja4_client_saturated",
                               "certificate_issuer",
                               "cert_issuer_established",
                               "cert_issuer_differs",
                               "cert_issuer_distinct",
                               "cert_issuer_mature",
+                              "cert_issuer_new_to_estate",
                               "cert_self_signed",
                               "cert_self_signed_external",
                               "cert_validity_days",
@@ -204,11 +231,13 @@ PRODUCED: dict = {
                               "cipher_floor_tier",
                               "cipher_downgraded",
                               "cipher_mature",
+                              "cipher_unrecognized",
                               "content_type_declared",
                               "content_type_detected",
                               "content_category_declared",
                               "content_category_detected",
-                              "content_category_crossed"),
+                              "content_category_crossed",
+                              "content_category_unclassified"),
         ),
     "morpheus:score:l7":
         Sourcetype(
@@ -225,7 +254,7 @@ PRODUCED: dict = {
             # for that reason. R-B-L7-002 and R-P-L7-006 read the SaaS columns, the context the enrichment attached,
             # and the weekly trajectory. R-B-L7-004 reads the endpoint columns, and the peer group the enrichment
             # attached is carried as the stage recorded it.
-            required_columns=("event_uid", "entity_key"),
+            required_columns=("event_uid", "entity_key", "lineage_id", "osi_layer", "window_id"),
             variant_columns=(
                 ("src_ip",
                  "query_name",
@@ -274,13 +303,21 @@ PRODUCED: dict = {
             # and the baseline it is a step above.
             required_columns=("event_uid",
                               "port_key",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              "mac_address",
+                              "macs_per_port",
+                              "macs_per_port_saturated",
                               "macs_per_port_first_in_window",
                               "macs_per_port_step",
                               "macs_per_port_baseline_max",
                               "macs_claiming_sender_ip",
+                              "arp_sender_mac",
                               "arp_sender_ip_excluded",
                               "auth_unpaired",
-                              "auth_port_key"),
+                              "auth_port_key",
+                              "resolution_method"),
         ),
     "morpheus:score:l5":
         Sourcetype(
@@ -301,7 +338,7 @@ PRODUCED: dict = {
             # resolved through the DHCP leases and the layer 2 MAC bindings to a switch port and site, with the
             # journey between the sites of a principal's sign-ins, which R-C-005 reads. A session's start and stop
             # records carry the address it came from, which R-C-004 binds a transfer to.
-            required_columns=("event_uid", "user_principal"),
+            required_columns=("event_uid", "user_principal", "lineage_id", "osi_layer", "window_id"),
             variant_columns=(
                 ("travel_status",
                  "travel_kmh",
@@ -321,6 +358,7 @@ PRODUCED: dict = {
                  "auth_result",
                  "login_port_key",
                  "login_site_id",
+                 "resolution_method",
                  "site_travel_status",
                  "site_travel_kmh",
                  "site_travel_elapsed_ns"),
@@ -343,7 +381,14 @@ PRODUCED: dict = {
             time_columns=("bucket_start", ),
             producer="`morpheus.utils.binding_table.BindingTable.to_bucketed_records`, which renders `bucket_start` "
             "itself rather than relying on a sink to do it.",
-            required_columns=("binding_table", ),
+            required_columns=("binding_table", "bucket", "binding_uid"),
+            # One variant per table the lookups read: the port inventory the L1 refreshes bucket, the MAC table,
+            # and the DHCP leases the L2/L3 refresh selects, which nothing in this fork produces yet (issue #63).
+            variant_columns=(
+                ("port_id", "switch_id", "site_id", "transceiver_serial", "lldp_neighbor_chassis_id"),
+                ("key", "port_key"),
+                ("ip", "mac", "port_id", "switch_id"),
+            ),
         ),
     "binding:l1":
         Sourcetype(
@@ -357,6 +402,8 @@ PRODUCED: dict = {
             required_columns=("port_id",
                               "switch_id",
                               "site_id",
+                              "bind_start",
+                              "bind_end",
                               "transceiver_serial",
                               "lldp_neighbor_chassis_id",
                               "binding_uid"),

@@ -524,7 +524,8 @@ GOLDEN_NAMES = ("golden_telemetry_expected.csv",
                 "golden_context_expected.csv",
                 "golden_endpoint_expected.csv",
                 "golden_saas_expected.csv",
-                "golden_session_expected.csv")
+                "golden_session_expected.csv",
+                "golden_estate_expected.csv")
 
 
 def layer_columns() -> dict:
@@ -701,3 +702,175 @@ def test_a_bogus_field_would_be_caught():
     search = f"index=behavior_events sourcetype=morpheus:score:l2 {invented}=true | table _time {invented}"
 
     assert invented in referenced_in(search) - created_in(search) - producible()
+
+
+# --- What each search reads from its sourcetype, against that sourcetype's wire contract -------------------------
+#
+# The checks above ask whether *something* writes a field. A deployment's guarantee is narrower: `SiemWireStage`
+# refuses a frame missing a column its sourcetype's contract requires, and accepts one missing anything else. A
+# search that filters on a column outside the contract therefore works against the corpus, where every stage ran,
+# and silently empties against a producer that dropped the column, which the contract said it could. "Binding
+# health" read `resolution_method` on `morpheus:score:l3` for weeks, a sourcetype whose producer never writes it,
+# and nothing here noticed because *a* producer somewhere did.
+
+SOURCETYPE_FILTER = re.compile(r"sourcetype\s*=\s*\"?([A-Za-z0-9:_*]+)\"?")
+NARROWING_COMMANDS = STATS_COMMANDS | JOINING_COMMANDS
+PROJECTING_COMMANDS = {"table", "fields"}
+
+
+def contract_columns(sourcetype: str) -> set:
+    """Every column the wire contract guarantees for a sourcetype, or for every sourcetype a wildcard names."""
+    from morpheus.utils.siem_sourcetypes import PRODUCED  # pylint: disable=import-outside-toplevel
+
+    pattern = re.compile("^" + re.escape(sourcetype).replace("\\*", ".*") + "$")
+    columns = set()
+
+    for (name, contract) in PRODUCED.items():
+        if (pattern.match(name)):
+            columns.update(contract.required_columns)
+
+            for variant in (contract.variant_columns or ()):
+                columns.update(variant)
+
+    return columns
+
+
+def _read_by_command(name: str, body: str, created: set) -> set:
+    """The fields one command reads from the rows it receives, by command."""
+    words = body.split()
+
+    if (name == "rename"):
+        return set(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s+AS\s+", body, flags=re.IGNORECASE)) - created
+
+    if (name == "sort"):
+        return {word.lstrip("-+") for word in words[1:] if not word.lstrip("-+").isdigit()} - created
+
+    if (name in JOINING_COMMANDS):
+        # `join type=inner a b [subsearch]`: the join fields are read from the rows; the options are not fields.
+        return {word for word in words[1:] if "=" not in word and re.fullmatch(r"[A-Za-z_]\w*", word)} - created
+
+    return referenced_in("| " + body) - created_in("| " + body) - created
+
+
+def reads_by_sourcetype(search: str) -> dict:
+    """
+    The fields each base search reads from its sourcetype, before anything narrows or widens the rows.
+
+    Attribution stops at the first `stats` (its arguments and group-by fields are read from the source rows and
+    counted; what follows reads its output) and at the first `join` (the rows then carry the subsearch's fields
+    too). Projections (`table`, `fields`) are not reads: a missing column there shows empty rather than dropping
+    rows. Every subsearch is walked the same way, so a chained rule's three base searches are each attributed to
+    their own sourcetype.
+    """
+    reads = {}
+
+    def visit(pipeline: str):
+        segments = _split_top_level(pipeline)
+        base = re.sub(r"^search\s+", "", segments[0])
+        match = SOURCETYPE_FILTER.search(base)
+        (created, collected) = (set(), set())
+        attributing = match is not None
+
+        if (attributing):
+            collected |= referenced_in("| search " + base)
+
+        for segment in segments[1:]:
+            (body, subsearches) = _subsearches(segment)
+
+            for subsearch in subsearches:
+                visit(subsearch)
+
+            words = body.split()
+            name = words[0].lower() if words else ""
+
+            if (not attributing or name in PROJECTING_COMMANDS or name in OPTION_COMMANDS):
+                continue
+
+            collected |= _read_by_command(name, body, created)
+            created |= created_in("| " + body)
+
+            if (name in NARROWING_COMMANDS):
+                attributing = False
+
+        if (match is not None):
+            reads.setdefault(match.group(1), set()).update(collected - SPL_WORDS - SPLUNK_INTRINSICS - {"_time"})
+
+    visit(search)
+
+    return reads
+
+
+KNOWN_HOLLOW_READS = {
+    ("Behavior summary - per-layer scores", "morpheus:score:l*"): {
+        "risk_score": "written by no stage and collected by no detection; the risk write path is issue #57",
+        "rule_id": "written by no stage and collected by no detection; the risk write path is issue #57",
+    },
+    ("Chain assembly - cross-layer risk", "morpheus:edge"): {
+        "lineage_id": "the edge stream carries no lineage_id; the edge producer is issue #63",
+        "osi_layer": "the edge stream carries no osi_layer; the edge producer is issue #63",
+        "max_abs_z": "a score, read off edges that carry none; the edge producer is issue #63",
+        "resolution_method": "carried by the lineage corpus's edges and promised by no contract; issue #63",
+        "risk_score": "written by no stage and collected by no detection; the risk write path is issue #57",
+        "rule_id": "written by no stage and collected by no detection; the risk write path is issue #57",
+    },
+}
+"""
+Reads this linter knows are hollow and the retrospective tracks: a search reading a field its sourcetype's contract
+cannot promise because nothing produces it. Each is listed with the issue that closes it, so the check below stays
+red on anything new while these stay visible rather than silently excused. An entry whose field the contract has
+since gained, or whose search no longer reads it, fails `test_the_registry_of_hollow_reads_is_honest`.
+"""
+
+
+@pytest.mark.parametrize("name", sorted(searches()))
+def test_every_field_a_search_reads_from_its_sourcetype_is_in_that_sourcetypes_contract(name: str):
+    for (sourcetype, fields) in reads_by_sourcetype(searches()[name]).items():
+        contract = contract_columns(sourcetype)
+
+        assert contract, f"{name} reads sourcetype={sourcetype}, which no wire contract describes"
+
+        missing = sorted(fields - contract - set(KNOWN_HOLLOW_READS.get((name, sourcetype), {})))
+
+        assert not missing, (f"{name} reads {missing} from {sourcetype}, which that sourcetype's contract does not "
+                             f"guarantee: SiemWireStage would accept a frame without them and the search would "
+                             f"silently return nothing. Add them to required_columns or a variant in "
+                             f"morpheus.utils.siem_sourcetypes, or stop reading them.")
+
+
+def test_a_read_outside_the_contract_would_be_caught():
+    # The negative control for the check above: a search filtering on a field its sourcetype never guarantees.
+    search = ("index=behavior_events sourcetype=morpheus:score:l3 resolution_method=unresolved "
+              "| stats count AS total BY src_ip | where total > 0")
+    reads = reads_by_sourcetype(search)
+
+    assert "resolution_method" in reads["morpheus:score:l3"]
+    assert "resolution_method" not in contract_columns("morpheus:score:l3")
+    assert "total" not in reads["morpheus:score:l3"], "a field the search itself creates is not a read"
+
+
+def test_a_chained_rule_attributes_each_base_search_to_its_own_sourcetype():
+    reads = reads_by_sourcetype(searches()["R-C-001 - Lateral movement chain"])
+
+    assert {"dsts_per_src", "src_ip", "window_id"} <= reads["morpheus:score:l3"]
+    assert {"auth_result", "target_host_first_seen", "source_ip"} <= reads["morpheus:score:l5"]
+    assert {"endpoint_pair_novel", "hostname"} <= reads["morpheus:score:l7"]
+    assert "previous_peak" not in reads["morpheus:score:l3"], "a stats output is read from the stats, not the source"
+
+
+def test_a_wildcard_sourcetype_is_checked_against_every_sourcetype_it_names():
+    columns = contract_columns("morpheus:score:l*")
+
+    assert {"dsts_per_src", "travel_status", "ja4_client"} <= columns
+    assert "bind_gap_ns" not in columns
+
+
+def test_the_registry_of_hollow_reads_is_honest():
+    # An allowlist that outlives its reason is the same defect it was written to make visible.
+    for ((name, sourcetype), fields) in KNOWN_HOLLOW_READS.items():
+        reads = reads_by_sourcetype(searches()[name]).get(sourcetype, set())
+        contract = contract_columns(sourcetype)
+
+        for (field, reason) in fields.items():
+            assert field in reads, f"{name} no longer reads {field} from {sourcetype}; drop the entry ({reason})"
+            assert field not in contract, f"{sourcetype} now guarantees {field}; drop the entry ({reason})"
+            assert "issue #" in reason, f"{name}/{field}: every hollow read names the issue that closes it"

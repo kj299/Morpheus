@@ -59,7 +59,7 @@ resolution, window sealing), feature stages for every telemetry class from TC-0 
 scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's six
 checks over twelve composed corpora, which run under pytest on developer machines and have not yet run in
 any CI this fork has executed. That is forty-six stages and forty-one supporting
-modules, covered by 1,884 distinct tests, itemized in
+modules, covered by 1,892 distinct tests, itemized in
 [Part 6](#provided). Thirty-two of the thirty-nine rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -1814,7 +1814,10 @@ the estate's own record of where its sites are, and `column_prefix`, so the site
 measured or anchored on, and carries the anchor forward so the notable names both ports. Its inverse is the
 second sign-in made at a shared workstation the asset inventory names as one, at the principal's request.
 
-Four decisions come with R-C-001. **It reads the scored events, not other rules' notables.** R-C-002 first
+Five decisions come with R-C-001. **Layer 3 seals hourly.** The rule's "previous hour" is `window_id + 1`, which is
+an hour only because every layer 3 corpus seals at 3600 seconds where `WindowSealStage` defaults to 300; the stanza
+states the dependency, `tests/morpheus/determinism/test_first_detections.py` pins both corpora to it, and a
+deployment sealing layer 3 at another period changes the join. **It reads the scored events, not other rules' notables.** R-C-002 first
 correlated notables, which exist only once the detections have run and written them, and never returned a row
 anywhere this fork could test; R-C-001 writes its steps' conditions into its own search and fires on pipeline output
 alone, and R-C-002 now does the same. **Its steps are joined on values, not

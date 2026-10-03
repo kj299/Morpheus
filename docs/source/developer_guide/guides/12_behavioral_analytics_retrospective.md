@@ -238,7 +238,7 @@ asking whether a transport exists. Late-arrival rows have no delivery path of th
 fourteen envelope fields are produced and checked by nothing.
 
 **What is built is thoroughly verified on a CPU, and the verdicts that say more than that are stale.**
-The inventory is self-checking: forty-six stages, forty-one modules and 1,884 test definitions are
+The inventory is self-checking: forty-six stages, forty-one modules and 1,892 test definitions are
 computed from the tree and compared against both documents; the liveness registry covers every stage
 class on disk; the personal-data inventory is checked against all twelve golden files; all fourteen Splunk
 stanzas have a producer; every search carries a written expectation and a regeneration-is-a-no-op test.

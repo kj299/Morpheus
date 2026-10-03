@@ -55,16 +55,48 @@ import campaign_pipeline  # noqa: E402
 import session_pipeline as sp  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 
-GAP_THRESHOLD_NS = 60 * 10**9
-TRAVEL_KMH_THRESHOLD = 900
-MFA_CHALLENGE_THRESHOLD = 5
-MFA_DENIAL_THRESHOLD = 4
-DRIFT_RISING_THRESHOLD = 4
-DRIFT_SIGMA_THRESHOLD = 1.5
-DRIFT_MEAN_CEILING = 2.0
-FORECAST_DAYS_THRESHOLD = 14
-"""The thresholds the saved searches state, repeated here so the predicate this file evaluates is the
-predicate the app ships rather than an approximation of it."""
+
+def _stanza_search(name: str) -> str:
+    """One saved search's SPL, with its continuation lines folded."""
+    import configparser  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
+
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.read_string(folded)
+
+    return parser[name]["search"]
+
+
+def threshold(stanza: str, pattern: str) -> float:
+    """
+    A threshold as the shipped search states it, so the predicate this file evaluates is the app's and not a copy.
+
+    Six layer 5 thresholds lived here as constants for weeks; a stanza edit would have left every test green while
+    the package's expectations went stale. `pattern` names the eval variable or the comparison, with one group
+    around the number.
+    """
+    import re  # pylint: disable=import-outside-toplevel
+
+    match = re.search(pattern, _stanza_search(stanza))
+
+    assert match is not None, f"{stanza} no longer states {pattern!r}"
+
+    return float(match.group(1))
+
+
+GAP_THRESHOLD_NS = int(threshold("R-D-L2-004 - MAC in two places at once", r"gap_threshold\s*=\s*(\d+)"))
+TRAVEL_KMH_THRESHOLD = threshold("R-D-L5-003 - Impossible travel", r"kmh_threshold\s*=\s*([\d.]+)")
+MFA_CHALLENGE_THRESHOLD = threshold("R-D-L5-004 - Multi-factor fatigue", r"challenge_threshold\s*=\s*([\d.]+)")
+MFA_DENIAL_THRESHOLD = threshold("R-D-L5-004 - Multi-factor fatigue", r"denial_threshold\s*=\s*([\d.]+)")
+DRIFT_RISING_THRESHOLD = threshold("R-P-L5-006 - Drift trajectory", r"rising_threshold\s*=\s*([\d.]+)")
+DRIFT_SIGMA_THRESHOLD = threshold("R-P-L5-006 - Drift trajectory", r"sigma_threshold\s*=\s*([\d.]+)")
+DRIFT_MEAN_CEILING = threshold("R-P-L5-006 - Drift trajectory", r"mean_ceiling\s*=\s*([\d.]+)")
+FORECAST_DAYS_THRESHOLD = threshold("R-P-L1-004 - Optical degradation forecast",
+                                    r"optical_rx_dbm_days_to_floor\s*<=\s*([\d.]+)")
+"""The thresholds the saved searches state, read from the stanzas rather than repeated here."""
 
 
 @pytest.fixture(name="expected", scope="module")
@@ -951,3 +983,46 @@ def test_the_conformance_runner_refuses_without_a_device(tmp_path):
 
     assert report["verdict"] == "failed"
     assert "no CUDA device" in report["reason"]
+
+
+def test_the_thresholds_are_read_from_the_stanzas_and_not_remembered():
+    # The values the guide gives, so a stanza retuned by accident fails here rather than silently retuning the
+    # package's expectations with it; a deliberate retune edits both.
+    assert (TRAVEL_KMH_THRESHOLD, MFA_CHALLENGE_THRESHOLD, MFA_DENIAL_THRESHOLD) == (900, 5, 4)
+    assert (DRIFT_RISING_THRESHOLD, DRIFT_SIGMA_THRESHOLD, DRIFT_MEAN_CEILING) == (4, 1.5, 2.0)
+    assert (GAP_THRESHOLD_NS, FORECAST_DAYS_THRESHOLD) == (60 * 10**9, 14)
+
+
+def test_the_binding_health_rows_are_the_classes_that_resolve_bindings(expected: dict):
+    # The search groups every scored event that carries a resolution outcome by sourcetype and class. It used to
+    # read morpheus:score:l3 alone, where no producer writes resolution_method, and could only ever return nothing.
+    groups: dict = {}
+
+    for name in sorted(os.listdir(EVENTS)):
+        if (not name.startswith("morpheus_score_l") or not name.endswith(".jsonlines")):
+            continue
+
+        sourcetype = name[:-len(".jsonlines")].replace("morpheus_score_", "morpheus:score:")
+
+        with open(os.path.join(EVENTS, name), encoding="utf-8") as handle:
+            for line in handle:
+                event = json.loads(line)
+
+                if ("resolution_method" in event):
+                    key = f"{sourcetype}/{event['telemetry_class']}"
+                    group = groups.setdefault(key, {"total": 0, "unresolved": 0})
+                    group["total"] += 1
+                    group["unresolved"] += int(event["resolution_method"] == "unresolved")
+
+    entry = expected["searches"]["Binding health - unresolved rate"]
+
+    assert len(groups) > 0
+    assert entry["expected_rows"] == len(groups)
+    assert entry["expected_empty"] is False
+    assert entry["groups"] == groups
+
+    # No class in the corpus is degraded, and the one with unresolved rows is the planted ARP rate.
+    for (key, group) in groups.items():
+        assert group["unresolved"] / group["total"] <= 0.2, key
+
+    assert groups["morpheus:score:l2/tc2_arp"]["unresolved"] > 0

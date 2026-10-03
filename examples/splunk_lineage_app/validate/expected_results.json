@@ -356,8 +356,31 @@
       "why": "A maintenance search that deletes buckets older than the retention window. On a freshly loaded corpus nothing is old enough to expire, so an empty result is the correct one."
     },
     "Binding health - unresolved rate": {
-      "expected_rows": 1,
-      "why": "One summary row over the ARP stream's resolution outcomes. This is an operational health metric rather than a detection, and it is the one search whose value is in the number rather than in whether it fired."
+      "expected_rows": 5,
+      "why": "One row per sourcetype and telemetry class whose records carry a resolution outcome: the layer 1 port stream, the three layer 2 streams, and the campaign's host logins resolved through DHCP leases on layer 5. The search used to read morpheus:score:l3 alone, a sourcetype whose producer never writes resolution_method, so it could only ever return nothing; the retrospective's gap G24. The ARP stream's 180 unresolved of 1,220 is the corpus's planted rate (0.148), under the 0.2 that marks a class degraded. An operational metric: the value is in the numbers rather than in whether rows came back.",
+      "expected_empty": false,
+      "groups": {
+        "morpheus:score:l1/tc1": {
+          "total": 305,
+          "unresolved": 0
+        },
+        "morpheus:score:l2/tc2_mac": {
+          "total": 82,
+          "unresolved": 0
+        },
+        "morpheus:score:l2/tc2_arp": {
+          "total": 1220,
+          "unresolved": 180
+        },
+        "morpheus:score:l2/tc2_auth": {
+          "total": 32,
+          "unresolved": 0
+        },
+        "morpheus:score:l5/tc5_auth": {
+          "total": 24,
+          "unresolved": 0
+        }
+      }
     },
     "R-P-L5-006 - Drift trajectory": {
       "expected_rows": 7,
