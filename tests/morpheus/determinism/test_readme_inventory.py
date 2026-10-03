@@ -233,3 +233,114 @@ def test_the_stated_test_count_is_the_one_that_is_there(document: str):
     assert stated == written, (f"the {document} says {stated} distinct tests; the files the conformance runner "
                                f"names define {written}. Both documents carried the same stale figure for "
                                f"fourteen commits before this check existed.")
+
+
+STAGES_PAGE = os.path.join(REPO_ROOT, "docs", "source", "stages", "morpheus_stages.md")
+SAVED_SEARCHES = os.path.join(REPO_ROOT,
+                              "examples",
+                              "splunk_lineage_app",
+                              "TA-morpheus-lineage",
+                              "default",
+                              "savedsearches.conf")
+REGISTERED_STAGE = re.compile(r"^@register_stage\(.*?\n(?:.*\n)*?class\s+(\w+)\(", re.MULTILINE)
+"""A `@register_stage` decorator and the class it decorates, however many decorator lines sit between them."""
+RULE_STANZA = re.compile(r"^\[(R-[A-Z]-(?:L\d-)?\d{3}) - ", re.MULTILINE)
+ANY_STANZA = re.compile(r"^\[", re.MULTILINE)
+RULE_ID = re.compile(r"\bR-[A-Z]-(?:L\d-)?\d{3}\b")
+
+
+def fork_stage_classes() -> dict:
+    """Every registered stage class this fork wrote, keyed by class name, with the module it lives in."""
+    found = {}
+
+    for relative in fork_stages():
+        with open(os.path.join(REPO_ROOT, relative), encoding="utf-8") as handle:
+            text = handle.read()
+
+        module = relative.replace(os.sep, ".").removeprefix("python.morpheus.").removesuffix(".py")
+
+        for match in REGISTERED_STAGE.finditer(text):
+            found[match.group(1)] = module
+
+    return found
+
+
+def test_the_stages_page_names_every_stage_this_fork_registers():
+    # The stages page listed sixteen of the thirty-six telemetry stages and six of the nine lineage stages for
+    # weeks, because nothing compared it with the tree. A stage a reader cannot find on the reference page is a
+    # stage that, to that reader, does not exist.
+    classes = fork_stage_classes()
+
+    assert len(classes) > 40
+
+    with open(STAGES_PAGE, encoding="utf-8") as handle:
+        page = handle.read()
+
+    missing = sorted(f"{module}.{name}" for (name, module) in classes.items() if f"{module}.{name}" not in page)
+
+    assert missing == [], f"registered in this fork and absent from docs/source/stages/morpheus_stages.md: {missing}"
+
+
+def shipped_rules() -> tuple:
+    """The rule stanzas in the app and the stanza total, read from savedsearches.conf."""
+    with open(SAVED_SEARCHES, encoding="utf-8") as handle:
+        text = handle.read()
+
+    return (sorted(set(RULE_STANZA.findall(text))), len(ANY_STANZA.findall(text)))
+
+
+def specified_rules() -> list:
+    """Every rule identifier Part 3 of the guide defines in bold, which is how it introduces a rule."""
+    with open(DOCUMENTS["guide"], encoding="utf-8") as handle:
+        text = handle.read()
+
+    part_3 = text[text.index("## Part 3:"):text.index("## Part 4:")]
+
+    return sorted(set(RULE_ID.findall("\n".join(line for line in part_3.splitlines() if line.startswith("**R-")))))
+
+
+def test_the_summary_states_how_many_rules_ship_and_how_many_are_specified():
+    # The Summary said six detections shipped while thirty-two did. The count is now read from the stanzas and
+    # the specification both, so the sentence can only be true.
+    (shipped, _) = shipped_rules()
+    specified = specified_rules()
+
+    assert len(shipped) > 20 and len(specified) >= len(shipped)
+
+    with open(DOCUMENTS["guide"], encoding="utf-8") as handle:
+        summary = handle.read().split("## Part 0:")[0]
+
+    match = re.search(r"([\w-]+) of the ([\w-]+) rules Part 3 specifies ship as saved searches", summary)
+
+    assert match is not None, "the guide's Summary no longer states how many of the specified rules ship"
+    assert from_words(match.group(1)) == len(shipped), f"the Summary says {match.group(1)}; {len(shipped)} stanzas ship"
+    assert from_words(
+        match.group(2)) == len(specified), (f"the Summary says {match.group(2)}; Part 3 defines {len(specified)}")
+
+
+def test_the_readme_states_the_shipped_detection_count():
+    (shipped, _) = shipped_rules()
+
+    with open(DOCUMENTS["README"], encoding="utf-8") as handle:
+        readme = handle.read()
+
+    match = re.search(r"Ten of the app's ([\w-]+) detection searches", readme)
+
+    assert match is not None, "the README's first-detections row no longer states the app's detection count"
+    assert from_words(match.group(1)) == len(shipped), f"the README says {match.group(1)}; {len(shipped)} stanzas ship"
+
+
+def test_the_summary_names_every_telemetry_class_that_has_a_stage():
+    # "The TC-1 and TC-2 feature stages" stood in the Summary for five telemetry classes after their stages landed.
+    prefixes = sorted({
+        os.path.basename(path)[:3].upper().replace("TC", "TC-")
+        for path in fork_stages() if os.path.basename(path).startswith("tc")
+    })
+
+    assert prefixes == ["TC-0", "TC-1", "TC-2", "TC-3", "TC-4", "TC-5", "TC-6", "TC-7"], prefixes
+
+    with open(DOCUMENTS["guide"], encoding="utf-8") as handle:
+        summary = handle.read().split("## Part 0:")[0]
+
+    assert f"every telemetry class from {prefixes[0]} to {prefixes[-1]}" in summary, (
+        "the Summary no longer says feature stages run for every telemetry class; name them or restore the phrase")

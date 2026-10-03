@@ -21,8 +21,9 @@ stamps `_time` by applying the shipped `props.conf`'s own `TIME_PREFIX` and `TIM
 applies R-D-L2-004's predicate to the parsed JSON rather than to a frame.
 
 R-D-L2-004 is the rule this can be done for. It needs one collector and nothing else -- no `port_designations`
-lookup, no exclusion list, no TC-0 context store. The other three shipped detections each need something an
-estate has to supply first, so proving one rule end to end is worth more than gesturing at four.
+lookup, no exclusion list, no TC-0 context store. Several of the thirty-two shipped detections need something an
+estate has to supply first, a designation list, an exclusion list or the TC-0 context store, and the rest have not
+been run this way yet, so proving one rule end to end is worth more than gesturing at thirty-two.
 
 ## What the sample contains
 

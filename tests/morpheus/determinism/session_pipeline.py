@@ -16,10 +16,9 @@
 """
 The week-long layer 5 corpus, and the composed session pipeline, for the determinism harness.
 
-The layer 1 and 2 harness proved that fourteen stages in a row reach the answer a golden file holds. The five
-TC-5 stages had never been run composed with each other, and the two deterministic layer 5 rules had no corpus to
-be asserted against -- which is why neither shipped as a saved search when its features landed. This module is
-both.
+The layer 1 and 2 harness proved that fourteen stages in a row reach the answer a golden file holds. This module
+does the same for layer 5: the seven TC-5 stages are composed here, and the three layer 5 saved searches, two
+deterministic and the drift watchlist, are asserted against this corpus.
 
 **A week, not an hour.** The layer 1 and 2 corpus covers an hour because a poller's cadence is a minute. Layer 5
 is event-driven and its features are about habit: an hour-of-day histogram needs days to say anything, an

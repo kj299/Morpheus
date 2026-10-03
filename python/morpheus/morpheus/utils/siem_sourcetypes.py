@@ -287,7 +287,8 @@ PRODUCED: dict = {
             name="morpheus:score:l5",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-5 stages (session, novelty, cadence, travel, risk) behind WindowSealStage; the "
+            producer="The TC-5 stages (session, novelty, cadence, travel, risk, score and, over daily windows, drift) "
+            "behind WindowSealStage; the "
             "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`; and host "
             "logins through TC5NoveltyStage with a target host, BindingResolverStage and a site-measuring "
             "TC5TravelStage, and sessions through TC5SessionStage, the `tc5_auth` and `tc5_session` classes of "

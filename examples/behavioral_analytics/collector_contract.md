@@ -4,8 +4,10 @@ What a collector has to send, per column, and where the value comes from. Writte
 their output against something other than prose.
 
 One class is specified here: the MAC address table, which is what R-D-L2-004 needs and all that
-[`run_mac_spoof.py`](./run_mac_spoof.py) consumes. The other telemetry classes in the guide are design; naming
-their object identifiers here would suggest a collector exists for them.
+[`run_mac_spoof.py`](./run_mac_spoof.py) consumes. The other thirteen input classes have stages that read them, but
+their input shape lives in the corpus builders under `tests/morpheus/determinism/` and in the guide's Part 2 prose
+rather than in a contract like this one; writing those contracts is tracked in the retrospective's plan (issue
+#66). Naming their object identifiers here before that work would suggest a collector exists for them.
 
 ## Envelope
 
