@@ -46,9 +46,11 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -78,6 +80,16 @@ SEVERITY = {"system": 70, "high": 55, "medium": 40, "low": 25}
 UNWEIGHTED_SEVERITY = 40
 WINDOW_DAYS = 30
 WARMUP_DAYS = 7
+
+SETTINGS = {
+    "period_seconds": PERIOD_SECONDS,
+    "lateness_seconds": LATENESS_SECONDS,
+    "window_days": WINDOW_DAYS,
+    "warmup_days": WARMUP_DAYS,
+}
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+RULES = ("R-B-L7-004", )
+"""The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 DAY_SECONDS = 86400
 LAST_DAY = 40
@@ -337,6 +349,7 @@ def run_pipeline(config: Config,
 
     pipe.add_stage(TC0EnrichStage(config, store=build_store(), entity_column="hostname"))
     pipe.add_stage(TC7EndpointStage(config, window_days=WINDOW_DAYS, warmup_days=WARMUP_DAYS))
+    pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(ENDPOINT_CLASS, SETTINGS, rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))
     pipe.add_stage(
         WindowSealStage(config,

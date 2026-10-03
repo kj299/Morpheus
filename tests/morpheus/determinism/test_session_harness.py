@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import session_pipeline as sp  # noqa: E402
+import stamping  # noqa: E402
 
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_session_expected.csv")
 DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_session_pipeline.py")
@@ -128,16 +129,22 @@ def test_corpus_is_shaped_like_an_identity_provider(corpus: dict[str, pd.DataFra
     # Several principals with different habits, which is what makes each one's own history the comparison.
     assert auth["user_principal"].nunique() >= 5
 
-    # Sessions arrive as separate start and stop records with no duration on either, which is the shape
-    # TC5SessionStage exists for.
+    # Sessions arrive mostly as separate start and stop records with no duration on either, which is the shape
+    # TC5SessionStage exists to pair; the identity provider's own collector adds the other shape, one record per
+    # session with both ends in it.
     sessions = corpus["tc5_session"]
-    assert set(sessions["session_action"]) == {"start", "end"}
+    assert set(sessions["session_action"]) == {"start", "end", "session"}
     assert "session_duration_s" not in sessions.columns
+    single = sessions[sessions["session_action"] == "session"]
+    assert single["session_start"].notna().all() and single["session_end"].notna().all()
+    assert sessions[sessions["session_action"] != "session"]["session_start"].isna().all()
 
-    # Every class carries the envelope the identifiers derive from, with a monotonic sequence.
+    # Every class carries the envelope the identifiers derive from, each collector with a monotonic sequence.
     for frame in corpus.values():
         assert set(sp.ID_COLUMNS) <= set(frame.columns)
-        assert frame["collector_seq"].is_monotonic_increasing
+
+        for (_, rows) in frame.groupby("collector_id"):
+            assert rows["collector_seq"].is_monotonic_increasing
 
 
 # --- Checks 2 through 6: determinism ---------------------------------------------------------------------------
@@ -519,6 +526,26 @@ def test_every_scored_row_says_it_was_scored_against_a_fallback(result: pd.DataF
 
     assert (scored["mean_abs_z"].notna()).all()
     assert sp.SCORING_MANIFEST.resolve("anyone@example.com", sp.SCORING_WINDOW).fallback_used is True
+    assert (scored["model_version"] == "reference-arithmetic:0").all()
+    assert scored["model_fallback_used"].astype("boolean").all()
+
+    unscored = result[result["telemetry_class"] == "tc5_session"]
+
+    assert len(unscored) > 0
+    assert unscored["model_version"].isna().all()
+    assert unscored["model_fallback_used"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_every_row_carries_the_determinism_envelope(result: pd.DataFrame):
+    # Control 12 at the row: the tier the harness asserts, one configuration hash per corpus, and a fingerprint that
+    # names the class, so two events from two runs can be told comparable or not without the runs' logs.
+    assert (result["determinism_tier"] == "D1").all()
+    assert result["config_hash"].nunique() == 1
+    assert result["pipeline_fingerprint"].notna().all()
+    assert set(result["feature_schema_version"]) == {"tc5_auth/1.0.0", "tc5_session/1.0.0"}
+    assert (result["code_commit"] == "unknown").all()
+    assert (result["rng_seed"] == 0).all()
 
 
 @pytest.mark.cpu_mode
@@ -598,30 +625,191 @@ def test_the_drift_rule_fires_on_exactly_the_reference_arithmetic_it_should(resu
     # trajectory rather than in the rule. The third is the fatigue burst: three rises of hundredths and then the
     # burst, a spike the rule's letter admits because the day's mean stays under 2.0. `drift_acceleration` tells
     # the two shapes apart, and that is the column a deployment tuning this rule should read first.
+    #
+    # The search now carries that reading as a condition: a steady rise only, |drift_acceleration| under a
+    # ceiling. The burst is a spike, which R-D-L5-004 and R-B-L5-001 exist to report, and it leaves; the two
+    # climbs stay, and stay documented as arithmetic. All three are asserted, so the ceiling cannot quietly grow
+    # to admit the spike or shrink to drop the climbs.
     auth = _rows(result, "tc5_auth")
     days = _days(auth)
+    limits = stamping.rule_thresholds(["R-P-L5-006"])["R-P-L5-006"]
 
-    fires = days[(days["drift_mature"] == True)  # noqa: E712  pylint: disable=singleton-comparison
-                 & (days["drift_rising_windows"].astype(float) >= 4)
-                 & (days["drift_rise_sigmas"].astype(float) > 1.5)
-                 & (days["mean_abs_z"].astype(float) < 2.0)]
+    trajectory = days[(days["drift_mature"] == True)  # noqa: E712  pylint: disable=singleton-comparison
+                      & (days["drift_rising_windows"].astype(float) >= limits["rising_threshold"])
+                      & (days["drift_rise_sigmas"].astype(float) > limits["sigma_threshold"])
+                      & (days["mean_abs_z"].astype(float) < limits["mean_ceiling"])]
+    fires = trajectory[trajectory["drift_acceleration"].astype(float).abs() < limits["acceleration_ceiling"]]
 
-    assert set(zip(fires["user_principal"], fires["day_window_id"].astype(int))) == {
-        (sp.CAROL, 9),
-        (sp.DAVE, 8),
-        (sp.DAVE, 9),
-        (sp.DAVE, 10),
-        (sp.BATCH, 8),
-        (sp.BATCH, 9),
-        (sp.BATCH, 10),
-    }
+    climbs = {(sp.DAVE, 8), (sp.DAVE, 9), (sp.DAVE, 10), (sp.BATCH, 8), (sp.BATCH, 9), (sp.BATCH, 10)}
+
+    assert set(zip(trajectory["user_principal"], trajectory["day_window_id"].astype(int))) == climbs | {(sp.CAROL, 9)}
+    assert set(zip(fires["user_principal"], fires["day_window_id"].astype(int))) == climbs
 
     # The two shapes. The climbers accelerate by hundredths; the burst accelerates by most of a unit.
-    burst = fires[fires["user_principal"] == sp.CAROL]
-    climbers = fires[fires["user_principal"] != sp.CAROL]
+    burst = trajectory[trajectory["user_principal"] == sp.CAROL]
 
     assert float(burst["drift_acceleration"].iloc[0]) > 0.5
-    assert climbers["drift_acceleration"].astype(float).abs().max() < 0.1
+    assert fires["drift_acceleration"].astype(float).abs().max() < limits["acceleration_ceiling"]
+
+
+def _true(frame: pd.DataFrame, column: str) -> pd.Series:
+    return frame[column].astype("boolean").fillna(False)
+
+
+@pytest.mark.cpu_mode
+def test_the_off_hours_rule_fires_on_the_planted_login_and_not_on_the_nightly_batch(result: pd.DataFrame):
+    # R-D-L5-007 as the search states it. The planted 03:00 sign-in fires and the service account's 03:00 does
+    # not, which is the cadence feature's own negative control turned into a rule. The traveller's sign-in before
+    # his flight fires too: 08:00 is an hour his office week never used, and a real change of habit.
+    auth = _rows(result, "tc5_auth")
+    fires = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature") & (auth["auth_result"] == "success")]
+
+    assert set(zip(fires["user_principal"], fires["local_hour"].astype(int))) == {
+        (sp.ALICE, sp.OFF_HOURS_HOUR),
+        (sp.BOB, sp.FLIGHT_DEPART_HOUR),
+    }
+    assert sp.BATCH not in set(fires["user_principal"])
+
+    # The fatigue burst is at an unseen hour too, and its rows are refusals: R-D-L5-004's and R-D-L5-009's.
+    unseen = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature")]
+    assert set(unseen["user_principal"]) == {sp.ALICE, sp.BOB, sp.CAROL}
+
+
+@pytest.mark.cpu_mode
+def test_the_novelty_rule_fires_on_the_new_country_and_not_on_the_controls(result: pd.DataFrame):
+    # R-D-L5-008. The new country fires for the principal whose journey was impossible and for the one who flew;
+    # the VPN user's first concentrator sign-in is new too and is stopped by the maturity gate alone, which is
+    # the control that makes the gate a condition rather than a decoration.
+    auth = _rows(result, "tc5_auth")
+    new = auth[(auth["auth_result"] == "success")
+               & (_true(auth, "location_first_seen") | _true(auth, "device_first_seen"))]
+    fires = new[_true(new, "cadence_mature")]
+
+    assert set(zip(fires["user_principal"], fires["user_location"])) == {
+        (sp.ALICE, "us:ny:new-york"),
+        (sp.BOB, "us:ny:new-york"),
+    }
+    assert set(new["user_principal"]) - set(fires["user_principal"]) == {sp.DAVE}
+
+
+@pytest.mark.cpu_mode
+def test_the_failure_run_rule_fires_on_the_burst_and_not_on_the_fumbled_password(result: pd.DataFrame):
+    # R-D-L5-009. Both are failure-then-success; only the threshold separates them.
+    auth = _rows(result, "tc5_auth")
+    threshold = stamping.rule_thresholds(["R-D-L5-009"])["R-D-L5-009"]["failure_threshold"]
+    runs = auth[_true(auth, "auth_failed_then_succeeded")]
+    fires = runs[runs["consecutive_auth_failures"].astype(float) >= threshold]
+
+    assert list(fires["user_principal"]) == [sp.CAROL]
+    assert set(runs["user_principal"]) == {sp.ALICE, sp.CAROL}
+    assert int(runs[runs["user_principal"] == sp.ALICE]["consecutive_auth_failures"].iloc[0]) < threshold
+
+
+@pytest.mark.cpu_mode
+def test_the_model_rules_read_nothing_a_fallback_scored(result: pd.DataFrame):
+    # R-B-L5-001 and R-B-L5-002 read only rows whose model was fitted to the principal. Every row here was scored
+    # by the reference arithmetic under the manifest's fallback, so both are empty -- and nothing was tuned to
+    # make them so: with the gate removed they are empty as well, which is asserted rather than assumed.
+    auth = _rows(result, "tc5_auth")
+    limits = stamping.rule_thresholds(["R-B-L5-001", "R-B-L5-002"])
+    scored = auth[auth["mean_abs_z"].notna()]
+
+    assert scored["model_fallback_used"].astype("boolean").all()
+
+    composite = scored[(scored["max_abs_z"].astype(float) >= limits["R-B-L5-001"]["max_threshold"])
+                       & (scored["mean_abs_z"].astype(float) >= limits["R-B-L5-001"]["mean_threshold"])]
+    location = scored[scored["locincrement_z_loss"].astype(float) >= limits["R-B-L5-002"]["loss_threshold"]]
+
+    assert composite.empty
+    assert location.empty
+
+
+def _day(result: pd.DataFrame, principal: str, corpus_day: int) -> pd.DataFrame:
+    rows = _principal(result, principal)
+    days = ((rows["event_time"].astype("int64") // sp.NS_PER_SECOND - sp.CORPUS_EPOCH_S) // sp.DAY_S).astype(int)
+
+    return rows[days == corpus_day]
+
+
+@pytest.mark.cpu_mode
+def test_the_leavers_sign_ins_carry_what_was_known_at_their_time(result: pd.DataFrame):
+    # Dave leaves on the Saturday and the directory hears on the Sunday. A detection running on Saturday could not
+    # have known, so his Saturday sign-ins say active; the enrichment answers as known at each event, and the
+    # Sunday ones say terminated.
+    assert set(_day(result, sp.DAVE, sp.LEAVER_DAY)["ctx_employment_status"]) == {"active"}
+    assert set(_day(result, sp.DAVE, sp.LEAVER_RECORDED_DAY)["ctx_employment_status"]) == {"terminated"}
+    assert set(_day(result, sp.DAVE, sp.LEAVER_DAY)["ctx_knowledge"]) == {"event"}
+
+
+@pytest.mark.cpu_mode
+def test_the_service_principal_says_so_on_both_layer_5_classes(result: pd.DataFrame):
+    batch = result[result["user_principal"] == sp.BATCH]
+
+    assert set(batch["telemetry_class"]) == {"tc5_auth", "tc5_session"}
+    assert set(batch["ctx_account_type"]) == {"service"}
+    assert set(result[result["user_principal"] == sp.ALICE]["ctx_account_type"]) == {"human"}
+
+
+@pytest.mark.cpu_mode
+def test_a_group_change_takes_effect_on_the_day_it_was_made(result: pd.DataFrame):
+    (london, newyork) = sp.GROUP_CHANGE_GROUPS
+
+    assert set(_day(result, sp.BOB, sp.FLIGHT_DAY - 1)["ctx_groups"]) == {london}
+    assert set(_day(result, sp.BOB, sp.FLIGHT_DAY + 1)["ctx_groups"]) == {newyork}
+
+
+@pytest.mark.cpu_mode
+def test_the_lifecycle_is_start_or_end_on_every_paired_record(result: pd.DataFrame):
+    sessions = _rows(result, "tc5_session")
+    paired = sessions[sessions["session_action"].isin(["start", "end"])]
+    single = sessions[sessions["session_action"] == "session"]
+
+    assert (paired["session_lifecycle"] == paired["session_action"]).all()
+    assert single["session_lifecycle"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_a_single_record_session_is_timed_and_an_inverted_one_is_reported(result: pd.DataFrame):
+    sessions = _rows(result, "tc5_session")
+    single = sessions[sessions["session_id"] == sp.SINGLE_RECORD_SESSION]
+    inverted = sessions[sessions["session_id"] == sp.INVERTED_SESSION]
+    (start_hour, end_hour) = sp.SINGLE_RECORD_HOURS
+
+    assert int(single["session_duration_s"].iloc[0]) == (end_hour - start_hour) * 3600
+    assert bool(single["session_out_of_order"].iloc[0]) is False
+    assert inverted["session_duration_s"].isna().all()
+    assert bool(inverted["session_out_of_order"].iloc[0]) is True
+
+
+def _duration_rule(result: pd.DataFrame, exclude_services: bool = True) -> pd.DataFrame:
+    """R-B-L5-005 as its search states it; the account-type exclusion can be switched off."""
+    limits = stamping.rule_thresholds(["R-B-L5-005"])["R-B-L5-005"]
+    sessions = _rows(result, "tc5_session")
+    measured = sessions[sessions["session_duration_mature"].astype("boolean").fillna(False)]
+    fires = measured[measured["session_duration_ratio"].astype(float) > limits["ratio_threshold"]]
+
+    if (exclude_services):
+        fires = fires[fires["ctx_account_type"].fillna("unknown") != "service"]
+
+    return fires
+
+
+@pytest.mark.cpu_mode
+def test_the_long_interactive_session_fires_and_the_bimodal_service_account_does_not(result: pd.DataFrame):
+    # Carol's eleven-hour last day, against four of eight. The service account's last night is the longest it has
+    # had too, and fires the moment the account-type exclusion is removed -- so the exclusion is what keeps it
+    # quiet, not a percentile that happens to sit above it.
+    fires = _duration_rule(result)
+
+    assert list(fires["user_principal"]) == [sp.CAROL]
+    assert float(fires["session_duration_ratio"].iloc[0]) == pytest.approx((sp.LONG_SESSION_END_HOUR - 9) / 8, abs=1e-4)
+    assert set(_duration_rule(result, exclude_services=False)["user_principal"]) == {sp.CAROL, sp.BATCH}
+
+    # The ordinary working days measure at exactly their own baseline, which is not beyond it.
+    ordinary = _rows(result, "tc5_session")
+    ordinary = ordinary[ordinary["user_principal"].isin([sp.ALICE, sp.BOB])
+                        & ordinary["session_duration_mature"].astype("boolean").fillna(False)]
+    assert (ordinary["session_duration_ratio"].astype(float) == 1.0).all()
 
 
 @pytest.mark.cpu_mode

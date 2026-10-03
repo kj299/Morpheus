@@ -105,6 +105,37 @@ def _canonical(value: typing.Any) -> typing.Any:
     return value
 
 
+def settings_hash(settings: dict, decimals: int = DIGEST_CHARACTERS) -> str:
+    """
+    A digest of the parameters that decide a pipeline's output, for a pipeline composed in code.
+
+    `config_hash` digests a `Config`, which also carries the execution mode, the thread count and the batch
+    size: facts about what ran the pipeline rather than about what it computes. A corpus that must produce the
+    same envelope on a CPU and on a GPU, under control 13's parity check, hashes the settings that decide the
+    answer instead -- the seal period, the lateness horizon, the stages' own parameters -- through the same
+    canonical rendering the fingerprint uses, so dictionary order and float spelling do not fork it.
+
+    Parameters
+    ----------
+    settings : dict
+        Parameter name to value; nested dictionaries and lists are rendered canonically.
+    decimals : int, default = 16
+        Hex characters to keep.
+
+    Returns
+    -------
+    str
+        The digest.
+    """
+    if (not settings):
+        raise ValueError("settings_hash needs the settings that decide the output; an empty dictionary would "
+                         "hash every pipeline to the same configuration")
+
+    rendered = json.dumps(_canonical(settings), sort_keys=True, separators=(",", ":"))
+
+    return hashlib.sha256(rendered.encode("utf-8")).hexdigest()[:decimals]
+
+
 def pipeline_fingerprint(*,
                          configuration: str,
                          schema_versions: dict,

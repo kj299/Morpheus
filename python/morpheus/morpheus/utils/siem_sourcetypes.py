@@ -41,6 +41,12 @@ a timestamp format would quietly change arithmetic that depends on them.
 import dataclasses
 import typing
 
+from morpheus.utils.determinism_envelope import CONFIG_HASH_COLUMN
+from morpheus.utils.determinism_envelope import FINGERPRINT_COLUMN
+from morpheus.utils.determinism_envelope import TIER_COLUMN
+from morpheus.utils.model_manifest import MODEL_FALLBACK_COLUMN
+from morpheus.utils.model_manifest import MODEL_VERSION_COLUMN
+
 
 @dataclasses.dataclass(frozen=True)
 class Sourcetype:
@@ -98,6 +104,18 @@ class Unproduced:
     """What would have to exist. Specific, so it reads as a work item rather than an apology."""
 
 
+PROVENANCE_COLUMNS = (TIER_COLUMN, FINGERPRINT_COLUMN, CONFIG_HASH_COLUMN)
+"""Control 12 at the delivery boundary: the determinism envelope every scored event carries.
+
+Written by `DeterminismStampStage`, which every composed pipeline places behind its feature stages, so a consumer
+comparing two events can tell whether they came out of the same configuration under the same rules. The commit,
+image digest, feature schema version and seed travel beside these three and are not required, because a corpus
+records `unknown` for the first two honestly and a deployment is what supplies them.
+"""
+
+MODEL_COLUMNS = (MODEL_VERSION_COLUMN, MODEL_FALLBACK_COLUMN)
+"""Control 1 on the row: the model a scored event was scored against, and whether that was a fallback."""
+
 PRODUCED: dict = {
     "morpheus:score:l1":
         Sourcetype(
@@ -111,38 +129,58 @@ PRODUCED: dict = {
             # for. R-P-L1-004 reads the forecast status and the days the fitted trend gives the optic.
             required_columns=("event_uid",
                               "entity_key",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              *PROVENANCE_COLUMNS,
                               "site_id",
                               "device_id",
                               "port_id",
+                              "transceiver_serial",
                               "transceiver_serial_changed",
                               "link_flaps",
                               "oper_status",
                               "optical_rx_dbm_forecast_status",
-                              "optical_rx_dbm_days_to_floor"),
+                              "optical_rx_dbm_days_to_floor",
+                              "optical_rx_dbm_floor_dbm",
+                              "optical_rx_dbm_trend_db_per_day",
+                              "optical_rx_dbm_trend_samples",
+                              "resolution_method"),
         ),
     "morpheus:score:l3":
         Sourcetype(
             name="morpheus:score:l3",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-3 stages (cardinality, reach, beacon, TTL) behind WindowSealStage; the `tc3` class "
+            producer="The TC-3 stages (cardinality, reach, beacon, TTL) behind a WindowSealStage sealing hourly, which "
+            "R-C-001's `window_id + 1` depends on; the `tc3` class "
             "of `tests/morpheus/determinism/network_pipeline.py`.",
             # The five layer 3 detections read these off this sourcetype. `flow_pair_key` is here because
             # R-B-L3-002 is about a conversation rather than about a host, and a search grouping by `src_ip`
             # would average a beacon in with everything else that host does.
             required_columns=("event_uid",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              *PROVENANCE_COLUMNS,
                               "src_ip",
                               "dst_ip",
                               "flow_pair_key",
                               "dsts_per_src",
+                              "dsts_per_src_saturated",
                               "internal_dst_ratio",
+                              "flow_intervals",
+                              "flow_mean_interval_ns",
                               "flow_interval_cv",
                               "flow_size_cv",
                               "flow_regularity_mature",
                               "dst_is_reserved",
                               "dst_is_multicast",
                               "ip_ttl_shift",
-                              "ip_ttl_shifted"),
+                              "ip_ttl_shifted",
+                              "ip_ttl_established",
+                              "ip_ttl_distinct",
+                              "ip_ttl_mature"),
         ),
     "morpheus:score:l4":
         Sourcetype(
@@ -155,6 +193,10 @@ PRODUCED: dict = {
             # ratio columns are not, because a running ratio is not monotone and a search that summarizes a bin
             # has to divide the counts' maxima rather than aggregate the ratio -- see `tc4_flow_stage`.
             required_columns=("event_uid",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              *PROVENANCE_COLUMNS,
                               "src_ip",
                               "dst_ip",
                               "dst_port",
@@ -186,16 +228,23 @@ PRODUCED: dict = {
             # estate has just started seeing, and an issuer difference alone fires on every delivery host behind
             # more than one authority.
             required_columns=("event_uid",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              *PROVENANCE_COLUMNS,
                               "src_ip",
                               "dst_ip",
                               "ja4_client",
                               "ja4_client_first_seen",
                               "ja4_client_observations",
+                              "ja4_client_distinct",
+                              "ja4_client_saturated",
                               "certificate_issuer",
                               "cert_issuer_established",
                               "cert_issuer_differs",
                               "cert_issuer_distinct",
                               "cert_issuer_mature",
+                              "cert_issuer_new_to_estate",
                               "cert_self_signed",
                               "cert_self_signed_external",
                               "cert_validity_days",
@@ -204,11 +253,13 @@ PRODUCED: dict = {
                               "cipher_floor_tier",
                               "cipher_downgraded",
                               "cipher_mature",
+                              "cipher_unrecognized",
                               "content_type_declared",
                               "content_type_detected",
                               "content_category_declared",
                               "content_category_detected",
-                              "content_category_crossed"),
+                              "content_category_crossed",
+                              "content_category_unclassified"),
         ),
     "morpheus:score:l7":
         Sourcetype(
@@ -225,7 +276,7 @@ PRODUCED: dict = {
             # for that reason. R-B-L7-002 and R-P-L7-006 read the SaaS columns, the context the enrichment attached,
             # and the weekly trajectory. R-B-L7-004 reads the endpoint columns, and the peer group the enrichment
             # attached is carried as the stage recorded it.
-            required_columns=("event_uid", "entity_key"),
+            required_columns=("event_uid", "entity_key", "lineage_id", "osi_layer", "window_id", *PROVENANCE_COLUMNS),
             variant_columns=(
                 ("src_ip",
                  "query_name",
@@ -274,13 +325,22 @@ PRODUCED: dict = {
             # and the baseline it is a step above.
             required_columns=("event_uid",
                               "port_key",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              *PROVENANCE_COLUMNS,
+                              "mac_address",
+                              "macs_per_port",
+                              "macs_per_port_saturated",
                               "macs_per_port_first_in_window",
                               "macs_per_port_step",
                               "macs_per_port_baseline_max",
                               "macs_claiming_sender_ip",
+                              "arp_sender_mac",
                               "arp_sender_ip_excluded",
                               "auth_unpaired",
-                              "auth_port_key"),
+                              "auth_port_key",
+                              "resolution_method"),
         ),
     "morpheus:score:l5":
         Sourcetype(
@@ -288,43 +348,81 @@ PRODUCED: dict = {
             time_column="event_time",
             time_columns=("event_time", ),
             producer="The TC-5 stages (session, novelty, cadence, travel, risk, score and, over daily windows, drift) "
-            "behind WindowSealStage; the "
+            "behind TC0EnrichStage and WindowSealStage; the "
             "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`; and host "
             "logins through TC5NoveltyStage with a target host, BindingResolverStage and a site-measuring "
             "TC5TravelStage, and sessions through TC5SessionStage, the `tc5_auth` and `tc5_session` classes of "
             "`tests/morpheus/determinism/campaign_pipeline.py`.",
             # Two sources with different shapes share this sourcetype. An identity provider's sign-ins carry
-            # locations and factors and are scored: R-D-L5-003 and R-D-L5-004 filter on the first six of that set,
-            # and R-P-L5-006 on the rest, which TC5DriftStage stamps over the daily windows a second
-            # WindowSealStage seals behind the hourly one. A host login -- a Windows logon, an SSH session -- has
+            # locations and factors and are scored: R-D-L5-003 and R-D-L5-004 read the travel and factor columns,
+            # R-D-L5-007, R-D-L5-008 and R-D-L5-009 the principal's own cadence, novelty and failure-run columns,
+            # R-B-L5-001 and R-B-L5-002 the scores and the model columns that gate them, and R-P-L5-006 the
+            # trajectory TC5DriftStage stamps over the daily windows a second WindowSealStage seals behind the
+            # hourly one. A host login -- a Windows logon, an SSH session -- has
             # no location or factor but names the host logged into, which R-C-001 reads, and its source address
             # resolved through the DHCP leases and the layer 2 MAC bindings to a switch port and site, with the
             # journey between the sites of a principal's sign-ins, which R-C-005 reads. A session's start and stop
-            # records carry the address it came from, which R-C-004 binds a transfer to.
-            required_columns=("event_uid", "user_principal"),
+            # records carry the address it came from, which R-C-004 binds a transfer to, and the lifecycle in two
+            # words whatever the collector said. An identity provider's sessions enriched with the principal's
+            # identity context carry each session's duration against the principal's own, which R-B-L5-005 reads.
+            required_columns=("event_uid",
+                              "user_principal",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              *PROVENANCE_COLUMNS),
             variant_columns=(
-                ("travel_status",
+                ("auth_result",
+                 "ctx_groups",
+                 "ctx_department",
+                 "ctx_employment_status",
+                 "ctx_account_type",
+                 "travel_status",
                  "travel_kmh",
                  "travel_elapsed_ns",
                  "mfa_denied_then_approved",
                  "mfa_attempts_in_window",
                  "mfa_denials_in_window",
+                 "hour_unseen",
+                 "hour_surprise_bits",
+                 "cadence_mature",
+                 "location_first_seen",
+                 "device_first_seen",
+                 "logcount",
+                 "locincrement",
+                 "auth_failed_then_succeeded",
+                 "consecutive_auth_failures",
                  "mean_abs_z",
                  "max_abs_z",
+                 "locincrement_z_loss",
+                 *MODEL_COLUMNS,
                  "day_window_id",
                  "drift_mature",
                  "drift_rising_windows",
-                 "drift_rise_sigmas"),
+                 "drift_rise_sigmas",
+                 "drift_velocity",
+                 "drift_acceleration"),
                 ("source_ip",
                  "target_host",
                  "target_host_first_seen",
                  "auth_result",
                  "login_port_key",
                  "login_site_id",
+                 "resolution_method",
                  "site_travel_status",
                  "site_travel_kmh",
                  "site_travel_elapsed_ns"),
-                ("source_ip", "session_key", "session_action"),
+                ("source_ip", "session_key", "session_action", "session_lifecycle"),
+                ("session_key",
+                 "session_lifecycle",
+                 "session_duration_s",
+                 "session_duration_baseline",
+                 "session_duration_ratio",
+                 "session_duration_mature",
+                 "ctx_account_type",
+                 "ctx_privilege_level",
+                 "ctx_department",
+                 "ctx_employment_status"),
             ),
         ),
     "morpheus:edge":
@@ -343,7 +441,14 @@ PRODUCED: dict = {
             time_columns=("bucket_start", ),
             producer="`morpheus.utils.binding_table.BindingTable.to_bucketed_records`, which renders `bucket_start` "
             "itself rather than relying on a sink to do it.",
-            required_columns=("binding_table", ),
+            required_columns=("binding_table", "bucket", "binding_uid"),
+            # One variant per table the lookups read: the port inventory the L1 refreshes bucket, the MAC table,
+            # and the DHCP leases the L2/L3 refresh selects, which nothing in this fork produces yet (issue #63).
+            variant_columns=(
+                ("port_id", "switch_id", "site_id", "transceiver_serial", "lldp_neighbor_chassis_id"),
+                ("key", "port_key"),
+                ("ip", "mac", "port_id", "switch_id"),
+            ),
         ),
     "binding:l1":
         Sourcetype(
@@ -357,6 +462,8 @@ PRODUCED: dict = {
             required_columns=("port_id",
                               "switch_id",
                               "site_id",
+                              "bind_start",
+                              "bind_end",
                               "transceiver_serial",
                               "lldp_neighbor_chassis_id",
                               "binding_uid"),

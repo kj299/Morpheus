@@ -29,15 +29,19 @@ from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
+from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.determinism import quantize_value
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import EventClock
 from morpheus.utils.session_timer import NS_PER_SECOND
 from morpheus.utils.session_timer import SessionTimer
+from morpheus.utils.transfer_envelope import DEFAULT_QUANTILE
+from morpheus.utils.transfer_envelope import TransferEnvelopeTracker
 
 logger = logging.getLogger(__name__)
 
@@ -55,17 +59,46 @@ START_ACTIONS = ("start", "session_start", "logon", "login", "begin")
 END_ACTIONS = ("end", "session_end", "logoff", "logout", "stop", "terminate")
 """Values of the lifecycle column that close one."""
 
+LIFECYCLE_START = "start"
+LIFECYCLE_END = "end"
+"""What `session_lifecycle` says, whatever the collector called it. A search reads these two values and nothing
+else, so an identity provider that says `logon` and `logoff` is read by the same search as one that says
+`start` and `end`."""
+
+DEFAULT_BASELINE_DAYS = 30
+"""Trailing window a principal's session-duration baseline is taken over. Thirty days, as R-B-L5-005's own
+history is read."""
+
+DEFAULT_BASELINE_MIN_SAMPLES = 100
+"""Prior sessions before a principal's baseline is published. A hundred, where a 99th percentile by nearest rank
+stops being the longest session ever seen; see `morpheus.utils.transfer_envelope`."""
+
 
 @register_stage("tc5-session")
 class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
-    Pair a session's start record with its end record and write how long it lasted.
+    Pair a session's start record with its end record, write how long it lasted, and measure that against the
+    principal's own history of sessions.
 
-    The TC-5 telemetry class names `session_duration_s` among its required fields, and on estates whose identity
-    provider emits one record per session carrying both `session_start` and `session_end` this stage has nothing to
-    do: the duration is a subtraction and needs no state. It exists for the other shape, which is the common one --
+    The TC-5 telemetry class names `session_duration_s` among its required fields, and it arrives in two shapes.
+    Some identity providers emit one record per session carrying both `start_column` and `end_column`; for those
+    the duration is a subtraction, done here without touching the pairing state, and a record whose end precedes
+    its start is reported out of order rather than given a negative duration. The other shape is the common one --
     RADIUS accounting, VPN concentrators, Windows 4624 and 4634, and most SSH and RDP session logging emit a start
-    record and, later, a separate stop record, with nothing in either one saying how long the session ran.
+    record and, later, a separate stop record, with nothing in either one saying how long the session ran -- and
+    pairing those is most of what this stage does.
+
+    **`session_lifecycle` says which end of a session a record is, in two words.** Collectors spell it `start`,
+    `logon`, `login`, `begin` and more; this column is `start` or `end` whichever they used, and null for a record
+    that is neither. A search that correlates against session boundaries reads this column, so it does not break on
+    the next identity provider's vocabulary.
+
+    **Every timed session is measured against the principal's own sessions.** `session_duration_baseline` is the
+    `baseline_quantile` of the principal's prior session durations over `baseline_days`, by nearest rank, and
+    `session_duration_ratio` is this session's duration over it. Nothing is published below `baseline_min_samples`
+    prior sessions, and `session_duration_mature` says which. This is what R-B-L5-005 reads, and the stage measures
+    every principal: whether a service account belongs in the rule is the rule's question, answered from the
+    identity context, not something to bake into the measurement.
 
     Three things beyond the duration come out of the pairing, and each is a defect report rather than a feature:
 
@@ -118,6 +151,20 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_open_sessions : int, default = 500000
         Sessions held open before the least recently started is dropped. A dropped session's stop arrives unpaired,
         which over-reports the defect rather than hiding it.
+    start_column : str, default = "session_start"
+        Column holding a single-record session's start. Used only on rows that carry both bounds; the column may be
+        absent, in which case every row is a start or a stop to pair.
+    end_column : str, default = "session_end"
+        Column holding a single-record session's end.
+    baseline_days : int, default = 30
+        Trailing window each principal's duration baseline is taken over.
+    baseline_quantile : float, default = 0.99
+        Quantile of the principal's prior durations the baseline is taken at.
+    baseline_min_samples : int, default = 100
+        Prior sessions before a principal's baseline is published.
+    decimals : int, default = 4
+        Decimal places the baseline and the ratio are quantized to, so a golden does not depend on the last bit of
+        a division.
     """
 
     def __init__(self,
@@ -131,8 +178,17 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  end_actions: typing.Sequence[str] = END_ACTIONS,
                  timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,
-                 max_open_sessions: int = 500_000):
+                 max_open_sessions: int = 500_000,
+                 start_column: str = "session_start",
+                 end_column: str = "session_end",
+                 baseline_days: int = DEFAULT_BASELINE_DAYS,
+                 baseline_quantile: float = DEFAULT_QUANTILE,
+                 baseline_min_samples: int = DEFAULT_BASELINE_MIN_SAMPLES,
+                 decimals: int = 4):
         super().__init__(c)
+
+        if (baseline_days <= 0):
+            raise ValueError(f"baseline_days must be positive, received {baseline_days}")
 
         if (timeout_seconds <= 0):
             raise ValueError(f"timeout_seconds must be positive, received {timeout_seconds}")
@@ -157,8 +213,20 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._start_actions = start_set
         self._end_actions = end_set
 
+        self._start_column = start_column
+        self._end_column = end_column
+        self._decimals = decimals
+
         self._timer = SessionTimer(timeout_ns=timeout_seconds * NS_PER_SECOND, max_pending=max_open_sessions)
         self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+
+        # The rule reads the ratio, so the tracker's own breach flag is not used; it is given the smallest multiplier
+        # it accepts rather than a second copy of the rule's threshold.
+        self._baselines = TransferEnvelopeTracker(window_ns=baseline_days * 24 * 3600 * NS_PER_SECOND,
+                                                  quantile=baseline_quantile,
+                                                  multiplier=1.0 + 1e-9,
+                                                  min_samples=baseline_min_samples,
+                                                  max_entities=max_open_sessions)
 
         self._needed_columns["session_key"] = TypeId.STRING
         self._needed_columns["session_duration_ns"] = TypeId.INT64
@@ -166,6 +234,10 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._needed_columns["session_starts"] = TypeId.INT64
         self._needed_columns["session_unpaired"] = TypeId.BOOL8
         self._needed_columns["session_out_of_order"] = TypeId.BOOL8
+        self._needed_columns["session_lifecycle"] = TypeId.STRING
+        self._needed_columns["session_duration_baseline"] = TypeId.FLOAT64
+        self._needed_columns["session_duration_ratio"] = TypeId.FLOAT64
+        self._needed_columns["session_duration_mature"] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -211,9 +283,30 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         action = action.lower()
 
         if (action in self._start_actions):
-            return "start"
+            return LIFECYCLE_START
 
-        return "end" if action in self._end_actions else None
+        return LIFECYCLE_END if action in self._end_actions else None
+
+    def _round(self, value: typing.Optional[float]) -> typing.Optional[float]:
+        return None if value is None else quantize_value(value, self._decimals)
+
+    def _measure(self, principal: typing.Optional[str], event_time_ns: int, elapsed_ns: typing.Optional[int]) -> tuple:
+        """The baseline, the ratio and maturity for one timed session, or three nulls when there is nothing to say."""
+        if (principal is None or elapsed_ns is None):
+            return (None, None, None)
+
+        result = self._baselines.observe(principal, event_time_ns, elapsed_ns / NS_PER_SECOND)
+
+        if (result.out_of_order):
+            return (None, None, None)
+
+        return (self._round(result.baseline), self._round(result.ratio), result.mature)
+
+    def _bound(self, value: typing.Any) -> typing.Optional[int]:
+        try:
+            return to_epoch_ns(value, time_unit=self._time_unit)
+        except ValueError:
+            return None
 
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
@@ -253,6 +346,15 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             has_principal = self._principal_column in df.columns
             principals = to_host_list(df, self._principal_column) if has_principal else [None] * len(sessions)
 
+            # A single-record session carries both bounds. Either column may be absent, in which case no row is one.
+            single = self._start_column in df.columns and self._end_column in df.columns
+            bounds_start = to_host_list(df, self._start_column) if single else [None] * len(sessions)
+            bounds_end = to_host_list(df, self._end_column) if single else [None] * len(sessions)
+            lifecycles: list = []
+            baselines: list = []
+            ratios: list = []
+            mature: list = []
+
             session_keys: list = []
             duration_ns: list = []
             duration_s: list = []
@@ -271,11 +373,33 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 session_keys.append(session_key)
 
                 lifecycle = self._lifecycle(actions[position])
+                lifecycles.append(lifecycle)
+                baselines.append(None)
+                ratios.append(None)
+                mature.append(None)
 
                 try:
                     event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
                 except ValueError:
                     event_time_ns = None
+
+                session_start_ns = None if bounds_start[position] is None else self._bound(bounds_start[position])
+                session_end_ns = None if bounds_end[position] is None else self._bound(bounds_end[position])
+
+                if (session_start_ns is not None and session_end_ns is not None and event_time_ns is not None
+                        and self._clock.accept(event_time_ns)):
+                    # One record, both ends: a subtraction, and none of the pairing state is touched. An end before
+                    # its start is a defect in the record rather than a negative duration.
+                    inverted = session_end_ns < session_start_ns
+                    elapsed_ns = None if inverted else session_end_ns - session_start_ns
+
+                    duration_ns.append(elapsed_ns)
+                    duration_s.append(None if elapsed_ns is None else elapsed_ns // NS_PER_SECOND)
+                    starts.append(None)
+                    unpaired.append(False)
+                    out_of_order.append(inverted)
+                    (baselines[-1], ratios[-1], mature[-1]) = self._measure(principal, event_time_ns, elapsed_ns)
+                    continue
 
                 if (session_id is None or lifecycle is None or event_time_ns is None):
                     # Nothing to pair, or nothing to pair it on. Pooling records under a fabricated identifier would
@@ -324,6 +448,7 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 starts.append(timing.attempts if timing.attempts > 0 else None)
                 unpaired.append(timing.unpaired)
                 out_of_order.append(timing.out_of_order)
+                (baselines[-1], ratios[-1], mature[-1]) = self._measure(principal, event_time_ns, timing.elapsed_ns)
 
             assign_str_column(df, "session_key", session_keys)
             assign_nullable_int_column(df, "session_duration_ns", duration_ns)
@@ -331,6 +456,10 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_int_column(df, "session_starts", starts)
             assign_nullable_bool_column(df, "session_unpaired", unpaired)
             df["session_out_of_order"] = out_of_order
+            assign_str_column(df, "session_lifecycle", lifecycles)
+            assign_nullable_float_column(df, "session_duration_baseline", baselines)
+            assign_nullable_float_column(df, "session_duration_ratio", ratios)
+            assign_nullable_bool_column(df, "session_duration_mature", mature)
 
         if (keyless > 0):
             logger.warning(

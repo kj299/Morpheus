@@ -291,6 +291,23 @@ def test_the_exfiltration_chain_fires_on_the_attacker_alone(result: pd.DataFrame
 
 
 @pytest.mark.cpu_mode
+def test_the_chain_fires_through_a_collector_that_says_logon_and_logoff(result: pd.DataFrame):
+    # Kim's sessions come from a domain controller, whose records say logon and logoff. The chain fires because
+    # the search and this recomputation read session_lifecycle, which TC5SessionStage normalizes to start and end;
+    # read with the literal words the other collector uses, Kim has no session and the one firing disappears.
+    sessions = result[(result["telemetry_class"] == cp_.SESSION_CLASS) & (result["user_principal"] == cp_.KIM)]
+
+    assert set(sessions["session_action"]) == {"logon", "logoff"}
+    assert set(sessions["session_lifecycle"]) == {"start", "end"}
+
+    literal = result.copy()
+    literal["session_lifecycle"] = literal["session_action"].where(literal["session_action"].isin(["start", "end"]))
+
+    assert cp_.KIM in {who for (who, _) in cp_.staged_exfiltration(result)}
+    assert cp_.KIM not in {who for (who, _) in cp_.staged_exfiltration(literal)}
+
+
+@pytest.mark.cpu_mode
 @pytest.mark.parametrize("principal, condition",
                          [(cp_.LEE, {
                              "session_bound": False
@@ -547,6 +564,9 @@ def test_the_exfiltration_search_carries_the_conditions_this_harness_asserts():
     assert "(flow_data_len_envelope_breached=true OR flow_bpp_envelope_breached=true)" in search
     assert "cert_issuer_new_to_estate=true" in search
     assert "t_breach >= opened AND (isnull(closed) OR t_breach <= closed)" in search
+    assert 'if(session_lifecycle="start", _time, null())' in search
+    assert 'if(session_lifecycle="end", _time, null())' in search
+    assert "session_action" not in search
     assert f"t_breach >= t_export - {tolerance} AND t_breach - t_export <= {window}" in search
     assert f"t_handshake >= t_breach - {tolerance} AND t_handshake - t_export <= {window}" in search
     assert f"risk_score = {cp_.EXFIL_SEVERITY}" in search

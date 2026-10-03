@@ -88,10 +88,12 @@ import presentation_pipeline
 import saas_pipeline
 import transport_pipeline
 
+import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -132,6 +134,10 @@ SAAS_CLASS = saas_pipeline.SAAS_CLASS
 CLASSES = (FLOW_CLASS, AUTH_CLASS, PROCESS_CLASS, SESSION_CLASS, TRANSFER_CLASS, HANDSHAKE_CLASS, SAAS_CLASS)
 """The collectors, in the order they are run. The last four are R-C-004's; each of those runs through its layer's own
 composed pipeline, which is the one its single-layer rules are asserted over."""
+SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS}
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+RULES = ("R-C-001", "R-C-002", "R-C-004", "R-C-005")
+"""The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 # The rule's own figures, stated once so the corpus is built around them deliberately.
 CHAIN_WINDOW_SECONDS = 30 * 60
@@ -253,6 +259,13 @@ EXFILTRATORS = {
 SESSION_HOLDERS = {**{actor.principal: actor.address for actor in EXFILTRATORS.values()}, MAX: "10.20.1.7"}
 """Every principal with a daily session and the address it comes from. Max exports nothing; Lee's breach comes from
 Max's address."""
+
+LOGON_COLLECTOR_PRINCIPALS = frozenset({KIM})
+"""Principals whose sessions come from a collector that says `logon` and `logoff` rather than `start` and `end`.
+
+Kim is the actor R-C-004 fires on, so the rule's one firing depends on the search reading `session_lifecycle`, the
+column TC5SessionStage normalizes the vocabulary into, rather than a literal word one collector happens to use.
+"""
 
 # --- R-C-002's actors ---------------------------------------------------------------------------------------------
 
@@ -395,7 +408,13 @@ def _flows(rows: list, actor: Actor, index: int):
 
 
 def _session(rows: list, principal: str, address: str, session_id: str, action: str, when: int):
-    record = _envelope(rows, "vpn-01", "tc5_session.v1", f"{session_id}:{action}", when)
+    # A Windows domain controller's 4624 and 4634 records, for the principals whose sessions come from one.
+    if (principal in LOGON_COLLECTOR_PRINCIPALS):
+        (collector, action) = ("dc-01", {"start": "logon", "end": "logoff"}[action])
+    else:
+        collector = "vpn-01"
+
+    record = _envelope(rows, collector, "tc5_session.v1", f"{session_id}:{action}", when)
     record.update({
         "user_principal": principal, "source_ip": address, "session_id": session_id, "session_action": action
     })
@@ -860,7 +879,7 @@ def run_class(config: Config,
               dataframes: list[pd.DataFrame],
               impose_order: bool = True,
               mac_table: typing.Optional[BindingTable] = None) -> pd.DataFrame:
-    """Source, stamp, total order, the layer's stages, envelope, seal hourly, sink, for one collector."""
+    """Source, stamp, total order, the layer's stages, determinism stamp, envelope, hourly seal, sink: one collector."""
     (stages, osi_layer, entity_columns) = _stages(config, telemetry_class, mac_table)
 
     pipe = LinearPipeline(config)
@@ -873,6 +892,8 @@ def run_class(config: Config,
     for stage in stages:
         pipe.add_stage(stage)
 
+    pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(telemetry_class, SETTINGS,
+                                                                                rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=osi_layer, entity_columns=entity_columns))
     pipe.add_stage(
         WindowSealStage(config,
@@ -1037,9 +1058,9 @@ def session_intervals(result: pd.DataFrame) -> pd.DataFrame:
     """Each session's principal, address and the interval it was open over. An unended session is open at the end."""
     rows = result[result["telemetry_class"] == SESSION_CLASS].copy()
     rows["event_time"] = rows["event_time"].astype("int64")
-    starts = rows[rows["session_action"] == "start"].groupby(["session_key", "user_principal",
-                                                              "source_ip"])["event_time"].min().rename("opened")
-    ends = rows[rows["session_action"] == "end"].groupby("session_key")["event_time"].max().rename("closed")
+    starts = rows[rows["session_lifecycle"] == "start"].groupby(["session_key", "user_principal",
+                                                                 "source_ip"])["event_time"].min().rename("opened")
+    ends = rows[rows["session_lifecycle"] == "end"].groupby("session_key")["event_time"].max().rename("closed")
 
     return starts.reset_index().merge(ends.reset_index(), on="session_key", how="left")
 

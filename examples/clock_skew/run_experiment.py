@@ -47,6 +47,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import sys
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -79,17 +80,43 @@ nanosecond, so a sweep of that corpus measures how round its numbers are as much
 Moving every clock by half a window puts the same events in the middle of theirs and changes nothing else.
 """
 
-IMPOSSIBLE_KMH = 900
-"""R-D-L5-003's threshold, matching the saved search and the layer 5 harness."""
+SAVED_SEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..",
+                              "splunk_lineage_app",
+                              "TA-morpheus-lineage",
+                              "default",
+                              "savedsearches.conf")
 
-FATIGUE_CHALLENGES = 5
-FATIGUE_DENIALS = 4
-"""R-D-L5-004's two thresholds: more than five challenges in the window, at least four of them denied."""
 
-DRIFT_RISING_WINDOWS = 4
-DRIFT_RISE_SIGMAS = 1.5
-DRIFT_MEAN_CEILING = 2.0
-"""R-P-L5-006's thresholds, matching the saved search."""
+def _threshold(stanza: str, pattern: str) -> float:
+    """A threshold as the shipped search states it, so this experiment decides the app's rule and not a copy."""
+    import configparser  # pylint: disable=import-outside-toplevel
+
+    with open(SAVED_SEARCHES, encoding="utf-8") as handle:
+        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
+
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.read_string(folded)
+    match = re.search(pattern, parser[stanza]["search"])
+
+    if (match is None):
+        raise ValueError(f"{stanza} no longer states {pattern!r}")
+
+    return float(match.group(1))
+
+
+IMPOSSIBLE_KMH = _threshold("R-D-L5-003 - Impossible travel", r"kmh_threshold\s*=\s*([\d.]+)")
+"""R-D-L5-003's threshold, read from the saved search."""
+
+FATIGUE_CHALLENGES = _threshold("R-D-L5-004 - Multi-factor fatigue", r"challenge_threshold\s*=\s*([\d.]+)")
+FATIGUE_DENIALS = _threshold("R-D-L5-004 - Multi-factor fatigue", r"denial_threshold\s*=\s*([\d.]+)")
+"""R-D-L5-004's two thresholds, read from the saved search: more challenges than the first, at least the second
+denied."""
+
+DRIFT_RISING_WINDOWS = _threshold("R-P-L5-006 - Drift trajectory", r"rising_threshold\s*=\s*([\d.]+)")
+DRIFT_RISE_SIGMAS = _threshold("R-P-L5-006 - Drift trajectory", r"sigma_threshold\s*=\s*([\d.]+)")
+DRIFT_MEAN_CEILING = _threshold("R-P-L5-006 - Drift trajectory", r"mean_ceiling\s*=\s*([\d.]+)")
+"""R-P-L5-006's thresholds, read from the saved search."""
 
 
 def offsets_for(sources: list, magnitude_ns: int) -> dict:
@@ -318,7 +345,6 @@ def compare_decisions(baseline: dict, skewed: dict) -> dict:
 
 def gap_threshold_ns() -> int:
     """R-D-L2-004's threshold, read from the shipped search rather than restated here."""
-    import re  # pylint: disable=import-outside-toplevel
 
     path = os.path.join(REPO_ROOT,
                         "examples",

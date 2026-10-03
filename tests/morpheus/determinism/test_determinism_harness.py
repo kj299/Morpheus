@@ -132,6 +132,7 @@ def test_against_golden_via_compare_dataframe_stage(pipeline_config: Config, cor
     from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
     from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
     from morpheus.stages.lineage.community_id_stage import CommunityIdStage
+    from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
     from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
     from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 
@@ -146,6 +147,7 @@ def test_against_golden_via_compare_dataframe_stage(pipeline_config: Config, cor
     pipe.add_stage(
         BindingResolverStage(pipeline_config, binding_table=lineage_pipeline.build_binding_table(),
                              key_column="src_ip"))
+    pipe.add_stage(DeterminismStampStage(pipeline_config, envelope=lineage_pipeline.ENVELOPE))
     pipe.add_stage(
         WindowSealStage(pipeline_config,
                         period_seconds=lineage_pipeline.PERIOD_SECONDS,

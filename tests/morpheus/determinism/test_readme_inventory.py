@@ -324,10 +324,18 @@ def test_the_readme_states_the_shipped_detection_count():
     with open(DOCUMENTS["README"], encoding="utf-8") as handle:
         readme = handle.read()
 
-    match = re.search(r"Ten of the app's ([\w-]+) detection searches", readme)
+    match = re.search(r"\| ([\w-]+) of the app's ([\w-]+) detection searches", readme)
 
     assert match is not None, "the README's first-detections row no longer states the app's detection count"
-    assert from_words(match.group(1)) == len(shipped), f"the README says {match.group(1)}; {len(shipped)} stanzas ship"
+    assert from_words(match.group(2)) == len(shipped), f"the README says {match.group(2)}; {len(shipped)} stanzas ship"
+
+    # The row names its own rules; their number is the first figure, and every one of them has to be a rule that
+    # ships.
+    row = readme[match.start():readme.index("\n", match.start())]
+    named = set(RULE_ID.findall(row))
+
+    assert from_words(match.group(1)) == len({rule for rule in named if re.match(r"R-[BDP]-L[125]-", rule)})
+    assert named <= set(shipped), sorted(named - set(shipped))
 
 
 def test_the_summary_names_every_telemetry_class_that_has_a_stage():
@@ -344,3 +352,96 @@ def test_the_summary_names_every_telemetry_class_that_has_a_stage():
 
     assert f"every telemetry class from {prefixes[0]} to {prefixes[-1]}" in summary, (
         "the Summary no longer says feature stages run for every telemetry class; name them or restore the phrase")
+
+
+CORPORA = os.path.dirname(os.path.abspath(__file__))
+
+
+def composed_pipelines() -> list:
+    """The twelve corpora: every `*_pipeline.py` beside this file that is not a `run_` entry point."""
+    return sorted(name for name in os.listdir(CORPORA) if name.endswith("_pipeline.py") and not name.startswith("run_"))
+
+
+def test_every_composed_pipeline_places_the_determinism_stamp():
+    # The envelope was a tested stage that no corpus placed for weeks, while two documents said scored events carried
+    # it. A corpus that composes its stages without the stamp is a corpus whose golden proves nothing about
+    # provenance, so the placement is asserted by name, in the source, for all twelve.
+    names = composed_pipelines()
+
+    assert len(names) == 12, names
+
+    unstamped = []
+
+    for name in names:
+        with open(os.path.join(CORPORA, name), encoding="utf-8") as handle:
+            text = handle.read()
+
+        if ("DeterminismStampStage(config" not in text or "stamping.envelope_for(" not in text):
+            unstamped.append(name)
+
+    assert not unstamped, f"composed without DeterminismStampStage: {unstamped}"
+
+
+def required_fields() -> dict:
+    """Per telemetry class, the fields Part 2 lists as required, for the classes that list them in one place."""
+    with open(DOCUMENTS["guide"], encoding="utf-8") as handle:
+        text = handle.read()
+
+    part_2 = text[text.index("## Part 2"):text.index("## Part 3:")]
+    found = {}
+
+    for match in re.finditer(r"### (TC-\d):[^\n]*\n(.*?)(?=\n### |\Z)", part_2, re.S):
+        listed = re.search(r"\*\*Required fields:\*\*(.*?)\n\n", match.group(2), re.S)
+
+        if (listed is not None):
+            found[match.group(1)] = re.findall(r"`([a-z0-9_]+)`", listed.group(1))
+
+    return found
+
+
+def read_fields(fields: list) -> list:
+    """The fields a telemetry or lineage stage, or a shipped search, names."""
+    sources = []
+
+    for directory in ("telemetry", "lineage"):
+        folder = os.path.join(STAGES, directory)
+        sources += [os.path.join(folder, name) for name in os.listdir(folder) if name.endswith(".py")]
+
+    text = ""
+
+    for path in sources + [SAVED_SEARCHES]:
+        with open(path, encoding="utf-8") as handle:
+            text += handle.read()
+
+    return [field for field in fields if re.search(rf"\b{field}\b", text)]
+
+
+def test_the_readme_says_how_many_required_fields_each_class_reads():
+    # Part 2 lists what each class must carry, and for weeks nothing said which of those anything reads: ten of
+    # the twenty-one TC-5 fields had no reader while the collection table called the class done. The Read column
+    # is recomputed here from the guide and the code, so a field gaining or losing its reader moves the number.
+    with open(DOCUMENTS["README"], encoding="utf-8") as handle:
+        readme = handle.read()
+
+    stated = dict(re.findall(r"^\| \*\*(TC-\d)\*\* .*\| (\d+ of \d+) \|$", readme, re.MULTILINE))
+    required = required_fields()
+
+    assert len(required) >= 6, sorted(required)
+    assert set(stated) == set(required), (sorted(stated), sorted(required))
+
+    for (telemetry_class, fields) in required.items():
+        assert stated[telemetry_class] == f"{len(read_fields(fields))} of {len(fields)}", telemetry_class
+
+
+def test_part_2_names_the_tc5_fields_nothing_reads_yet():
+    fields = required_fields()["TC-5"]
+    unread = [field for field in fields if field not in read_fields(fields)]
+
+    with open(DOCUMENTS["guide"], encoding="utf-8") as handle:
+        text = handle.read()
+
+    section = text[text.index("### TC-5: Session"):text.index("### TC-6:")]
+    sentence = section[section.index("specified and not yet read by anything"):]
+    sentence = sentence[:sentence.index(". ")]
+
+    assert sorted(re.findall(r"`([a-z0-9_]+)`", sentence)) == sorted(unread)

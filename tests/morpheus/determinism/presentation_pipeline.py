@@ -59,9 +59,11 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -94,6 +96,10 @@ SCHEMA_VERSION = "tc6.v1"
 MIN_SAMPLES = 5
 """Prior handshakes a reference needs. The stages' own default, repeated so the corpus can be built to clear it
 deliberately rather than by accident."""
+SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS, "min_samples": MIN_SAMPLES}
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+RULES = ("R-B-L6-001", "R-D-L6-002", "R-D-L6-003", "R-B-L6-004", "R-D-L6-005")
+"""The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 # Hosts.
 MANAGED = "10.0.0.20"
@@ -354,6 +360,8 @@ def run_pipeline(config: Config,
     for stage in build_stages(config):
         pipe.add_stage(stage)
 
+    pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(TELEMETRY_CLASS, SETTINGS,
+                                                                                rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))
     pipe.add_stage(
         WindowSealStage(config,

@@ -54,9 +54,11 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -84,6 +86,11 @@ IGNORE_COLUMNS: list[str] = []
 OSI_LAYER = 7
 ENTITY_COLUMNS = ["user_principal"]
 SAAS_CLASS = "tc7_saas"
+
+SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS, "week_seconds": WEEK_SECONDS}
+"""The settings that decide this corpus's output, with the knowledge mode `run_pipeline` is given added per run."""
+RULES = ("R-B-L7-002", "R-P-L7-006")
+"""The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 WEEK_PREFIX = "week_"
 """Prefix of the weekly seal's columns, so they sit beside the hourly seal's rather than over them."""
@@ -428,6 +435,8 @@ def run_pipeline(config: Config,
     pipe.add_stage(
         TC0EnrichStage(config, store=asset, entity_column="target_object", knowledge=knowledge, prefix="ctx_object_"))
     pipe.add_stage(TC7SaasStage(config))
+    settings = {**SETTINGS, "knowledge": knowledge}
+    pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(SAAS_CLASS, settings, rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))
     pipe.add_stage(
         WindowSealStage(config,

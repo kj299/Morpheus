@@ -36,6 +36,9 @@ env:
 jobs:
   project_automation_sync_pr_with_issues:
     runs-on: ubuntu-latest
+    # NVIDIA's project board and app credentials exist only upstream; on a fork this job has nothing to
+    # write to and no token to write with, so it is skipped rather than left to fail on every PR.
+    if: github.repository_owner == 'nv-morpheus'
 
     steps:
       - name: Generate Token
