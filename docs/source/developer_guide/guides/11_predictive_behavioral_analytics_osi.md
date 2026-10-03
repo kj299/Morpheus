@@ -59,7 +59,7 @@ resolution, window sealing), feature stages for every telemetry class from TC-0 
 scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's six
 checks over twelve composed corpora, which run under pytest on developer machines and have not yet run in
 any CI this fork has executed. That is forty-six stages and forty-one supporting
-modules, covered by 1,880 distinct tests, itemized in
+modules, covered by 1,884 distinct tests, itemized in
 [Part 6](#provided). Thirty-two of the thirty-nine rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -146,7 +146,7 @@ fallen out of a list, which is the defect two of the repairs below were for.
 
 These runs also carry `torch==2.4.0+cu124` beside the RAPIDS stack, which answers a question the earlier
 ones could not: the two coexist in one process, and adding Torch does not disturb cuDF. That is every
-stage, all four composed pipelines, control 13's six checks, the stage parameter liveness registry and
+stage and all four composed pipelines that existed on 2026-09-20 (lineage, telemetry, session, estate), control 13's six checks, the stage parameter liveness registry and
 the first-detection corpus, in GPU mode. What a device run does not reach, in this harness as in the
 others, is the assertions marked `cpu_mode`: the estate's nineteen include the ladder itself and both
 its negative controls, and they are CPU statements by construction rather than by omission. What it is not is a measurement of the model. The conformance
@@ -426,8 +426,10 @@ Output (`stages/output/`): `WriteToKafkaStage`, `WriteToElasticsearchStage`, `Wr
 General (`stages/general/`): `MonitorStage`, `TriggerStage`, `BufferStage`, `DelayStage`,
 `RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, `MultiPortModulesStage`.
 
-Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`, `EnvelopeStampStage`,
-`ChainAnchorStage`. These were added to support the design in Part 4 and are covered in detail there.
+Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`, `EnvelopeStampStage`, `ChainAnchorStage`,
+`BindingResolverStage`, `WindowSealStage`, `TotalOrderStage`, `DeterminismStampStage` and `MinimizationStage`. These
+were added to support the design in Parts 4 and 5 and are covered in detail there, beside the thirty-six
+telemetry stages under `stages/telemetry/` and the SIEM wire stage under `stages/output/`.
 
 There is no Splunk sink. Delivery to Splunk goes through Kafka, HTTP Event Collector via
 `HttpClientSinkStage`, or a file drop consumed by a forwarder. Part 4 covers the tradeoffs.
@@ -757,7 +759,9 @@ Four mechanisms in this architecture make it forward-looking, in increasing orde
 3. **Forecast residual.** `TimeSeriesStage` already computes the difference between an entity's observed
    binned activity and the reconstruction of its dominant periodic components. Feeding the forecast
    itself, not just the residual flag, into the SIEM lets you alert on "this entity is projected to exceed
-   its envelope in the next window."
+   its envelope in the next window." Status: this mechanism is built for layer 1 optics only, as
+   {py:class}`~morpheus.stages.telemetry.tc1_forecast_stage.TC1ForecastStage`'s linear extrapolation; no fork
+   stage uses `TimeSeriesStage` or its forecast (gap G21).
 4. **Cross-layer precursor chains.** The highest-value predictive signal is ordinal: an entity that shows
    a layer 3 scanning pattern, then a layer 5 authentication anomaly, then a layer 7 data access anomaly,
    within a bounded interval. No single layer's score need cross a threshold for the chain to be alarming.
@@ -812,8 +816,10 @@ against the time of day would make a replay of last week's data expire everythin
 one corpus produce different output depending on when it was run. The reference that keeps replay honest is
 the stream's own progress, so a time further ahead of everything seen so far than any operational gap could
 explain is refused, the row carries no per-entity features, and the stage reports how many it refused.
-{py:mod}`~morpheus.utils.event_clock` implements this, and both TC-2 stateful stages take
-`max_clock_skew_seconds`.
+{py:mod}`~morpheus.utils.event_clock` implements this, and four stages take `max_clock_skew_seconds`:
+`TC1BindingStage`, `TC2BindingStage`, `TC2AuthStage` and `TC5SessionStage`. The other windowed stateful stages,
+`TC2CardinalityStage`, `TC2BaselineStage`, `TC2ArpStage` and the layer 3 to 7 window stages, do not yet guard
+event time this way (gap G71 in [the retrospective](./12_behavioral_analytics_retrospective.md)).
 
 ### TC-1: Physical
 
@@ -823,17 +829,26 @@ explain is refused, the row carries no per-entity features, and the stage report
 structured cabling and patch-panel inventory, out-of-band management controllers, and for physical
 security, badge readers and rack door sensors.
 
-**Required fields:** `port_id`, `admin_status`, `oper_status`, `link_speed_bps`, `duplex`,
-`transceiver_serial`, `transceiver_type`, `optical_tx_dbm`, `optical_rx_dbm`, `crc_error_delta`,
-`symbol_error_delta`, `input_discards_delta`, `output_discards_delta`, `last_change_time`,
-`lldp_neighbor_chassis_id`, `lldp_neighbor_port_id`, `poe_draw_watts`.
+**Required fields, as the stages read them:** `site_id`, `device_id` and `port_id` for the key; `admin_status`,
+`oper_status`, `link_speed_bps`, `duplex`; `transceiver_serial`, `transceiver_type`, `optical_tx_dbm`,
+`optical_rx_dbm`; the raw monotonic counters `crc_errors`, `symbol_errors`, `input_discards` and
+`output_discards`, with `uptime` (`sysUpTime`, in hundredths of a second) and `if_last_change` beside them;
+`lldp_neighbor_chassis_id`, `lldp_neighbor_port_id`; `poe_draw_watts`. Of these, `admin_status`,
+`link_speed_bps`, `duplex`, `lldp_neighbor_port_id` and `poe_draw_watts` are required by this design and read by
+no shipped stage yet.
 
-Counters must be reported as **deltas with an explicit interval**, not raw values, because raw counters
-wrap and reset silently on device reboot. A `counter_reset` flag on each record removes ambiguity.
+Counters arrive as **raw monotonic totals with `sysUpTime` beside them**, not as deltas.
+{py:class}`~morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage` differences them in the pipeline
+and emits `crc_errors_delta`, `symbol_errors_delta`, `input_discards_delta`, `output_discards_delta` and
+`interval_seconds`, with `counter_wrapped`, `counter_reset` and `sample_out_of_order` flags that tell a 32-bit
+wrap from a device reboot. A collector that subtracted first would be subtracted from twice. Differencing needs
+the previous sample, which makes it stateful, and state at the collector is state to be replicated, aged,
+and lost on restart; keeping it in the pipeline leaves the collector a stateless poller.
 
-{py:class}`~morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage` performs that conversion in
-the pipeline, so the collector stays a stateless poller. Differencing needs the previous sample, which
-makes it stateful, and state at the collector is state to be replicated, aged, and lost on restart.
+**Identity is the collector's strings.** The port key is `site_id:device_id:port_id` composed from the names
+the poller reports; nothing anchors it to an `ifIndex`, a chassis serial or an alias interval, so a renamed
+port or a replaced switch with a new `hostname` starts a new entity and a new history. That is a recorded
+limitation rather than planned work (gap G39).
 Placed here it also inherits the pipeline's determinism controls: the stage is single-engine and shards
 by device (control 4), and it processes rows in the order given, flagging a sample that arrives out of
 order rather than reporting the negative delta a naive subtraction would produce. A wrap and a reboot are
@@ -1009,7 +1024,11 @@ real move. Every other reason leaves the gap null, because nothing was seen else
 against. A **snapshot absence** means a reconciliation pass over a scope no longer
 lists the key. An **idle timeout** is the backstop for the stop record that never arrived. Every emitted
 record carries `bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that
-will act on a binding can insist on an end somebody actually reported.
+will act on a binding can insist on an end somebody actually reported. Status: {py:mod}`~morpheus.utils.binding_closer`
+implements the explicit stop and the snapshot reconcile and both are unit-tested, but no shipped stage calls
+them, so every emitted end is inferred today and `bind_end_observed` is false on every record a composed
+pipeline produces; a rule insisting on an observed end matches nothing until a stop or snapshot input is
+wired (gap G38).
 
 The binding target defaults to this class's own entity key, `site_id`, `switch_id`, `port_id` and
 `vlan_id`, and every closed binding also carries `port_key` as `site_id:switch_id:port_id`. That string
@@ -1168,8 +1187,9 @@ the class earns its place even though the mapping is loose.
 
 ### TC-7: Application
 
-**Entity key:** varies by sub-class. `user_principal` for SaaS, `service_account` for API, `hostname`
-for DNS, `process_guid` for endpoint.
+**Entity key:** varies by sub-class. As built: `src_ip`, the querying client, for DNS and HTTP;
+`user_principal` for SaaS; `hostname` for endpoint. As designed and not built: `service_account` for API and
+`process_guid` for endpoint processes.
 
 **Sources:** HTTP proxies and WAFs, DNS resolvers, SaaS audit APIs (Microsoft 365, Salesforce,
 Workday), database audit logs, API gateways, email security gateways, EDR process telemetry, and the
@@ -1185,10 +1205,13 @@ endpoint: `process_guid`, `parent_process_guid`, `image_path`, `command_line_has
 **Behavioral features:** DNS query name entropy and label-length distribution for tunneling and domain
 generation algorithms. `DistinctIncrementColumn` over `target_object_type` per principal for data access
 novelty. Record-count-per-operation deviation from the principal's baseline for bulk extraction. Ratio of
-`4xx`/`5xx` to `2xx` per client for enumeration. User agent novelty per principal. Process ancestry
+`4xx` to `2xx` per client for enumeration (`5xx` is about the server and is excluded; see R-D-L7-005). User agent novelty per principal. Process ancestry
 novelty using the parent-child pair as a categorical. The `models/` directory ships pretrained models
 usable here: `sid-models` for sensitive information detection, `phishing-models`, `log-parsing-models`
-for NER over unstructured logs, and `ransomware-models` for AppShield-style host telemetry.
+for NER over unstructured logs, and `ransomware-models` for AppShield-style host telemetry. These are upstream
+models and sources: this fork composes none of them, R-B-L7-003 waits on a Triton path (see Part 6), and
+`AppShieldSourceStage`, named here and in Part 0 as the host-telemetry analogue, is used by nothing in this
+fork, whose endpoint class reads EDR process records instead (gap G69).
 
 **Cadence:** continuous, very high volume.
 **Cardinality:** highest of any layer.
@@ -1217,7 +1240,9 @@ word for it. It is also the smallest and most valuable dataset in the architectu
 keeping it accurate rather than for keeping it forever. Set the period against the retention of what it
 interprets, and ask counsel rather than this document.
 
-This is built. {py:mod}`~morpheus.utils.bitemporal` holds the facts,
+The profile, group-membership and asset parts of this are built; the service-account-to-owning-team and the
+CMDB application-to-server mappings have no producer, kind or sourcetype yet, although the store is
+kind-generic and could hold them (gap G51). {py:mod}`~morpheus.utils.bitemporal` holds the facts,
 {py:class}`~morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage` and
 {py:class}`~morpheus.stages.telemetry.tc0_asset_stage.TC0AssetStage` produce `context:identity` and
 `context:asset`, and {py:class}`~morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage` attaches the context
@@ -1448,7 +1473,10 @@ All five of these are built and ship as saved searches. The features they read c
 {py:class}`~morpheus.stages.telemetry.tc3_beacon_stage.TC3BeaconStage` and
 {py:class}`~morpheus.stages.telemetry.tc3_ttl_stage.TC3TtlStage`, and each rule is asserted over the seeded
 corpus in `tests/morpheus/determinism/test_network_harness.py` together with the case beside it that must stay
-quiet. Two departures from the text above are deliberate and recorded where they are made. R-B-L3-001's
+quiet. Three departures from the text above are deliberate and recorded where they are made. R-B-L3-002 ships as
+a coefficient of variation over inter-arrival times and sizes ({py:mod}`~morpheus.utils.arrival_regularity`,
+`TC3BeaconStage`) rather than through `TimeSeriesStage`; the periodogram path in `fftAD` exists upstream in
+`morpheus.stages.postprocess.timeseries_stage` and is not applied to the beacon rule. R-B-L3-001's
 threshold is a fixed distinct-destination count standing in for the per-source fourteen-day percentile, which
 the shipped app cannot compute without a history it does not keep. R-B-L3-004 fires on a shift of one hop rather
 than on more than one, because one hop is what a single interposed device costs and the stricter reading would
@@ -1483,8 +1511,10 @@ that must stay quiet. The two that do not ship are recorded here rather than lef
 R-B-L4-001 is the shipped `abp-pcap-xgb` model behind a Triton endpoint, so what this fork owes it is the
 thirteen features under the names it was trained on; those are emitted, and `MODEL_FEATURES` maps each one
 to the column carrying it so a deployment builds the model's input frame from the mapping rather than from
-a second copy of the list. R-B-L4-004 needs a layer 7 `user_agent` on the same `flow_id`, and layer 7 is
-still design.
+a second copy of the list. R-B-L4-004 needs `tcp_options_order` on the layer 4 row and the layer 7 `user_agent`
+joined to that flow on a shared flow identifier; `TC4FlowStage` carries no options and no stage links a
+`flow_id` to a request, so the rule waits on the stack fingerprint columns and the host identity work (gaps
+G29 and G52), not on layer 7, which ships.
 
 Three departures from the text above are deliberate, and each is recorded where it is made. R-D-L4-003's
 threshold is 0.5 rather than 0.8, because a connection refused with RST+ACK puts exactly two flags on the
@@ -1579,7 +1609,8 @@ All five of these are built and ship as saved searches, reading
 {py:class}`~morpheus.stages.telemetry.tc6_cipher_stage.TC6CipherStage` and
 {py:class}`~morpheus.stages.telemetry.tc6_content_stage.TC6ContentStage`, and each is asserted over the
 seeded corpus in `tests/morpheus/determinism/test_presentation_harness.py` together with the case beside
-it that must stay quiet. R-B-L6-001 is as cheap as this section claims: the layer rides collection points
+it that must stay quiet. One departure is recorded here: R-B-L6-001 is not gated on the host being a managed
+endpoint, because layer 6 carries no TC-0 join yet, so every `src_ip` is eligible (gap G76). R-B-L6-001 is as cheap as this section claims: the layer rides collection points
 layers 3 and 4 already established, and four of the five rules reuse primitives the fork had before layer
 6 existed.
 
@@ -2036,7 +2067,9 @@ pipe.add_stage(CommunityIdStage(config, src_ip_column="src_ip", dst_ip_column="d
 Name the columns your frames actually carry. The stage defaults to `dest_ip` and `dest_port`, which are
 the Splunk CIM spellings; every telemetry class in this fork emits `dst_ip` and `dst_port`, which is why
 each composed pipeline passes them explicitly. Mixing the two is not a syntax error anywhere -- it is a
-null column, and R-C-002 spent several increments grouping on one.
+null column, and R-C-002 spent several increments grouping on one. The lineage reference corpus and the
+`morpheus:edge` contract still use `dest_ip` and `dest_port`, so a search joining edges to scored events must
+rename one side until the edge producer is aligned.
 
 Leave `seed` at its default of zero. The seed is part of the hash input, so a non-default value produces
 identifiers that no other tool in the estate will agree with, which forfeits the entire benefit.
@@ -2322,7 +2355,9 @@ Alert on the unresolved rate. A rising rate means the collector is losing expiry
 attribution it produces is suspect. `BindingTable` counts overlapping intervals at construction for the
 same reason and logs a warning.
 
-**Define the lookup.** The KV Store collection and its lookup definition:
+**Define the lookup.** The KV Store collection and its lookup definition, illustratively; the app's
+`collections.conf` and `transforms.conf` are the authority, and they add `[binding_l1_collection]`, the current-state
+lookup, and a `_key` field this listing omits:
 
 ```ini
 # collections.conf
@@ -2461,13 +2496,13 @@ event arrival order, which breaks determinism.
 Single hop, layer 3 to layer 2 to layer 1, resolving an IP to a physical port:
 
 ```spl
-index=behavior_events sourcetype=morpheus:score:l3 max_abs_z>=6.0
+index=behavior_events sourcetype=morpheus:score:l3 dsts_per_src>=50
 | eval bucket=floor(_time/300), l1_bucket=floor(_time/86400)
 | lookup binding_l2_l3 ip AS src_ip bucket OUTPUT mac port_id switch_id
 | lookup binding_l1_history port_id switch_id bucket AS l1_bucket OUTPUT site_id transceiver_serial lldp_neighbor_chassis_id
 | lookup binding_l1 port_id switch_id OUTPUT site_id AS site_now transceiver_serial AS transceiver_now lldp_neighbor_chassis_id AS neighbor_now
 | eval site_id = coalesce(site_id, site_now), transceiver_serial = coalesce(transceiver_serial, transceiver_now), lldp_neighbor_chassis_id = coalesce(lldp_neighbor_chassis_id, neighbor_now)
-| table _time src_ip mac port_id switch_id site_id transceiver_serial max_abs_z event_uid lineage_id
+| table _time src_ip mac port_id switch_id site_id transceiver_serial dsts_per_src event_uid lineage_id
 ```
 
 The last hop is two lookups and a coalesce, and the order carries the meaning. The history is consulted
@@ -2476,7 +2511,9 @@ and falls back. Reversing the two, or dropping the history hop for brevity, answ
 question in the present tense and looks exactly the same while doing it.
 
 Full chain assembly from the edge index. This is the query that makes R-C-001 through R-C-005
-expressible:
+expressible. Status: designed, pending an edge producer. The `morpheus:edge` records the fork emits carry
+`community_id` and no parent or child `event_uid`, `join_method`, `osi_layer` or `lineage_id`, so this query
+returns nothing on pipeline output today (gap G43), and the four shipped chained rules join on values instead:
 
 ```spl
 index=behavior_lineage sourcetype=morpheus:edge earliest=-30m
@@ -2612,9 +2649,10 @@ For rules driven off the summary index rather than the raw index, the same stanz
 
 - Use `tstats` against accelerated data models for the volume layers. Accept that acceleration introduces
   a summarization lag and document it in each rule's expected detection latency.
-- Summary-index the per-layer scores at 5-minute granularity. Chained rules run against the summary, not
-  the raw index, which makes their runtime independent of raw volume and their results independent of
-  index-time variability.
+- Summary-index the per-layer scores at 5-minute granularity. Chained rules should run against the summary,
+  not the raw index, which makes their runtime independent of raw volume and their results independent of
+  index-time variability. Status: only R-P-L3-005 reads the summary today; the four shipped chained rules
+  read scored events in `behavior_events`.
 - Pin every scheduled search to a fixed relative time range with a lag offset that exceeds the lateness
   horizon from Part 5. A search with `earliest=-30m latest=now` produces different results depending on
   when it runs. `earliest=-45m latest=-15m` does not.
@@ -2670,7 +2708,9 @@ Splunk's `_time` must be set from `event_time`, never from ingest. Set a **laten
 telemetry class, typically 15 minutes for network and 60 minutes for SaaS audit APIs, which are
 notoriously delayed. A window is sealed only after the horizon has elapsed. Records arriving after the
 seal go to a late-arrival index and trigger a documented backfill procedure, rather than silently
-mutating an already-published result.
+mutating an already-published result. Status: `WindowSealStage` marks late rows `is_late=true` and
+`window_complete=false` on the same stream; the app defines no late-arrival index, no search filters the
+flags, and the backfill procedure is unwritten (gap G61).
 
 ---
 
@@ -3002,7 +3042,7 @@ Determinism claims decay silently. Enforce them:
 
 Run 1 and 2 on every commit; run the rest nightly.
 
-All six checks ship, implemented against the reference lineage pipeline in
+All six checks ship, implemented against the twelve composed pipelines in
 `tests/morpheus/determinism/`, with the comparison half factored into
 {py:mod}`~morpheus.utils.determinism` for reuse against any pipeline: `canonicalize` reduces output to
 a normal form in which two deterministic runs compare equal, `diff_frames` explains the first
@@ -3072,7 +3112,7 @@ The linter had three blind spots of its own, now closed. It read `field=value` b
 could name anything; and it treated a search as one bag of fields, when `stats` replaces the rows with its own
 output and a field it neither aggregates nor groups by is null for the rest of the pipeline. A walk of each
 pipeline now tracks which fields survive every command, subsearches included, and flags a read of one a `stats`
-dropped. None of the 38 searches does that. The aggregate check found one real gap: Chain assembly collects
+dropped. None of the 41 searches does that. The aggregate check found one real gap: Chain assembly collects
 `values(join_method) AS methods`, the name
 {py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage` gives a parent-child edge's method, and
 no reference pipeline stamps parent-child edges, so the column was always empty. The method every scored event does
@@ -3159,11 +3199,12 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage`).
 - The Splunk side of Part 4 as an installable app: indexes, sourcetypes, KV Store binding lookups,
   and the scheduled searches ([`examples/splunk_lineage_app`](../../../../examples/splunk_lineage_app/README.md)).
-- Deterministic window sealing with a lateness horizon, revision numbering, and a late-arrival stream
+- Deterministic window sealing with a lateness horizon, revision numbering, and late-arrival flags on the
+  same stream
   ({py:mod}`~morpheus.utils.window_seal` and
   {py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage`).
-- The determinism CI harness: control 13's six checks running against the reference lineage pipeline
-  over a seeded golden corpus ({py:mod}`~morpheus.utils.determinism` and
+- The determinism harness: control 13's six checks running against the twelve composed pipelines over
+  seeded golden corpora, under pytest on developer machines, since no CI has run on this fork ({py:mod}`~morpheus.utils.determinism` and
   `tests/morpheus/determinism/`).
 - The SIEM wire format, rendered by the stanza the SIEM will parse it with
   ({py:class}`~morpheus.stages.output.siem_wire_stage.SiemWireStage` and
@@ -3523,6 +3564,17 @@ What Morpheus provides versus what has to be built, stated plainly.
   the middle of that silence no longer attributes an event to a port the device had left. Both run on
   each row's own event time rather than a batch boundary, which keeps the closure in the same place
   however the stream is divided.
+- Twenty per-entity trackers under `morpheus.utils`, each bespoke. Two conventions are followed silently
+  rather than shared: a tracker either excludes the current sample from the baseline it is judged against
+  (`cyclic_histogram`, `transfer_envelope`, `bucket_peak`) or includes it (`distinct_window`), and
+  `quantize_value` is applied inside four modules and at the stage in the rest. Recorded here so a new
+  tracker chooses deliberately (gap G82).
+- A retention departure, recorded rather than resolved: Part 2 asks for thirteen months on TC-1, TC-5, TC-6
+  and TC-7, and the app retains events ninety days with `MAX_DAYS_AGO` 30 on `morpheus:score:l1` to `l4` and
+  `l6` and 90 on `l5` and `l7`, so a backfill older than that is dropped at index time. The ninety days are
+  the deliberate choice Part 4 makes; Part 2's figure is the requirement an estate reconciles against its
+  own policy (gap G74).
+
 ### Must be built
 
 Rewritten by [the retrospective](./12_behavioral_analytics_retrospective.md) on 2026-10-03 from the gaps it
@@ -3561,7 +3613,7 @@ raises and should not be assumed away. Two of them have since been answered; the
 the question that produced them, rather than moving somewhere tidier, because what a question turned out
 to be is worth more to the next reader than a clean list of open ones.
 
-**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Measured. Every join here
+**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Measured, for seven of the thirty-two shipped rules over three of the twelve pipelines. Every join here
 is a join on time across sources that do not share a clock, and the
 [collection section](../../../../README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
 qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0`, as it was first
@@ -3661,7 +3713,9 @@ eternal, and sealing layer 5 apart -- with each break failing the test that exis
 changed. Its first threshold, `dc(osi_layer) >= 3`, is met. The line after it is not: `total_risk >= 60 OR
 (layer_span >= 4 AND peak_z >= 4.0)`, and `risk_score` is written into the index by the detection searches as
 they fire rather than by any stage, so a package that indexes pipeline output alone sums null for every chain.
-That is a deployment step, not a corpus or a ladder one. The `morpheus:edge` events still carry no `lineage_id`,
+That is not a deployment step either: no detection stanza collects, raises a notable or alerts, so `risk_score`
+never lands in any index the chain search reads, and a `collect` per detection with a source change in the
+chain search is what closes it (gap G11, issue #57). The `morpheus:edge` events still carry no `lineage_id`,
 because they come from the flow corpus rather than from a composed pipeline.
 
 One consequence of sealing the union is worth stating because it looks like a change and is not. 129 rows in

@@ -29,7 +29,7 @@ same training twice with the same seed and the same data, and find out whether t
 are not, every threshold tuned against them is tuned against noise, and R-P-L5-006 -- a rule about a score
 rising by fractions of a standard deviation -- is measuring the model's own jitter.
 
-Three things are checked, each a control from Part 5:
+Four things are checked, each a control from Part 5:
 
 - **Control 3, seeding.** `CUBLAS_WORKSPACE_CONFIG` is set before Torch is imported, because it has no effect
   once the CUDA context exists, and `torch.use_deterministic_algorithms(True)` is enabled so that an operation

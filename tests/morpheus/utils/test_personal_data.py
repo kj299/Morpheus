@@ -55,7 +55,7 @@ KEY = b"a-key-long-enough-to-be-accepted"
 
 
 def golden_columns() -> set:
-    """Every column the four reference pipelines emit, read from the goldens rather than from a list."""
+    """Every column the composed pipelines emit, read from every golden rather than from a list."""
     found = set()
 
     for path in sorted(glob.glob(GOLDENS)):

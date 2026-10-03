@@ -131,15 +131,17 @@ side alone breaks the joins silently.
 
 ## What to expect once data flows
 
-- The three refresh searches populate the KV Store within their first scheduled cycle; `| inputlookup
-  binding_l2_l3 | head 5` confirms rows are landing.
+- The two layer 1 refresh searches populate the KV Store from `binding:l1` within their first scheduled cycle;
+  `| inputlookup binding_l1 | head 5` confirms rows are landing. `binding_l2_l3` stays empty until a DHCP lease
+  feed is expanded with `to_bucketed_records(table_name="dhcp_lease")`, which nothing in the fork produces yet
+  (issue #63).
 - `binding_l1_history` is the one lookup that is *expected* to be empty in a healthy estate, and stays
   empty until somebody replaces an optic or moves a fibre. Do not read an empty result there as a broken
   refresh; read it against `| inputlookup binding_l1 | stats count`, which should hold one row per port
   from the first cycle onward.
 - `behavior_summary` starts filling on the 5-minute cadence, lagged by the 15-minute lateness
-  horizon. Chained rules read from it, so detections trail real time by design; the guide's Part 5
-  explains why that trade is correct.
+  horizon. R-P-L3-005 reads from it; the four chained rules read the scored events directly. Detections
+  trail real time by design; the guide's Part 5 explains why that trade is correct.
 - The `Binding health - unresolved rate` alert is the canary for the soft-join substrate. If it
   fires, the collector is losing lease or expiry records, and attributions are degrading into
   guesses; fix collection before trusting anything downstream.
@@ -167,7 +169,8 @@ Three levels, strongest last:
    KV Store: timestamps anchor to `event_time` as the props intend, the identifier ladder resolves an
    IP through both lookups to a physical port and site, the chain assembly search emits the seeded
    cross-layer chain with the expected span and risk, and R-C-002 detects its ordered sequence with
-   the expected gap. That R-C-002 correlated two detections' notables; it has since been rewritten to read the
+   the expected gap. That seed carried edge and risk fields the pipeline does not yet emit; against pipeline
+   output the chain assembly returns no rows and `binding_l2_l3` is empty (see `validate/VALIDATION.md`). That R-C-002 correlated two detections' notables; it has since been rewritten to read the
    scored events, and the rewrite has not met a search head.
 
 Several things were added after that validation and have **not** been run against a live instance: the
@@ -179,7 +182,9 @@ then `morpheus:score:l4` with three more, `morpheus:score:l6` with five, `morphe
 and `R-C-005`, with `R-C-002` as rewritten, and the layer 1 detections `R-D-L1-001` and `R-P-L1-004`. That is all thirty-two detection searches this app ships, so the live
 pass above covers the app's oldest part and none of its detections as they now stand. Their SPL follows
 the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
-Python over the determinism harness's planted corpus (`tests/morpheus/determinism/test_first_detections.py`),
+Python over the determinism harnesses' planted corpora (`tests/morpheus/determinism/test_first_detections.py` for
+the layer 1, 2 and 5 rules, and the network, transport, presentation, application, SaaS, endpoint and campaign
+harnesses beside it for the rest),
 where each fires on exactly the planted cases and nothing else -- twice for `R-D-L2-004`, which the corpus
 plants both a simultaneous and a cross-switch spoof for, alongside a legitimate move it must not fire on. That is evidence the columns and conditions are right; it is not evidence
 the stanzas parse on a search head. Run `btool savedsearches list` after installing.
