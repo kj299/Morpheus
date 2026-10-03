@@ -16,8 +16,9 @@
 # The fork's own CI: every test the GPU conformance runner names, in CPU execution mode, on an ordinary runner.
 #
 # pr.yaml delegates to NVIDIA's shared workflows and their runners, which this fork has no access to, so until this
-# file existed no GitHub Actions run had ever executed the suite here. This job installs the released morpheus-core
-# package for its compiled library, overlays the repository's Python sources onto it, and runs the two tiers
+# file existed no GitHub Actions run had ever executed the suite here. This job installs the pinned CPU environment
+# (ci/scripts/cpu_env/linux-64-cpu.lock, released morpheus-core for its compiled library), overlays the repository's
+# Python sources onto it, and runs the two tiers
 # ci/scripts/gpu_conformance.sh keeps total, selecting the CPU variant of every mode-parametrized test. The GPU
 # variants still need a card and that script; this is the half that does not.
 
@@ -52,21 +53,13 @@ jobs:
       - name: Create the environment
         uses: mamba-org/setup-micromamba@v2
         with:
-          # The version the fork's CPU environment was built and tested with. The runner's newer micromamba
-          # resolves conda-forge through sharded repodata, and the shards omit dlpack 0.8, which libcudf 25.02
-          # needs, so the solve failed with "dlpack >=0.8,<1.0 does not exist"; the flat repodata has it.
+          # The environment the tests were written against, pinned package by package. A fresh solve on the runner
+          # went wrong twice in two different ways (sharded repodata missing dlpack 0.8; a libarrow build without
+          # libgflags), which is the argument for installing exactly what was verified.
           micromamba-version: '2.9.0-0'
-          condarc: |
-            use_sharded_repodata: false
           environment-name: morpheus
+          environment-file: ci/scripts/cpu_env/linux-64-cpu.lock
           cache-environment: true
-          create-args: >-
-            -c conda-forge -c rapidsai -c nvidia
-            python=3.12
-            morpheus-core=25.06
-            pytest
-            pytest-asyncio
-            pytest-benchmark
           init-shell: bash
 
       - name: Overlay the fork's sources onto the installed package
