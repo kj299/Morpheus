@@ -73,3 +73,4 @@ the configuration stanzas, and gives thirteen controls for keeping the output de
 is the ledger of which parts are implemented and which are still design.
 
 - [Predictive Behavioral Analytics Across OSI Layers 1-7](./guides/11_predictive_behavioral_analytics_osi.md)
+- [Behavioral Analytics Retrospective](./guides/12_behavioral_analytics_retrospective.md) - What the fork can say today about the behavior of users, systems, network objects, nodes, applications and platforms, scored per entity class, with the verified gaps and the plan that closes them

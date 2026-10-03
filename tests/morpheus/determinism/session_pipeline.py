@@ -540,7 +540,8 @@ SCORED_FEATURES = [
 
 SCORING_WINDOW = 0
 SCORING_MANIFEST = ModelManifest(window_id=SCORING_WINDOW, models={}, fallback="reference-arithmetic:0")
-"""Every principal resolves to the same placeholder, and `model_fallback_used` is true on every scored row.
+"""Every principal resolves to the same placeholder; `model_fallback_used` would read true on every scored row once
+DeterminismStampStage is placed behind the scorer, which this corpus does not yet do.
 
 That is the honest resolution for a corpus with no trained models in it. An event carrying a fallback is a claim
 about a population rather than about the entity's own history, which is exactly what these scores are.

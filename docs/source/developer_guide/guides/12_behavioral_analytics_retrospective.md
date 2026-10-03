@@ -1,0 +1,596 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+# Behavioral Analytics Retrospective: What This Fork Can Say About a Network
+
+This document asks one question of the code as it stood on 2026-10-03, at the commit that merged the
+layer 1 and layer 2 rules: **can this fork understand the behavior of the systems, network objects, nodes,
+applications, platforms and users on a network?** It answers per entity class, says where the answer is
+no, and ends with the plan for closing the distance, filed as GitHub issues and mirrored into the design
+guide's build list.
+
+It is a retrospective in the plain sense. The [design guide](./11_predictive_behavioral_analytics_osi.md)
+was written before anything was built and has been the ledger since; fifty pull requests later, this is
+the first time the whole of what shipped has been read against the goal rather than against the next
+rule. Several sentences in the guide and the README turned out to describe a repository that no longer
+exists, in both directions: some say less is built than is, some say more. Those are corrected in the same
+change that adds this document, and listed below so the corrections can be checked.
+
+## How the question was made testable
+
+"Understand the behavior of an entity" is not one capability. It was broken into eight, and each entity
+class was scored on each:
+
+| Dimension | The question it asks of an entity class |
+| --- | --- |
+| **Observe** | Is telemetry about this entity ingested and normalized, under the envelope Part 2 requires? |
+| **Identify** | Does the entity have a key that survives a replay and a rename, and that other layers can reproduce? |
+| **Baseline** | Does per-entity history exist, so that "normal for this one" is computable rather than assumed? |
+| **Detect** | Do deviations from that baseline reach a shipped saved search whose predicate is asserted? |
+| **Predict** | Do any of the guide's four forward-looking mechanisms operate on this entity? |
+| **Link** | Can this entity's story be joined to the other classes through the identifier ladder or TC-0 context? |
+| **Deliver** | Does the output reach the SIEM under a sourcetype contract with a named producer? |
+| **Verify** | Do tests, golden files, control 13's six checks, the liveness registry and a device run cover it? |
+
+Each cell is one of **built**, **partial**, **designed** (specified in the guide, no code) or **absent**.
+The scoring was done by ten independent readers of the repository, six on the entity classes and four on
+the concerns that cut across them: the identifier ladder, the modeling substrate, delivery and operations,
+and the integrity of the documents themselves. Every gap any reader reported was then handed to two
+sceptics with different briefs, one trying to find the capability somewhere in the tree and one checking
+whether closing it serves the goal at the stated severity, and a gap survives here only if the first
+could not refute it. The plan at the end was drafted three times from three angles, scored, and
+synthesized, and a final pass asked what the whole exercise had missed. The orchestrator spot-checked the
+headline findings by hand; those checks are recorded where they bear on a claim.
+
+## The matrix
+
+| Entity class | Observe | Identify | Baseline | Detect | Predict | Link | Deliver | Verify |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **Users** | partial | built | partial | partial | partial | partial | partial | built |
+| **Systems** | partial | partial | partial | built | partial | partial | partial | partial |
+| **Network objects** | partial | partial | partial | partial | partial | partial | partial | built |
+| **Nodes** | partial | partial | partial | partial | partial | partial | partial | built |
+| **Applications** | partial | partial | partial | built | partial | partial | built | partial |
+| **Platforms** | partial | partial | partial | partial | partial | partial | partial | partial |
+
+No cell is **absent** and no cell is **designed**: every class has code behind every dimension. No class
+has a row of **built** either, and the pattern in the partials is the finding. The fork is strongest where
+the design put its effort, at the two ends of the stack: a principal at layer 5 and a switch port at
+layers 1 and 2 each have a stable key, a learned history, shipped detections and a verified pipeline. It is
+weakest in the middle, where a host is an address per window, and at the level above the stack, where a
+platform is the thing users are observed on rather than a thing observed itself. The sections below say
+what each row means, with the single hole that would move it furthest.
+
+## Users
+
+A principal is the entity this fork understands best. Sessions are assembled from the separate start and
+stop records an identity provider emits, and seven feature stages keep history per principal: an
+hour-of-day and day-of-week histogram the principal's own cadence is scored against, cumulative sets of
+the places, applications and devices seen, implied travel speed between successful authentications, the
+failure and multi-factor denial runs that end in a success, a per-operation 99th percentile and a weekly
+breadth of object types for SaaS, and the drift trajectory over daily windows. Eight shipped searches read
+principal columns, each with its predicate asserted in Python over a seeded week and its row count written
+into the validation package: impossible travel, multi-factor fatigue, bulk SaaS access, access breadth
+rising under an unchanged role, the drift watchlist, and the principal steps of three chained rules. The
+estate pipeline carries a principal through a supplied directory and a derived 802.1X binding down to the
+port they sat at, and refuses to do so for the remote worker and for the sign-ins made after the hour's
+last exchange.
+
+What is missing is the thing the word "behavioral" was meant to rest on. The composite score every
+R-B-L5 rule reads is produced, but by `ReferenceScorer`: ten frozen constants that compare every
+principal to the same population rather than to themselves. The per-principal autoencoder has been trained
+once, on one machine with a card, inside `examples/layer5_model/run_model.py`, and nothing it produced is
+in the repository, in CI, or loadable by a composed pipeline. R-B-L5-001, R-B-L5-002 and R-B-L5-005 have
+a producer for their columns and no saved search. And the learned baselines the stages do compute, the
+hour surprise, the first-seen location and device, the failure run, are read by no search at all, so
+"this user's behavior changed" can be said with evidence for travel, denial runs, SaaS volume and SaaS
+breadth, and for nothing about the user's own hours, places or devices. Below the pipeline, no SIEM lookup
+carries a principal to a port, no layer 5 event receives TC-0 context, and nothing distinguishes a service
+principal from a person.
+
+## Systems
+
+A host is described several times and never once. At layer 3 a source address has a fan-out, a reach, a
+beacon rhythm and an established time-to-live; at layer 4 a flow has its flags and a triple its transfer
+envelope; at layer 6 a client address has its fingerprint set; at layer 7 a `hostname` has its process
+ancestry against a peer group read from the asset inventory. Nine host-centric single-layer rules ship with
+asserted predicates and the benign case beside each, and three chained rules fire on the campaign corpus
+with a host in them. That is a detect column marked built, and it is earned.
+
+Nothing says these are the same host. The key is `src_ip` at three layers, `flow_id` at one and
+`hostname` at one; no stage resolves an address to a `hostname` or a `hostname` to an address; the only DHCP
+lease table lives in test code and serves one rule's sign-ins; the Splunk lookup that would hold the
+IP-to-MAC-to-port rung has a refresh job and no producer, and its expected row count in the validation
+package is zero. A host that takes a new lease is a new entity at four layers, the asset record that
+knows its owner and criticality is reachable only from its EDR rows, and "normal for this host" exists one
+feature at a time, over a trailing hour or as permanent novelty, never as a distribution: R-B-L3-001's
+per-host percentile is a literal fifty in the shipped search, and the guide says so. No host has a score,
+and no platform fingerprint of a host, not the time-to-live default, not the TCP options, not a user agent,
+is used behaviorally.
+
+## Network objects
+
+For the access port as a cage for an optic and a seat for a MAC address, understanding is end to end. The
+`site_id:device_id:port_id` key is composed identically at layers 1 and 2; the port keeps a six-hour
+optical median, a seven-day fitted receive trend projected to the optic's floor, the memory of every
+transceiver serial and LLDP neighbour it has reported, thirty days of hourly distinct-MAC peaks, and closed
+binding intervals with the end reason and the gap between sightings. Seven searches read them and the
+lookups answer in two tenses. The verify column is the strongest in the matrix; deliver is marked partial only because the sourcetype contract covers what the seven searches read and would let a producer drop the counter deltas, the optical deviation and the OUI counts unnoticed.
+
+The interface as a thing that carries traffic is not modelled. No octet counter is designed at all; the
+four error and discard deltas are produced on every poll and read by nothing; the optical step the TC-1
+section names as the security signal, a tap, reaches no search; flap instability has features and no rule;
+802.1X timing has a flag and no distribution. A VLAN, a link between two ports and a trunk are not
+entities anywhere, and the four-part key the TC-2 section specifies is designed only. On the SIEM side
+the layer 2 rung is missing: the app has no MAC-to-port lookup, and its L2/L3 refresh selects pre-joined
+DHCP rows that nothing in the fork produces. R-C-003, the chain the guide gives as the reason layer 1 pays
+for itself, lacks a per-port OUI novelty feature, a management VLAN designation, and any corpus in which
+layers 1 and 3 coexist.
+
+## Nodes
+
+A switch is understood through its ports and an address through its flows, and that is where it stops. A
+device reboot is detected, correctly, as a counter reset rather than a wrap, forty-eight times for a
+forty-eight-port switch, in per-port flags that no saved search and no sourcetype contract reads. There is
+no device entity, key, baseline or rule: configuration change, route churn, control-plane load and
+sysUpTime as a fact about the device rather than a divisor for its counters appear nowhere. Infrastructure
+servers, the resolvers, lease servers, identity providers and time sources whose behavior an estate most
+needs a baseline for, are clients' destinations rather than subjects.
+
+The hole that matters most for nodes is the edge stream. `morpheus:edge` is produced by the lineage test
+corpus alone, carries `community_id` but no `lineage_id`, `osi_layer`, `link_uid`, parent or child, or
+`join_method`, so the shipped chain-assembly search and the guide's own edge queries read columns that
+nothing emits, and the graph store that would make a node able to be queried exists as two paragraphs. The layer 3
+corpus never runs `CommunityIdStage`, so the first of the guide's four decisions is not applied at the layer
+it was made for. Collectors are a sort key rather than an entity: gaps in `collector_seq` and the lag
+between observed and event time are never measured, and `clock_source` and `clock_offset_ms` remain schema
+with no quarantine behind them.
+
+## Applications
+
+The fork understands the actors on application protocols: a DNS or HTTP client address, a TLS client host
+and a TLS destination, a principal performing a SaaS operation, a host running a process pair. Eight stages
+and two judgement tables, which report what they could not place rather than guessing, feed ten shipped
+layer 6 and 7 searches with asserted predicates, and the TC-0 join sets the severity of the SaaS and
+endpoint notables from the classification and the peer group as they were known at the time.
+
+It does not understand an application or a service as an entity. Nothing keys a `(dst_ip, dst_port)`
+service or a SaaS application; `transfer_triple` is a conversation key, not a service one; `client_app`,
+`sni` and `service_account` are carried and never read; and the TC-0 store has no application-to-server
+or service-account kind although Part 2 lists both and says the class is built. The three model-dependent
+rules, sensitive data in transit, the anomalous flow profile and the stack-versus-user-agent mismatch, remain
+design with no Triton path and no stub. Several TC-7 features Part 2 requires have no producer: user-agent
+novelty, NXDOMAIN and generated-domain ratios, server errors. The DNS and HTTP rules fire on global
+thresholds the guide itself calls placeholders, with no mechanism to derive a client's own normal, and the
+layer 6 and 7 pipelines have no normalize step, because the corpora hand them columns already shaped.
+
+## Platforms
+
+The users on a platform are observed well; the platform is not observed at all. An identity provider, a
+SaaS tenant, a collector, an operating system and a cloud control plane are behavioral subjects nowhere:
+`tenant_id`, `clock_source`, `clock_offset_ms`, `sampling_policy`, `observed_time` and `ingest_time`,
+six of the fourteen envelope fields, appear in no stage, no golden and no search; an operating system or
+version appears in no TC-0 attribute set; cloud audit logs and Kubernetes are not mentioned.
+
+The analytics platform itself is the most consequential case. Control 12's envelope and control 1's model
+manifest exist as modules with unit tests, and `DeterminismStampStage` is wired into none of the twelve
+composed pipelines, so no golden, no sourcetype contract and no saved search carries
+`pipeline_fingerprint`, `config_hash`, `determinism_tier` or `model_version`. the statement in the README that
+every scored row reports `model_fallback_used` is false against the code: the scoring stage declares the
+two score columns and the per-feature losses and nothing else. Pipeline health is log lines: refusals,
+saturation and abandoned sessions are counted in warnings and reach no column. The one health search reads
+`resolution_method` on `morpheus:score:l3`, a sourcetype that in this fork never carries it, and the
+behavior summary and chain assembly sum a `risk_score` that no detection writes anywhere, because every
+detection stanza is a correlation search with no notable action and no `collect`. On the SIEM side the app
+is configuration without a transport: the Kafka Connect path Part 6 names is not configured, no artifact
+composes a segment outside the test corpora except a layer 2 file-to-file example, and the thirty-two
+detection searches have never run on a search head.
+
+## What cuts across the classes
+
+**The identifier ladder stops at layer 3, in both directions.** Inside the pipeline the bottom rungs are
+real and asserted: an ARP observation resolves through a closed MAC binding onto the layer 1 port key and
+roots its chain there, the estate corpus carries a principal to a desk port through a supplied directory
+and a derived supplicant binding, and R-C-005 walks a sign-in's address through a lease and a MAC binding
+to a port and a site. Above layer 3 there is no ladder: layers 4, 6 and 7 carry no `flow_id`,
+`session_id` or `trace_id` that another layer also carries, so R-C-001, R-C-002 and R-C-004 join on
+`src_ip` or `hostname` string equality in SPL, outside the lineage substrate. Hosts have no rung at all,
+which is why asset context cannot reach a network-layer event. In the SIEM only the port-to-optic rung has
+a populated lookup. No graph store, entity index or summary search answers "everything about this entity
+across layers"; the design names that as the point of the whole exercise.
+
+**The modeling substrate is twenty bespoke trackers and no learned model.** Per-entity history is
+computed for ports (optical median, hourly MAC peaks), sources (time-to-live mode, destination-network
+recall), transfer triples and principal-operations (nearest-rank 99th percentile), principals (cyclic
+histogram, cumulative novelty, drift), destinations and pairs (issuer mode, cipher floor), and hosts
+(fingerprint recall, process-pair history). Every tracker is unit-tested, driven by a stage, run under
+control 13's six checks, and most reach a search. The other half of the rules is threshold-only: layer 3
+fan-out, every layer 4 flow rule, both layer 7 DNS and HTTP rules and layer 5 session duration keep no
+history for the entity they judge. No composed pipeline contains a learned model; the autoencoder's slot
+is frozen arithmetic, the only training path is a script run once by hand on one GPU with its artifact
+left out of the tree, and the forecast-residual mechanism, `TimeSeriesStage`, has no fork code behind it.
+Hysteresis, suppression and threshold tuning from a baseline period exist as prose in the rule metadata
+and nowhere in Splunk or Python.
+
+**Delivery stops at an in-memory sink and starts at an in-memory source.** Every composed pipeline reads
+`InMemorySourceStage` and writes `InMemorySinkStage`; the one file-to-wire composition is a four-stage
+example for one telemetry class; no `KafkaSourceStage`, `WriteToKafkaStage`, segment edge, `RouterStage`
+or `MinimizationStage` appears in any fork composition, so the sharding and minimization that are built as
+stages have never run in a pipeline. On the Splunk side none of the forty-one searches is an alert: no
+suppression, no notable action, no risk action, no `collect`, so each detection's rows are discarded when
+its job ends and the summary and chain searches read `risk_score` and `rule_id` from an index nothing
+writes them to. The field-contract linter accepts this because it resolves cross-search fields without
+asking whether a transport exists. Late-arrival rows have no delivery path of their own, and ten of the
+fourteen envelope fields are produced and checked by nothing.
+
+**What is built is thoroughly verified on a CPU, and the verdicts that say more than that are stale.**
+The inventory is self-checking: forty-six stages, forty-one modules and 1,880 test definitions are
+computed from the tree and compared against both documents; the liveness registry covers every stage
+class on disk; the personal-data inventory is checked against all twelve golden files; all fourteen Splunk
+stanzas have a producer; every search carries a written expectation and a regeneration-is-a-no-op test.
+Beyond that, three claims an auditor would ask about are unproven. The standing GPU verdict is dated
+2026-09-20 and predates seven of the twelve composed pipelines and fifteen of the forty-six stages, and the
+cross-mode parity test covers three pipelines. No SPL has ever executed for any of the thirty-two
+detections; the live Splunk pass covered the lookup and summary searches. The fork has zero GitHub
+Actions runs, so "the CI harness" has only ever run on developer machines, and both the GPU and the model
+verdict artifacts are ignored by git rather than checked in.
+
+## What the documents said that was no longer true
+
+Ninety-four sentences across the guide, the README, the Splunk app and a handful of docstrings were
+reported as stale by the readers; ninety-three survived verification, one was refuted and one received
+no verdict. They fall into three families. The largest is **the design outrunning its own ledger**: the
+guide's Summary and the README section "What this fork is not" still describe layers 3, 4, 6 and 7 as design,
+six detections as shipped, the chained rule engine as not built and `mean_abs_z` as having no producer,
+while the README table five rows above, Part 3's layer sections and Part 6's "Provided" list
+describe thirty-six telemetry stages, thirty-two detections and four chained rules that run under control
+13. The second is **a built module described as pipeline behavior**: the determinism envelope, the model
+stamp, the sharding hash, the binding closer of the binding explicit-stop path and the minimization stage all exist
+and are tested, and the text says scored events carry them when no composed pipeline places them. The
+third is **numbers that stopped being counted**: thirty-eight searches, three composed pipelines, four
+reference pipelines, seven rules swept for clock skew out of seven, a GPU verdict that covered everything.
+
+This change corrects the sentences that contradict the code outright: the guide's Summary paragraph on
+what is verified versus designed, Part 3's claim about which rules exist as code, Part 6's rows on the
+chained engine, the determinism envelope and the TC-0 store, the sequencing recommendation's undefined
+R-B-L5-006, the README bullet on layers 3 to 7, its `model_fallback_used` sentence and its GPU and
+validation qualifiers, the documentation index's one-line summary, and the three docstrings that said a
+column or a layer existed when it did not. The rest, which are wording drift rather than contradiction,
+are the first step of the plan (#52), and the full list is in the appendix so that step can be checked
+off claim by claim.
+
+## The verified gaps
+
+One hundred and forty-six gap reports from the ten readers merged into eighty-nine distinct gaps. Each
+was handed to a sceptic whose brief was to find the capability in the tree; seventy-two stand as stated,
+seventeen were narrowed to a more precise statement, and none was refuted. The twenty blocking and major
+gaps in the first two batches also went to a second sceptic asking whether the severity served the
+owner's goal; fifteen of those were narrowed, mostly from blocking to major on the grounds that a
+capability designed and acknowledged as not built is a hole rather than a hollow claim. The table carries
+the severity after that review where it was given and the readers' severity where it was not, so the
+later batches lean higher than a full review would have left them.
+
+Two gaps remain blocking after that review: a host with no identity across layers (G03) and no service or
+application entity (G10). The two the readers ranked first, no trained per-entity model in any shipped
+artifact and the determinism envelope stamped on no scored event, were narrowed to major on the grounds
+that both are designed, acknowledged as not built and already in Part 6; they are still the things the
+words "behavioral" and "reproducible" rest on, and they lead the plan. The pattern behind the fifty-six
+major gaps is the one the matrix shows: features produced and read by
+nothing (cadence, novelty, error rates, device resets, fan-in, a dozen host columns), rungs of the ladder
+with no producer behind the lookup (IP to MAC, principal to port, edge to edge), entities with no key
+(device, service, VLAN, link, collector, tenant, platform), and verification that stops at a CPU. The
+critic's pass added a ninetieth, tracker state that survives a restart, which no reader had scored
+because every reader marked persistence as out of the delivery lens's remit.
+
+Two gaps the readers raised were kept and marked out of scope rather than closed: cloud control-plane
+and Kubernetes audit (G56), which the design never claimed, and a graph store (G08), which the design
+calls an optional addition. Both are recorded so the decision is visible.
+
+| Gap | Severity | Check | Entity classes | What is missing | Issue |
+| --- | --- | --- | --- | --- | --- |
+| G03 | blocking | narrowed | systems | A host has no identity across layers: no time-bounded `hostname`<->`ip`/mac binding | #63 |
+| G10 | blocking | stands | applications | No service or application entity: host:port or SaaS app never has a key, baseline, ladder rung or sealed window | #64 |
+| G01 | major | stands | users | No trained per-user model in any shipped artifact; scoring is frozen population constants via ReferenceScorer | #59 |
+| G02 | major | stands | all | Determinism envelope, `model_version` and `model_fallback_used` are stamped in no composed pipeline and never reach the SIEM | #54 |
+| G04 | major | stands | systems, network objects | IP-to-MAC rung has no producer: `binding_l2_l3` refresh expects DHCP lease rows nothing emits | #63 |
+| G05 | major | stands | systems, network objects, nodes | R-C-003 physical compromise chain is designed only: no per-port OUI novelty, no VLAN designation, no stanza or corpus | #65 |
+| G06 | major | stands | network objects | Port traffic volume (octet counters, utilization) absent from TC-1 design and stages | #61 |
+| G07 | major | narrowed | nodes | No device-level entity: a switch or router exists only inside a port key | #65 |
+| G09 | major | stands | nodes, applications | No parser or normalization from real sources (NetFlow/IPFIX/Zeek/proxy/EDR/M365) into the TC-3/4/6/7 column names | #66 |
+| G11 | major | stands | all | Detections write nothing back: no collect/notable/risk action, so Chain assembly and Behavior summary sum a `risk_score` nothing indexes | #57 |
+| G12 | major | stands | all | No deployment composition: every pipeline is in-memory, no Kafka/HTTP source or sink, Splunk transport not configured | #66 |
+| G13 | major | narrowed | users, network objects | Cadence, novelty and optical-deviation per-entity baselines are read by no search and are outside the sourcetype contracts | #55 |
+| G14 | major | stands | users | R-P-L5-006 watchlist has no consumer; the 'raise layer 7 sensitivity' half is absent | #55 |
+| G15 | major | stands | users | R-B-L5-001/002/005 have producers but no saved search; z-loss columns outside the contract | #55 |
+| G21 | major | stands | users, nodes, all | Forecast-residual predictive mechanism (TimeSeriesStage) has no fork producer outside layer 1 optics | #52 |
+| G22 | major | stands | systems | R-B-L3-001 uses a fixed fan-out threshold; no per-source 14-day percentile history tracker | #60 |
+| G23 | major | stands | systems | No host-level score or model; predictive mechanisms 1-3 absent for hosts | #59 |
+| G24 | major | stands | all | 'Binding health - unresolved rate' reads `resolution_method` on `morpheus:score:l3`, which no layer 3 producer writes | #53 |
+| G25 | major | stands | systems, platforms | TC-0 asset carries no device role, type or OS/platform version | #60 |
+| G26 | major | narrowed | systems | Asset criticality, owner and classification attached to host rows and read by nothing | #60 |
+| G27 | major | stands | systems | `hostname` is not case-folded in stages or TC-0 store while chain SPL folds it | #60 |
+| G28 | major | stands | systems | A dozen host features emitted with no consumer (fan-in, ports, asymmetry, ASN, JA4, host-seen flags) | #60 |
+| G29 | major | stands | systems, applications | R-B-L4-004 cannot be built: no `tcp_options_order` on flows and no `flow_id`/community_id on HTTP events | #64 |
+| G30 | major | narrowed | all | GPU conformance verdict covers three of twelve pipelines and predates most of the fork | #58 |
+| G31 | major | stands | all | Detection SPL has never executed on a search head; 34 of 41 searches validated only by Python re-implementation | #58 |
+| G32 | major | stands | network objects | Error and discard deltas have no rate, per-port baseline or rule | #61 |
+| G33 | major | stands | network objects | Optical tap step has no detection designed or shipped | #61 |
+| G34 | major | stands | network objects | VLAN is not a first-class entity: `ouis_per_vlan` unread, no history, four-part key never stamped | #61 |
+| G35 | major | stands | network objects | A link or trunk is not an entity; LLDP neighbour change is never detected | #61 |
+| G36 | major | stands | network objects | Link flap instability has no detection rule | #61 |
+| G37 | major | stands | network objects | 802.1X time-to-authorize lacks a per-port distribution | #61 |
+| G38 | major | stands | network objects | BindingCloser explicit stop and snapshot reconcile are wired in no stage; `bind_end_observed` always false | #61 |
+| G39 | major | stands | network objects | Port identity does not survive renaming: no ifIndex/serial/alias anchor for `entity_key` | #52 |
+| G40 | major | stands | nodes | Device reboot flags are emitted and read by nothing | #61 |
+| G41 | major | stands | all | `clock_source`/clock_offset_ms and the other envelope fields are produced, validated and quarantined on by nothing | #62 |
+| G42 | major | stands | nodes | Collectors are not entities: `collector_seq` monotonicity unchecked, no collector health signal | #62 |
+| G43 | major | stands | all | `morpheus:edge` is not an edge stream: no producer of parent/child/link_uid/join_method/osi_layer edges | #63 |
+| G44 | major | stands | nodes | Layer 3 flows ship without `community_id` | #60 |
+| G45 | major | narrowed | nodes | Layer 3 is per-IP with no subnet/asset-group roll-up and no TC-0 join for infrastructure nodes | #60 |
+| G46 | major | narrowed | all | Sourcetype `required_columns` are narrower than the columns the shipped searches read, group and join on | #53 |
+| G47 | major | stands | nodes, all | R-P-L3-005 and Chain assembly depend on Splunk-side state (`behavior_summary`, risk) the validation package never produces | #57 |
+| G48 | major | stands | applications | Model-dependent rules R-B-L7-003 and R-B-L4-001 have no inference path or scorer stub | not scheduled |
+| G49 | major | stands | applications | User-agent novelty, DGA/NXDOMAIN and 5xx ratio TC-7 features have no producer | #64 |
+| G50 | major | stands | applications | DNS and HTTP clients have no per-entity baseline; R-B-L7-001 is fixed thresholds | #64 |
+| G51 | major | stands | applications | TC-0 has no application-to-server or service-account-to-team kind | #64 |
+| G52 | major | stands | applications, all | Layers 4/6/7 carry no shared hard join key (`flow_id`/session_id/trace_id); cross-layer chains are value joins only | #63 |
+| G53 | major | narrowed | applications | Predictive mechanisms absent for DNS, HTTP, TLS and process behaviour | #59 |
+| G54 | major | narrowed | all | Stage refusals, late arrivals and other operational health signals are log lines, not fields or searches | #62 |
+| G55 | major | stands | platforms | No platform is a behavioural entity: IdP, SaaS tenant and collector have no key or baseline | #62 |
+| G56 | major | stands | platforms | Cloud control planes and Kubernetes audit are outside the design | not scheduled |
+| G57 | major | stands | platforms | R-C-004 hard-codes one identity provider's session lifecycle vocabulary; no normalized lifecycle column | #56 |
+| G58 | major | stands | all | Join method of the layer 5 -> port hop is invisible to every search and contract | #57 |
+| G59 | major | stands | users | Drift velocity and acceleration are emitted but given a threshold by no rule and outside the contract | #55 |
+| G60 | major | stands | all | No tooling derives thresholds from a baseline period; `config_hash` not computed over shipped thresholds | not scheduled |
+| G61 | major | narrowed | all | Late-arrival rows have no delivery path and feed detections as if complete | #62 |
+| G62 | major | stands | all | Machine-checkable collector input contract exists for one of fourteen input classes | #66 |
+| G63 | major | stands | all | No CI has ever run the test suite on this fork | #53 |
+| G64 | major | stands | all | Clock-skew tolerance measured for 7 of 32 rules and 3 of 12 pipelines | #58 |
+| G08 | minor | stands | all | No graph store or cross-layer entity index anyone can query | not scheduled |
+| G16 | minor | stands | users | R-B-L5-005 per-principal session-duration percentile has no tracker | #56 |
+| G17 | minor | narrowed | users, platforms | The principal-to-dot1x-identity-to-port rung exists only as a dict in the estate corpus; no SIEM lookup or TC-0 kind carries it | #63 |
+| G18 | minor | stands | users | Layer 5 authentications are never enriched with TC-0 context | #56 |
+| G19 | minor | stands | users | Nothing distinguishes a service principal from a human principal | #56 |
+| G20 | minor | stands | all | Hysteresis and rule suppression (control 9) implemented in no stage or stanza; no search is an alert | #57 |
+| G65 | minor | stands | users | Ten TC-5 required fields consumed by nothing; privilege-escalation-per-session feature has no producer | #56 |
+| G66 | minor | narrowed | users | Layer 5 search thresholds hard-coded in the validation test rather than read from SPL | #53 |
+| G67 | minor | stands | all | Stages reference page omits most fork stages (TC-0/3/4/6/7, scoring, drift, lineage, minimization) and guide lookup stanzas drift | #52 |
+| G68 | minor | stands | users | Entity sharding router is a utility with no composed pipeline | #66 |
+| G69 | minor | stands | systems | AppShield host snapshots named as a TC-7 source and used by nothing | #52 |
+| G70 | minor | narrowed | network objects | No TC-0 context keyed on port, device or VLAN (commissioning optical level, designation, owner) | not scheduled |
+| G71 | minor | stands | network objects | Stateful TC-1/TC-2 stages other than binding and auth do not guard event time | #62 |
+| G72 | minor | stands | network objects | TC1FeatureStage runs in no composed pipeline, golden or sourcetype | #52 |
+| G73 | minor | stands | network objects | TC-1 field names and counter contract in guide/README do not match stage inputs and outputs | #52 |
+| G74 | minor | narrowed | network objects, platforms, users, applications | Index retention and `MAX_DAYS_AGO` contradict the guide's 13-month requirement for TC-1/5/6/7 | #52 |
+| G75 | minor | stands | nodes | Layer 3 rows carry no exporter device column, so flow exporter clock cannot be perturbed or quarantined | #62 |
+| G76 | minor | stands | applications | R-B-L6-001 drops its managed-endpoint condition without recording the departure | #60 |
+| G77 | minor | stands | applications | TLS destination identity is `dst_ip` only; `sni` never read | #64 |
+| G78 | minor | stands | platforms | Single-record session shape has no producer for `session_duration_s` | #56 |
+| G79 | minor | narrowed | platforms | `behavior_context` is produced but read by no search; `indexes.conf` says no producer exists | #52 |
+| G80 | minor | stands | all | Layer 5 -> port attributions carry no `binding_uid` | #63 |
+| G81 | minor | stands | all | R-C-001's 'previous hour' depends on an undocumented 3600 s layer 3 sealer period | #53 |
+| G82 | minor | stands | all | Twenty bespoke trackers with no shared abstraction and divergent conventions | #52 |
+| G83 | minor | narrowed | all | MinimizationStage is placed in no composition | #66 |
+| G84 | minor | narrowed | all | CLI command construction tested for 4 of 46 stages; no CLI composition documented | #66 |
+| G85 | minor | stands | all | Part 6 Must-be-built table omits most not built items and keeps a stale row | #52 |
+| G86 | minor | stands | all | Guide Summary and Part 3 contradict themselves and the code on what ships | #52 |
+| G87 | minor | stands | all | GPU and model-run verdict artifacts are not in the tree | #58 |
+| G88 | minor | stands | all | Control 13 check 4 (CompareDataFrameStage) exists only for the lineage pipeline | #52 |
+| G89 | minor | stands | users | Field-contract linter omits the estate golden | #53 |
+
+## The plan
+
+Three plans were drafted from the verified gaps, from three angles: detection value per unit of effort,
+dependency and credibility, and entity coverage. A judge scored them eight, seven and six, took the
+value-first skeleton and grafted the credibility work in where it is cheap and the entity work in where
+the skeleton had left a class with nothing. The result is sixteen steps. The first three make the
+documents, the contracts and CI tell the truth and put provenance on every scored row; four to six ship
+the user detections the stages already feed and close the risk write path so any entity's detections
+persist; seven re-verifies on a search head and a card; eight puts a trained per-entity model in CI;
+nine to eleven give hosts, ports and the pipeline their baselines and health; twelve builds host identity
+and a real edge stream; thirteen to fifteen score hosts and services and complete the port, the device
+and R-C-003; sixteen makes it deployable. Every step has a condition that can be checked in the tree, and
+every step is a GitHub issue; #69 tracks them.
+
+Two corrections from the completeness review are applied here rather than left to the issues. The
+per-user half of step eight does not wait for host identity and is to be done first; the issue says so.
+And an evaluation of the upstream pieces the design named and the fork never used, `morpheus_dfp`'s
+rolling window, training and inference stages, the identity-provider source parsers, `TimeSeriesStage`
+and `MLFlowDriftStage`, precedes the model, normalization and health steps (#67), because a plan that
+builds bespoke paths without recording why the in-tree ones were rejected repeats the thing this
+retrospective exists to catch.
+
+1. **Documentation truth pass: rewrite every stale claim, record the known departures, make the counts self-checking** (small; after nothing; #52). README 74-75 says layers 3-7 do not run under a table saying they do; the Summary says six detections ship and `mean_abs_z` has no producer; the stages page names 23 of 46 stages; the Must-be-built table has six rows; the sequencing names an undefined R-B-L5-006. Every later step edits these files, so the correction lands once, first, and the departures that are decisions rather than work (R-B-L3-002 coefficient of variation, mechanism 3 layer 1 only, 90-day retention, port renaming, AppShield, tracker conventions) are written down so they stop resurfacing as gaps. *Done when:* Every stale-claim location S01-S94 reads true against the tree; grep for 'R-B-L5-006', 'six shipped detections', 'designed, not built', 'Three things are checked', 'no producer for it' returns nothing; `test_readme_inventory.py` asserts the stated shipped-detection count equals the number of stanzas with a `rule_id` `eval` (32) and the total (41), and a sibling test asserts every @`register_stage` class under stages/telemetry and stages/lineage plus SiemWireStage is named in `docs/source/stages/morpheus_stages.md`; the Part 6 Must-be-built table is replaced by the rows below; the TC-1 field list is restated as the stage input contract (raw totals, sysUpTime, ifLastChange); Part 1 and Part 6 state mechanism 3 is built for layer 1 optics only and record the R-B-L3-002 and R-B-L6-001 departures; Part 2 TC-1 records the renaming limitation and TC-7 the AppShield non-use; Part 6 carries a tracker-conventions note and a retention departure with `MAX_DAYS_AGO` raised for l5; `indexes.conf:38-40` says the TC-0 stages produce `behavior_context` and the app does not yet read it, with one documented as-known-at SPL idiom.
+
+2. **Fork CI on the CPU tiers and a per-sourcetype read contract: every field a search reads is in its sourcetype's contract, thresholds parsed from SPL, estate golden linted, Binding health and R-C-001 repaired** (medium; after nothing; #53). No workflow has ever run the suite on this fork (zero Actions runs), so no later `done_when` is observable by anyone but the author. The sourcetype contracts are narrower than the fields the searches read (l3 omits `ip_ttl_mature`/established/distinct, l6 omits six columns, none requires `lineage_id` or `osi_layer`), Binding health reads `resolution_method` on `morpheus:score:l3` where 0 of 719 rows carry it, R-C-001's 'previous hour' rests on an undocumented 3600 s seal, the six layer 5 thresholds are duplicated as test constants, and the estate golden is outside the field linter. These are hollow rules and holes in the net that would otherwise let every later step pass green while a search silently empties. *Done when:* A .github/workflows fork job runs the UNMARKED tier plus -m `cpu_mode` over `gpu_conformance.sh` TARGETS with --run_slow on Ubuntu with the CPU container and has one recorded green run; `tests/morpheus/utils/test_siem_sourcetypes.py` parses each search's base sourcetype and asserts every field it filters, aggregates, groups or joins on (minus fields it writes with `eval`) is in that sourcetype's required or variant columns, passing after l3/l5/l6 are widened and `lineage_id`, `osi_layer`, `window_id` are required on every score sourcetype; `golden_estate_expected.csv` is in `GOLDEN_NAMES` of `test_splunk_field_contracts.py`; `kmh_threshold`, `challenge_threshold`, `denial_threshold`, `rising_threshold`, `sigma_threshold` and `mean_ceiling` are parsed from `savedsearches.conf` in `test_splunk_validation_package.py` and `run_experiment.py` and RULES in `test_first_detections.py` includes R-P-L5-006, R-B-L7-002, R-P-L7-006 and R-C-005; Binding health reads sourcetype=`morpheus:score:l`* `resolution_method`=* BY sourcetype `telemetry_class` with a non-zero expectation computed from the telemetry and campaign frames and asserted; the R-C-001 stanza description, the l3 producer text and Part 3 state the hourly seal with a contract test on `PERIOD_SECONDS`; guide 59 and `gpu_conformance.sh`:19 say what runs where.
+
+3. **Wire DeterminismStampStage into all twelve corpora so `model_version`, `model_fallback_used`, `config_hash` and `pipeline_fingerprint` reach the golden files, the contracts and the SIEM** (medium; after 2; #54). Governance rule 2 says a rule over `max_abs_z` is meaningless without the model version beside it; the stage, envelope and manifest are built and unit-tested and placed in none of the twelve corpora, so README 96 is false and two model versions would be indistinguishable in the index. The EnvelopeStampStage tail pattern exists in every corpus, so this is wiring, and the gated R-B-L5 stanzas in step 4 cannot be written until the column is on the row. *Done when:* DeterminismStampStage is placed after TC5ScoreStage in session, campaign and estate pipelines and after the last feature stage in the other nine, with a DeterminismEnvelope built from each harness `config` including the stanza thresholds its rules use so `config_hash` moves when a threshold does; every `golden_`*`_expected.csv` header carries `determinism_tier`, `pipeline_fingerprint` and `config_hash`, and session/campaign/estate also carry `model_version` and `model_fallback_used`; those columns are required on every `morpheus:score:l`* sourcetype and the step 2 contract test passes; R-P-L5-006's table carries `model_version` and `model_fallback_used`; `test_session_harness` asserts every scored row carries the manifest-resolved version and `model_fallback_used`=true under the reference manifest; a test fails if any *`_pipeline.py` lacks the stage; `make_sample_events.py` renders the columns and `expected_results.json` records `model_fallback_used`=true on every l5 row; README 60 and 96, guide 3212-3216 and `session_pipeline.py`:543 are true as written.
+
+4. **Ship searches over the per-principal baselines the TC-5 stages already compute, the gated R-B-L5-001/002 stanzas, an acceleration condition on R-P-L5-006 and a watchlist the layer 7 rules read** (medium; after 2, 3; #55). TC5CadenceStage, TC5NoveltyStage, TC5RiskStage and TC5DriftStage emit `hour_unseen`, `hour_surprise_bits`, `cadence_mature`, location/app/device `_first_seen`, `auth_failed_then_succeeded`, `drift_velocity` and `drift_acceleration`; the session corpus plants and asserts the off-hours login and the new country; no saved search reads any of them (0 hits in `savedsearches.conf`; `drift_acceleration` only in R-P-L5-006's table at :1278). R-P-L5-006 writes with `eval` action=watchlist into a column nothing consumes. This is the largest increase in what an operator can learn about a user per unit of effort in the project, and needs no new stage. *Done when:* `savedsearches.conf` carries new R-D-L5 stanzas for off-hours (`hour_unseen`=true AND `cadence_mature`=true, svc-batch asserted as the negative control), new location/device (`location_first_seen` OR `device_first_seen` gated on a history minimum) and failed-then-succeeded at volume (`auth_failed_then_succeeded` with `consecutive_auth_failures`), plus [R-B-L5-001] (`max_abs_z`>=6.0 AND `mean_abs_z`>=2.0) and [R-B-L5-002] (`locincrement_z_loss`>=4.0) gated on `model_fallback_used`=false with `expected_rows` 0 recorded; each has a Part 3 paragraph, an `expected_results.json` entry, an assertion in `test_splunk_validation_package.py` and a RULES fragment; the cadence, novelty, risk, *_z_loss, `drift_velocity` and `drift_acceleration` columns are in the l5 variant columns; R-P-L5-006's where clause carries an acceleration ceiling or steady-rise condition with svc-batch, the planted principal and carol asserted as controls in `test_session_harness` and the decision recorded at guide 1535; a `principal_watchlist` KV collection and transforms stanza exist, R-P-L5-006 and R-P-L7-006 outputlookup into it with an expiry job, R-B-L7-002 reads it to raise `risk_score` for watchlisted principals, and `test_saas_harness` asserts the write; the README First-detections row names the new ids.
+
+5. **Give layer 5 its TC-0 context, an account type, a per-principal session-duration percentile (R-B-L5-005), a normalized session lifecycle and single-record durations** (medium; after 4; #56). Three specified layer 5 behaviours cannot be written on current columns: R-B-L5-001's HR leave-status suppression, R-B-L5-005's service-account exclusion and 99th-percentile duration, and R-C-004 surviving an IdP that says logon/logoff (TC5SessionStage accepts six vocabularies at :52-55 and writes no normalized column; the stanza tests 'start'/'end' literally at :322). TC0EnrichStage and TransferEnvelopeTracker already exist and run at layer 7; `session_pipeline` imports neither. *Done when:* `DEFAULT_PROFILE_COLUMNS` includes `account_type`, in `personal_data` PROFILES and the `context:identity` contract, with a service principal in `context_pipeline` and `session_pipeline`; `session_pipeline` builds an identity store with a leaver and a group change and runs TC0EnrichStage(`entity_column`=`user_principal`) before TC5ScoreStage; `ctx_groups`, `ctx_department`, `ctx_employment_status` and `ctx_account_type` are in the l5 variant columns and read by the step 4 searches for exclusion or severity; `test_session_harness` asserts a recorded leaver's sign-in carries `ctx_employment_status` as known at event time; TC5SessionStage (or a TC5DurationStage) keeps a TransferEnvelopeTracker per interactive principal over `session_duration_ns` emitting `session_duration_baseline`/_ratio/_mature, and a stateless branch computes the duration from `session_start`/session_end when both are present with `session_out_of_order` on inverted bounds, unit-tested with a single-record IdP actor; [R-B-L5-005] ships gated on `ctx_account_type` != service with `privilege_level` setting severity, a long interactive session and a bimodal service account planted and asserted; `session_lifecycle` (start|end|null) is emitted, R-C-004 reads it, and a campaign actor emitting logon/logoff still fires R-C-004 in `test_campaign_harness`; Part 2 marks the ten unconsumed TC-5 fields 'specified, not yet read' and the README collection table gains a Consumed column.
+
+6. **Close the detection output loop: a `behavior_risk` collect and suppression on every detection, Chain assembly and Behavior summary reading it, one `resolution_methods` field and `chain_anchor_source` in the contracts, an ordered validation run** (medium; after 2, 3; #57). All 32 detections end in '| table' with action.correlationsearch.enabled=1 and no collect, notable or alert key (the file's only collect is Behavior summary's at :165), so Chain assembly and Behavior summary sum a `risk_score` nothing indexes and three documents misstate the cause. R-P-L3-005 reads a summary the validation package never produces. Chain assembly reads values(`resolution_method`) only, so the directory and 802.1X hops on the fifteen estate chains are invisible. Once rows persist, R-C-005 (-24h window every 15 minutes) would re-emit a chain 96 times a day, so control 9's suppression half lands in the same change; hysteresis waits on a model scoring near thresholds. *Done when:* `indexes.conf` defines `behavior_risk`; grep -c 'collect index=`behavior_risk`' `savedsearches.conf` equals the number of [R-*] stanzas, each carrying `rule_id`, `risk_score`, `osi_layer`, `entity_key`, `lineage_id`, `event_uid`, `window_id`, `model_version`; every detection has alert.suppress, alert.suppress.fields and alert.suppress.period derived from a `lookups/rule_metadata.csv` (`rule_id`, threshold fields, suppression key, period) asserted in `test_splunk_app_contracts.py`; Chain assembly unions `behavior_risk` with `behavior_lineage`, drops the sum over raw events and reads values(`resolution_methods`) and values(`chain_anchor_source`); every BindingResolverStage appends to one `resolution_methods` field and it, `chain_anchor_source`, `resolved_port_key` and `binding_uid` are in the l2/l5 contracts; `VALIDATION.md` documents an ordered run (detections, Behavior summary, then R-P-L3-005 and Chain assembly) and `expected_results.json` records non-zero rows for the fifteen estate chains and the planted scan's rising windows, asserted in `test_splunk_validation_package.py`; `test_splunk_field_contracts.py` resolves a cross-search field only when the creating search writes to the index the reader queries; `VALIDATION.md:81`, `expected_results.json`:331 and guide 3627-3630 state the real cause; Part 5 records suppression as built and hysteresis as deferred.
+
+7. **Re-earn the verification verdicts on what ships: a recorded search-head run of all 41 searches, GPU parity over twelve corpora with a fresh card run, clock skew over every rule, artifacts committed** (medium; after 4, 5, 6; #58). Steps 2-6 add or edit a dozen stanzas and twelve corpora; none of the 34 searches added since the live pass has run on a search head, the GPU verdict (2026-09-20) covers four of twelve pipelines and 26 of 46 stages, clock skew is measured for 7 of 32 rules over two pipelines, and the GPU and model artifacts the README quotes are ignored by git. One recorded pass with committed artifacts makes every later step's claim checkable. *Done when:* `validate/search_head_results.json` is committed with Splunk version, date and per-search row counts from a docker-compose run that dispatched all 41 searches in the ordered procedure, and a test compares it to `expected_results.json`; `test_gpu_parity.py` is parametrized over all twelve corpus modules; ci/scripts/gpu_conformance.sh has been rerun on a card and its JSON committed under ci/artifacts/gpu_conformance-<date>.json beside the layer 5 run artifact under examples/layer5_model/artifacts/<date>/, with .gitignore:223-225 removed and a test tying README 106-123, 147-171 and guide 86-140 to the artifacts' fields; `run_experiment.py` has decision functions for the network, transport, presentation, application, `saas`, endpoint and campaign pipelines and `test_clock_skew_experiment.py` asserts the chained rules' 120 s join-tolerance breaking points; README 341-342 and guide 3531, 3548 name exactly what each verdict covers.
+
+8. **Put a learned per-entity model in CI: committed artifact, CPU inference, disjoint train and score windows, R-B-L5-001/002 live; then a host feature frame scored on `host_key` with daily drift over TLS, DNS and endpoint columns** (large; after 3, 4, 7, 12; #55, #59). Every shipped score compares a principal to ten frozen constants (`SCORING_MANIFEST` models={}, ReferenceScorer 'Not a model'); the `dfencoder` path trains only inside `run_model.py` on a GPU, scores the rows it trained on and writes an artifact that is not in the tree. With provenance (step 3), gated stanzas (step 4) and committed-artifact discipline (step 7) in place, a real score reaching the SIEM is visible as such and its rule is waiting. The host half depends on `host_key` from step 12 and is the first time predictive mechanisms 1-2 exist for systems; scoring hosts through ReferenceScorer first would reproduce the hollow claim this plan opens by removing. *Done when:* examples/layer5_model/artifacts/<date>/ holds the `run_model.py` artifact and five weight digests with a test tying the README numbers to them; DfencoderScorer loads a committed `state_dict` on torch CPU (or an exported `numpy` forward pass) with a unit test scoring a fixed row; `session_pipeline` widens to a train window and a disjoint score window with one deviating principal, controls and one unseen principal, `SCORING_MANIFEST` pins each corpus principal to a digest with reference-arithmetic:0 as fallback only, and `golden_session_expected.csv` is regenerated byte-stable with `model_fallback_used`=false on modelled rows and true on the unseen one; `test_session_harness` asserts R-B-L5-001 and R-B-L5-002 fire on the deviation and not on the controls, their `expected_rows` become non-zero and the search-head run is repeated; a host feature frame per hourly window (`dsts_per_src_step`, `internal_dst_ratio`, `byte_asymmetry`, `ja4_client_distinct`, endpoint novelty count) keyed on `host_key` is scored by TC5ScoreStage(`entity_column`='`host_key`') with a shared model per `ctx_peer_group` pinned in a host manifest, followed by DeterminismStampStage and a daily TC5DriftStage; a host-score corpus plants a drifting host and asserts `mean_abs_z`, `drift_rising_windows` and `model_version` on host rows; a `morpheus:score:host` sourcetype carries them, Behavior summary's `peak_z` is non-null on host rows and R-P-L3-00x host drift ships with expected rows; daily WindowSealStage + TC5DriftStage(aggregate=max) runs over `ja4_client_distinct` per host in `presentation_pipeline` and `dns_subdomains_per_domain` per client in `application_pipeline` with R-P-L6/L7 watchlist searches and expectations; Part 6 says which entity classes have a score.
+
+9. **Host baselines: a 14-day per-source and per-destination layer 3 history, rules over the unread host features, `community_id` at layer 3, `hostname` case-folding, `device_role`/os_family and criticality read by rules, the R-B-L6-001 managed-endpoint gate** (large; after 2, 6; #60). R-B-L3-001 reads a literal 50 where the guide specifies the source's own 14-day 99.5th percentile and `bucket_peak` is used only by TC2BaselineStage; `srcs_per_dst`, `dst_ports_per_src`, `byte_asymmetry`, `dst_asn_first_seen`, `ja4_client_changed` and the endpoint host-seen flags are emitted and read by nothing; `ctx_criticality`, `ctx_owner` and `ctx_data_classification` are attached and unread; `network_pipeline` has no CommunityIdStage; `hostname` is case-folded in SPL but not in the stages; R-B-L6-001 dropped its managed-endpoint gate. Applying the port pattern to hosts is medium effort for a large gain in what can be said about a workstation or server or an infrastructure server. *Done when:* TC3BaselineStage (registered, liveness entries) keeps BucketPeakTracker histories keyed on `src_ip` over hourly `dsts_per_src` and on `dst_ip` over hourly `srcs_per_dst` for 14 days with a `group_column` option, emitting *_baseline_max/_step/_mature; R-B-L3-001 fires on `dsts_per_src_step`>0 AND mature with the literal as a floor and a new R-B-L3-00x fan-in rule reads `srcs_per_dst_step` on a `ctx_device_role`=workstation; `network_pipeline` extends to 14 days and plants a DNS server and a DHCP server as controls asserted in `test_network_harness`; rules read `dst_asn_first_seen` with `byte_asymmetry`, `dst_ports_per_src` beside R-D-L4-002 and `ja4_client_changed` for a settled host, each with a Part 3 id, corpus case, expectation and contract columns, and a test asserts every emitted feature column is read by a search or listed in a 'features without a rule' table in Part 6 and the app README; CommunityIdStage runs in `network_pipeline` and `presentation_pipeline`, `community_id` is in the l3 and l6 contracts and one search joins l3 to l4 to l6 on it over the campaign corpus; `normalize_hostname` (case-fold, trailing dot, optional domain strip) in `morpheus.utils.entity_key` is applied by TC7EndpointStage, TC0AssetStage, TC0EnrichStage and EnvelopeStampStage with a mixed-case EDR case asserted and the SPL lower() in R-C-001 removed; `device_role`, `os_family` and `os_version` join `DEFAULT_ASSET_COLUMNS`, `personal_data` and `context:asset`, R-C-001 requires `ctx_device_role`=server, R-B-L7-004's `risk_score` multiplies integrity by `ctx_criticality` and carries `ctx_owner` with the weighting asserted in `test_endpoint_harness`; `presentation_pipeline` runs TC0EnrichStage, `ctx_found`/ctx_criticality are on l6, R-B-L6-001 is gated on a managed host with an unmanaged control planted and the departure recorded in Part 3.
+
+10. **Network-object detections on columns that already exist: optical tap step, flap instability, device restart, error-rate step, LLDP neighbour change and adjacency lookup** (medium; after 2; #61). The one-to-three dB tap step (`optical_rx_dbm_deviation`, which `optical_baseline.py` calls the security signal), `link_flaps_in_window`, `counter_reset`/link_flap_device_reset, the four error/discard deltas and `lldp_neighbor_chassis_id_changed` are computed, asserted in Python and read by no search; no stage divides a delta by its interval; `lldp_neighbor_port_id` is required and unread; the corpus never changes a neighbour. Five small rules and one feature give a port, a link and a switch behaviour an operator can see. *Done when:* Part 3 specifies and `savedsearches.conf` ships R-D-L1-00x receive-step-with-transmit-steady (`optical_rx_dbm_deviation` `<= -1.0` AND |`optical_tx_dbm_deviation`| < 0.5 AND samples >= N, deduplicated per port), R-D-L1-00x `link_flaps_in_window` >= N excluding `link_flap_device_reset`, an operational 'Device restart' search collapsing `counter_reset` OR `link_flap_device_reset` to one row per (`site_id`, `device_id`, window) with `expected_rows` 1, R-D-L1-00x CRC/symbol error-rate step over a per-port rate feature (delta / `interval_seconds`, null on reset or out-of-order, given a baseline with `bucket_peak`) and R-D-L1-00x topology change over `lldp_neighbor_chassis_id_changed`; `lldp_neighbor_port_id` is read and a link key (sorted pair of near `entity_key` and far chassis:port) is a column and TC1BindingStage attribute, a 'Topology - LLDP adjacency' search fills a KV lookup, and trunk/LAG membership is a port designation the single-host rules exclude; `telemetry_pipeline` plants a sustained flapper, a climbing error port, a re-patch and an inline insertion; the deviation, window count, deltas, `interval_seconds`, reset flags and link key are required in the l1 contract; each rule has a first-detection assertion and an `expected_results` entry; R-D-L1-001's documentation carries the reboot exclusion clause.
+
+11. **Make the pipeline, collectors and tenants observable: envelope validation and clock quarantine, `collector_seq` checks, a `morpheus:health` sourcetype, late-row routing, `exporter_id` on layer 3, tenant and collector carried to every score row with a per-platform baseline** (medium; after 3, 6; #62). Ten of fourteen envelope fields are produced, validated and quarantined on by nothing (`clock_source` and `clock_offset_ms` appear only in prose), so the clock-skew experiment measures damage with no mitigation; `collector_seq` regressions are unchecked and `observed_time` has no consumer; refusals, unpaired sessions and abandoned sessions are log lines; late rows feed detections as complete; layer 3 rows name no exporter; `tenant_id` is read by no stage. This is the first baseline any platform (IdP, tenant, collector, the pipeline itself) gets, and the one stale health search was repaired in step 2. *Done when:* Every corpus envelope carries `observed_time`, `ingest_time`, `clock_source`, `clock_offset_ms`, `sampling_policy` and `tenant_id`, and the TC-3 corpus carries `exporter_id` (IPFIX observation domain) as a required field in Part 2 and the l3 contract; an EnvelopeValidateStage (or EnvelopeStampStage extension) stamps `ingest_time`, requires the fourteen fields or an explicit null with reason code, and routes |`clock_offset_ms`| above `max_offset_ms` or `clock_source`=unsynchronized to a `morpheus:quarantine` sourcetype in `behavior_quarantine` with a reason; a CollectorSequenceStage flags `collector_seq_gap`/collector_seq_regressed and a PipelineHealthStage emits one `morpheus:health` record per sealed window per (`collector_id`, `telemetry_class`, `tenant_id`) with rows, refused, without a key, unclassified, unpaired, abandoned, `out_of_order`, late, unresolved, saturated, fallback, max `observed_time` lag and the offset distribution into `behavior_health`, with a BucketPeakTracker baseline per collector and tenant; 'Pipeline health - refusal rate', 'Collector health', 'Late arrivals by class' and 'Platform baseline step' searches ship with expectations, and `saas_pipeline` plants a tenant whose export volume doubles asserted in its harness; a `morpheus:late` sourcetype and `behavior_late` index receive `is_late` rows, every detection's base search carries `window_complete`=true, one score corpus plants a late arrival that reaches sample events, and the backfill procedure is in the app README; `tenant_id` and `collector_id` are required columns on every score sourcetype and a Part 2 'TC-P platform' section names the key; `max_clock_skew_seconds` with an EventClock refusal is on TC1Optical/Forecast/Flap/Change/Normalize and TC2Cardinality/Baseline/Arp with liveness knobs and guide 806-807 corrected; `run_experiment.py` gains an exporter-clock axis and a run with quarantine on, with the delta recorded in Part 6.
+
+12. **Host identity across layers: a `dhcp_lease` producer, a `host_inventory` binding, `host_key` on layer 3/4/6/7 events, a real edge stream, `binding_uid` on every resolver, principal and 802.1X lookups in the SIEM, hard join keys above layer 3** (large; after 6, 9, 11; #63). A host is `src_ip` at layers 3/6/7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint with nothing bridging them; `binding_l2_l3` is refreshed from `dhcp_lease` rows nothing emits; `morpheus:edge` carries none of the parent/child `uid`, `join_method`, `osi_layer` or `lineage_id` fields Chain assembly and the guide's edge SPL read; the principal-to-desk rung is a Python dict with no SIEM lookup; only `telemetry_pipeline` passes `uid_column`; R-C-001/002/004 join on strings in SPL. Everything that treats a host as one thing (asset context on a flow, a host score, 'this host's story') depends on this rung. The DHCP collector stays out of scope; emitting bucketed lease rows is downstream of it. *Done when:* A TC-2/TC-3 lease stage closes DHCP ack/release (or ARP) records into a `dhcp_lease` BindingTable through `binding_closer` and emits `binding:bucketed` rows with `binding_table`=`dhcp_lease`, so 'Binding lookup - L2/L3 refresh' has non-zero `expected_rows` and the Part 4 walk at 2448-2460 is asserted end to end; a `host_inventory` BindingTable (`hostname` -> mac) and a BindingResolverStage hop `ip` -> mac -> `hostname` run ahead of EnvelopeStampStage in the network, transport, presentation and application corpora emitting `host_key` and `mac_address`, ChainAnchorStage roots `chain_anchor` on `host_key`, `host_key` is required on l3/l4/l6/l7, TC0EnrichStage on the resolved `hostname` attaches ctx_* to layer 3/4/6 rows, and a host-identity corpus asserts one workstation at layers 3, 4, 6 and 7 shares one `entity_key` and one lineage chain; an EdgeEmitStage after the resolvers in estate and campaign emits one `morpheus:edge` row per resolved relation (`parent_event_uid`, `child_event_uid`, `relation_type`, `join_method`, `osi_layer` of both ends, `lineage_id`, `community_id` where present), the edge contract requires them, the lineage corpus's flow rows move to `morpheus:flow` or are renamed `dst_ip`/dst_port, `make_sample_events` renders them and Chain assembly's methods include an edge `join_method`; every BindingResolverStage in estate and campaign passes `uid_column` and the `uids` are in the l5 variant columns and R-C-005's table; the supplicant table is emitted as `binding_table`=`dot1x_supplicant` with a `binding_l5_l2` collection keyed (`dot1x_identity`, bucket) and a `binding_l2` lookup keyed (mac, bucket), each with refresh and expiry searches, the directory documented as an estate-supplied lookup, `desk_identity`/desk_port_key in the l5 contract and the walk asserted in `test_splunk_validation_package`; HTTP/SaaS events resolve to `session_key` via a BindingResolverStage over TC5SessionStage intervals keyed on `source_ip`, R-C-002/R-C-004 join on `community_id`/session_key where present with the value join as stated fallback, asserted in `test_campaign_harness`; the Part 4 ladder diagram gains the host and identity rungs and guide 2029-2031, 2470-2485 and the Splunk README 134-135 are corrected.
+
+13. **Make a service and an application an entity: `tc7_service`, per-client DNS/HTTP baselines, user-agent and NXDOMAIN features, SNI-keyed TLS destinations, a TC-0 application kind, and the R-B-L4-004 inputs** (large; after 3, 12; #64). The owner's goal names applications and nothing has a service as a subject: `tc4_envelope` keys a conversation, `sni` and `client_app` are unread, DNS/HTTP rules are global literals the guide calls placeholders, three Part 2 TC-7 features have no producer, TC-0 claims an application-to-server mapping it does not hold, and R-B-L4-004 is cannot be built because `tcp_options_order` is not carried. Reuses TransferEnvelopeTracker, DistinctWindowTracker, ValueNoveltyTracker, RatioWindowTracker and the kind-generic bitemporal store. *Done when:* A `tc7_service` composition seals on `compose_key`(`dst_ip`, `dst_port`) (`sni:dst_port` where present) with bytes/connections per window, distinct clients and new client fingerprints per service, a `tc7_service` variant in the l7 contract, a corpus class in `application_pipeline` with a planted service change and controls, one saved search with an expectation and a Part 2/Part 6 entry defining the service key; TC7DnsStage and TC7HttpStage keep per-client BucketPeakTracker or TransferEnvelopeTracker histories over daily windows publishing `*_baseline` and `*_ratio` for `dns_subdomains_per_domain`, distinct registered domains and `http_distinct_paths`, R-B-L7-001 and R-D-L7-005 threshold the ratio with the literal as a floor and Part 3 records the prior form; TC7HttpStage emits user-agent-family novelty per client and TC7DnsStage an NXDOMAIN ratio and distinct-registered-domains window with a DGA corpus actor and a shipped R-B-L7 rule, and guide 1178-1179 agrees with 1623 on 5xx; TC6CertificateStage defaults `key_columns` to [`dst_ip`, `sni`] when `sni` is present with a one-address-two-names case and `sni` in the l6 contract; the bitemporal store gains an application kind and a `service_account` attribute, TC0ApplicationStage produces `context:application`, TC0EnrichStage attaches `ctx_application_*` on `dst_ip`:`dst_port` for L4/L6/L7 events, `context_pipeline` carries a reassigned server and guide 1194/1211 say which TC-0 contents are built; TC4FlowStage carries `tcp_options_order`, `tcp_mss` and `tcp_window_initial` with a per-host `stack_fingerprint` novelty, R-B-L4-004 ships as a join on `host_key` between the stack fingerprint and the HTTP user-agent family, and guide 1476-1477, README 55 and `test_transport_harness.py`:29-30 are corrected.
+
+14. **Complete the network object: port traffic volume, VLAN as an entity, 802.1X timing distribution, observed binding ends** (medium; after 10, 11; #61). The interface as a thing that carries traffic has no behaviour (no octet counter is designed, `link_speed_bps` is required and unread), a VLAN has no history and the four-part key is never stamped, 802.1X timing has no tails, and `bind_end_observed` is false on every record because no stage calls close() or reconcile(). Each reuses `counter_delta`, `bucket_peak`, `transfer_envelope` and `binding_closer`. *Done when:* ifHCInOctets/ifHCOutOctets join TC-1's required fields and TC1NormalizeStage's counters (64-bit), a TC1RateStage computes bits per second and utilization against `link_speed_bps` with a per-port hour-of-day baseline and a planted volume step and silence, and R-B-L1-00x ships with l1 contract columns; a second VLAN and a never-seen OUI are planted, `ouis_per_vlan` gets a BucketPeakTracker baseline keyed on site:vlan and a shipped rule, `ouis_per_vlan` joins the l2 contract, and Part 2 either stamps a class on the four-part key or deletes it and README 284; TC2AuthStage emits `auth_elapsed_p99`/_ratio per port with slow-tail (`auth_attempts` >= 3) and fast-success rules and corpus cases; TC2BindingStage gains a stop column calling close() and a snapshot mode calling reconcile(), the corpus plants one explicit stop and one snapshot absence, the harness asserts `bind_end_observed` true exactly once and a `SNAPSHOT_ABSENT` reason, and guide 1001-1003 documents which end reasons each source yields.
+
+15. **Build R-C-003 and the device as an entity** (large; after 10, 12, 14; #65). R-C-003 is the chain the guide says is the only reason layer 1 pays for itself and it has no stanza, corpus actor or harness; two of its inputs are absent (OUI novelty is per VLAN only, nothing classifies a management network) and no corpus holds layers 1 and 3 together, which the host-identity rung supplies. A switch or router exists only as the middle segment of a port key: a reboot is 48 identical per-port flags, and configuration change, route churn and CPU appear nowhere, so the owner's 'nodes' have no device-level behaviour. *Done when:* TC2CardinalityStage (or TC2BindingStage) keeps a ValueNoveltyTracker keyed on `port_key` over oui writing `oui_first_seen_on_port` and oui joins the layer 2 binding attributes; TC3ReachStage takes a management prefix list and emits `dst_is_management` with a `vlan_designations` lookup (`vlan_id`, role) shipped; a rogue-host actor (new serial or link-up, novel OUI on the port, a lease to that MAC, a flow to a management prefix) is planted in the campaign or estate corpus with a known-OUI re-patch and a novel-OUI-no-management control; [R-C-003] ships joined through the lease and MAC bindings with collect and suppression, asserted in `test_campaign_harness` and recorded in `expected_results.json`; Part 2 gains a `tc1_device` sub-class (`entity_key` `site_id`:`device_id`; sysUpTime, `config_hash`, `cpu_util`, `mem_util`, `route_count`, `bgp_peer_count`, `syslog_rate`) and TC1DeviceStage (registered, liveness entries) derives reboot events from uptime regression, `config`-change novelty and route-count deltas with a per-device reboot-frequency baseline; the telemetry corpus plants a reboot storm and a `config` push; R-D-L1-00x `config` change outside window and R-P-L1-00x reboot-rate trajectory ship with a `morpheus:score:l1` device variant and contract; the Device restart search collapses to the device entity; guide 3755 and the sequencing list record R-C-003 as shipped.
+
+16. **Make it deployable: per-segment runners, minimization placed, CLI coverage for all 46 stages, Splunk transport configuration, the sharding variant, per-class input samples and contracts, first real-feed normalizations** (large; after 3, 11, 13, 15; #66). Every composed pipeline is in-memory behind InMemorySourceStage; the only runner is a four-stage layer 2 example; MinimizationStage is placed nowhere although the app's documents say it runs before the sink; CLI build is proven for 16 of 46 stages; Kafka Connect is the recommended transport with no configuration; one of fourteen input classes has a contract or sample; the per-layer pattern's normalization step is design only. None of this increases what is detected, which is why it is last; all of it is required before an operator sees any of the above against real feeds. Collectors remain out of scope; the schemas and contracts are the boundary document they need. *Done when:* examples/behavioral_analytics/run_<segment>.py exists per segment (FileSourceStage or KafkaSourceStage -> LineageStamp -> TotalOrder -> class stages -> TC0Enrich where applicable -> EnvelopeStamp -> WindowSeal -> DeterminismStamp -> MinimizationStage with `minimization_policy.example`.yaml keyed from an environment variable -> SiemWireStage -> file or WriteToKafkaStage) with a test that each reproduces its corpus golden from a sample file, MinimizationStage is in `run_mac_spoof.py`, and sample events carry no plaintext `user_principal` when the policy is on; a with sharding `session_pipeline` variant over RouterStage and `stable_shard` is asserted equal to the unsharded golden under control 13; examples/splunk_lineage_app/transport/ holds a Kafka Connect for Splunk connector JSON and an `inputs.conf`/HEC alternative referenced from the app README; `test_lineage_stage_cli.py` is parametrized over every class carrying `_morpheus_registered_stage` (46) with the `ignore_args` stages documented as Python-only and one `morpheus run` composition per segment documented; examples/behavioral_analytics/samples/<class>.jsonlines and a per-class contract table (column, type, unit, source) exist for all fourteen input classes with a test that each builder's columns equal its contract and each sample runs through its composition, and `collector_contract.md`:7 is rewritten; one FlowRecordNormalizeStage (IPFIX/NetFlow v9 or Zeek conn.log via `parsers/zeek.py`) to the TC-3 field list with `exporter_id` and one DataFrameInputSchema per L6/L7 sub-class (Zeek ssl+x509, Zeek `http` or Squid, Zeek dns/BIND, M365 UnifiedAuditLog, the Windows system monitor 1/EDR) each round-trip a fixture to the golden columns; README 72-73 names the real boundary.
+
+**Left open on purpose.** Collectors stay out of scope, as the design says, with two exceptions the
+verification turned up: the bucketed `dhcp_lease` rows and the per-class input contracts are promised by
+the fork's own Splunk app and per-layer pattern, so fork code must emit them. Cloud and Kubernetes audit,
+a graph store, threshold-tuning tooling, a Triton inference path for the two model rules and TC-0 context
+for ports and VLAN objects are recorded as gaps and not scheduled.
+
+## What the completeness review found
+
+A final reader was given the matrices, the verified gaps and the plan and asked what was missing. Its
+findings changed this document in five places and are recorded here because each is a correction to the
+audit rather than to the code.
+
+- **The upstream pieces were ignored.** No lens, gap or plan step weighed `morpheus_dfp`, the
+  identity-provider and CloudTrail source stages, `TimeSeriesStage` or `MLFlowDriftStage`, all named by
+  the design. Added as #67 and as a precondition in the plan.
+- **State persistence had no gap.** The delivery lens noted that no tracker survives a restart and then
+  scored the dimension built. Added as G90 and #68.
+- **Platforms was the under-examined class.** Its gaps were all deferred or not reviewed and no step gave a
+  platform a detection of its own. Step eleven now carries a per-tenant and per-collector baseline.
+- **Six matrix cells said built where the plan schedules work.** Users' observe and network objects'
+  deliver are downgraded to partial above; the cross-cutting lenses' baseline cells were not published as
+  matrix rows for the same reason.
+- **The GPU coverage figure had three values.** The number used here is the one the tree supports: the
+  cross-mode parity test compares three corpora, and the standing verdict predates seven of the twelve
+  composed pipelines and fifteen of the forty-six stages.
+
+The review also flagged, correctly, that "every detection ends in a table" is the right conclusion from
+the wrong evidence; the verified statement is that no detection stanza collects, raises a notable or
+alerts, and the one `collect` in the file belongs to the behavior summary. The thesis above uses the
+verified form.
+
+## What this retrospective does not establish
+
+It is a reading of the repository, not a run of it. Nothing here was executed on a GPU, on a search head,
+or against a collector, so the matrix measures what the code and its tests say, and where the code has been
+verified only on a CPU the matrix says so rather than marking the cell down. The cell values are
+judgements: ten readers scored them independently and a critic read them against each other, but
+"partial" covers a wide range, and the paragraph under each row is the thing to read, not the word in the
+table. The gap list was filtered by sceptics who tried to find each capability and could not; a capability
+that exists under a name nobody searched for would have survived as a gap, which is why every entry
+carries the anchors the sceptic checked, so a reader who knows better can say where. Severity is relative
+to the owner's goal of understanding six classes of entity, not to the guide's own sequencing, which
+deliberately put layers 1 and 2 last and the per-user model first. The plan is a sequencing of the
+verified gaps and inherits their limits.
+
+## Appendix: The stale claims, one by one
+
+Every sentence reported as stale, with its location at the commit this document describes, the
+corrected statement and verdict from the verifier. Locations are line numbers before this change;
+the ones this change corrects have moved by a few lines.
+
+| Claim | Where | What it says | What is true | Check |
+| --- | --- | --- | --- | --- |
+| S01 | `guide:59-62` | **there is no per-user model.** `mean_abs_z` and `max_abs_z` have no producer, so the four behavioral and pre… | There is no trained per-user model in the shipped pipeline: `mean_abs_z` and `max_abs_z` are produced by TC5ScoreStage from ReferenceScorer's frozen population arithmetic, so R-P-L5-006 ships and its seven firings… | stands |
+| S02 | `guide:65-67` | Given no score column it carries a null in every drift column and says so once in the log, which is what a pi… | The repository ships with the drift columns populated from the reference scorer's `mean_abs_z`; the null-column behaviour is what a deployment without any scorer would see. | stands |
+| S03 | `guide:66-73` | What remains design rather than a running system: the telemetry classes for layers 3, 4, 6 and 7, every detec… | All seven telemetry classes have feature stages and composed corpora; 32 of the 39 Part 3 rules ship as saved searches (R-B-L4-001, R-B-L4-004, R-B-L5-001, R-B-L5-002, R-B-L5-005, R-B-L7-003 and R-C-003 do not… | narrowed |
+| S04 | `guide:67-69` | What remains design rather than a running system: the telemetry classes for layers 3, 4, 6 and 7, every detec… | What remains design: R-B-L4-001, R-B-L4-004, R-B-L5-001, R-B-L5-002, R-B-L5-005, R-B-L7-003 and R-C-003; the per-user model; the collectors; the chained rule engine beyond the shipped searches; controls 4 (rou… | stands |
+| S05 | `guide:1420-1423 together with 1437-1446` | Feed the binned series to `TimeSeriesStage`; the periodogram approach in `fftAD` detects this directly and mo… | Add a third recorded departure: 'R-B-L3-002 ships as a coefficient of variation over inter-arrival times and sizes (ArrivalRegularityTracker, TC3BeaconStage) rather than through TimeSeriesStage; the periodogra… | narrowed |
+| S06 | `guide:1838-1861` | L5  `session_id` : `user_principal`               \|               \|  session-to-flow: source IP + time containm… | The diagram is correct as drawn but omits the identity rung the estate pipeline builds: L5 `user_principal` -> (directory, supplied, time-bounded) -> `dot1x_identity` -> (802.1X supplicant binding derived by TC2Bi… | narrowed |
+| S07 | `guide:3212-3216` | The envelope every scored event carries and the two hashes inside it (`morpheus.utils.determinism_en`… | 'The envelope a scored event is designed to carry ... and the stage that stamps it, DeterminismStampStage, built and tested but not yet placed in any composed pipeline (see Must be built).' Add a Must-be-built… | stands |
+| S08 | `guide:3252` | R-D-L5-003 and R-D-L5-004 as saved searches, which makes six shipped detections rather than four. | R-D-L5-003 and R-D-L5-004 as saved searches, two of the thirty-two that ship. | stands |
+| S09 | `guide:3746` | Ship R-B-L5-001, R-B-L5-006, and R-B-L7-002. | Ship R-B-L5-001, R-P-L5-006 and R-B-L7-002; today R-P-L5-006 and R-B-L7-002 ship and R-B-L5-001 waits on a trained per-user model. | stands |
+| S10 | `examples/layer5_model/run_model.py:32` | Three things are checked, each a control from Part 5: | 'Four things are checked, each a control from Part 5:' | stands |
+| S11 | `python/morpheus/morpheus/utils/siem_sourcetypes.py:290` | producer="The TC-5 stages (session, novelty, cadence, travel, risk) behind WindowSealStage; | producer="The TC-5 stages (session, novelty, cadence, travel, risk, score and, over daily windows, drift) behind WindowSealStage; ..." -- an omission in the producer field only; the stanza's comment at lines 2… | narrowed |
+| S12 | `README.md:60` | \| **Scoring determinism** \| The envelope every scored event carries and the two hashes inside it, a model m… | 'The determinism envelope and model stamp exist as a tested stage (DeterminismStampStage) that is not yet wired into any composed pipeline; no scored event in the golden files or the validation package carries mode… | stands |
+| S13 | `README.md:64` | **First detections** \| Ten rules as saved searches in the app, eight deterministic and two predictive. | The first-detection set: ten of the app's thirty-two rule searches, eight deterministic and two predictive; nine are asserted end to end in `test_first_detections.py` and R-P-L5-006 in `test_session_harness.py`, w… | stands |
+| S14 | `README.md:74-75` | **Layers 3, 4, 6 and 7 are designed, not built.** The telemetry classes, detection rules, and Splunk queries… | Delete the bullet or replace it with the actual boundary at those layers: collectors are absent for every layer; R-B-L4-001 and R-B-L7-003 (Triton models) and R-B-L4-004 (needs layer 7 `user_agent` on the flow)… | stands |
+| S15 | `README.md:96` | Every scored row reports `model_fallback_used`. | 'Every principal resolves to the manifest's fallback (reference-arithmetic:0); the column that would say so on the row, `model_fallback_used`, is written by DeterminismStampStage, which the composed pipeline doe… | stands |
+| S16 | `README.md:395` | [List of available Morpheus stages](`./docs/source/stages/morpheus_stages.md`) - The `Lineage` and `Telemetry`… | Either complete the page or say it covers a subset and point readers to the Part 6 'Provided' list for the full inventory. | stands |
+| S17 | `tests/morpheus/determinism/session_pipeline.py:19-22` | The five TC-5 stages had never been run composed with each other, and the two deterministic layer 5 rules had… | Rewrite in the present tense: seven TC-5 stages are composed here, and the three layer 5 searches are asserted against this corpus. | stands |
+| S18 | `guide:55-58` | What now runs: the lineage substrate (identifiers, Community ID, binding resolution, window sealing), the TC-… | List all telemetry classes TC-0 through TC-7 as running, naming the corpus each is verified against, and move the qualifications (synthetic sources, no collectors, no model) to the next paragraph. | stands |
+| S19 | `guide:56-59` | What now runs: the lineage substrate (identifiers, Community ID, binding resolution, window sealing), the TC-… | What now runs: all eight telemetry classes TC-0 through TC-7 with their producing stages, the lineage substrate, the SIEM wire stage, and thirty-two of the thirty-nine specified rules as saved searches (eighte… | stands |
+| S20 | `guide:59-62` | the Splunk app was validated three ways, the strongest being a functional pass against seeded telemetry on a… | Qualify: the live pass covered the app's oldest seven searches; the 34 added since, including every detection, are validated by recomputation in Python only. | stands |
+| S21 | `guide:63-66` | What now runs: the lineage substrate (identifiers, Community ID, binding resolution, window sealing), the TC-… | Replace with the layer-by-layer summary the README table gives, or point to Part 6 and delete the enumeration. | unverified |
+| S22 | `guide:67-72` | What remains design rather than a running system: the telemetry classes for layers 3, 4, 6 and 7, every detec… | What remains design rather than a running system: seven of the thirty-nine specified rules (R-B-L4-001 and R-B-L7-003, which need Triton; R-B-L4-004, which needs a layer 7 `user_agent` on the flow; R-B-L5-001, R… | stands |
+| S23 | `guide:71-73` | `mean_abs_z` and `max_abs_z` have no producer, so the four behavioral and predictive rules that read them --… | `mean_abs_z` and `max_abs_z` are produced by TC5ScoreStage; in the shipped corpus the scorer behind it is ReferenceScorer, frozen arithmetic rather than a model. R-P-L5-006 ships as a saved search and fires on thr… | stands |
+| S24 | `guide:80` | Everything else at this layer is built: the session assembly and the six feature stages run under control 13'… | the session assembly and the seven TC-5 stages (including TC5ScoreStage and TC5DriftStage). | refuted |
+| S25 | `guide:140` | That is every stage, all four composed pipelines, control 13's six checks, the stage parameter liveness regis… | That run covered every stage and all four composed pipelines that existed on 2026-09-20 (lineage, telemetry, session, estate) in GPU mode. The eight composed pipelines added between 2026-09-20 and 2026-09-25 (… | narrowed |
+| S26 | `guide:806-807` | `morpheus.utils.event_clock` implements this, and both TC-2 stateful stages take `max_clock_skew_sec`… | `morpheus.utils.event_clock` implements this, and four stages take `max_clock_skew_seconds`: TC1BindingStage, TC2BindingStage, TC2AuthStage and TC5SessionStage. The other windowed stateful stages (TC2CardinalitySt… | narrowed |
+| S27 | `guide:817-823` | **Required fields:** ... `crc_error_delta`, `symbol_error_delta`, `input_discards_delta`, `output_discards_de`… | List the raw inputs the stages require with their units, and the emitted columns under their real names; drop 'must be reported as deltas'. | stands |
+| S28 | `guide:1001-1003` | Every emitted record carries `bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule… | State that the explicit and snapshot paths exist in the `util` only, that every emitted end is inferred today, and that a rule insisting on an observed end matches nothing until a stop or snapshot input is wired. | stands |
+| S29 | `guide:1162-1163` | **Entity key:** varies by sub-class. `user_principal` for SaaS, `service_account` for API, `hostname` for DNS… | State the keys as built: `src_ip` for DNS and HTTP (the querying client), `user_principal` for SaaS, `hostname` for endpoint; mark `service_account` and `process_guid` as designed. | stands |
+| S30 | `guide:1178-1179` | Ratio of `4xx`/`5xx` to `2xx` per client for enumeration. | 'Ratio of 4xx to 2xx per client for enumeration (5xx is about the server and is excluded; see R-D-L7-005).' | stands |
+| S31 | `guide:1180-1182` | The `models/` directory ships pretrained models usable here: `sid-models` for sensitive information detection… | Keep the sentence, append a status note: 'These are upstream models. This fork composes none of them; R-B-L7-003 waits on a Triton path (see 1651 and Part 6).' | narrowed |
+| S32 | `guide:1192-1194 and 1211` | ...service account to owning-team mapping, and the CMDB application-to-server mapping. ... This is built. | The profile, group-membership and asset parts of TC-0 are built (TC0IdentityStage, TC0AssetStage, bitemporal store); the service-account-to-owning-team and CMDB application-to-server mappings have no producer,… | stands |
+| S33 | `guide:1388-1389` | These seven, R-D-L1-001, R-P-L1-004, R-B-L2-002 and R-D-L2-001, 003, 004 and 005, are the rules in this part… | These seven are the layer 1 and 2 rules that exist as code; the layer 3-7 and chained rules that ship are listed in their own sections and in the app README. | stands |
+| S34 | `guide:1389-1392` | The two layer 1 rules, R-B-L2-002, 004 and 005 read columns the shipped stages produce and depend on nothing… | R-D-L1-001, R-B-L2-002, R-D-L2-004 and R-D-L2-005 depend on nothing outside the pipeline; R-P-L1-004 needs the estate's optic floor table and reports `no_floor` without it; R-D-L2-001 is silent and R-D-L2-003 is… | stands |
+| S35 | `guide:1476-1477` | R-B-L4-004 needs a layer 7 `user_agent` on the same `flow_id`, and layer 7 is still design. | R-B-L4-004 needs `tcp_options_order` on the layer 4 row and a join from a flow to the layer 7 request that rode it; TC4FlowStage does not carry the options and no stage links a `flow_id` to a request, so the rule… | stands |
+| S36 | `guide:1566` | All five of these are built and ship as saved searches | Add a fourth recorded departure: 'R-B-L6-001 is not gated on the host being a managed endpoint, because layer 6 carries no TC-0 join yet; every `src_ip` is eligible.' | stands |
+| S37 | `guide:2029-2031` | The stage defaults to `dest_ip` and `dest_port`, which are the Splunk CIM spellings; every telemetry class in… | 'Every telemetry class emits `dst_ip` and `dst_port`; the lineage reference corpus and the `morpheus:edge` contract still use `dest_ip` and `dest_port`, so a search joining edges to scored events must rename one side un… | stands |
+| S38 | `guide:2343-2356` | [`binding_l2_l3`] ... `fields_list` = `ip`, bucket, mac, `port_id`, `switch_id`, `binding_uid` ... [`binding_l1`] ... field… | Mirror the app's `transforms.conf` (with `_key` and `binding_uid`) and add [`binding_l1_collection`] to the collections listing, or a literal include of the app files. | stands |
+| S39 | `guide:2454 (and app transforms.conf:9)` | index=`behavior_events` sourcetype=`morpheus:score:l3` `max_abs_z`>=6.0 | Filter on a layer 3 column (for example `dsts_per_src`>=50 or `flow_regularity_mature`=true) or start the walk from `morpheus:score:l5` with `source_ip`. | stands |
+| S40 | `guide:2470-2485` | index=`behavior_lineage` sourcetype=`morpheus:edge` earliest=-30m \| stats values(`child_event_uid`) AS children va… | Mark the edge-index query as designed pending an edge producer, or rename the shipped sourcetype (for example `morpheus:flow`) and reserve `morpheus:edge` for the edge stream. | stands |
+| S41 | `guide:2662` | Records arriving after the seal go to a late-arrival index and trigger a documented backfill procedure | The sentence is a design requirement and stays; add beside it: 'Status: WindowSealStage marks late rows `is_late`=true / `window_complete`=false on the same stream; the app defines no late-arrival index, no search… | narrowed |
+| S42 | `guide:3212-3216` | the stage that stamps all of it (`morpheus.stages.lineage.determinism_stamp_stage.DeterminismStamp`… | Note that the stage exists and is unit-tested but is placed in none of the twelve composed pipelines, so the envelope is not yet on any scored event. | stands |
+| S43 | `guide:3373-3374` | the two stanzas still unproduced are both the TC-0 context store, which is also what the SaaS and endpoint ru… | Mark as the state at the time, or rewrite: every stanza now has a producer and the three TC-0-reading rules ship. | stands |
+| S44 | `guide:3431-3432` | Nothing fires on it yet; it is what the SaaS and endpoint rules at layer 7 will read. | Three layer 7 rules read it: R-B-L7-002 through the target object's data classification (`ctx_object_data_classification`), R-P-L7-006 through the principal's group memberships (`ctx_groups`), and R-B-L7-004 throu… | stands |
+| S45 | `guide:3627-3630` | `risk_score` is written into the index by the detection searches as they fire rather than by any stage, so a… | Record that the chain assembly's risk input has no producer in the shipped app and list the collect/risk index as a must-be-built item. | stands |
+| S46 | `guide:3746` | Ship R-B-L5-001, R-B-L5-006, and R-B-L7-002. | Name R-P-L5-006 and note that R-B-L5-001 awaits the per-user model; R-B-L7-002 and R-P-L5-006 are shipped. | stands |
+| S47 | `examples/behavioral_analytics/collector_contract.md:7` | The other telemetry classes in the guide are design; naming their object identifiers here would suggest a col… | 'The other telemetry classes have stages and seeded corpora but no collector contract yet; their input columns are the ones the corpora in `tests/morpheus/determinism/*_pipeline.py` supply.' | stands |
+| S48 | `examples/behavioral_analytics/README.md:23-25 (and run_mac_…` | The other three shipped detections each need something an estate has to supply first, so proving one rule end… | R-D-L2-004 was the first rule run end to end; the other rules that need only one collector and no lookup could be run the same way and have not been. | stands |
+| S49 | `app README.md:134-135` | The three refresh searches populate the KV Store within their first scheduled cycle; `\| inputlookup binding_`… | The two layer 1 refreshes populate from TC1BindingStage output; binding_l2_l3 stays empty until a DHCP lease feed is expanded with to_bucketed_records(table_name="dhcp_lease"). | stands |
+| S50 | `guide 2605-2606, app README.md:140-141, savedsearches.conf:…` | Chained rules run against the summary, not the raw index / Chained rules read from it | Only R-P-L3-005 reads `behavior_summary`; the chained rules read scored events in `behavior_events`. | stands |
+| S51 | `app README.md:164-168` | the identifier ladder resolves an IP through both lookups to a physical port and site, the chain assembly sea… | Qualify: 'with hand-seeded edge and risk fields the pipeline does not yet emit; against pipeline output the chain assembly returns no rows (see `VALIDATION.md`)'. | stands |
+| S52 | `app README.md:181-183` | the predicates they encode are asserted in Python over the determinism harness's planted corpus (tests/morphe… | Name the per-layer harness files alongside `test_first_detections.py`. | stands |
+| S53 | `app indexes.conf:37-40` | `behavior_summary` carries per-layer scores by `entity_key`, so it holds whichever subject that layer names: a po… | `behavior_summary` holds a port, a MAC, an address, a flow, a host or a principal; `behavior_context` is produced by TC0IdentityStage and TC0AssetStage, and its retention is still the estate's decision. | stands |
+| S54 | `app indexes.conf:38-40` | `behavior_context` is the identity and asset data the joins need. This app ships no producer for it; whoever po… | The Morpheus TC-0 stages produce this index's two sourcetypes; the app ships no search that reads them yet. | stands |
+| S55 | `app validate/expected_results.json 'Binding health - unreso…` | "`expected_rows`": 1 ... "One summary row over the ARP stream's resolution outcomes." | Expected 0 rows with the reason, or change the search to the sourcetype that carries `resolution_method` and assert it in `test_splunk_validation_package.py`. | stands |
+| S56 | `app validate/expected_results.json:331` | Running the detections first, on a search head that keeps their notables, is what would make this fire; that… | Same as above: the search as written sums a field no index holds; name the collect/risk-index change required. | stands |
+| S57 | `app validate/expected_results.json:358-360` | One summary row over the ARP stream's resolution outcomes. | Either change the search to the sourcetypes that carry `resolution_method` (l2, l5) and keep the expectation, or state that on l3 the search returns total>0, unresolved=0 and never alerts. | stands |
+| S58 | `app validate/expected_results.json searches['Binding health…` | `expected_rows`: 1 ... One summary row over the ARP stream's resolution outcomes. | Either the search reads `morpheus:score:l2` (where the ARP rows carry `resolution_method`) and the expectation names the l2 rate, or the expectation is 0 with the reason that no layer 3 producer resolves a binding. | stands |
+| S59 | `app validate/VALIDATION.md:81` | `risk_score` is written into the index by the detection searches as they fire, not by a stage. This package i… | Chain assembly cannot fire as shipped because nothing writes `risk_score` to an index it reads; the fix is a collect (or risk index) in every detection and a source change in the chain search, not a deployment s… | stands |
+| S60 | `guide 56-60` | What now runs: the lineage substrate ..., the TC-1 and TC-2 feature stages, the deterministic half of TC-5, c… | List all eight telemetry classes, the nine lineage stages, the wire stage, the 32 detections and the four chained rules; say the harness runs locally, not in CI. | stands |
+| S61 | `guide 59 and ci/scripts/gpu_conformance.sh:19` | control 13's CI harness / Everything else here runs in CI. | Control 13's harness (`tests/morpheus/determinism/`, six checks over twelve pipelines) runs under pytest locally. Workflow files exist (.github/workflows/pr.yaml, `ci_pipe.yml` delegating to rapidsai shared workfl… | narrowed |
+| S62 | `guide 67-70` | What remains design rather than a running system: the telemetry classes for layers 3, 4, 6 and 7, every detec… | What remains design only: R-B-L4-001, R-B-L4-004, R-B-L5-001/002/005, R-B-L7-003, R-C-003; the hysteresis half of control 9, controls 10 (LLM path) and 11 (idempotent sinks) as code; RouterStage sharding wirin… | stands |
+| S63 | `guide 71-72` | `mean_abs_z` and `max_abs_z` have no producer, so the four behavioral and predictive rules that read them -- R-B-… | `mean_abs_z` and `max_abs_z` are produced by TC5ScoreStage against a ReferenceScorer (frozen arithmetic, no model); R-P-L5-006 ships and fires on three principals for arithmetic reasons; R-B-L5-001, R-B-L5-002 and… | stands |
+| S64 | `guide 420-421` | Lineage (stages/lineage/): LineageStampStage, CommunityIdStage, EnvelopeStampStage, ChainAnchorStage. | List all nine lineage stages, plus stages/telemetry (36) and output/siem_wire_stage. | stands |
+| S65 | `guide 1388-1389` | These seven, R-D-L1-001, R-P-L1-004, R-B-L2-002 and R-D-L2-001, 003, 004 and 005, are the rules in this part… | These seven are the layer 1 and 2 rules that exist as code. | stands |
+| S66 | `guide 1393` | R-D-L1-001, 004 and 005 fire exactly once | R-D-L1-001 fires once; R-D-L2-004 and R-D-L2-005 each fire twice. | stands |
+| S67 | `guide 2995-2996 and 3155-3157` | All six checks ship, implemented against the reference lineage pipeline / control 13's six checks running aga… | Six checks over twelve pipelines; check 4 uses CompareDataFrameStage for lineage and `diff_frames` elsewhere. | stands |
+| S68 | `guide 3065` | None of the 38 searches does that. | None of the 41 searches does that. | stands |
+| S69 | `guide 3252` | R-D-L5-003 and R-D-L5-004 as saved searches, which makes six shipped detections rather than four. | Date the sentence or rewrite: 32 detections ship as saved searches. | stands |
+| S70 | `guide 3373-3374` | the two stanzas still unproduced are both the TC-0 context store, which is also what the SaaS and endpoint ru… | No stanza is unproduced; the SaaS and endpoint rules read the context store. | stands |
+| S71 | `guide 3431-3432` | Nothing fires on it yet; it is what the SaaS and endpoint rules at layer 7 will read. | Three layer 7 rules read it and ship. | stands |
+| S72 | `guide 3522` | Chained rule engine \| Medium \| Runs in Splunk, not in Morpheus. The examples/splunk_lineage_app searches ar… | Chained rules: four of five ship as saved searches in Splunk (R-C-001, 002, 004, 005), asserted over the campaign corpus. Remaining: R-C-003 physical compromise chain (medium, needs the layer 1/2 ladder in the… | stands |
+| S73 | `guide 3531` | How much does clock skew between nodes degrade behavioral integrity, quantitatively? Measured. | Measured for seven of the 32 shipped rules (R-D-L2-001, R-D-L2-003, R-D-L2-004, R-D-L2-005, R-D-L5-003, R-D-L5-004, R-P-L5-006) and for the ladder's reach, over three of the twelve pipelines (telemetry, estate… | narrowed |
+| S74 | `guide 3746` | Ship R-B-L5-001, R-B-L5-006, and R-B-L7-002. | Ship R-B-L5-001, R-P-L5-006 and R-B-L7-002 (there is no R-B-L5-006). Of these, R-P-L5-006 and R-B-L7-002 already ship as saved searches; R-B-L5-001 waits on a per-user model. | stands |
+| S75 | `guide 3755` | they complete the ladder and enable R-C-003 and R-C-005, which are not expressible any other way. | Layers 1 and 2 complete the ladder; R-C-005 already ships on layer 2 bindings and DHCP leases, and R-C-003 (physical compromise, the only chain that reaches layer 1) remains the rule that justifies layer 1 col… | stands |
+| S76 | `README.md:55` | the other two need a Triton endpoint and a layer 7 this fork does not have, and say so | 'the other two need a Triton endpoint and, for R-B-L4-004, a `tcp_options_order` feature and a flow identifier on HTTP records that neither TC4FlowStage nor TC7HttpStage emits yet'. | stands |
+| S77 | `README.md:62 and guide 62-65` | validated by AppInspect, a live load into Splunk Enterprise 10.2, and a functional pass against seeded teleme… | validated by AppInspect, a live load into Splunk Enterprise 10.2 that registered the seven searches then present, and a functional pass against seeded telemetry; the thirty-four searches added since, including… | narrowed |
+| S78 | `README.md:63` | classified per column and checked against the four reference pipelines | 'checked against every composed pipeline's golden'; also fix the docstring at `tests/morpheus/utils/test_personal_data.py:58` and guide 3689. | stands |
+| S79 | `README.md:64` | Ten rules as saved searches in the app, eight deterministic and two predictive. | Ten of the app's thirty-two detection searches are described in this row, the layer 1, 2 and 5 rules: eight deterministic and two predictive. The layer 3, 4, 6, 7 and chained rules are described in their own r… | narrowed |
+| S80 | `README.md:74-75` | Layers 3, 4, 6 and 7 are designed, not built. The telemetry classes, detection rules, and Splunk queries for… | Layers 3, 4, 6 and 7 ship fourteen stages and eighteen saved searches, asserted over seeded corpora; their collectors remain out of scope and none of their searches has run on a live search head. | stands |
+| S81 | `README.md:96` | Every scored row reports `model_fallback_used`. | State that `model_version` and `model_fallback_used` are written by DeterminismStampStage, which the composed pipelines do not yet place, so the composed golden files carry neither; or wire the stage in and keep the se… | stands |
+| S82 | `README.md:147-148` | Every `gpu_mode` variant this fork has passes on a GPU, and so does everything else it adds. | Every `gpu_mode` variant that existed at 12:23 UTC on 2026-09-20 passed on that card; the layer 3, 4, 6, 7, TC-0 and campaign harnesses, nineteen later stage tests (four TC-3, two TC-4, four TC-6, four TC-7, thr… | narrowed |
+| S83 | `README.md:160-162` | That covers all twenty-six stages, all three composed pipelines, control 13's six checks ... and now all four… | The 2026-09-20 verdict covered the stages and four of the twelve composed pipelines then present (telemetry, session, lineage, estate); the layer 3, 4, 6, 7, campaign and context pipelines have not been measur… | stands |
+| S84 | `README.md:289` | Varies: `user_principal` for SaaS, `hostname` for DNS and endpoint | `user_principal` for SaaS, `src_ip` for DNS and HTTP, `hostname` for endpoint. | stands |
+| S85 | `README.md:293-296` | **Counters must arrive as deltas with an explicit interval, not raw values.** ... `TC1NormalizeStage` does th… | Counters must arrive as raw monotonic totals with sysUpTime beside them; TC1NormalizeStage produces the deltas, the interval and the wrap/reset flags. | stands |
+| S86 | `README.md:341` | six of the seven rules are untouched by a full minute | Six of the seven rules the experiment covers (the layer 2 and layer 5 rules) are untouched by a full minute; the 25 others have not been swept. | stands |
+| S87 | `README.md:342, guide 3548, examples/clock_skew/README.md:64` | six of the seven rules are untouched by a full minute | Six of the seven layer 2 and layer 5 rules the experiment decides (R-D-L2-001, 003, 004, 005, R-D-L5-003, R-D-L5-004, R-P-L5-006) are untouched by a full minute; the twenty-five layer 1, 3, 4, 6, 7 and chained… | narrowed |
+| S88 | `README.md:390-392` | The pipeline emits all fourteen sourcetypes the shipped app parses -- see [`siem_sourcetypes`](...), which na… | Every one of the fourteen sourcetypes the shipped app parses has a producer named in `siem_sourcetypes` and is rendered by a composed pipeline, a binding table or the TC-0 store; `morpheus:edge` is produced only b… | narrowed |
+| S89 | `README.md:400` | The `Lineage` and `Telemetry` sections cover the stages added here | The Telemetry section lists 16 of the 36 telemetry stages (TC-1 except Binding, all TC-2, TC-5 except Drift and Score) and the Lineage section 6 of 9 (ChainAnchor, EnvelopeStamp and Minimization missing); with… | narrowed |
+| S90 | `tests/morpheus/determinism/session_pipeline.py:543` | Every principal resolves to the same placeholder, and `model_fallback_used` is true on every scored row. | Say the manifest declares a fallback so the resolution is honest, and that the column itself is stamped only where DeterminismStampStage is placed. | stands |
+| S91 | `tests/morpheus/determinism/test_gpu_parity.py:17` | Whether the three composed pipelines produce the same output in GPU mode as in CPU mode. | Whether three of the twelve composed pipelines (telemetry, session, lineage) produce the same output in GPU mode as in CPU mode; the other nine harnesses carry their own `gpu_and_cpu_mode` golden checks and are… | stands |
+| S92 | `tests/morpheus/determinism/test_transport_harness.py:29-30` | R-B-L4-004 needs a layer 7 `user_agent` on the same `flow_id`, and layer 7 does not exist yet. | R-B-L4-004 needs `tcp_options_order` on the flow and the layer 7 `user_agent` joined to that flow via a shared flow identifier (the layer 4 to layer 7 lineage hop). TC4FlowStage emits no `tcp_options_order`, TC7Http… | stands |
+| S93 | `tests/morpheus/determinism/test_transport_harness.py:30` | layer 7 does not exist yet. | R-B-L4-004 needs the layer 7 `user_agent` joined to the flow on a shared flow identifier, together with `tcp_options_order` on the flow; layer 7 ships as four stages, but neither the join nor either field is produ… | stands |
+| S94 | `tests/morpheus/utils/test_splunk_field_contracts.py:359-366` | The detections `\| eval` a rule identifier, a risk score and a layer onto every notable; the summary and chai… | The detections `eval` `rule_id`, `risk_score` and `osi_layer` onto their own result rows only; no detection writes them to any index this app defines (no collect, summary-index or notable action; `indexes.conf` has no n… | stands |
+
