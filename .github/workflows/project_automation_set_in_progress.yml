@@ -43,6 +43,9 @@ env:
 jobs:
   project_automation_in_progress:
     runs-on: ubuntu-latest
+    # NVIDIA's project board and app credentials exist only upstream; on a fork this job has nothing to
+    # write to and no token to write with, so it is skipped rather than left to fail on every PR.
+    if: github.repository_owner == 'nv-morpheus'
 
     # We use the default GitHub token to perform the draft update because
     # The pull_request_review trigger does not grant access to secrets

@@ -23,8 +23,9 @@ on:
 jobs:
   Label-Issue:
     runs-on: ubuntu-latest
-    # Only run if the issue author is not part of NV-Morpheus
-    if: ${{ ! contains(fromJSON('["OWNER", "MEMBER", "CONTRIBUTOR", "COLLABORATOR"]'), github.event.issue.author_association)}}
+    # Only run upstream, where the app credentials and the label exist, and only if the issue author is not
+    # part of NV-Morpheus
+    if: ${{ github.repository_owner == 'nv-morpheus' && ! contains(fromJSON('["OWNER", "MEMBER", "CONTRIBUTOR", "COLLABORATOR"]'), github.event.issue.author_association)}}
     steps:
       - name: Generate Token
         uses: actions/create-github-app-token@v1
