@@ -27,7 +27,8 @@ beside it that must stay quiet.
 Two of the five rules cannot be asserted here and are not pretended to be. R-B-L4-001 is the shipped
 `abp-pcap-xgb` model behind Triton, so what this fork owes it is the thirteen features under the names it was
 trained on, which `MODEL_FEATURES` carries and `test_the_model_feature_list_is_complete` pins. R-B-L4-004 needs
-a layer 7 `user_agent` on the same `flow_id`, and layer 7 does not exist yet.
+`tcp_options_order` on the flow and the layer 7 `user_agent` joined to it on a shared flow identifier; TC4FlowStage
+emits neither the options nor a key another layer carries, so the rule waits on both.
 """
 
 import os

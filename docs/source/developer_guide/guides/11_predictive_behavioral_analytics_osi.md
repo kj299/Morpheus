@@ -55,28 +55,37 @@ and
 
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
-resolution, window sealing), the TC-1 and TC-2 feature stages, the deterministic half of TC-5, control
-8's total order, and control 13's CI harness. That is forty-six stages and forty-one supporting
+resolution, window sealing), feature stages for every telemetry class from TC-0 to TC-7, the layer 5
+scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's six
+checks over twelve composed corpora, which run under pytest on developer machines and have not yet run in
+any CI this fork has executed. That is forty-six stages and forty-one supporting
 modules, covered by 1,880 distinct tests, itemized in
-[Part 6](#provided). The Community ID implementation was checked against the reference implementation
+[Part 6](#provided). Thirty-two of the thirty-nine rules Part 3 specifies ship as saved searches, four of
+them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
-([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)).
+([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)); that pass covered
+the seven searches then present, and the thirty-four added since, every detection among them, have been
+validated by recomputation in Python only. [The retrospective](./12_behavioral_analytics_retrospective.md)
+scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
-What remains design rather than a running system: the telemetry classes for layers 3, 4, 6 and 7, every
-detection rule in Part 3 apart from the six that ship as saved searches, two of which fire on nothing
-until their lookup is populated, the chained rule engine, and the determinism controls other than 7, 8,
-and 13. Layer 5 is a partial exception, and the boundary inside it is now one thing rather than four:
-**there is no per-user model.** `mean_abs_z` and `max_abs_z` have no producer, so the four behavioral
-and predictive rules that read them -- R-B-L5-001, R-B-L5-002, R-B-L5-005 and R-P-L5-006 -- fire on
-nothing. The drift trajectory that is this document's flagship predictive claim is now the exception
-worth stating precisely: the arithmetic behind R-P-L5-006 is built and tested --
+What remains design rather than a running system: seven of the thirty-nine rules (R-B-L4-001 and
+R-B-L7-003, which need a Triton endpoint; R-B-L4-004, which needs a stack fingerprint on the flow and a
+flow identifier on the request that rode it; R-B-L5-001, R-B-L5-002 and R-B-L5-005, whose columns are
+produced and whose searches are not written; and R-C-003), a trained model in the composed pipeline, the
+hysteresis half of control 9, controls 10 and 11 as code, the sharding router's wiring, and clock
+correction, since `clock_source` and `clock_offset_ms` are schema that nothing produces or checks. Layer 5
+is the case to state precisely: **there is no trained per-user model in any shipped artifact.**
+`mean_abs_z` and `max_abs_z` have a producer,
+{py:class}`~morpheus.stages.telemetry.tc5_score_stage.TC5ScoreStage`, but in every composed pipeline the
+scorer behind it is `ReferenceScorer`, ten frozen population constants, so what R-P-L5-006 fires on is
+arithmetic, and the three behavioral rules that read the same columns ship no search. The drift
+trajectory that is this document's flagship predictive claim is built and tested --
 {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` reports the velocity, the
 acceleration, the length of the rising run and its total rise in the principal's own standard deviations
--- against scores supplied directly, so the rule's shape is settled before there is a model to argue
-about. Given no score column it carries a null in every drift column and says so once in the log, which
-is what a pipeline with no model looks like and what this repository ships as.
+-- against those reference scores, so the rule's shape is settled before there is a model to argue
+about. Given no score column at all it carries a null in every drift column and says so once in the log.
 Everything else at this layer is built: the session assembly and the six feature stages run under
 control 13's six checks against a week-long corpus, the two deterministic rules ship as saved searches
 with their predicates asserted against that corpus, and `morpheus:score:l5` is a produced sourcetype.
@@ -1385,12 +1394,13 @@ bypass takes the pending slot of the device it is bridged behind and reads as an
 is reported. On ports where MAB is configured deliberately, suppress by port designation rather than by
 loosening the rule. Tier D1. Ships as a saved search in the Splunk app.
 
-These seven, R-D-L1-001, R-P-L1-004, R-B-L2-002 and R-D-L2-001, 003, 004 and 005, are the rules in this part
-that exist as code rather than as specification. The two layer 1 rules, R-B-L2-002, 004 and 005 read columns the
+These seven, R-D-L1-001, R-P-L1-004, R-B-L2-002 and R-D-L2-001, 003, 004 and 005, are the layer 1 and 2 rules
+in this part that exist as code rather than as specification; the layer 3 to 7 and chained rules that ship are
+recorded in their own sections below. The two layer 1 rules, R-B-L2-002, 004 and 005 read columns the
 shipped stages produce and depend on nothing outside the pipeline; 001 and 003 depend on a list the estate owns,
 and each ships with the hook for that list and fires on nothing until it is populated, while R-D-L2-003 fires on
 every first-hop redundancy address until its exclusion list is supplied. All seven predicates are asserted in
-Python over the determinism harness's planted corpus: R-D-L1-001, 004 and 005 fire exactly once, R-P-L1-004 on
+Python over the determinism harness's planted corpus: R-D-L1-001 fires exactly once and R-D-L2-004 and 005 twice each, once per spoof and once per bypass, R-P-L1-004 on
 the one failing optic, R-B-L2-002 once each on the hub and the spoofed port, 001 once per offending MAC, and 003
 on the flooded gateway and not on the redundancy pair.
 
@@ -3213,7 +3223,9 @@ What Morpheus provides versus what has to be built, stated plainly.
   ({py:mod}`~morpheus.utils.determinism_envelope`), the model manifest that is resolved once per window and
   refuses to answer for any other ({py:mod}`~morpheus.utils.model_manifest`), the stable hash that decides an
   entity's shard without depending on `PYTHONHASHSEED` ({py:mod}`~morpheus.utils.sharding`), and the stage that
-  stamps all of it ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`). These
+  stamps all of it ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`), which is
+  built and tested and placed in none of the twelve composed pipelines yet, so no golden and no scored event
+  carries the envelope (see [Must be built](#must-be-built)). These
   come before the autoencoder rather than after it because this document says they must: retrofitting
   determinism onto a running detection pipeline means re-tuning every threshold, since the scores will move.
   What is not here is the autoencoder itself, and the boundary is exact -- see the caveat below.
@@ -3249,7 +3261,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   window of a given width, the composed pipelines re-run over the same corpora, and a report of which columns
   moved and at what width each shipped rule changed what it accuses. It runs anywhere in about forty seconds,
   needs no card, and answers the open question this document had left open since it was written.
-- R-D-L5-003 and R-D-L5-004 as saved searches, which makes six shipped detections rather than four. Their
+- R-D-L5-003 and R-D-L5-004 as saved searches, two of the thirty-two detections that now ship. Their
   predicates are asserted in Python over the corpus and their row counts written into the validation
   package, so an expectation cannot go stale without a test failing. Both fire on the planted cases and
   neither fires on the negative controls beside them. R-D-L5-003 ships with an empty egress exclusion
@@ -3370,9 +3382,9 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.telemetry.tc7_http_stage.TC7HttpStage`, composed in
   `tests/morpheus/determinism/application_pipeline.py`), over one new primitive,
   {py:mod}`~morpheus.utils.query_entropy`, which finds the registered domain and measures the name below it.
-  `morpheus:score:l7` has a producer, which leaves no score sourcetype without one; the two stanzas still
-  unproduced are both the TC-0 context store, which is also what the SaaS and endpoint rules at this layer wait
-  for. **What the corpus caught that the prose had not.** R-B-L7-001's three conditions, read as three
+  `morpheus:score:l7` has a producer, which leaves no score sourcetype without one; the TC-0 context store, the
+  last stanza without a producer when this was written, has since gained one, and the SaaS and endpoint rules
+  read it. **What the corpus caught that the prose had not.** R-B-L7-001's three conditions, read as three
   independent aggregates over a domain's hour, are satisfied by a SaaS domain with a hundred ordinary tenant
   names and one random one, since the count and the entropy are then met by different queries; the search counts
   subdomains only among the queries that meet the other two. And R-D-L7-005 written as a ratio never fires on the
@@ -3428,8 +3440,9 @@ What Morpheus provides versus what has to be built, stated plainly.
   {py:class}`~morpheus.stages.telemetry.tc0_asset_stage.TC0AssetStage` and
   {py:class}`~morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage`, composed in
   `tests/morpheus/determinism/context_pipeline.py`), which Part 6 had listed as must be built. `context:identity`
-  and `context:asset` have producers, which leaves none of the fourteen stanzas without one. Nothing fires on it
-  yet; it is what the SaaS and endpoint rules at layer 7 will read. **What the corpus caught that the prose had not.** A
+  and `context:asset` have producers, which leaves none of the fourteen stanzas without one. Three layer 7 rules read
+  it: R-B-L7-002 through the object's data classification, R-P-L7-006 through the principal's group memberships,
+  and R-B-L7-004 through the host's peer group. **What the corpus caught that the prose had not.** A
   snapshot is how most HR systems report a departure -- by leaving the person out -- and the text above describes
   snapshots and deltas without saying what an omission means. Read naively, an omitted principal stays current
   forever, because nothing ever says otherwise; read as a deletion, the whole history goes. The store reads it as
@@ -3512,14 +3525,34 @@ What Morpheus provides versus what has to be built, stated plainly.
   however the stream is divided.
 ### Must be built
 
+Rewritten by [the retrospective](./12_behavioral_analytics_retrospective.md) on 2026-10-03 from the gaps it
+verified; each row names the GitHub issue that tracks it, and the retrospective's gap table carries the evidence.
+
 | Component | Effort | Notes |
 | --- | --- | --- |
-| **The per-user autoencoder in the pipeline** | Medium | The largest gap in this fork, and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores every layer 5 event against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory over daily windows, and R-B-L5-001 and R-P-L5-006 are evaluated end to end against the corpus. What scores them is `ReferenceScorer`, frozen arithmetic that the class itself calls not a model. `morpheus.models.dfencoder` is in the tree and `examples/layer5_model/run_model.py` has trained it on this corpus under controls 3 and 5. The adapter is built: `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, pins each principal to a digest of its own weights, and `run_model.py` runs the composed pipeline with it as its fourth check. That check has now been run on a card and passes: 105 rows scored identically twice over and again under the batch-split sweep, against five models pinned to a digest of their own weights. It failed its first run, on the adapter passing the group's size through to the model rather than on the model itself, which is the defect the check existed to catch. What remains is enough data for the scores to mean anything -- 105 events across five principals proves the wiring and nothing else |
-| Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it |
-| TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage` |
-| Binding table ingestion | Small | Refreshing `BindingTable` on a schedule and loading it into the SIEM. The resolution and expansion logic ships, and so does the closing of open bindings into resolvable intervals (`TC2BindingStage`) |
-| Splunk sink or connector configuration | Small | Kafka Connect is the recommended path |
-| Chained rule engine | Medium | Runs in Splunk, not in Morpheus. The `examples/splunk_lineage_app` searches are the starting set |
+| Documentation reconciliation | Small | The ninety-three stale sentences the retrospective verified, the stages page's twenty-three missing entries, and a test that keeps the shipped-detection count and the stages page true. Tracked in #52 |
+| Upstream reuse decision | Small | A recorded reuse-or-reject decision, with a measured reason, for `morpheus_dfp`'s rolling window, training and inference stages, the identity-provider and CloudTrail source stages, `TimeSeriesStage` and `MLFlowDriftStage`, all named by this document and used by no fork code. Precedes the model, normalization and health rows. Tracked in #67 |
+| Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
+| **The per-entity learned model in the pipeline (principals, then hosts)** | Large | Still the largest gap and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory, `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, and `examples/layer5_model/run_model.py` has trained and run it once on one card, scoring the week it trained on. What fills the slot in every composed pipeline and every shipped artifact is `ReferenceScorer`, frozen population arithmetic the class itself calls not a model. Three things remain: the run's artifact and weight digests committed beside the README that quotes them; a CPU inference path (`state_dict` load or an exported forward pass) so the composed pipeline runs with a pinned real model in CI; a corpus with a train window and a disjoint score window, so R-B-L5-001, R-B-L5-002 and R-P-L5-006 are evaluated against a learned baseline for the first time. Then `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame gives hosts the score and drift principals have. Tracked in #59, after #67 |
+| Determinism envelope on every scored event | Small | `DeterminismStampStage`, the envelope and the manifest are built and unit-tested and placed in none of the twelve composed pipelines, so no golden, sourcetype contract or saved search carries `model_version`, `model_fallback_used`, `config_hash` or `pipeline_fingerprint`, and governance rule 2 is unmet at the delivery boundary. The wiring pattern (`EnvelopeStampStage` at the tail of every corpus) already exists. Must land before a second model version does. Tracked in #54 |
+| Searches over the per-principal baselines the TC-5 stages compute | Medium | `TC5CadenceStage`, `TC5NoveltyStage`, `TC5RiskStage` and `TC5DriftStage` emit `hour_unseen`, `hour_surprise_bits`, the `_first_seen` and `increment` columns, `auth_failed_then_succeeded`, `drift_velocity` and `drift_acceleration`; the corpus plants and asserts the off-hours login and the new country; no saved search reads any of them and none is in the `morpheus:score:l5` contract. Three deterministic layer 5 rules, R-B-L5-001/002 gated on `model_fallback_used=false`, an acceleration condition on R-P-L5-006, and a `principal_watchlist` lookup that R-B-L7-002 reads so the watchlist half of R-P-L5-006 does something. Tracked in #55 |
+| Layer 5 context, account type and session duration | Medium | `TC0EnrichStage` runs on SaaS principals and EDR hosts and not on sign-ins, so no `ctx_` column reaches `morpheus:score:l5`; nothing distinguishes a service principal from a human; R-B-L5-005 needs a per-principal duration percentile that `TransferEnvelopeTracker` already implements and nothing keys on a principal's sessions; `TC5SessionStage` writes no normalized lifecycle column so R-C-004 breaks on an IdP that says `logon`/`logoff`, and the single-record session shape produces no duration. Tracked in #56 |
+| Risk write path and suppression for the shipped detections | Small | Every one of the 32 detection stanzas ends in `/ table` with only `action.correlationsearch.enabled`; none collects, so `risk_score` and `rule_id` never land in an index and "Chain assembly - cross-layer risk" and "Behavior summary" sum null by construction. A `behavior_risk` index, a `collect` per detection, `alert.suppress` keyed on each rule's documented deduplication key (control 9's suppression half; without it R-C-005 would emit the same chain 96 times a day), the chain search reading the risk index, and one `resolution_methods` field so the chain's `methods` names every hop. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
+| Per-sourcetype read contracts and fork CI | Medium | No workflow has executed the suite on this fork; `required_columns` are narrower than the fields the searches read (l3 and l6 omit ten columns, none requires `lineage_id` or `osi_layer`); the estate golden is not linted; layer 5 thresholds are duplicated as test constants; the one health search reads a column its sourcetype never carries; R-C-001's "previous hour" rests on an unstated hourly seal. A CPU workflow over the two tiers and a test that every field a search reads from its sourcetype is in that sourcetype's contract. Tracked in #53 |
+| Live search-head run, GPU conformance over twelve pipelines, clock skew over every rule | Medium | Seven of forty-one searches have run on a search head and none of the thirty-two detections as they now stand; GPU conformance covers four of twelve composed pipelines and the 2026-09-20 verdict predates most of the tree; clock skew is measured for seven of thirty-two rules; the GPU and model verdict artifacts quoted in the README are ignored by git. One recorded pass of each, with the artifacts committed under dated paths and tied to the quoted numbers by test. Tracked in #58 |
+| Host baselines at layers 3, 4 and 6 | Medium | R-B-L3-001 reads a literal 50 where the design specifies the source's own fourteen-day 99.5th percentile; the `bucket_peak` pattern `TC2BaselineStage` uses for ports was never applied to hosts, and fan-in per destination has no history. Fan-in, distinct ports, byte asymmetry, first-contact ASN, JA4 change and the endpoint host-seen flags are emitted and read by no search; asset criticality, owner and classification are attached to host rows and read by nothing; `device_role` and `os_family` are absent from the asset record; `community_id` is absent from layer 3; `hostname` is case-folded in the chain SPL and not in the stages; R-B-L6-001 dropped its managed-endpoint gate. Tracked in #60 |
+| Host identity across layers, the lease producer and a real edge stream | Large | A host is `src_ip` at layers 3, 6 and 7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint, and nothing bridges them: no time-bounded `hostname`-to-address binding exists, the network, transport, presentation and application corpora run no `BindingResolverStage`, and asset context cannot attach to a network-layer event. The SIEM `binding_l2_l3` refresh selects `binding_table=dhcp_lease` rows nothing produces, `morpheus:edge` carries no `lineage_id`, `osi_layer`, parent or child `uid` or `join_method`, the principal-to-desk rung the estate corpus proves is a Python dict, and only one resolver passes `uid_column`. A lease stage emitting bucketed `dhcp_lease` rows, a `host_inventory` binding and a `host_key` on every layer 3-7 event, an `EdgeEmitStage` behind the resolvers, MAC and 802.1X lookups in the SIEM, and `community_id`/`session_key` joins above layer 3. The DHCP collector itself is not Morpheus. Tracked in #63 |
+| Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | The optical tap step (`optical_rx_dbm_deviation`, the TC-1 section's stated security signal), flap instability, the device reboot flags, the four error and discard deltas and `lldp_neighbor_chassis_id_changed` are computed, asserted in Python and read by no search; no stage divides a delta by its interval; `lldp_neighbor_port_id` is required and unread. No octet counter is designed and `link_speed_bps` is required and unread, so the interface as a thing that carries traffic has no behaviour; `ouis_per_vlan` has no consumer, history or corpus case; `TC2AuthStage` emits a raw elapsed time with no distribution; `BindingCloser.close()` and `reconcile()` are called by no stage so `bind_end_observed` is false on every record. Rules, a rate feature, a link key, a per-VLAN baseline, a per-port auth quantile, and a stop column and snapshot mode on the binding stage. Tracked in #61 |
+| Envelope validation, clock quarantine, collector and pipeline health, late-arrival delivery, platform baselines | Medium | Ten of the fourteen universal envelope fields (`observed_time`, `ingest_time`, `clock_source`, `clock_offset_ms`, `sampling_policy`, `tenant_id` among them) are produced, validated and quarantined on by nothing, so the clock-skew experiment measures damage with no mitigation; `collector_seq` regressions and gaps are unchecked; refusals, abandoned sessions and unpaired records are log lines; late rows are marked `is_late` and then read like any other row; no identity provider, tenant or collector has a key or baseline; eight stateful TC-1/TC-2 stages take no `max_clock_skew_seconds`. A validate stage with a quarantine route, a `morpheus:health` record per sealed window per collector, class and tenant with a baseline, a late route with the backfill procedure written, `window_complete=true` on every detection, and `tenant_id`/`collector_id` on every score row. This is what gives a platform its first behaviour. Tracked in #62 |
+| Device telemetry class and R-C-003 | Large | A switch or router exists only as the middle segment of a port key; a reboot surfaces 48 times per 48-port switch and never as a device event; configuration change, route churn and CPU are absent from design and code. R-C-003, the chain that justifies layer 1, has no stanza, corpus actor or harness, and two of its three inputs are absent: OUI novelty is kept per VLAN only and the closed binding carries no `oui`; nothing classifies a management destination. A `tc1_device` sub-class keyed `site_id:device_id` with a stage deriving reboot, `config`-change and route-count features and two rules; per-port OUI novelty, `dst_is_management` and a `vlan_designations` lookup; a rogue-host actor in a corpus holding layers 1, 2 and 3 together. Tracked in #65 |
+| Service and application entity | Large | No stage, key, baseline or sourcetype treats a `dst_ip:dst_port` service or a SaaS application as a subject; `sni`, `client_app` and `service_account` are never read; DNS and HTTP rules are fixed thresholds with no per-client history; user-agent novelty, NXDOMAIN/DGA and the 5xx ratio named in Part 2 have no producer; TC-0 has no application-to-server or service-account kind although Part 2 says it is built; `tcp_options_order` is not carried so R-B-L4-004 cannot be written. A `tc7_service` composition keyed on the destination, `[dst_ip, sni]` as the certificate key, per-client baselines under R-B-L7-001, an `application` kind with `ctx_application_*` enrichment, and the TCP option columns. Tracked in #64 |
+| Triton-backed rules R-B-L4-001 and R-B-L7-003 | Medium | Specified over the `abp` features and over request bodies; no fork pipeline composes `TritonInferenceStage` and no `Scorer`-protocol adapter exists for layers 4 or 7 the way `ReferenceScorer` and `DfencoderScorer` do for layer 5. Both need a Triton endpoint and a GPU path CPU CI cannot exercise; revisit once the per-user model's CPU inference path exists as the pattern to copy. Not scheduled; recorded as gap G48 in the retrospective |
+| Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it, asserted equal to the unsharded golden under control 13. Tracked in #66 |
+| Runnable segment compositions and SIEM transport | Large | Every composed pipeline lives in `tests/morpheus/determinism/` behind `InMemorySourceStage`; the only runner is a four-stage layer 2 file-to-file example; no Kafka or HTTP source or sink, segment edge or `MinimizationStage` is composed anywhere although the app's documents say minimization happens before the sink; Kafka Connect is the recommended transport and no configuration ships; CLI command construction is tested for 16 of 46 stages. One runner per segment with minimization and the determinism stamp, a Kafka Connect for Splunk connector and an HEC alternative, and the CLI test over every registered stage. Tracked in #66 |
+| Per-class collector input contracts, samples and layer 3-7 normalization schemas | Medium | `examples/behavioral_analytics/collector_contract.md` specifies one of fourteen input classes; every other class's input shape lives in a corpus builder and in Part 2 prose. The per-layer pattern promises a `DataFrameInputSchema` per class and none exists; no fork stage reads `parsers/zeek.py`, `DocaSourceStage` is never composed with `TC4FlowStage`, and no shipped mapping takes IPFIX, Zeek, a proxy log, EDR or M365 audit into the TC-3/4/6/7 column names. A sample file and column/type/unit/source table per class with a test, one `column_info` schema and fixture per sub-class, and a DOCA adapter tested on the one GPU machine. The collectors themselves remain out of scope. Tracked in #66 |
+| TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage`, and it consumes raw monotonic totals with sysUpTime beside them, not pre-differenced deltas. Out of scope by design; not tracked |
+| Graph store beside Splunk | Medium | Optional by design: nothing in Part 3 depends on it and Splunk is the detection surface. Deliberately left open. The one concrete piece worth taking early is small and is listed under the network-object detections above: an LLDP adjacency lookup over `binding:l1`, and an 'Entity view' SPL recipe per entity class in the app README. Not scheduled; recorded as gap G08 |
+| Cloud control-plane sub-class (`tc7_cloud`) | Medium | CloudTrail, Azure Activity, GCP Audit and Kubernetes audit are outside the design although a role assumption or `kubectl exec` has exactly the shape `TC7SaasStage` measures. Specified in Part 2 with the baseline key extended to (principal, account, operation); the corpus, variant column set and rule wait until the service entity and normalization schemas exist. Not scheduled; recorded as gap G56 |
 
 ### Open questions this work has not answered
 
@@ -3545,7 +3578,8 @@ clocks in the estate disagrees by exactly that much. A decision is keyed on what
 when, because a detection identified by its timestamp would differ under every non-zero offset and would
 measure the injection rather than the damage.
 
-**Six of the seven rules are untouched by a full minute of disagreement.** The two that move do not move for
+**Six of the seven layer 2 and layer 5 rules the experiment covers are untouched by a full minute of
+disagreement**, and the twenty-five layer 1, 3, 4, 6, 7 and chained rules have not been swept. The two that move do not move for
 the reasons this section predicted, and both corrections are worth more than the confirmations would have been.
 
 **R-D-L2-004 fails against switch clocks and is immune to collector clocks.** This document said the
@@ -3743,7 +3777,7 @@ this order:
 
 1. **Layers 5 and 7 first.** `morpheus_dfp` applies directly, the entity (user) is unambiguous, the
    cardinality is tractable, and these two layers produce most of the standalone detection value. Ship
-   R-B-L5-001, R-B-L5-006, and R-B-L7-002.
+   R-B-L5-001, R-P-L5-006 and R-B-L7-002; the last two ship, and R-B-L5-001 waits on a trained per-user model.
 2. **The lineage substrate second**, connecting those two layers only. Prove the `event_uid` and
    `lineage_id` construction, the Splunk edge index, and the chain query on a two-layer chain before
    scaling it to seven. R-C-004 is the target.
@@ -3752,7 +3786,8 @@ this order:
 4. **Layer 6 fourth.** Small, high-signal, and cheap once layers 3 and 4 exist, since it rides the same
    collection points. R-B-L6-001 is one of the best rules in the set relative to its cost.
 5. **Layers 1 and 2 last.** Highest collection effort, lowest standalone detection value, but they
-   complete the ladder and enable R-C-003 and R-C-005, which are not expressible any other way.
+   complete the ladder and enable R-C-003 and R-C-005, which are not expressible any other way; R-C-005 ships
+   on the layer 2 bindings and R-C-003 does not yet.
 
 Apply the D1 and D2 determinism controls from the start. Retrofitting determinism onto a running
 detection pipeline means re-tuning every threshold, because the scores will move.

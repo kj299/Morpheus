@@ -14,7 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Whether the three composed pipelines produce the same output in GPU mode as in CPU mode.
+Whether three of the twelve composed pipelines (telemetry, session, lineage) produce the same output in GPU mode as
+in CPU mode; the other nine harnesses carry their own `gpu_and_cpu_mode` golden checks and are not compared here.
 
 Every stage declares support for both execution modes, and 203 `gpu_mode` variants assert that per stage. None of
 them composes a pipeline. Both determinism harnesses built their configuration in CPU mode and nothing else, so

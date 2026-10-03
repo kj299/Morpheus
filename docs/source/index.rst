@@ -45,8 +45,11 @@ The design was written down in full before any of it was built. See
 :doc:`developer_guide/guides/11_predictive_behavioral_analytics_osi` for the analysis, the per-layer
 telemetry requirements, the detection rules, the Splunk configuration, and the determinism controls.
 Its Part 6 is the running ledger of what is implemented and what is still design; the short version is
-that layers 1 and 2 have running feature stages, layers 3 through 7 are specified but not built, the
-collectors themselves are out of scope, and GPU execution mode is declared but unexercised.
+that every layer has running feature stages and thirty-two of the thirty-nine specified rules ship as
+saved searches, the per-user model's slot is filled by frozen arithmetic, the collectors are out of
+scope, and GPU execution mode has been measured on one machine. :doc:`The retrospective
+<developer_guide/guides/12_behavioral_analytics_retrospective>` scores what that adds up to per class of
+entity.
 
 Features
 --------
@@ -82,6 +85,7 @@ Using Morpheus
  * :doc:`Pretrained Models <models_and_datasets>` - Pretrained models with corresponding training, validation scripts, and datasets
  * :doc:`Developer Guides <developer_guide/guides>` - Covers extending Morpheus with custom stages
  * :doc:`Predictive Behavioral Analytics Across OSI Layers 1-7 <developer_guide/guides/11_predictive_behavioral_analytics_osi>` - The design guide this fork implements, and the ledger of what is built
+ * :doc:`Behavioral Analytics Retrospective <developer_guide/guides/12_behavioral_analytics_retrospective>` - What the fork can say about each class of entity on a network, the verified gaps, and the plan
 
 Modifying Morpheus
 ^^^^^^^^^^^^^^^^^^
