@@ -52,6 +52,12 @@ jobs:
       - name: Create the environment
         uses: mamba-org/setup-micromamba@v2
         with:
+          # The version the fork's CPU environment was built and tested with. The runner's newer micromamba
+          # resolves conda-forge through sharded repodata, and the shards omit dlpack 0.8, which libcudf 25.02
+          # needs, so the solve failed with "dlpack >=0.8,<1.0 does not exist"; the flat repodata has it.
+          micromamba-version: '2.9.0-0'
+          condarc: |
+            use_sharded_repodata: false
           environment-name: morpheus
           cache-environment: true
           create-args: >-
