@@ -380,3 +380,68 @@ def test_every_composed_pipeline_places_the_determinism_stamp():
             unstamped.append(name)
 
     assert not unstamped, f"composed without DeterminismStampStage: {unstamped}"
+
+
+def required_fields() -> dict:
+    """Per telemetry class, the fields Part 2 lists as required, for the classes that list them in one place."""
+    with open(DOCUMENTS["guide"], encoding="utf-8") as handle:
+        text = handle.read()
+
+    part_2 = text[text.index("## Part 2"):text.index("## Part 3:")]
+    found = {}
+
+    for match in re.finditer(r"### (TC-\d):[^\n]*\n(.*?)(?=\n### |\Z)", part_2, re.S):
+        listed = re.search(r"\*\*Required fields:\*\*(.*?)\n\n", match.group(2), re.S)
+
+        if (listed is not None):
+            found[match.group(1)] = re.findall(r"`([a-z0-9_]+)`", listed.group(1))
+
+    return found
+
+
+def read_fields(fields: list) -> list:
+    """The fields a telemetry or lineage stage, or a shipped search, names."""
+    sources = []
+
+    for directory in ("telemetry", "lineage"):
+        folder = os.path.join(STAGES, directory)
+        sources += [os.path.join(folder, name) for name in os.listdir(folder) if name.endswith(".py")]
+
+    text = ""
+
+    for path in sources + [SAVED_SEARCHES]:
+        with open(path, encoding="utf-8") as handle:
+            text += handle.read()
+
+    return [field for field in fields if re.search(rf"\b{field}\b", text)]
+
+
+def test_the_readme_says_how_many_required_fields_each_class_reads():
+    # Part 2 lists what each class must carry, and for weeks nothing said which of those anything reads: ten of
+    # the twenty-one TC-5 fields had no reader while the collection table called the class done. The Read column
+    # is recomputed here from the guide and the code, so a field gaining or losing its reader moves the number.
+    with open(DOCUMENTS["README"], encoding="utf-8") as handle:
+        readme = handle.read()
+
+    stated = dict(re.findall(r"^\| \*\*(TC-\d)\*\* .*\| (\d+ of \d+) \|$", readme, re.MULTILINE))
+    required = required_fields()
+
+    assert len(required) >= 6, sorted(required)
+    assert set(stated) == set(required), (sorted(stated), sorted(required))
+
+    for (telemetry_class, fields) in required.items():
+        assert stated[telemetry_class] == f"{len(read_fields(fields))} of {len(fields)}", telemetry_class
+
+
+def test_part_2_names_the_tc5_fields_nothing_reads_yet():
+    fields = required_fields()["TC-5"]
+    unread = [field for field in fields if field not in read_fields(fields)]
+
+    with open(DOCUMENTS["guide"], encoding="utf-8") as handle:
+        text = handle.read()
+
+    section = text[text.index("### TC-5: Session"):text.index("### TC-6:")]
+    sentence = section[section.index("specified and not yet read by anything"):]
+    sentence = sentence[:sentence.index(". ")]
+
+    assert sorted(re.findall(r"`([a-z0-9_]+)`", sentence)) == sorted(unread)

@@ -60,7 +60,13 @@ logger = logging.getLogger(__name__)
 PROFILE = "profile"
 """The kind of a principal's own attributes."""
 
-DEFAULT_PROFILE_COLUMNS = ("department", "manager", "employment_status")
+DEFAULT_PROFILE_COLUMNS = ("department", "manager", "employment_status", "account_type", "privilege_level")
+"""What a principal's profile carries by default.
+
+`account_type` says whether the principal is a person or a service, which several layer 5 rules turn on: a
+service account's sessions and sign-in hours are bimodal and uninformative where a person's are a habit.
+`privilege_level` weights how loudly an anomaly about the principal is reported.
+"""
 
 GROUP_ATTRIBUTE = "group_name"
 """The attribute a membership records its group under, whatever the source column is called, so a consumer of the
@@ -127,7 +133,8 @@ class TC0IdentityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         columns are ignored. The column may be absent, in which case every row is a profile. The group is recorded
         under `group_name` whatever this column is called.
     profile_columns : list of str, optional
-        The attributes a profile carries. Defaults to department, manager and employment status.
+        The attributes a profile carries. Defaults to department, manager, employment status, account type and
+        privilege level.
     valid_from_column : str, default = "valid_from"
         Column holding when the fact started to hold.
     valid_to_column : str, default = "valid_to"

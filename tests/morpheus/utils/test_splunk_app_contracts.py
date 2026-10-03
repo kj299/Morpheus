@@ -192,6 +192,7 @@ def test_the_app_readme_states_the_number_of_searches_it_ships():
         "forty-five": 45,
         "forty-six": 46,
         "forty-seven": 47,
+        "forty-eight": 48,
     }
 
     assert words.get(match.group(1).lower()) == shipped, (

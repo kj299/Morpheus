@@ -93,6 +93,8 @@ FRANK = "frank@example.com"
 GRACE = "grace@example.com"
 HEIDI = "heidi@example.com"
 MALLORY = "mallory@example.com"
+REPORTER = "svc-reports@example.com"
+"""A service principal: a reporting job's identity, which the profile says is not a person."""
 
 # Hosts.
 ALICE_WORKSTATION = "ws-alice"
@@ -130,15 +132,29 @@ SNAPSHOT_HOUR = 6
 DELTA_HOUR = 9
 
 
-def _profile(principal, department, manager, status, valid_from, recorded, change=bitemporal.ASSERT):
-    return make_version(PROFILE,
-                        principal,
-                        valid_from,
-                        None,
-                        recorded,
-                        change, {
-                            "department": department, "manager": manager, "employment_status": status
-                        })
+def _profile(principal,
+             department,
+             manager,
+             status,
+             valid_from,
+             recorded,
+             change=bitemporal.ASSERT,
+             account_type="human",
+             privilege="standard"):
+    return make_version(
+        PROFILE,
+        principal,
+        valid_from,
+        None,
+        recorded,
+        change,
+        {
+            "department": department,
+            "manager": manager,
+            "employment_status": status,
+            "account_type": account_type,
+            "privilege_level": privilege,
+        })
 
 
 def _member(principal, group, valid_from, recorded, change=bitemporal.ASSERT):
@@ -189,17 +205,19 @@ def identity_log() -> list:
     """Every identity version the source records, in the order it records them."""
     day0 = at(0, SNAPSHOT_HOUR)
     first = [
-        _profile(ALICE, "Finance", FRANK, "active", at(0), day0),
+        _profile(ALICE, "Finance", FRANK, "active", at(0), day0, privilege="elevated"),
         _profile(BOB, "Engineering", GRACE, "active", at(0), day0),
         _profile(CAROL, "Sales", HEIDI, "active", at(0), day0),
         _profile(DAVE, "Finance", FRANK, "active", at(0), day0),
         _profile(ERIN, "Engineering", GRACE, "contractor", at(0), day0),
+        _profile(REPORTER, "Engineering", GRACE, "active", at(0), day0, account_type="service", privilege="elevated"),
         _member(ALICE, "finance-users", at(0), day0),
         _member(ALICE, "expense-approvers", at(0), day0),
         _member(BOB, "eng-users", at(0), day0),
         _member(CAROL, "sales-users", at(0), day0),
         _member(DAVE, "finance-users", at(0), day0),
         _member(ERIN, "eng-users", at(0), day0),
+        _member(REPORTER, "reporting-services", at(0), day0),
     ]
 
     # The first snapshot goes through the diff too. Against an empty store it asserts everything, which is the
@@ -220,7 +238,7 @@ def identity_log() -> list:
     # in it, because the source has not heard yet.
     snapshot = at(SNAPSHOT_DAY, SNAPSHOT_HOUR)
     held = BitemporalStore("held", log)
-    still_here = [ALICE, BOB, CAROL, DAVE]
+    still_here = [ALICE, BOB, CAROL, DAVE, REPORTER]
 
     for kind in (PROFILE, bitemporal.MEMBERSHIP):
         facts = [
@@ -320,6 +338,8 @@ UNRECORDED_ROW = {
     "department": "Finance",
     "manager": None,
     "employment_status": "active",
+    "account_type": "human",
+    "privilege_level": "standard",
     bitemporal.VALID_FROM: at(0),
     bitemporal.VALID_TO: None,
     bitemporal.RECORDED_AT: None,
@@ -333,6 +353,8 @@ INVERTED_ROW = {
     "department": None,
     "manager": None,
     "employment_status": None,
+    "account_type": None,
+    "privilege_level": None,
     bitemporal.VALID_FROM: at(9),
     bitemporal.VALID_TO: at(3),
     bitemporal.RECORDED_AT: at(9, DELTA_HOUR),
@@ -360,6 +382,7 @@ IDENTITY_PROBE_EVENTS = [
     ("erin-before-snapshot", ERIN, at(14, 12)),
     ("erin-after-snapshot", ERIN, at(16, 12)),
     ("mallory-unknown", MALLORY, at(5, 12)),
+    ("reporter-service-account", REPORTER, at(3, 12)),
 ]
 
 ASSET_PROBE_EVENTS = [

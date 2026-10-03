@@ -352,6 +352,19 @@
       "why": "Correct, for the same reason as R-B-L5-001: the search reads only rows a principal's own model scored, and every row here was scored under the fallback. Without the gate it is still empty, because the reference losses on locincrement peak at 1.4 against a threshold of 4.0. R-D-L5-008 asks the deterministic form of the question and returns its two rows today.",
       "candidate_rows_without_the_gate": 0
     },
+    "R-B-L5-005 - Session duration anomaly": {
+      "expected_rows": 1,
+      "why": "One session longer than its principal's own: carol@example.com's last working day ran eleven hours against four of eight, a ratio of 1.375 to her baseline, at the default severity because the identity context gives her a standard privilege level. alice@example.com and bob@example.com work their usual eight hours and measure at exactly 1.0, which is not beyond the baseline. svc-batch@example.com's last night is the longest it has had, at 1.25 against its baseline of four hours, and is excluded because the context marks it a service account: its sessions alternate between a ten-minute check and a four-hour run, and a percentile of two shapes says nothing. Without that exclusion it would fire, which is what makes the exclusion a condition rather than a decoration. The campaign corpus's sessions never reach the sample floor of four, so none is measured.",
+      "key_values": [
+        {
+          "user_principal": "carol@example.com",
+          "session_key": "carol@example.com:sess-carol-4",
+          "session_duration_ratio": 1.375,
+          "risk_score": 40
+        }
+      ],
+      "candidate_rows_without_the_account_type_exclusion": 2
+    },
     "R-C-002 - TLS anomaly precedes beaconing": {
       "expected_rows": 1,
       "expected_empty": false,
@@ -364,15 +377,15 @@
       ]
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 4319,
+      "expected_rows": 4335,
       "expected_empty": false,
-      "contributing_rows": 8205,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 8205 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control."
+      "contributing_rows": 8221,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 8221 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 3334,
+      "distinct_lineage_ids": 3347,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
@@ -380,7 +393,7 @@
       "three_layer_chain_methods": [
         "soft:mac_table"
       ],
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 3334 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything. `methods` once read `join_method`, which no pipeline writes, and was blank on every chain; it now reads the `resolution_method` the binding resolver records, so all 15 three-layer chains say `soft:mac_table` and 60 chains in all carry a method."
+      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 3347 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything. `methods` once read `join_method`, which no pipeline writes, and was blank on every chain; it now reads the `resolution_method` the binding resolver records, so all 15 three-layer chains say `soft:mac_table` and 60 chains in all carry a method."
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,
@@ -619,7 +632,7 @@
     "R-C-004 - Staged exfiltration": {
       "expected_rows": 1,
       "expected_empty": false,
-      "why": "One chain. kim@example.com exported 5000 records, eighty times their own baseline; twenty-five minutes later the address kim's session held open, 10.20.1.5, sent 60000 bytes to its sync server, fifty times that triple's envelope; and twenty minutes after that it connected to a destination presenting an issuer nobody in the estate had seen in thirty days. Four others each do all three with one relation broken, and are quiet: lee's breach and connection came from the address max's session held; nia's came twenty minutes after nia logged off; oto's connection presented the corporate issuer every host sees daily; pia's breach and connection happened before the export. Every one of the five exports is an R-B-L7-002 notable and every breach an R-B-L4-005 notable on its own.",
+      "why": "One chain. kim@example.com exported 5000 records, eighty times their own baseline; twenty-five minutes later the address kim's session held open, 10.20.1.5, sent 60000 bytes to its sync server, fifty times that triple's envelope; and twenty minutes after that it connected to a destination presenting an issuer nobody in the estate had seen in thirty days. Four others each do all three with one relation broken, and are quiet: lee's breach and connection came from the address max's session held; nia's came twenty minutes after nia logged off; oto's connection presented the corporate issuer every host sees daily; pia's breach and connection happened before the export. Every one of the five exports is an R-B-L7-002 notable and every breach an R-B-L4-005 notable on its own. kim@example.com's sessions come from a domain controller that says logon and logoff, and the chain still fires because the search reads session_lifecycle, which TC5SessionStage normalizes to start and end.",
       "key_values": [
         {
           "user_principal": "kim@example.com",

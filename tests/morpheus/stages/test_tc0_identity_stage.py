@@ -43,6 +43,8 @@ def records(**overrides) -> dict:
         "department": ["Finance", None, "Engineering"],
         "manager": ["frank", None, "grace"],
         "employment_status": ["active", None, "active"],
+        "account_type": ["human", None, "service"],
+        "privilege_level": ["standard", None, "elevated"],
         "valid_from": [0, 0, 0],
         "valid_to": [None, None, 5 * DAY],
         "recorded_at": [DAY, DAY, DAY],
@@ -61,7 +63,9 @@ def test_a_row_naming_a_group_is_a_membership_and_any_other_is_a_profile(config:
     assert list(result[bitemporal.CONTEXT_KEY]) == ["alice", "alice:finance-users", "bob"]
     assert list(result[bitemporal.CONTEXT_ENTITY]) == ["alice", "alice", "bob"]
     assert list(result[bitemporal.CONTEXT_ATTRIBUTES]) == [
-        "department,employment_status,manager", "group_name", "department,employment_status,manager"
+        "account_type,department,employment_status,manager,privilege_level",
+        "group_name",
+        "account_type,department,employment_status,manager,privilege_level"
     ]
     assert result[bitemporal.CONTEXT_REFUSED].isna().all()
     assert result[bitemporal.CONTEXT_UID].notna().all()

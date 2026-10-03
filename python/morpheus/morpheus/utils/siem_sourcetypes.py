@@ -348,7 +348,7 @@ PRODUCED: dict = {
             time_column="event_time",
             time_columns=("event_time", ),
             producer="The TC-5 stages (session, novelty, cadence, travel, risk, score and, over daily windows, drift) "
-            "behind WindowSealStage; the "
+            "behind TC0EnrichStage and WindowSealStage; the "
             "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`; and host "
             "logins through TC5NoveltyStage with a target host, BindingResolverStage and a site-measuring "
             "TC5TravelStage, and sessions through TC5SessionStage, the `tc5_auth` and `tc5_session` classes of "
@@ -362,7 +362,9 @@ PRODUCED: dict = {
             # no location or factor but names the host logged into, which R-C-001 reads, and its source address
             # resolved through the DHCP leases and the layer 2 MAC bindings to a switch port and site, with the
             # journey between the sites of a principal's sign-ins, which R-C-005 reads. A session's start and stop
-            # records carry the address it came from, which R-C-004 binds a transfer to.
+            # records carry the address it came from, which R-C-004 binds a transfer to, and the lifecycle in two
+            # words whatever the collector said. An identity provider's sessions enriched with the principal's
+            # identity context carry each session's duration against the principal's own, which R-B-L5-005 reads.
             required_columns=("event_uid",
                               "user_principal",
                               "lineage_id",
@@ -371,6 +373,10 @@ PRODUCED: dict = {
                               *PROVENANCE_COLUMNS),
             variant_columns=(
                 ("auth_result",
+                 "ctx_groups",
+                 "ctx_department",
+                 "ctx_employment_status",
+                 "ctx_account_type",
                  "travel_status",
                  "travel_kmh",
                  "travel_elapsed_ns",
@@ -406,7 +412,17 @@ PRODUCED: dict = {
                  "site_travel_status",
                  "site_travel_kmh",
                  "site_travel_elapsed_ns"),
-                ("source_ip", "session_key", "session_action"),
+                ("source_ip", "session_key", "session_action", "session_lifecycle"),
+                ("session_key",
+                 "session_lifecycle",
+                 "session_duration_s",
+                 "session_duration_baseline",
+                 "session_duration_ratio",
+                 "session_duration_mature",
+                 "ctx_account_type",
+                 "ctx_privilege_level",
+                 "ctx_department",
+                 "ctx_employment_status"),
             ),
         ),
     "morpheus:edge":

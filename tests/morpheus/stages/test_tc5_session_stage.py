@@ -337,3 +337,111 @@ def test_one_row_from_a_broken_clock_does_not_abandon_every_open_session(config:
     stage.on_data(closed)
 
     assert _as_list(closed, "session_duration_s") == [600]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_lifecycle_column_names_each_end_in_two_words_whatever_the_collector_said(config: Config):
+    # A search reading session boundaries reads this column, so a collector that says logon and logoff is read by
+    # the same search as one that says start and end.
+    meta = run(config, frame(["logon", "LOGOFF", "start", "stop", "heartbeat"]))
+
+    assert _as_list(meta, "session_lifecycle") == ["start", "end", "start", "end", None]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_single_record_session_is_a_subtraction(config: Config):
+    payload = frame(["session"], times=[3 * HOUR_NS])
+    payload["session_start"] = [HOUR_NS]
+    payload["session_end"] = [3 * HOUR_NS]
+
+    stage = TC5SessionStage(config)
+    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
+    stage.on_data(meta)
+
+    assert _as_list(meta, "session_duration_s") == [2 * 3600]
+    assert _as_list(meta, "session_out_of_order") == [False]
+    assert _as_list(meta, "session_unpaired") == [False]
+    # The pairing state is untouched: a single record opens nothing a later stop could close.
+    assert stage.open_sessions == 0
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_single_record_ending_before_it_starts_is_out_of_order_and_untimed(config: Config):
+    payload = frame(["session"], times=[3 * HOUR_NS])
+    payload["session_start"] = [3 * HOUR_NS]
+    payload["session_end"] = [HOUR_NS]
+
+    meta = run(config, payload)
+
+    assert _as_list(meta, "session_duration_s") == [None]
+    assert _as_list(meta, "session_out_of_order") == [True]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_paired_and_single_record_rows_coexist(config: Config):
+    payload = frame(["start", "session", "end"], sessions=["s-1", "s-2", "s-1"], times=[0, HOUR_NS, 2 * HOUR_NS])
+    payload["session_start"] = [None, 0, None]
+    payload["session_end"] = [None, HOUR_NS, None]
+
+    meta = run(config, payload)
+
+    assert _as_list(meta, "session_duration_s") == [None, 3600, 2 * 3600]
+
+
+def _sessions_of(durations_h: list, principal: str = ALICE) -> dict:
+    """One single-record session a day for one principal, each lasting the given number of hours."""
+    starts = [day * 24 * HOUR_NS for day in range(len(durations_h))]
+    ends = [start + int(hours * HOUR_NS) for (start, hours) in zip(starts, durations_h)]
+    payload = frame(["session"] * len(durations_h),
+                    sessions=[f"s-{day}" for day in range(len(durations_h))],
+                    times=ends,
+                    principals=[principal] * len(durations_h))
+    payload["session_start"] = starts
+    payload["session_end"] = ends
+
+    return payload
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_session_is_measured_against_the_principals_own_prior_sessions(config: Config):
+    # Four eight-hour days, then an eleven-hour one. By nearest rank the 99th percentile of four sessions is the
+    # longest of them, and the eleven-hour session is measured against it, not folded into it first.
+    meta = run(config, _sessions_of([8, 8, 8, 8, 11]), baseline_min_samples=4)
+
+    assert _as_list(meta, "session_duration_mature") == [False, False, False, False, True]
+    assert _as_list(meta, "session_duration_baseline") == [None, None, None, None, 8 * 3600.0]
+    assert _as_list(meta, "session_duration_ratio") == [None, None, None, None, 1.375]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_nothing_is_published_below_the_sample_floor(config: Config):
+    # The default floor is a hundred prior sessions, where a 99th percentile stops being the longest ever seen.
+    meta = run(config, _sessions_of([8, 8, 8, 8, 11]))
+
+    assert _as_list(meta, "session_duration_ratio") == [None] * 5
+    assert _as_list(meta, "session_duration_mature") == [False] * 5
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_each_principal_has_their_own_baseline(config: Config):
+    alice = _sessions_of([8, 8, 8, 8, 11])
+    bob = _sessions_of([1, 1, 1, 1, 2], principal="bob@example.com")
+    payload = {name: values + bob[name] for (name, values) in alice.items()}
+
+    meta = run(config, payload, baseline_min_samples=4)
+
+    assert _as_list(meta, "session_duration_ratio") == [None, None, None, None, 1.375, None, None, None, None, 2.0]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_untimed_session_is_not_measured(config: Config):
+    # A stop with no start has no duration, and a baseline built from a guess at one would excuse the next long one.
+    meta = run(config, frame(["end"]), baseline_min_samples=1)
+
+    assert _as_list(meta, "session_duration_ratio") == [None]
+    assert _as_list(meta, "session_duration_mature") == [None]
+
+
+def test_the_baseline_window_must_be_positive(config: Config):
+    with pytest.raises(ValueError, match="baseline_days"):
+        TC5SessionStage(config, baseline_days=0)

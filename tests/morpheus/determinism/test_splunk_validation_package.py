@@ -100,6 +100,7 @@ FAILURE_RUN_THRESHOLD = threshold("R-D-L5-009 - Failed authentication run ending
 COMPOSITE_MAX_THRESHOLD = threshold("R-B-L5-001 - Composite authentication anomaly", r"max_threshold\s*=\s*([\d.]+)")
 COMPOSITE_MEAN_THRESHOLD = threshold("R-B-L5-001 - Composite authentication anomaly", r"mean_threshold\s*=\s*([\d.]+)")
 LOCATION_LOSS_THRESHOLD = threshold("R-B-L5-002 - Location novelty anomaly", r"loss_threshold\s*=\s*([\d.]+)")
+DURATION_RATIO_THRESHOLD = threshold("R-B-L5-005 - Session duration anomaly", r"ratio_threshold\s*=\s*([\d.]+)")
 FORECAST_DAYS_THRESHOLD = threshold("R-P-L1-004 - Optical degradation forecast",
                                     r"optical_rx_dbm_days_to_floor\s*<=\s*([\d.]+)")
 """The thresholds the saved searches state, read from the stanzas rather than repeated here."""
@@ -320,6 +321,33 @@ def test_the_principal_baseline_rules_return_exactly_what_is_written(expected: d
     assert {(row["user_principal"], row["consecutive_auth_failures"])
             for row in entry["key_values"]
             } == set(zip(failures["user_principal"], failures["consecutive_auth_failures"].astype(int)))
+
+
+def test_the_session_duration_rule_returns_exactly_what_is_written(expected: dict):
+    # R-B-L5-005 over the events a search head would hold, with its exclusion and its severity as the search states
+    # them, and its candidates without the exclusion recorded beside it.
+    sessions = [
+        event for event in _events_of("morpheus_score_l5.jsonlines") if event.get("session_duration_mature") is True
+    ]
+    candidates = [event for event in sessions if event["session_duration_ratio"] > DURATION_RATIO_THRESHOLD]
+    fires = [event for event in candidates if (event.get("ctx_account_type") or "unknown") != "service"]
+    severity = {"admin": 70, "elevated": 55}
+    entry = expected["searches"]["R-B-L5-005 - Session duration anomaly"]
+
+    assert entry["expected_rows"] == len(fires)
+    assert entry["candidate_rows_without_the_account_type_exclusion"] == len(candidates)
+    assert [{
+        "user_principal": event["user_principal"],
+        "session_key": event["session_key"],
+        "session_duration_ratio": event["session_duration_ratio"],
+        "risk_score": severity.get(event.get("ctx_privilege_level"), 40),
+    } for event in fires] == entry["key_values"]
+
+    search = _stanza_search("R-B-L5-005 - Session duration anomaly")
+
+    for (level, score) in severity.items():
+        assert f'ctx_privilege_level == "{level}", {score}' in search
+    assert 'account_type != "service"' in search
 
 
 def test_the_model_rules_are_empty_for_the_reason_they_state(expected: dict, sessions: pd.DataFrame):
@@ -935,6 +963,7 @@ NUMBER_WORDS = {
     "forty-five": 45,
     "forty-six": 46,
     "forty-seven": 47,
+    "forty-eight": 48,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -966,7 +995,8 @@ def test_every_expected_empty_search_says_why(expected: dict):
     #
     # Nine of forty-seven after the layer 5 baseline searches, and every one of the three new empties is correct
     # for a reason it states: R-B-L5-001 and R-B-L5-002 read only rows a principal's own model scored, and none
-    # here was; the watchlist expiry drops entries for events that are years old.
+    # here was; the watchlist expiry drops entries for events that are years old. Nine of forty-eight after
+    # R-B-L5-005, which arrived with a long session planted for it.
     assert len(empty) == 9
 
     for (name, entry) in empty.items():

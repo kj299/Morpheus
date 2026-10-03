@@ -370,7 +370,15 @@ _PROFILES = (
     "weekday_share",
     "weekday_surprise_bits",
     "weekday_surprise_bits_z_loss",
-    "weekday_unseen",
+    "weekday_unseen",  # Identity context at layer 5, and each session measured against the principal's own.
+    "account_type",
+    "privilege_level",
+    "ctx_account_type",
+    "ctx_privilege_level",
+    "session_lifecycle",
+    "session_duration_baseline",
+    "session_duration_ratio",
+    "session_duration_mature",
 )
 
 _PSEUDONYMS = (
@@ -574,7 +582,9 @@ _OPERATIONAL = (
     "model_fallback_used",
     "model_version",
     "pipeline_fingerprint",
-    "rng_seed",
+    "rng_seed",  # A single-record session's bounds: timestamps, like event_time.
+    "session_start",
+    "session_end",
 )
 
 COLUMNS: dict[str, str] = {}
@@ -665,7 +675,13 @@ BOUNDED_DOMAIN = frozenset({
     "token_type",
     "travel_status",
     "validation_result",
-    "vlan_id",
+    "vlan_id",  # A handful of values each, so a digest of one is a lookup, not a pseudonym.
+    "account_type",
+    "privilege_level",
+    "ctx_account_type",
+    "ctx_privilege_level",
+    "session_lifecycle",
+    "session_duration_mature",
 })
 """Columns whose set of possible values is fixed by the field's own definition rather than by the estate's size.
 

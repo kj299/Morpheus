@@ -444,6 +444,8 @@ def identity_records() -> dict:
         "department": ["Finance", None, "Engineering", "Finance"],
         "manager": ["frank", None, "grace", "frank"],
         "employment_status": ["active", None, "active", "active"],
+        "account_type": ["human", None, "human", "human"],
+        "privilege_level": ["standard", None, "standard", "standard"],
         "valid_from": [0, 0, 0, 10 * DAY],
         "valid_to": [None, 5 * DAY, None, None],
         "recorded_at": [DAY, DAY, DAY, 12 * DAY],
@@ -792,11 +794,20 @@ def wire_without_the_required_columns() -> dict:
 def sessions() -> dict:
     # Two sessions open at once, each closing later. Overlapping is what makes max_open_sessions bite, and the gap
     # between a start and its end is what makes the timeout bite.
+    #
+    # Around them, three single-record sessions for alice, which carry both bounds and are a subtraction. They give
+    # her a duration history to be measured against: a five-hour session at the start, then, two days later, a ten-
+    # and a thirty-minute one. The old five-hour session is the largest, so a window shorter than two days, a lower
+    # quantile and a higher sample floor each change the baseline the last session is measured against.
+    alice = "alice@example.com"
+
     return {
-        "session_id": ["s-a", "s-b", "s-a", "s-b"],
-        "user_principal": ["alice@example.com", "bob@example.com", "alice@example.com", "bob@example.com"],
-        "session_action": ["start", "start", "end", "end"],
-        "event_time": [0, MINUTE, 2 * MINUTE, 3 * MINUTE],
+        "session_id": ["s-0", "s-a", "s-b", "s-a", "s-b", "s-1", "s-2"],
+        "user_principal": [alice, alice, "bob@example.com", alice, "bob@example.com", alice, alice],
+        "session_action": ["session", "start", "start", "end", "end", "session", "session"],
+        "event_time": [0, 0, MINUTE, 2 * MINUTE, 3 * MINUTE, 2 * DAY, 2 * DAY + HOUR],
+        "session_start": [-5 * HOUR, None, None, None, None, 2 * DAY - 10 * MINUTE, 2 * DAY + 30 * MINUTE],
+        "session_end": [0, None, None, None, None, 2 * DAY, 2 * DAY + HOUR],
     }
 
 
@@ -1208,7 +1219,8 @@ REGISTRY: dict = {
         Scenario(
             stage=TC5SessionStage,
             frame=sessions,
-            base={},
+            # One prior session is enough for a baseline here, so the baseline's own parameters have one to change.
+            base={"baseline_min_samples": 1},
             knobs=(
                 Knob("session_column", INPUT_COLUMN, benign="session_id"),
                 Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
@@ -1220,6 +1232,12 @@ REGISTRY: dict = {
                 Knob("timeout_seconds", DIFFERS, benign=3600, extreme=1),
                 Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("max_open_sessions", DIFFERS, benign=500_000, extreme=1),
+                Knob("start_column", INPUT_COLUMN, benign="session_start"),
+                Knob("end_column", INPUT_COLUMN, benign="session_end"),
+                Knob("baseline_days", DIFFERS, benign=30, extreme=1),
+                Knob("baseline_quantile", DIFFERS, benign=0.99, extreme=0.0),
+                Knob("baseline_min_samples", DIFFERS, benign=1, extreme=1000),
+                Knob("decimals", DIFFERS, benign=4, extreme=0),
             ),
         ),
     "TC5NoveltyStage":

@@ -129,16 +129,22 @@ def test_corpus_is_shaped_like_an_identity_provider(corpus: dict[str, pd.DataFra
     # Several principals with different habits, which is what makes each one's own history the comparison.
     assert auth["user_principal"].nunique() >= 5
 
-    # Sessions arrive as separate start and stop records with no duration on either, which is the shape
-    # TC5SessionStage exists for.
+    # Sessions arrive mostly as separate start and stop records with no duration on either, which is the shape
+    # TC5SessionStage exists to pair; the identity provider's own collector adds the other shape, one record per
+    # session with both ends in it.
     sessions = corpus["tc5_session"]
-    assert set(sessions["session_action"]) == {"start", "end"}
+    assert set(sessions["session_action"]) == {"start", "end", "session"}
     assert "session_duration_s" not in sessions.columns
+    single = sessions[sessions["session_action"] == "session"]
+    assert single["session_start"].notna().all() and single["session_end"].notna().all()
+    assert sessions[sessions["session_action"] != "session"]["session_start"].isna().all()
 
-    # Every class carries the envelope the identifiers derive from, with a monotonic sequence.
+    # Every class carries the envelope the identifiers derive from, each collector with a monotonic sequence.
     for frame in corpus.values():
         assert set(sp.ID_COLUMNS) <= set(frame.columns)
-        assert frame["collector_seq"].is_monotonic_increasing
+
+        for (_, rows) in frame.groupby("collector_id"):
+            assert rows["collector_seq"].is_monotonic_increasing
 
 
 # --- Checks 2 through 6: determinism ---------------------------------------------------------------------------
@@ -716,6 +722,94 @@ def test_the_model_rules_read_nothing_a_fallback_scored(result: pd.DataFrame):
 
     assert composite.empty
     assert location.empty
+
+
+def _day(result: pd.DataFrame, principal: str, corpus_day: int) -> pd.DataFrame:
+    rows = _principal(result, principal)
+    days = ((rows["event_time"].astype("int64") // sp.NS_PER_SECOND - sp.CORPUS_EPOCH_S) // sp.DAY_S).astype(int)
+
+    return rows[days == corpus_day]
+
+
+@pytest.mark.cpu_mode
+def test_the_leavers_sign_ins_carry_what_was_known_at_their_time(result: pd.DataFrame):
+    # Dave leaves on the Saturday and the directory hears on the Sunday. A detection running on Saturday could not
+    # have known, so his Saturday sign-ins say active; the enrichment answers as known at each event, and the
+    # Sunday ones say terminated.
+    assert set(_day(result, sp.DAVE, sp.LEAVER_DAY)["ctx_employment_status"]) == {"active"}
+    assert set(_day(result, sp.DAVE, sp.LEAVER_RECORDED_DAY)["ctx_employment_status"]) == {"terminated"}
+    assert set(_day(result, sp.DAVE, sp.LEAVER_DAY)["ctx_knowledge"]) == {"event"}
+
+
+@pytest.mark.cpu_mode
+def test_the_service_principal_says_so_on_both_layer_5_classes(result: pd.DataFrame):
+    batch = result[result["user_principal"] == sp.BATCH]
+
+    assert set(batch["telemetry_class"]) == {"tc5_auth", "tc5_session"}
+    assert set(batch["ctx_account_type"]) == {"service"}
+    assert set(result[result["user_principal"] == sp.ALICE]["ctx_account_type"]) == {"human"}
+
+
+@pytest.mark.cpu_mode
+def test_a_group_change_takes_effect_on_the_day_it_was_made(result: pd.DataFrame):
+    (london, newyork) = sp.GROUP_CHANGE_GROUPS
+
+    assert set(_day(result, sp.BOB, sp.FLIGHT_DAY - 1)["ctx_groups"]) == {london}
+    assert set(_day(result, sp.BOB, sp.FLIGHT_DAY + 1)["ctx_groups"]) == {newyork}
+
+
+@pytest.mark.cpu_mode
+def test_the_lifecycle_is_start_or_end_on_every_paired_record(result: pd.DataFrame):
+    sessions = _rows(result, "tc5_session")
+    paired = sessions[sessions["session_action"].isin(["start", "end"])]
+    single = sessions[sessions["session_action"] == "session"]
+
+    assert (paired["session_lifecycle"] == paired["session_action"]).all()
+    assert single["session_lifecycle"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_a_single_record_session_is_timed_and_an_inverted_one_is_reported(result: pd.DataFrame):
+    sessions = _rows(result, "tc5_session")
+    single = sessions[sessions["session_id"] == sp.SINGLE_RECORD_SESSION]
+    inverted = sessions[sessions["session_id"] == sp.INVERTED_SESSION]
+    (start_hour, end_hour) = sp.SINGLE_RECORD_HOURS
+
+    assert int(single["session_duration_s"].iloc[0]) == (end_hour - start_hour) * 3600
+    assert bool(single["session_out_of_order"].iloc[0]) is False
+    assert inverted["session_duration_s"].isna().all()
+    assert bool(inverted["session_out_of_order"].iloc[0]) is True
+
+
+def _duration_rule(result: pd.DataFrame, exclude_services: bool = True) -> pd.DataFrame:
+    """R-B-L5-005 as its search states it; the account-type exclusion can be switched off."""
+    limits = stamping.rule_thresholds(["R-B-L5-005"])["R-B-L5-005"]
+    sessions = _rows(result, "tc5_session")
+    measured = sessions[sessions["session_duration_mature"].astype("boolean").fillna(False)]
+    fires = measured[measured["session_duration_ratio"].astype(float) > limits["ratio_threshold"]]
+
+    if (exclude_services):
+        fires = fires[fires["ctx_account_type"].fillna("unknown") != "service"]
+
+    return fires
+
+
+@pytest.mark.cpu_mode
+def test_the_long_interactive_session_fires_and_the_bimodal_service_account_does_not(result: pd.DataFrame):
+    # Carol's eleven-hour last day, against four of eight. The service account's last night is the longest it has
+    # had too, and fires the moment the account-type exclusion is removed -- so the exclusion is what keeps it
+    # quiet, not a percentile that happens to sit above it.
+    fires = _duration_rule(result)
+
+    assert list(fires["user_principal"]) == [sp.CAROL]
+    assert float(fires["session_duration_ratio"].iloc[0]) == pytest.approx((sp.LONG_SESSION_END_HOUR - 9) / 8, abs=1e-4)
+    assert set(_duration_rule(result, exclude_services=False)["user_principal"]) == {sp.CAROL, sp.BATCH}
+
+    # The ordinary working days measure at exactly their own baseline, which is not beyond it.
+    ordinary = _rows(result, "tc5_session")
+    ordinary = ordinary[ordinary["user_principal"].isin([sp.ALICE, sp.BOB])
+                        & ordinary["session_duration_mature"].astype("boolean").fillna(False)]
+    assert (ordinary["session_duration_ratio"].astype(float) == 1.0).all()
 
 
 @pytest.mark.cpu_mode

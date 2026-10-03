@@ -45,8 +45,15 @@ beside it:
   negative control that makes the cadence feature a statement about a principal rather than about a clock;
 - a **session that never ends**, whose stop record was lost, and a **stop with no start**, which is what the
   beginning of any stream looks like;
-- and a **session identifier used twice**, which is a duplicating collector rather than a retry.
-
+- a **session identifier used twice**, which is a duplicating collector rather than a retry;
+- a **long interactive session**: one office worker's last working day runs eleven hours against four of eight,
+  which R-B-L5-005 reports, beside a **service account** whose nightly sessions alternate between ten minutes and
+  four hours and end on a five-hour one -- the bimodal shape the rule excludes by account type rather than by luck;
+- **single-record sessions** from an identity provider that states both ends in one record, one of them with its
+  end before its start;
+- and an **identity store**: each principal's profile and groups, a leaver whose termination is recorded the day
+  after it takes effect, a group change on the day of a relocation, and the service account marked as one. Both
+  layer 5 classes are enriched from it as known at each event's time.
 The pipeline is one per telemetry class, which is the deployment shape: authentication events arrive from the
 identity provider, session lifecycle records from the concentrators and the RADIUS accounting stream, and the two
 have different required columns. Every stateful stage is preceded by `TotalOrderStage`, which is determinism
@@ -69,6 +76,9 @@ from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
+from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
+from morpheus.stages.telemetry.tc0_identity_stage import GROUP_ATTRIBUTE
+from morpheus.stages.telemetry.tc0_identity_stage import PROFILE
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
@@ -79,6 +89,9 @@ from morpheus.utils.model_manifest import ModelManifest
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.bitemporal import MEMBERSHIP
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 
@@ -215,9 +228,100 @@ the stop reads unpaired -- which is the point: a session that never closes is a 
 five-day session, and reporting one would put an absurd duration on an ordinary working day."""
 UNPAIRED_SESSION = "sess-unpaired"
 DUPLICATED_SESSION = "sess-duplicated"
+LONG_SESSION_DAY = 4
+LONG_SESSION_END_HOUR = 20
+"""Carol's last working day runs from nine to eight: eleven hours, against four days of eight."""
+
+BATCH_SESSION_MINUTES = (10, 240)
+BATCH_LAST_SESSION_MINUTES = 300
+"""The service account's nightly sessions alternate between a short check and a long run, and the last night's is
+the longest it has had. Bimodal, which is why R-B-L5-005 excludes service accounts rather than hoping a percentile
+of two shapes means anything."""
+
+SINGLE_RECORD_SESSION = "sess-dave-sso"
+SINGLE_RECORD_DAY = 4
+SINGLE_RECORD_HOURS = (13, 16)
+INVERTED_SESSION = "sess-dave-sso-skew"
+INVERTED_DAY = 5
+INVERTED_HOURS = (17, 16)
+"""Two sessions from an identity provider that emits one record per session with both ends in it. The first is
+three hours; the second ends an hour before it starts, which is a defect in the record and is reported as one."""
+
+SESSION_BASELINE_MIN_SAMPLES = 4
+"""Prior sessions before a principal's duration baseline is published, for this corpus.
+
+Below the stage's own floor of a hundred, deliberately, for the reason `CADENCE_MIN_SAMPLES` gives: a week holds five
+working days, and a floor nobody reaches would make the baseline assert nothing. By nearest rank a 99th percentile
+of four sessions is the longest of them, which is what this corpus's long session is measured against.
+"""
+
+LEAVER_DAY = 5
+LEAVER_RECORDED_DAY = 6
+"""Dave leaves on the Saturday; the directory hears on the Sunday. His Saturday sign-ins carry `active` as known at
+their time, which is what a detection could have known, and his Sunday ones carry `terminated`."""
+
+GROUP_CHANGE_GROUPS = ("london-office", "newyork-office")
+"""Bob's office group, changed on the day he flies, recorded the same day."""
+
 SESSION_TIMEOUT_SECONDS = 12 * HOUR_S
 """Shorter than the stage's own default, because this corpus is a week and a session abandoned after a day and a
 half would never be abandoned inside it."""
+
+
+def _profile(principal: str,
+             department: str,
+             status: str,
+             valid_from_s: int,
+             recorded_s: int,
+             account_type: str = "human",
+             privilege: str = "standard"):
+    return make_version(PROFILE,
+                        principal,
+                        valid_from_s * NS_PER_SECOND,
+                        None,
+                        recorded_s * NS_PER_SECOND,
+                        values={
+                            "department": department,
+                            "employment_status": status,
+                            "account_type": account_type,
+                            "privilege_level": privilege,
+                        })
+
+
+def _member(principal: str, group: str, valid_from_s: int, recorded_s: int, change: str = "assert"):
+    return make_version(MEMBERSHIP,
+                        principal,
+                        valid_from_s * NS_PER_SECOND,
+                        None,
+                        recorded_s * NS_PER_SECOND,
+                        change, {GROUP_ATTRIBUTE: group}, (group, ))
+
+
+def identity_versions() -> list:
+    """The identity store the layer 5 classes are enriched from: what the directory recorded, and when."""
+    start = at(0, 0) - DAY_S
+    (london, newyork) = GROUP_CHANGE_GROUPS
+
+    return [
+        _profile(ALICE, "Finance", "active", start, start, privilege="elevated"),
+        _profile(BOB, "Engineering", "active", start, start),
+        _profile(CAROL, "Sales", "active", start, start),
+        _profile(DAVE, "Finance", "active", start, start),
+        _profile(BATCH, "Engineering", "active", start, start, account_type="service", privilege="elevated"),
+        _member(ALICE, "finance-users", start, start),
+        _member(BOB, london, start, start),
+        _member(CAROL, "sales-users", start, start),
+        _member(DAVE, "finance-users", start, start),
+        _member(BATCH, "batch-jobs", start, start),
+        _member(BOB, london, at(FLIGHT_DAY, 0), at(FLIGHT_DAY, 0), "retract"),
+        _member(BOB, newyork, at(FLIGHT_DAY, 0), at(FLIGHT_DAY, 0)),
+        _profile(DAVE, "Finance", "terminated", at(LEAVER_DAY, 0), at(LEAVER_RECORDED_DAY, 0)),
+    ]
+
+
+def build_identity_store() -> BitemporalStore:
+    """The store, rebuilt per run so no state leaks between the runs control 13 compares."""
+    return BitemporalStore("identity", identity_versions())
 
 
 def _envelope(rng: random.Random, collector: str, schema: str, seq: int) -> dict:
@@ -369,13 +473,20 @@ def _build_sessions(rng: random.Random) -> pd.DataFrame:
     events: list[tuple] = []
 
     # An ordinary working session per office worker per weekday: one start in the morning, one stop in the
-    # evening, emitted as two records with nothing in either saying how long it ran.
+    # evening, emitted as two records with nothing in either saying how long it ran. Carol's last one runs late.
     for day in WEEKDAYS:
         for (index, principal) in enumerate((ALICE, BOB, CAROL)):
             session_id = f"sess-{principal.split('@')[0]}-{day}"
+            long_day = principal == CAROL and day == LONG_SESSION_DAY
             events.append((at(day, 9, index), session_id, principal, "start"))
-            events.append((at(day, 17, index), session_id, principal, "end"))
+            events.append((at(day, LONG_SESSION_END_HOUR if long_day else 17, index), session_id, principal, "end"))
 
+    # The service account's nightly sessions, short and long by turns, and the longest on the last night.
+    for day in range(CORPUS_DAYS):
+        minutes = BATCH_LAST_SESSION_MINUTES if day == CORPUS_DAYS - 1 else BATCH_SESSION_MINUTES[day % 2]
+        session_id = f"sess-batch-{day}"
+        events.append((at(day, BATCH_HOUR), session_id, BATCH, "start"))
+        events.append((at(day, BATCH_HOUR, minutes * 60), session_id, BATCH, "end"))
     # A session abandoned past the timeout, whose stop then arrives days later. It must read as unpaired rather
     # than as a five-day session.
     events.append((at(ABANDONED_START_DAY, 10), ABANDONED_SESSION, DAVE, "start"))
@@ -393,6 +504,7 @@ def _build_sessions(rng: random.Random) -> pd.DataFrame:
     events.append((at(3, 11), DUPLICATED_SESSION, DAVE, "end"))
 
     events.sort(key=lambda event: (event[0], event[1]))
+
     rows = []
 
     for (seq, (time_s, session_id, principal, action)) in enumerate(events, start=1):
@@ -401,10 +513,32 @@ def _build_sessions(rng: random.Random) -> pd.DataFrame:
             "session_id": session_id,
             "user_principal": principal,
             "session_action": action,
+            "session_start": None,
+            "session_end": None,
             **_envelope(rng, "radius-accounting", "TC-5/1.0.0", seq),
         })
 
-    return pd.DataFrame(rows)
+    # The identity provider's own session records, one per session with both ends in it, from a collector of its
+    # own. Each is emitted when the session ends, which is when such a record exists.
+    single = [(SINGLE_RECORD_SESSION, SINGLE_RECORD_DAY, SINGLE_RECORD_HOURS),
+              (INVERTED_SESSION, INVERTED_DAY, INVERTED_HOURS)]
+
+    for (seq, (session_id, day, (start_hour, end_hour))) in enumerate(single, start=1):
+        rows.append({
+            "event_time": at(day, max(start_hour, end_hour)) * NS_PER_SECOND,
+            "session_id": session_id,
+            "user_principal": DAVE,
+            "session_action": "session",
+            "session_start": at(day, start_hour) * NS_PER_SECOND,
+            "session_end": at(day, end_hour) * NS_PER_SECOND,
+            **_envelope(rng, "idp-sessions", "TC-5/1.0.0", seq),
+        })
+
+    frame = pd.DataFrame(rows).sort_values(["event_time", "collector_id", "collector_seq"], kind="mergesort")
+    frame["session_start"] = frame["session_start"].astype("Int64")
+    frame["session_end"] = frame["session_end"].astype("Int64")
+
+    return frame.reset_index(drop=True)
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -475,10 +609,19 @@ SETTINGS = {
     "day_seconds": DAY_S,
     "cadence_min_samples": CADENCE_MIN_SAMPLES,
     "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,
+    "session_baseline_min_samples": SESSION_BASELINE_MIN_SAMPLES,
     "excluded_source_networks": [VPN_EGRESS_NETWORK],
 }
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-D-L5-003", "R-D-L5-004", "R-D-L5-007", "R-D-L5-008", "R-D-L5-009", "R-B-L5-001", "R-B-L5-002", "R-P-L5-006")
+RULES = ("R-D-L5-003",
+         "R-D-L5-004",
+         "R-D-L5-007",
+         "R-D-L5-008",
+         "R-D-L5-009",
+         "R-B-L5-001",
+         "R-B-L5-002",
+         "R-B-L5-005",
+         "R-P-L5-006")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 
@@ -684,6 +827,7 @@ def run_pipeline(config: Config,
         config,
         batches["tc5_auth"],
         [
+            TC0EnrichStage(config, store=build_identity_store(), entity_column="user_principal"),
             TC5NoveltyStage(config),
             TC5CadenceStage(config, min_samples=CADENCE_MIN_SAMPLES),
             TC5TravelStage(config, excluded_source_networks=(VPN_EGRESS_NETWORK, )),
@@ -697,13 +841,18 @@ def run_pipeline(config: Config,
         telemetry_class="tc5_auth",
         manifest=manifest)
 
-    outputs["tc5_session"] = _run_class(config,
-                                        batches["tc5_session"],
-                                        [TC5SessionStage(config, timeout_seconds=SESSION_TIMEOUT_SECONDS)],
-                                        impose_order,
-                                        anchor=CHAIN_ANCHORS["tc5_session"],
-                                        envelope=CLASS_ENVELOPE["tc5_session"],
-                                        telemetry_class="tc5_session")
+    outputs["tc5_session"] = _run_class(
+        config,
+        batches["tc5_session"],
+        [
+            TC0EnrichStage(config, store=build_identity_store(), entity_column="user_principal"),
+            TC5SessionStage(
+                config, timeout_seconds=SESSION_TIMEOUT_SECONDS, baseline_min_samples=SESSION_BASELINE_MIN_SAMPLES),
+        ],
+        impose_order,
+        anchor=CHAIN_ANCHORS["tc5_session"],
+        envelope=CLASS_ENVELOPE["tc5_session"],
+        telemetry_class="tc5_session")
 
     frames = []
 
