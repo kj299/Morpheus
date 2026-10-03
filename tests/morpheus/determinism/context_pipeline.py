@@ -46,9 +46,11 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc0_asset_stage import ASSET
 from morpheus.stages.telemetry.tc0_asset_stage import DEFAULT_ASSET_COLUMNS
@@ -78,6 +80,9 @@ PRODUCER_CLASSES = (IDENTITY_CLASS, ASSET_CLASS)
 PROBE_CLASSES = (IDENTITY_PROBES, ASSET_PROBES)
 CORPUS_CLASSES = PRODUCER_CLASSES + PROBE_CLASSES
 
+SETTINGS = {"profile_columns": list(DEFAULT_PROFILE_COLUMNS), "asset_columns": list(DEFAULT_ASSET_COLUMNS)}
+"""The settings that decide the producers' output; a probe class adds the knowledge mode it was enriched under."""
+
 # Principals.
 ALICE = "alice@example.com"
 BOB = "bob@example.com"
@@ -88,6 +93,8 @@ FRANK = "frank@example.com"
 GRACE = "grace@example.com"
 HEIDI = "heidi@example.com"
 MALLORY = "mallory@example.com"
+REPORTER = "svc-reports@example.com"
+"""A service principal: a reporting job's identity, which the profile says is not a person."""
 
 # Hosts.
 ALICE_WORKSTATION = "ws-alice"
@@ -125,15 +132,29 @@ SNAPSHOT_HOUR = 6
 DELTA_HOUR = 9
 
 
-def _profile(principal, department, manager, status, valid_from, recorded, change=bitemporal.ASSERT):
-    return make_version(PROFILE,
-                        principal,
-                        valid_from,
-                        None,
-                        recorded,
-                        change, {
-                            "department": department, "manager": manager, "employment_status": status
-                        })
+def _profile(principal,
+             department,
+             manager,
+             status,
+             valid_from,
+             recorded,
+             change=bitemporal.ASSERT,
+             account_type="human",
+             privilege="standard"):
+    return make_version(
+        PROFILE,
+        principal,
+        valid_from,
+        None,
+        recorded,
+        change,
+        {
+            "department": department,
+            "manager": manager,
+            "employment_status": status,
+            "account_type": account_type,
+            "privilege_level": privilege,
+        })
 
 
 def _member(principal, group, valid_from, recorded, change=bitemporal.ASSERT):
@@ -184,17 +205,19 @@ def identity_log() -> list:
     """Every identity version the source records, in the order it records them."""
     day0 = at(0, SNAPSHOT_HOUR)
     first = [
-        _profile(ALICE, "Finance", FRANK, "active", at(0), day0),
+        _profile(ALICE, "Finance", FRANK, "active", at(0), day0, privilege="elevated"),
         _profile(BOB, "Engineering", GRACE, "active", at(0), day0),
         _profile(CAROL, "Sales", HEIDI, "active", at(0), day0),
         _profile(DAVE, "Finance", FRANK, "active", at(0), day0),
         _profile(ERIN, "Engineering", GRACE, "contractor", at(0), day0),
+        _profile(REPORTER, "Engineering", GRACE, "active", at(0), day0, account_type="service", privilege="elevated"),
         _member(ALICE, "finance-users", at(0), day0),
         _member(ALICE, "expense-approvers", at(0), day0),
         _member(BOB, "eng-users", at(0), day0),
         _member(CAROL, "sales-users", at(0), day0),
         _member(DAVE, "finance-users", at(0), day0),
         _member(ERIN, "eng-users", at(0), day0),
+        _member(REPORTER, "reporting-services", at(0), day0),
     ]
 
     # The first snapshot goes through the diff too. Against an empty store it asserts everything, which is the
@@ -215,7 +238,7 @@ def identity_log() -> list:
     # in it, because the source has not heard yet.
     snapshot = at(SNAPSHOT_DAY, SNAPSHOT_HOUR)
     held = BitemporalStore("held", log)
-    still_here = [ALICE, BOB, CAROL, DAVE]
+    still_here = [ALICE, BOB, CAROL, DAVE, REPORTER]
 
     for kind in (PROFILE, bitemporal.MEMBERSHIP):
         facts = [
@@ -315,6 +338,8 @@ UNRECORDED_ROW = {
     "department": "Finance",
     "manager": None,
     "employment_status": "active",
+    "account_type": "human",
+    "privilege_level": "standard",
     bitemporal.VALID_FROM: at(0),
     bitemporal.VALID_TO: None,
     bitemporal.RECORDED_AT: None,
@@ -328,6 +353,8 @@ INVERTED_ROW = {
     "department": None,
     "manager": None,
     "employment_status": None,
+    "account_type": None,
+    "privilege_level": None,
     bitemporal.VALID_FROM: at(9),
     bitemporal.VALID_TO: at(3),
     bitemporal.RECORDED_AT: at(9, DELTA_HOUR),
@@ -355,6 +382,7 @@ IDENTITY_PROBE_EVENTS = [
     ("erin-before-snapshot", ERIN, at(14, 12)),
     ("erin-after-snapshot", ERIN, at(16, 12)),
     ("mallory-unknown", MALLORY, at(5, 12)),
+    ("reporter-service-account", REPORTER, at(3, 12)),
 ]
 
 ASSET_PROBE_EVENTS = [
@@ -414,10 +442,19 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def _run(config: Config, stage, dataframes: list[pd.DataFrame]) -> pd.DataFrame:
+def _run(config: Config,
+         stage,
+         dataframes: list[pd.DataFrame],
+         telemetry_class: str,
+         settings: dict = None) -> pd.DataFrame:
+    """Source → the class's one stage → determinism stamp → sink. No sealing: context is a store, not a stream."""
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(stage)
+    pipe.add_stage(
+        DeterminismStampStage(config,
+                              envelope=stamping.envelope_for(telemetry_class,
+                                                             SETTINGS if settings is None else settings)))
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
@@ -453,8 +490,8 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
-    identity = _run(config, TC0IdentityStage(config), batches[IDENTITY_CLASS])
-    asset = _run(config, TC0AssetStage(config), batches[ASSET_CLASS])
+    identity = _run(config, TC0IdentityStage(config), batches[IDENTITY_CLASS], IDENTITY_CLASS)
+    asset = _run(config, TC0AssetStage(config), batches[ASSET_CLASS], ASSET_CLASS)
 
     stores = {
         IDENTITY_PROBES: (build_store("identity", identity), "user_principal"),
@@ -476,9 +513,12 @@ def run_pipeline(config: Config,
         (store, entity_column) = stores[name]
 
         for knowledge in KNOWLEDGE_MODES:
+            settings = {**SETTINGS, "knowledge": knowledge}
             enriched = _run(config,
                             TC0EnrichStage(config, store=store, entity_column=entity_column, knowledge=knowledge),
-                            [frame.copy() for frame in batches[name]])
+                            [frame.copy() for frame in batches[name]],
+                            name,
+                            settings=settings)
             enriched["telemetry_class"] = name
             enriched["row_key"] = [f"{probe}@{knowledge}" for probe in enriched["probe_id"]]
             frames.append(enriched)

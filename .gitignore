@@ -223,3 +223,6 @@ examples/behavioral_analytics/notables.jsonlines
 # Ignore the GPU conformance artifact, which ci/scripts/gpu_conformance.sh writes to the repository
 # root by default. It records one machine's run and belongs in a report, not in the tree.
 /gpu_conformance.json
+
+# The fork CPU workflow installs its environment from this explicit package list; it is source, not a build product.
+!ci/scripts/cpu_env/linux-64-cpu.lock

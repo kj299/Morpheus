@@ -65,7 +65,20 @@ RULES = {
     "R-D-L2-005": "R-D-L2-005 - Authorization without authentication",
     "R-D-L5-003": "R-D-L5-003 - Impossible travel",
     "R-D-L5-004": "R-D-L5-004 - Multi-factor fatigue",
+    "R-D-L5-007": "R-D-L5-007 - Off-hours authentication",
+    "R-D-L5-008": "R-D-L5-008 - New authentication location or device",
+    "R-D-L5-009": "R-D-L5-009 - Failed authentication run ending in success",
+    "R-B-L5-001": "R-B-L5-001 - Composite authentication anomaly",
+    "R-B-L5-002": "R-B-L5-002 - Location novelty anomaly",
+    "R-B-L5-005": "R-B-L5-005 - Session duration anomaly",
+    "R-P-L5-006": "R-P-L5-006 - Drift trajectory",
+    "R-B-L7-002": "R-B-L7-002 - Bulk data access",
+    "R-P-L7-006": "R-P-L7-006 - Access breadth trajectory",
+    "R-C-005": "R-C-005 - Credential replay across the stack",
 }
+"""The rules whose stanzas this file reads back: the layer 1 and 2 rules whose predicates it asserts over the
+telemetry corpus, and the layer 5, 7 and chained rules whose predicates live in the session, SaaS and campaign
+harnesses but whose SPL had no reader here until the retrospective's steps 2 and 4."""
 
 
 def _gap_threshold_ns() -> int:
@@ -448,6 +461,58 @@ def test_the_search_reads_the_column_the_stage_emits(rule_id: str, searches: dic
                        "mfa_attempts_in_window",
                        "mfa_denials_in_window",
                        "consecutive_mfa_denials"),
+        "R-P-L5-006": ("sourcetype=morpheus:score:l5",
+                       "drift_mature=true",
+                       "drift_rising_windows >= rising_threshold",
+                       "drift_rise_sigmas > sigma_threshold",
+                       "mean_abs_z < mean_ceiling",
+                       "abs(drift_acceleration) < acceleration_ceiling",
+                       "dedup user_principal day_window_id",
+                       "outputlookup principal_watchlist"),
+        "R-D-L5-007": ("sourcetype=morpheus:score:l5",
+                       "hour_unseen=true",
+                       "cadence_mature=true",
+                       "auth_result=success",
+                       "hour_surprise_bits"),
+        "R-D-L5-008": ("sourcetype=morpheus:score:l5",
+                       "auth_result=success",
+                       "cadence_mature=true",
+                       'location_first_seen == "true"',
+                       'device_first_seen == "true"'),
+        "R-D-L5-009": ("sourcetype=morpheus:score:l5",
+                       "auth_failed_then_succeeded=true",
+                       "consecutive_auth_failures >= failure_threshold",
+                       "auth_failures_in_window"),
+        "R-B-L5-001": ("sourcetype=morpheus:score:l5",
+                       "model_fallback_used=false",
+                       "max_abs_z >= max_threshold",
+                       "mean_abs_z >= mean_threshold"),
+        "R-B-L5-002":
+            ("sourcetype=morpheus:score:l5", "model_fallback_used=false", "locincrement_z_loss >= loss_threshold"),
+        "R-B-L5-005": ("sourcetype=morpheus:score:l5",
+                       "session_duration_mature=true",
+                       "session_duration_ratio > ratio_threshold",
+                       'account_type != "service"',
+                       "ctx_privilege_level"),
+        "R-B-L7-002": ("sourcetype=morpheus:score:l7",
+                       "saas_baseline_mature=true",
+                       "saas_record_ratio>5",
+                       "ctx_object_data_classification",
+                       "saas_record_baseline",
+                       "lookup principal_watchlist user_principal"),
+        "R-P-L7-006": ("sourcetype=morpheus:score:l7",
+                       "saas_object_types_in_week=*",
+                       "max(drift_rising_windows) AS rising_weeks",
+                       "dc(role) AS role_versions",
+                       "values(week_window_id) AS weeks",
+                       "BY user_principal",
+                       "outputlookup principal_watchlist"),
+        "R-C-005": ("sourcetype=morpheus:score:l5",
+                    'site_travel_status="measured"',
+                    "last(login_port_key) AS previous_port",
+                    "last(login_site_id) AS previous_site",
+                    "site_travel_kmh >= 900",
+                    "BY user_principal"),
     }[rule_id]
 
     for fragment in expected:
@@ -463,22 +528,76 @@ def test_the_search_follows_the_scheduling_discipline(rule_id: str, searches: di
 
     assert stanza["realtime_schedule"] == "0"
     assert stanza["enableSched"] == "1"
-    assert stanza["dispatch.latest_time"].endswith("@m")
-    assert stanza["dispatch.earliest_time"].endswith("@m")
 
-    trailing_minutes = int(re.fullmatch(r"-(\d+)m@m", stanza["dispatch.latest_time"]).group(1))
-    assert trailing_minutes >= tp.LATENESS_SECONDS // 60, "the window must trail by at least the lateness horizon"
+    # Both boundaries snap to a unit, so a run never ends at "now" and two runs over the same interval agree.
+    latest = re.fullmatch(r"(?:-(\d+)([mhdw]))?@([mhdw]\d*)", stanza["dispatch.latest_time"])
+    earliest = re.fullmatch(r"-(\d+)([mhdw])@([mhdw]\d*)", stanza["dispatch.earliest_time"])
 
-    # Window width equals the cadence, so consecutive runs are disjoint and a detection is emitted once. The
-    # watchlist rules run once an hour, at a fixed minute, over the hour before.
-    earliest_minutes = int(re.fullmatch(r"-(\d+)m@m", stanza["dispatch.earliest_time"]).group(1))
-    every = re.fullmatch(r"\*/(\d+) \* \* \* \*", stanza["cron_schedule"])
-    hourly = re.fullmatch(r"\d+ \* \* \* \*", stanza["cron_schedule"])
+    assert latest is not None, stanza["dispatch.latest_time"]
+    assert earliest is not None, stanza["dispatch.earliest_time"]
 
-    assert every is not None or hourly is not None, stanza["cron_schedule"]
+    unit_minutes = {"m": 1, "h": 60, "d": 1440, "w": 10080}
+    trailing_minutes = int(latest.group(1) or 0) * unit_minutes[latest.group(2) or "m"]
+    earliest_minutes = int(earliest.group(1)) * unit_minutes[earliest.group(2)]
 
-    cadence_minutes = int(every.group(1)) if every is not None else 60
-    assert earliest_minutes - trailing_minutes == cadence_minutes
+    cadence_minutes = _cadence_minutes(stanza["cron_schedule"])
+
+    if (cadence_minutes < 1440):
+        # A rule that runs more than daily trails by at least the lateness horizon, and its window width equals
+        # its cadence, so consecutive runs are disjoint and a detection is emitted once. The hourly watchlists
+        # run at a fixed minute over the hour before.
+        assert trailing_minutes >= tp.LATENESS_SECONDS // 60, "the window must trail by at least the lateness horizon"
+
+        if (earliest_minutes - trailing_minutes != cadence_minutes):
+            # A chained rule reaches back for the steps before its last one, so its window is wider than its
+            # cadence and a chain is re-emitted on every run inside that window until suppression lands
+            # (retrospective gap G20, issue #57). A single-layer rule has no such excuse.
+            assert rule_id.startswith("R-C-"), f"{rule_id}'s window is not its cadence"
+            assert earliest_minutes - trailing_minutes > cadence_minutes
+    else:
+        # The daily and weekly watchlists snap to the day or week and look back over at least one cadence, and
+        # they deduplicate on the window they read, so an overlapping run repeats nothing.
+        assert latest.group(3)[0] in ("m", "d", "w"), stanza["dispatch.latest_time"]
+        assert earliest_minutes >= cadence_minutes
+        assert "dedup" in searches[RULES[rule_id]]["search"] or "| stats" in searches[RULES[rule_id]]["search"]
+
+
+def _cadence_minutes(cron: str) -> int:
+    """How often a cron expression fires, in minutes, for the shapes the app uses."""
+    every = re.fullmatch(r"\*/(\d+) \* \* \* \*", cron)
+    hourly = re.fullmatch(r"\d+ \* \* \* \*", cron)
+    daily = re.fullmatch(r"\d+ \d+ \* \* \*", cron)
+    weekly = re.fullmatch(r"\d+ \d+ \* \* \d", cron)
+
+    if (every is not None):
+        return int(every.group(1))
+
+    if (hourly is not None):
+        return 60
+
+    if (daily is not None):
+        return 1440
+
+    assert weekly is not None, cron
+
+    return 10080
+
+
+def test_layer_3_seals_hourly_as_the_lateral_movement_chain_assumes(searches: dict[str, dict[str, str]]):
+    # R-C-001 joins `window_id = window_id + 1` to mean "the hour before". That is true only because every layer 3
+    # corpus seals at 3600 seconds, where WindowSealStage's default is 300; the stanza now says so, and this pins
+    # the two corpora the rule is asserted over to the period the SPL encodes.
+    import campaign_pipeline  # pylint: disable=import-outside-toplevel
+    import network_pipeline  # pylint: disable=import-outside-toplevel
+
+    assert network_pipeline.PERIOD_SECONDS == 3600
+    assert campaign_pipeline.PERIOD_SECONDS == 3600
+
+    stanza = searches["R-C-001 - Lateral movement chain"]
+
+    assert "window_id = window_id + 1" in stanza["search"]
+    assert "seals hourly" in stanza["description"]
+    assert "period_seconds=3600" in stanza["description"]
 
 
 def test_the_binding_sourcetype_is_timed_on_the_end():

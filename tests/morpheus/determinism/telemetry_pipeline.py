@@ -60,6 +60,7 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
@@ -67,6 +68,7 @@ from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -276,6 +278,16 @@ thing that persists, and at layer 2 the MAC is the thing that moves between port
 exception and keys on the port rather than the supplicant, because an exchange is a question about the port that
 authorized it -- the same reasoning that gives `TC2AuthStage` its port-keyed timing.
 """
+
+SETTINGS = {
+    "period_seconds": PERIOD_SECONDS,
+    "lateness_seconds": LATENESS_SECONDS,
+    "baseline_min_buckets": BASELINE_MIN_BUCKETS,
+    "optic_floors": OPTIC_FLOORS,
+}
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+RULES = ("R-D-L1-001", "R-P-L1-004", "R-B-L2-002", "R-D-L2-001", "R-D-L2-003", "R-D-L2-004", "R-D-L2-005")
+"""The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 
 def _envelope(rng: random.Random, collector: str, schema: str, seq: int) -> dict:
@@ -591,8 +603,10 @@ def _run_class(config: Config,
                seal: bool = True,
                anchor: str = None,
                envelope: tuple = None,
-               chain: list[str] = None) -> pd.DataFrame:
-    """Source → stamp → (total order) → the class's stages → (envelope) → (chain anchor) → (window seal) → sink.
+               chain: list[str] = None,
+               telemetry_class: str = None) -> pd.DataFrame:
+    """Source → stamp → (total order) → the class's stages → determinism stamp → (envelope) → (chain anchor) →
+    (window seal) → sink.
 
     The envelope stamp goes after the class's own stages rather than before them, because two of these classes
     are produced by stages that replace the payload wholesale: a binding stage emits one row per interval, not
@@ -617,6 +631,12 @@ def _run_class(config: Config,
 
     for stage in stages:
         pipe.add_stage(stage)
+
+    if (telemetry_class is None):
+        raise ValueError("every class is stamped with the determinism envelope, and the envelope names the class")
+
+    pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(telemetry_class, SETTINGS,
+                                                                                rules=RULES)))
 
     if (envelope is not None):
         (osi_layer, entity_columns) = envelope
@@ -777,7 +797,8 @@ def run_classes(config: Config,
                                 impose_order,
                                 seal=False,
                                 chain=CHAIN_ROOTS["tc1"],
-                                envelope=CLASS_ENVELOPE["tc1"])
+                                envelope=CLASS_ENVELOPE["tc1"],
+                                telemetry_class="tc1")
 
     # The same layer 1 snapshots, closed into port bindings. This is the ladder's last rung: the table that takes
     # a switch port to the site, optic and neighbour it held at a given moment. The stage emits its own
@@ -787,7 +808,8 @@ def run_classes(config: Config,
                                batches["tc1"], [TC1BindingStage(config)],
                                impose_order,
                                seal=False,
-                               envelope=CLASS_ENVELOPE["tc1_binding"])
+                               envelope=CLASS_ENVELOPE["tc1_binding"],
+                               telemetry_class="tc1_binding")
     port_bindings["row_key"] = port_bindings["binding_uid"]
     outputs["tc1_binding"] = port_bindings
 
@@ -803,12 +825,14 @@ def run_classes(config: Config,
         impose_order,
         seal=False,
         chain=CHAIN_ROOTS["tc2_mac"],
-        envelope=CLASS_ENVELOPE["tc2_mac"])
+        envelope=CLASS_ENVELOPE["tc2_mac"],
+        telemetry_class="tc2_mac")
     bindings = _run_class(config,
                           batches["tc2_mac"], [TC2BindingStage(config)],
                           impose_order,
                           seal=False,
-                          envelope=CLASS_ENVELOPE["tc2_binding"])
+                          envelope=CLASS_ENVELOPE["tc2_binding"],
+                          telemetry_class="tc2_binding")
 
     bindings["row_key"] = [
         event_uid("binding", *values)
@@ -835,14 +859,16 @@ def run_classes(config: Config,
         impose_order,
         seal=False,
         chain=CHAIN_ROOTS["tc2_arp"],
-        envelope=CLASS_ENVELOPE["tc2_arp"])
+        envelope=CLASS_ENVELOPE["tc2_arp"],
+        telemetry_class="tc2_arp")
 
     outputs["tc2_auth"] = _run_class(config,
                                      batches["tc2_auth"], [TC2AuthStage(config)],
                                      impose_order,
                                      seal=False,
                                      chain=CHAIN_ROOTS["tc2_auth"],
-                                     envelope=CLASS_ENVELOPE["tc2_auth"])
+                                     envelope=CLASS_ENVELOPE["tc2_auth"],
+                                     telemetry_class="tc2_auth")
 
     return outputs
 

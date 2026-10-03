@@ -49,14 +49,25 @@ LATER_NS = SAMPLE_NS + 61 * 10**9
 
 SCORE_L2_COLUMNS = {
     "event_uid": ["a", "b"],
+    "lineage_id": ["l-a", "l-b"],
+    "osi_layer": [2, 2],
+    "window_id": [1, 1],
+    "determinism_tier": ["D1", "D1"],
+    "pipeline_fingerprint": ["f1", "f1"],
+    "config_hash": ["c1", "c1"],
     "port_key": ["site-1:sw1:Gi1/0/1", "site-1:sw1:Gi1/0/2"],
+    "mac_address": ["aa:bb:cc:00:00:01", "aa:bb:cc:00:00:02"],
+    "macs_per_port": [1, 2],
+    "macs_per_port_saturated": [False, False],
     "macs_per_port_first_in_window": [True, False],
     "macs_per_port_step": [0, 1],
     "macs_per_port_baseline_max": [1, 1],
     "macs_claiming_sender_ip": [1, 2],
     "arp_sender_ip_excluded": [False, False],
+    "arp_sender_mac": ["aa:bb:cc:00:00:01", "aa:bb:cc:00:00:02"],
     "auth_unpaired": [False, True],
     "auth_port_key": ["site-1:sw1:Gi1/0/1", "site-1:sw1:Gi1/0/2"],
+    "resolution_method": ["exact", "unresolved"],
 }
 
 
@@ -214,7 +225,16 @@ def test_a_shared_sourcetype_accepts_any_one_sub_class_in_full(config: Config, v
     # union would refuse every such deployment, which is what the check did before sub-classes were declared.
     columns = siem_sourcetypes.PRODUCED["morpheus:score:l7"].variant_columns[variant]
     frame = {
-        "event_time": [SAMPLE_NS], "event_uid": ["u"], "entity_key": ["k"], **{
+        "event_time": [SAMPLE_NS],
+        "event_uid": ["u"],
+        "entity_key": ["k"],
+        "lineage_id": ["l"],
+        "osi_layer": [7],
+        "window_id": [1],
+        "determinism_tier": ["D1"],
+        "pipeline_fingerprint": ["f1"],
+        "config_hash": ["c1"],
+        **{
             column: [None]
             for column in columns
         }
@@ -232,7 +252,16 @@ def test_a_shared_sourcetype_refuses_a_record_with_no_sub_class_in_full(config: 
     columns = list(siem_sourcetypes.PRODUCED["morpheus:score:l7"].variant_columns[2])
     dropped = columns.pop()
     frame = {
-        "event_time": [SAMPLE_NS], "event_uid": ["u"], "entity_key": ["k"], **{
+        "event_time": [SAMPLE_NS],
+        "event_uid": ["u"],
+        "entity_key": ["k"],
+        "lineage_id": ["l"],
+        "osi_layer": [7],
+        "window_id": [1],
+        "determinism_tier": ["D1"],
+        "pipeline_fingerprint": ["f1"],
+        "config_hash": ["c1"],
+        **{
             column: [None]
             for column in columns
         }

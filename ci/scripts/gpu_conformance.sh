@@ -16,7 +16,8 @@
 #
 # One command for the verdict this repository cannot render itself.
 #
-# Everything else here runs in CI. This cannot: there is no GPU, and the fork's claim to support one rests on
+# Everything else here runs on a CPU, under pytest on a developer machine and in the fork workflow
+# (.github/workflows/fork-cpu.yaml). This cannot: there is no GPU, and the fork's claim to support one rests on
 # variants that only execute on a machine with a card in it. So the run has to be one command, it has to say what
 # it actually ran, and it has to fail in a way nobody can mistake for a pass.
 #

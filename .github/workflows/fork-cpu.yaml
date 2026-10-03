@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The fork's own CI: every test the GPU conformance runner names, in CPU execution mode, on an ordinary runner.
+#
+# pr.yaml delegates to NVIDIA's shared workflows and their runners, which this fork has no access to, so until this
+# file existed no GitHub Actions run had ever executed the suite here. This job installs the pinned CPU environment
+# (ci/scripts/cpu_env/linux-64-cpu.lock, released morpheus-core for its compiled library), overlays the repository's
+# Python sources onto it, and runs the two tiers
+# ci/scripts/gpu_conformance.sh keeps total, selecting the CPU variant of every mode-parametrized test. The GPU
+# variants still need a card and that script; this is the half that does not.
+
+name: Fork CPU tiers
+
+on:
+  push:
+    branches:
+      - 'branch-*'
+      - 'claude/**'
+  pull_request:
+    branches:
+      - 'branch-*'
+  workflow_dispatch:
+
+concurrency:
+  group: 'fork-cpu @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-tiers:
+    name: CPU tiers
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Create the environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          # The environment the tests were written against, pinned package by package. A fresh solve on the runner
+          # went wrong twice in two different ways (sharded repodata missing dlpack 0.8; a libarrow build without
+          # libgflags), which is the argument for installing exactly what was verified.
+          micromamba-version: '2.9.0-0'
+          environment-name: morpheus
+          environment-file: ci/scripts/cpu_env/linux-64-cpu.lock
+          cache-environment: true
+          init-shell: bash
+
+      - name: Overlay the fork's sources onto the installed package
+        shell: bash -el {0}
+        run: python ci/scripts/cpu_env/overlay_fork_sources.py "$GITHUB_WORKSPACE"
+
+      - name: Run the CPU tiers
+        shell: bash -el {0}
+        run: |
+          mapfile -t TIERS < <(sed -n '/^TARGETS=(/,/^)/p;/^UNMARKED=(/,/^)/p' ci/scripts/gpu_conformance.sh | grep -E '^\s+tests/' | tr -d ' ')
+          echo "${#TIERS[@]} test files"
+          export PYTHONPATH="$GITHUB_WORKSPACE/ci/scripts/cpu_env${PYTHONPATH:+:$PYTHONPATH}"
+          python -m pytest "${TIERS[@]}" -p gpuless -m "not gpu_mode" --run_slow -q -p no:cacheprovider

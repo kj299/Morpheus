@@ -120,7 +120,13 @@ def test_corpus_is_fixed(corpus: dict[str, pd.DataFrame]):
 
 
 def test_corpus_is_shaped_like_an_hr_export_and_an_inventory(corpus: dict[str, pd.DataFrame]):
-    for column in ("user_principal", "group_name", "department", "manager", "employment_status"):
+    for column in ("user_principal",
+                   "group_name",
+                   "department",
+                   "manager",
+                   "employment_status",
+                   "account_type",
+                   "privilege_level"):
         assert column in corpus[cp.IDENTITY_CLASS].columns, column
 
     for column in ("hostname", "owner", "owning_team", "criticality", "data_classification", "peer_group"):
@@ -326,7 +332,7 @@ def test_the_second_snapshot_records_only_the_absences():
 def test_the_first_snapshot_asserts_everything_through_the_same_diff():
     day0 = cp.at(0, cp.SNAPSHOT_HOUR)
 
-    assert len(_recorded_at(cp.identity_log(), day0)) == 11
+    assert len(_recorded_at(cp.identity_log(), day0)) == 13
     assert len(_recorded_at(cp.asset_log(), day0)) == 4
     assert all(change == bitemporal.ASSERT for (_, _, change) in _recorded_at(cp.identity_log(), day0))
 
@@ -399,3 +405,13 @@ def test_every_attached_value_traces_to_a_recorded_version(result: pd.DataFrame)
 def test_the_corpus_never_contradicts_itself():
     assert BitemporalStore("identity", cp.identity_log()).contradictions() == 0
     assert BitemporalStore("asset", cp.asset_log()).contradictions() == 0
+
+
+@pytest.mark.cpu_mode
+def test_a_service_principal_says_so_on_every_row_that_names_it(result: pd.DataFrame):
+    # Several layer 5 rules turn on whether a principal is a person: a service account's sessions and sign-in hours
+    # are bimodal and uninformative where a person's are a habit. The profile says which, and the enrichment carries
+    # it onto the row in both views.
+    assert _pair(result, "reporter-service-account", "account_type") == ("service", "service")
+    assert _pair(result, "alice-day3", "account_type") == ("human", "human")
+    assert _pair(result, "reporter-service-account", "privilege_level") == ("elevated", "elevated")

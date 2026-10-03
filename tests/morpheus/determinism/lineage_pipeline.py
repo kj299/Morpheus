@@ -31,6 +31,7 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
@@ -39,6 +40,7 @@ from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
@@ -48,6 +50,13 @@ CORPUS_SEED = 20260830
 
 PERIOD_SECONDS = 300
 LATENESS_SECONDS = 900
+
+SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS}
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+TELEMETRY_CLASS = "lineage"
+"""What the envelope's feature schema is named after; this corpus has no `telemetry_class` column of its own."""
+ENVELOPE = stamping.envelope_for(TELEMETRY_CLASS, SETTINGS)
+"""The one envelope this corpus stamps, exposed so a pipeline composed by hand can stamp the same one."""
 
 # The canonical row key and the columns two runs may legitimately differ in (none, for this pipeline).
 KEY_COLUMNS = ["event_uid", "is_late"]
@@ -195,6 +204,7 @@ def run_pipeline(config: Config,
         LineageStampStage(config, id_columns=["collector_id", "schema_version", "origin_hash", "collector_seq"]))
     pipe.add_stage(CommunityIdStage(config))
     pipe.add_stage(BindingResolverStage(config, binding_table=build_binding_table(), key_column="src_ip"))
+    pipe.add_stage(DeterminismStampStage(config, envelope=ENVELOPE))
     pipe.add_stage(
         WindowSealStage(config,
                         period_seconds=PERIOD_SECONDS,
