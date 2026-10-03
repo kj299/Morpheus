@@ -519,6 +519,26 @@ def test_every_scored_row_says_it_was_scored_against_a_fallback(result: pd.DataF
 
     assert (scored["mean_abs_z"].notna()).all()
     assert sp.SCORING_MANIFEST.resolve("anyone@example.com", sp.SCORING_WINDOW).fallback_used is True
+    assert (scored["model_version"] == "reference-arithmetic:0").all()
+    assert scored["model_fallback_used"].astype("boolean").all()
+
+    unscored = result[result["telemetry_class"] == "tc5_session"]
+
+    assert len(unscored) > 0
+    assert unscored["model_version"].isna().all()
+    assert unscored["model_fallback_used"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_every_row_carries_the_determinism_envelope(result: pd.DataFrame):
+    # Control 12 at the row: the tier the harness asserts, one configuration hash per corpus, and a fingerprint that
+    # names the class, so two events from two runs can be told comparable or not without the runs' logs.
+    assert (result["determinism_tier"] == "D1").all()
+    assert result["config_hash"].nunique() == 1
+    assert result["pipeline_fingerprint"].notna().all()
+    assert set(result["feature_schema_version"]) == {"tc5_auth/1.0.0", "tc5_session/1.0.0"}
+    assert (result["code_commit"] == "unknown").all()
+    assert (result["rng_seed"] == 0).all()
 
 
 @pytest.mark.cpu_mode

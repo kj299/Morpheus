@@ -58,10 +58,12 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -467,6 +469,17 @@ behavioral rollup is for. `session_id` stays on the record as its own column for
 
 DRIFT_PREFIX = "day_"
 """Prefix on the daily sealer's columns, so the hourly windows keep theirs."""
+SETTINGS = {
+    "period_seconds": PERIOD_SECONDS,
+    "lateness_seconds": LATENESS_SECONDS,
+    "day_seconds": DAY_S,
+    "cadence_min_samples": CADENCE_MIN_SAMPLES,
+    "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,
+    "excluded_source_networks": [VPN_EGRESS_NETWORK],
+}
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+RULES = ("R-D-L5-003", "R-D-L5-004", "R-P-L5-006")
+"""The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 
 def _run_class(config: Config,
@@ -475,9 +488,14 @@ def _run_class(config: Config,
                impose_order: bool,
                anchor: str,
                envelope: tuple = None,
-               daily: list = None) -> pd.DataFrame:
-    """Source → stamp → (total order) → the class's stages → (envelope) → window seal → (daily seal → daily
-    stages) → sink, as one frame.
+               daily: list = None,
+               telemetry_class: str = None,
+               manifest: ModelManifest = None) -> pd.DataFrame:
+    """Source → stamp → (total order) → the class's stages → determinism stamp → (envelope) → window seal →
+    (daily seal → daily stages) → sink, as one frame.
+
+    The determinism stamp carries `manifest` on the scored class, so every scored row names the model version it
+    was scored against and whether that was a fallback; on the other class the model columns are null.
 
     The hourly seal is the one the chains and the shipped detections are built on. A class given `daily` is
     sealed a second time, into days, behind it -- with the daily columns prefixed so the hourly ones keep their
@@ -494,6 +512,15 @@ def _run_class(config: Config,
 
     for stage in stages:
         pipe.add_stage(stage)
+
+    if (telemetry_class is None):
+        raise ValueError("every class is stamped with the determinism envelope, and the envelope names the class")
+
+    pipe.add_stage(
+        DeterminismStampStage(config,
+                              envelope=stamping.envelope_for(telemetry_class, SETTINGS, rules=RULES),
+                              manifest=manifest,
+                              entity_column="user_principal"))
 
     if (envelope is not None):
         (osi_layer, entity_columns) = envelope
@@ -539,8 +566,8 @@ SCORED_FEATURES = [
 
 SCORING_WINDOW = 0
 SCORING_MANIFEST = ModelManifest(window_id=SCORING_WINDOW, models={}, fallback="reference-arithmetic:0")
-"""Every principal resolves to the same placeholder; `model_fallback_used` would read true on every scored row once
-DeterminismStampStage is placed behind the scorer, which this corpus does not yet do.
+"""Every principal resolves to the same placeholder, and `DeterminismStampStage`, placed behind the scorer, writes
+`model_fallback_used` as true on every scored row beside this version string.
 
 That is the honest resolution for a corpus with no trained models in it. An event carrying a fallback is a claim
 about a population rather than about the entity's own history, which is exactly what these scores are.
@@ -666,14 +693,17 @@ def run_pipeline(config: Config,
         impose_order,
         anchor=CHAIN_ANCHORS["tc5_auth"],
         envelope=CLASS_ENVELOPE["tc5_auth"],
-        daily=[TC5DriftStage(config, window_column=f"{DRIFT_PREFIX}window_id", aggregate="mean")])
+        daily=[TC5DriftStage(config, window_column=f"{DRIFT_PREFIX}window_id", aggregate="mean")],
+        telemetry_class="tc5_auth",
+        manifest=manifest)
 
     outputs["tc5_session"] = _run_class(config,
                                         batches["tc5_session"],
                                         [TC5SessionStage(config, timeout_seconds=SESSION_TIMEOUT_SECONDS)],
                                         impose_order,
                                         anchor=CHAIN_ANCHORS["tc5_session"],
-                                        envelope=CLASS_ENVELOPE["tc5_session"])
+                                        envelope=CLASS_ENVELOPE["tc5_session"],
+                                        telemetry_class="tc5_session")
 
     frames = []
 

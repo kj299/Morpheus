@@ -59,7 +59,7 @@ resolution, window sealing), feature stages for every telemetry class from TC-0 
 scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's six
 checks over twelve composed corpora, which run under pytest on developer machines and have not yet run in
 any CI this fork has executed. That is forty-six stages and forty-one supporting
-modules, covered by 1,892 distinct tests, itemized in
+modules, covered by 1,899 distinct tests, itemized in
 [Part 6](#provided). Thirty-two of the thirty-nine rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -3267,9 +3267,9 @@ What Morpheus provides versus what has to be built, stated plainly.
   ({py:mod}`~morpheus.utils.determinism_envelope`), the model manifest that is resolved once per window and
   refuses to answer for any other ({py:mod}`~morpheus.utils.model_manifest`), the stable hash that decides an
   entity's shard without depending on `PYTHONHASHSEED` ({py:mod}`~morpheus.utils.sharding`), and the stage that
-  stamps all of it ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`), which is
-  built and tested and placed in none of the twelve composed pipelines yet, so no golden and no scored event
-  carries the envelope (see [Must be built](#must-be-built)). These
+  stamps all of it ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`), placed
+  behind the feature stages of all twelve composed pipelines, so every golden row carries the envelope and
+  every scored layer 5 row its `model_version` and `model_fallback_used`. These
   come before the autoencoder rather than after it because this document says they must: retrofitting
   determinism onto a running detection pipeline means re-tuning every threshold, since the scores will move.
   What is not here is the autoencoder itself, and the boundary is exact -- see the caveat below.
@@ -3577,6 +3577,15 @@ What Morpheus provides versus what has to be built, stated plainly.
   `l6` and 90 on `l5` and `l7`, so a backfill older than that is dropped at index time. The ninety days are
   the deliberate choice Part 4 makes; Part 2's figure is the requirement an estate reconciles against its
   own policy (gap G74).
+- The determinism envelope on every event and the model stamp on every scored one
+  ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`, behind the feature
+  stages of all twelve composed pipelines): every golden row carries `determinism_tier`,
+  `pipeline_fingerprint` and `config_hash`, every scored layer 5 row carries `model_version` and
+  `model_fallback_used`, every `morpheus:score:*` contract requires the envelope, and the three layer 5
+  searches select the model columns. The configuration hash digests the settings that decide a corpus's
+  output rather than the `Config`, so the CPU and GPU runs agree on it; the fingerprint folds in the
+  thresholds the layer's shipped rules state, read from the app's own stanzas; the commit and image digest
+  are `unknown` in a corpus, and a deployment supplies them.
 
 ### Must be built
 
@@ -3589,7 +3598,6 @@ verified; each row names the GitHub issue that tracks it, and the retrospective'
 | Upstream reuse decision | Small | A recorded reuse-or-reject decision, with a measured reason, for `morpheus_dfp`'s rolling window, training and inference stages, the identity-provider and CloudTrail source stages, `TimeSeriesStage` and `MLFlowDriftStage`, all named by this document and used by no fork code. Precedes the model, normalization and health rows. Tracked in #67 |
 | Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
 | **The per-entity learned model in the pipeline (principals, then hosts)** | Large | Still the largest gap and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory, `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, and `examples/layer5_model/run_model.py` has trained and run it once on one card, scoring the week it trained on. What fills the slot in every composed pipeline and every shipped artifact is `ReferenceScorer`, frozen population arithmetic the class itself calls not a model. Three things remain: the run's artifact and weight digests committed beside the README that quotes them; a CPU inference path (`state_dict` load or an exported forward pass) so the composed pipeline runs with a pinned real model in CI; a corpus with a train window and a disjoint score window, so R-B-L5-001, R-B-L5-002 and R-P-L5-006 are evaluated against a learned baseline for the first time. Then `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame gives hosts the score and drift principals have. Tracked in #59, after #67 |
-| Determinism envelope on every scored event | Small | `DeterminismStampStage`, the envelope and the manifest are built and unit-tested and placed in none of the twelve composed pipelines, so no golden, sourcetype contract or saved search carries `model_version`, `model_fallback_used`, `config_hash` or `pipeline_fingerprint`, and governance rule 2 is unmet at the delivery boundary. The wiring pattern (`EnvelopeStampStage` at the tail of every corpus) already exists. Must land before a second model version does. Tracked in #54 |
 | Searches over the per-principal baselines the TC-5 stages compute | Medium | `TC5CadenceStage`, `TC5NoveltyStage`, `TC5RiskStage` and `TC5DriftStage` emit `hour_unseen`, `hour_surprise_bits`, the `_first_seen` and `increment` columns, `auth_failed_then_succeeded`, `drift_velocity` and `drift_acceleration`; the corpus plants and asserts the off-hours login and the new country; no saved search reads any of them and none is in the `morpheus:score:l5` contract. Three deterministic layer 5 rules, R-B-L5-001/002 gated on `model_fallback_used=false`, an acceleration condition on R-P-L5-006, and a `principal_watchlist` lookup that R-B-L7-002 reads so the watchlist half of R-P-L5-006 does something. Tracked in #55 |
 | Layer 5 context, account type and session duration | Medium | `TC0EnrichStage` runs on SaaS principals and EDR hosts and not on sign-ins, so no `ctx_` column reaches `morpheus:score:l5`; nothing distinguishes a service principal from a human; R-B-L5-005 needs a per-principal duration percentile that `TransferEnvelopeTracker` already implements and nothing keys on a principal's sessions; `TC5SessionStage` writes no normalized lifecycle column so R-C-004 breaks on an IdP that says `logon`/`logoff`, and the single-record session shape produces no duration. Tracked in #56 |
 | Risk write path and suppression for the shipped detections | Small | Every one of the 32 detection stanzas ends in `/ table` with only `action.correlationsearch.enabled`; none collects, so `risk_score` and `rule_id` never land in an index and "Chain assembly - cross-layer risk" and "Behavior summary" sum null by construction. A `behavior_risk` index, a `collect` per detection, `alert.suppress` keyed on each rule's documented deduplication key (control 9's suppression half; without it R-C-005 would emit the same chain 96 times a day), the chain search reading the risk index, and one `resolution_methods` field so the chain's `methods` names every hop. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |

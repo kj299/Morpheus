@@ -24,6 +24,7 @@ from morpheus.utils.determinism_envelope import UNKNOWN
 from morpheus.utils.determinism_envelope import DeterminismEnvelope
 from morpheus.utils.determinism_envelope import config_hash
 from morpheus.utils.determinism_envelope import pipeline_fingerprint
+from morpheus.utils.determinism_envelope import settings_hash
 
 COMPONENTS = {
     "configuration": "7d2e4a1f9c3b5e80",
@@ -147,3 +148,20 @@ def test_a_tier_a_consumer_cannot_interpret_is_refused(tier):
 def test_the_envelope_cannot_be_changed_after_it_is_built():
     with pytest.raises(dataclasses.FrozenInstanceError):
         envelope().tier = "D0"
+
+
+def test_the_settings_hash_is_stable_across_dictionary_order_and_float_spelling():
+    first = settings_hash({"period_seconds": 3600, "lateness_seconds": 900, "stages": {"window": 10.0}})
+    second = settings_hash({"stages": {"window": 10}, "lateness_seconds": 900, "period_seconds": 3600})
+
+    assert first == second
+    assert len(first) == 16
+
+
+def test_a_changed_setting_changes_the_settings_hash():
+    assert settings_hash({"period_seconds": 3600}) != settings_hash({"period_seconds": 300})
+
+
+def test_empty_settings_are_refused():
+    with pytest.raises(ValueError, match="empty dictionary"):
+        settings_hash({})

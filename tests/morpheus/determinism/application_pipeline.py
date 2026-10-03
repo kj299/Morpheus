@@ -52,9 +52,11 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -81,6 +83,11 @@ ENTITY_COLUMNS = ["src_ip"]
 DNS_CLASS = "tc7_dns"
 HTTP_CLASS = "tc7_http"
 TELEMETRY_CLASSES = (DNS_CLASS, HTTP_CLASS)
+
+SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS}
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+RULES = ("R-B-L7-001", "R-D-L7-005")
+"""The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 # The rules' own thresholds, stated once so the corpus is built to clear them deliberately.
 ENTROPY_THRESHOLD = 4.0
@@ -301,7 +308,7 @@ def build_stages(config: Config, telemetry_class: str) -> list:
 
 def _run_class(config: Config, telemetry_class: str, dataframes: list[pd.DataFrame],
                impose_order: bool) -> pd.DataFrame:
-    """Source, stamp, total order, the class's stage, envelope, window seal, sink."""
+    """Source, stamp, total order, the class's stage, determinism stamp, envelope, window seal, sink."""
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
@@ -312,6 +319,8 @@ def _run_class(config: Config, telemetry_class: str, dataframes: list[pd.DataFra
     for stage in build_stages(config, telemetry_class):
         pipe.add_stage(stage)
 
+    pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(telemetry_class, SETTINGS,
+                                                                                rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))
     pipe.add_stage(
         WindowSealStage(config,

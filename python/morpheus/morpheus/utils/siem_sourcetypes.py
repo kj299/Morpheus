@@ -41,6 +41,12 @@ a timestamp format would quietly change arithmetic that depends on them.
 import dataclasses
 import typing
 
+from morpheus.utils.determinism_envelope import CONFIG_HASH_COLUMN
+from morpheus.utils.determinism_envelope import FINGERPRINT_COLUMN
+from morpheus.utils.determinism_envelope import TIER_COLUMN
+from morpheus.utils.model_manifest import MODEL_FALLBACK_COLUMN
+from morpheus.utils.model_manifest import MODEL_VERSION_COLUMN
+
 
 @dataclasses.dataclass(frozen=True)
 class Sourcetype:
@@ -98,6 +104,18 @@ class Unproduced:
     """What would have to exist. Specific, so it reads as a work item rather than an apology."""
 
 
+PROVENANCE_COLUMNS = (TIER_COLUMN, FINGERPRINT_COLUMN, CONFIG_HASH_COLUMN)
+"""Control 12 at the delivery boundary: the determinism envelope every scored event carries.
+
+Written by `DeterminismStampStage`, which every composed pipeline places behind its feature stages, so a consumer
+comparing two events can tell whether they came out of the same configuration under the same rules. The commit,
+image digest, feature schema version and seed travel beside these three and are not required, because a corpus
+records `unknown` for the first two honestly and a deployment is what supplies them.
+"""
+
+MODEL_COLUMNS = (MODEL_VERSION_COLUMN, MODEL_FALLBACK_COLUMN)
+"""Control 1 on the row: the model a scored event was scored against, and whether that was a fallback."""
+
 PRODUCED: dict = {
     "morpheus:score:l1":
         Sourcetype(
@@ -114,6 +132,7 @@ PRODUCED: dict = {
                               "lineage_id",
                               "osi_layer",
                               "window_id",
+                              *PROVENANCE_COLUMNS,
                               "site_id",
                               "device_id",
                               "port_id",
@@ -143,6 +162,7 @@ PRODUCED: dict = {
                               "lineage_id",
                               "osi_layer",
                               "window_id",
+                              *PROVENANCE_COLUMNS,
                               "src_ip",
                               "dst_ip",
                               "flow_pair_key",
@@ -176,6 +196,7 @@ PRODUCED: dict = {
                               "lineage_id",
                               "osi_layer",
                               "window_id",
+                              *PROVENANCE_COLUMNS,
                               "src_ip",
                               "dst_ip",
                               "dst_port",
@@ -210,6 +231,7 @@ PRODUCED: dict = {
                               "lineage_id",
                               "osi_layer",
                               "window_id",
+                              *PROVENANCE_COLUMNS,
                               "src_ip",
                               "dst_ip",
                               "ja4_client",
@@ -254,7 +276,7 @@ PRODUCED: dict = {
             # for that reason. R-B-L7-002 and R-P-L7-006 read the SaaS columns, the context the enrichment attached,
             # and the weekly trajectory. R-B-L7-004 reads the endpoint columns, and the peer group the enrichment
             # attached is carried as the stage recorded it.
-            required_columns=("event_uid", "entity_key", "lineage_id", "osi_layer", "window_id"),
+            required_columns=("event_uid", "entity_key", "lineage_id", "osi_layer", "window_id", *PROVENANCE_COLUMNS),
             variant_columns=(
                 ("src_ip",
                  "query_name",
@@ -306,6 +328,7 @@ PRODUCED: dict = {
                               "lineage_id",
                               "osi_layer",
                               "window_id",
+                              *PROVENANCE_COLUMNS,
                               "mac_address",
                               "macs_per_port",
                               "macs_per_port_saturated",
@@ -338,7 +361,12 @@ PRODUCED: dict = {
             # resolved through the DHCP leases and the layer 2 MAC bindings to a switch port and site, with the
             # journey between the sites of a principal's sign-ins, which R-C-005 reads. A session's start and stop
             # records carry the address it came from, which R-C-004 binds a transfer to.
-            required_columns=("event_uid", "user_principal", "lineage_id", "osi_layer", "window_id"),
+            required_columns=("event_uid",
+                              "user_principal",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              *PROVENANCE_COLUMNS),
             variant_columns=(
                 ("travel_status",
                  "travel_kmh",
@@ -348,6 +376,7 @@ PRODUCED: dict = {
                  "mfa_denials_in_window",
                  "mean_abs_z",
                  "max_abs_z",
+                 *MODEL_COLUMNS,
                  "day_window_id",
                  "drift_mature",
                  "drift_rising_windows",

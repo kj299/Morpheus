@@ -46,9 +46,11 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc0_asset_stage import ASSET
 from morpheus.stages.telemetry.tc0_asset_stage import DEFAULT_ASSET_COLUMNS
@@ -77,6 +79,9 @@ ASSET_PROBES = "tc0_asset_probes"
 PRODUCER_CLASSES = (IDENTITY_CLASS, ASSET_CLASS)
 PROBE_CLASSES = (IDENTITY_PROBES, ASSET_PROBES)
 CORPUS_CLASSES = PRODUCER_CLASSES + PROBE_CLASSES
+
+SETTINGS = {"profile_columns": list(DEFAULT_PROFILE_COLUMNS), "asset_columns": list(DEFAULT_ASSET_COLUMNS)}
+"""The settings that decide the producers' output; a probe class adds the knowledge mode it was enriched under."""
 
 # Principals.
 ALICE = "alice@example.com"
@@ -414,10 +419,19 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def _run(config: Config, stage, dataframes: list[pd.DataFrame]) -> pd.DataFrame:
+def _run(config: Config,
+         stage,
+         dataframes: list[pd.DataFrame],
+         telemetry_class: str,
+         settings: dict = None) -> pd.DataFrame:
+    """Source → the class's one stage → determinism stamp → sink. No sealing: context is a store, not a stream."""
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(stage)
+    pipe.add_stage(
+        DeterminismStampStage(config,
+                              envelope=stamping.envelope_for(telemetry_class,
+                                                             SETTINGS if settings is None else settings)))
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
@@ -453,8 +467,8 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
-    identity = _run(config, TC0IdentityStage(config), batches[IDENTITY_CLASS])
-    asset = _run(config, TC0AssetStage(config), batches[ASSET_CLASS])
+    identity = _run(config, TC0IdentityStage(config), batches[IDENTITY_CLASS], IDENTITY_CLASS)
+    asset = _run(config, TC0AssetStage(config), batches[ASSET_CLASS], ASSET_CLASS)
 
     stores = {
         IDENTITY_PROBES: (build_store("identity", identity), "user_principal"),
@@ -476,9 +490,12 @@ def run_pipeline(config: Config,
         (store, entity_column) = stores[name]
 
         for knowledge in KNOWLEDGE_MODES:
+            settings = {**SETTINGS, "knowledge": knowledge}
             enriched = _run(config,
                             TC0EnrichStage(config, store=store, entity_column=entity_column, knowledge=knowledge),
-                            [frame.copy() for frame in batches[name]])
+                            [frame.copy() for frame in batches[name]],
+                            name,
+                            settings=settings)
             enriched["telemetry_class"] = name
             enriched["row_key"] = [f"{probe}@{knowledge}" for probe in enriched["probe_id"]]
             frames.append(enriched)

@@ -565,6 +565,16 @@ _OPERATIONAL = (
     "window_id",
     "window_seq",
     "window_start_ns",
+    # The determinism envelope and the model stamp: what produced the row, and nothing about whom it concerns.
+    "code_commit",
+    "config_hash",
+    "determinism_tier",
+    "feature_schema_version",
+    "image_digest",
+    "model_fallback_used",
+    "model_version",
+    "pipeline_fingerprint",
+    "rng_seed",
 )
 
 COLUMNS: dict[str, str] = {}

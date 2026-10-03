@@ -57,6 +57,7 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
@@ -64,6 +65,7 @@ from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -94,6 +96,10 @@ AUTH_CLASS = "tc5_auth"
 CHAINED_CLASSES = ("tc1", "tc2_mac", "tc2_arp", "tc2_auth", AUTH_CLASS)
 UNCHAINED_CLASSES = ("tc1_binding", "tc2_binding")
 """The closed bindings. They are tables rather than observations, so nothing correlates them into a chain."""
+SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS}
+"""The settings that decide the sign-in class's output here; the telemetry classes carry the telemetry corpus's own."""
+RULES = ("R-D-L5-004", )
+"""The shipped rule that reads what this corpus's own stages write onto the sign-ins (TC5RiskStage's factor runs)."""
 
 DESKS = {
     sp.ALICE: tp.PORTS[0],
@@ -362,25 +368,27 @@ def run_pipeline(config: Config,
         [TC2BindingStage(config, key_column="dot1x_identity", attribute_columns=["auth_port_key"])],
         impose_order)
 
-    outputs[AUTH_CLASS] = _run_class(config,
-                                     batches[AUTH_CLASS],
-                                     [
-                                         TC5NoveltyStage(config),
-                                         TC5RiskStage(config, min_denominator=1),
-                                         BindingResolverStage(config,
-                                                              binding_table=build_directory_table(),
-                                                              key_column="user_principal",
-                                                              output_columns={"dot1x_identity": DESK_IDENTITY_COLUMN},
-                                                              method_column=DIRECTORY_METHOD_COLUMN),
-                                         BindingResolverStage(config,
-                                                              binding_table=build_supplicant_table(identity_bindings),
-                                                              key_column=DESK_IDENTITY_COLUMN,
-                                                              output_columns={"auth_port_key": DESK_PORT_COLUMN},
-                                                              method_column=SUPPLICANT_METHOD_COLUMN),
-                                         ChainAnchorStage(config, candidates=[DESK_PORT_COLUMN, "user_principal"]),
-                                         EnvelopeStampStage(config, osi_layer=5, entity_columns=["user_principal"]),
-                                     ],
-                                     impose_order)
+    outputs[AUTH_CLASS] = _run_class(
+        config,
+        batches[AUTH_CLASS],
+        [
+            TC5NoveltyStage(config),
+            TC5RiskStage(config, min_denominator=1),
+            BindingResolverStage(config,
+                                 binding_table=build_directory_table(),
+                                 key_column="user_principal",
+                                 output_columns={"dot1x_identity": DESK_IDENTITY_COLUMN},
+                                 method_column=DIRECTORY_METHOD_COLUMN),
+            BindingResolverStage(config,
+                                 binding_table=build_supplicant_table(identity_bindings),
+                                 key_column=DESK_IDENTITY_COLUMN,
+                                 output_columns={"auth_port_key": DESK_PORT_COLUMN},
+                                 method_column=SUPPLICANT_METHOD_COLUMN),
+            ChainAnchorStage(config, candidates=[DESK_PORT_COLUMN, "user_principal"]),
+            EnvelopeStampStage(config, osi_layer=5, entity_columns=["user_principal"]),
+            DeterminismStampStage(config, envelope=stamping.envelope_for(AUTH_CLASS, SETTINGS, rules=RULES)),
+        ],
+        impose_order)
 
     parts = max(len(batches[name]) for name in CHAINED_CLASSES)
     outputs.update(_seal_chains(config, {name: outputs[name] for name in CHAINED_CLASSES}, parts=parts))

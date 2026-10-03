@@ -88,10 +88,12 @@ import presentation_pipeline
 import saas_pipeline
 import transport_pipeline
 
+import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -132,6 +134,10 @@ SAAS_CLASS = saas_pipeline.SAAS_CLASS
 CLASSES = (FLOW_CLASS, AUTH_CLASS, PROCESS_CLASS, SESSION_CLASS, TRANSFER_CLASS, HANDSHAKE_CLASS, SAAS_CLASS)
 """The collectors, in the order they are run. The last four are R-C-004's; each of those runs through its layer's own
 composed pipeline, which is the one its single-layer rules are asserted over."""
+SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS}
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+RULES = ("R-C-001", "R-C-002", "R-C-004", "R-C-005")
+"""The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 # The rule's own figures, stated once so the corpus is built around them deliberately.
 CHAIN_WINDOW_SECONDS = 30 * 60
@@ -860,7 +866,7 @@ def run_class(config: Config,
               dataframes: list[pd.DataFrame],
               impose_order: bool = True,
               mac_table: typing.Optional[BindingTable] = None) -> pd.DataFrame:
-    """Source, stamp, total order, the layer's stages, envelope, seal hourly, sink, for one collector."""
+    """Source, stamp, total order, the layer's stages, determinism stamp, envelope, hourly seal, sink: one collector."""
     (stages, osi_layer, entity_columns) = _stages(config, telemetry_class, mac_table)
 
     pipe = LinearPipeline(config)
@@ -873,6 +879,8 @@ def run_class(config: Config,
     for stage in stages:
         pipe.add_stage(stage)
 
+    pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(telemetry_class, SETTINGS,
+                                                                                rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=osi_layer, entity_columns=entity_columns))
     pipe.add_stage(
         WindowSealStage(config,

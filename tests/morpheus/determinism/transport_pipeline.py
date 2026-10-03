@@ -51,10 +51,12 @@ import typing
 
 import pandas as pd
 
+import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
@@ -86,6 +88,16 @@ IGNORE_COLUMNS: list[str] = []
 TELEMETRY_CLASS = "tc4"
 OSI_LAYER = 4
 ENTITY_COLUMNS = ["flow_id"]
+
+SETTINGS = {
+    "period_seconds": PERIOD_SECONDS,
+    "lateness_seconds": LATENESS_SECONDS,
+    "bin_seconds": BIN_SECONDS,
+    "envelope_window_seconds": CORPUS_SECONDS * 4,
+}
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+RULES = ("R-D-L4-002", "R-D-L4-003", "R-B-L4-005")
+"""The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 COLLECTOR = "pcap-01"
 SCHEMA_VERSION = "tc4.v1"
@@ -294,6 +306,8 @@ def run_pipeline(config: Config,
     for stage in build_stages(config):
         pipe.add_stage(stage)
 
+    pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(TELEMETRY_CLASS, SETTINGS,
+                                                                                rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))
     pipe.add_stage(
         WindowSealStage(config,

@@ -1026,3 +1026,33 @@ def test_the_binding_health_rows_are_the_classes_that_resolve_bindings(expected:
         assert group["unresolved"] / group["total"] <= 0.2, key
 
     assert groups["morpheus:score:l2/tc2_arp"]["unresolved"] > 0
+
+
+def test_every_scored_sample_event_carries_the_determinism_envelope():
+    # What a SIEM receives is the test, not what the pipeline holds: the envelope has to survive rendering and the
+    # all-null column drop the generator applies, on every score sourcetype.
+    events = _scored_events()
+
+    assert len(events) > 0
+
+    for event in events:
+        assert event["determinism_tier"] == "D1", event
+        assert event["config_hash"], event
+        assert event["pipeline_fingerprint"], event
+
+
+def test_the_scored_layer_5_samples_name_the_model_and_the_fallback():
+    # R-D-L5-003, R-D-L5-004 and R-P-L5-006 table `model_version` and `model_fallback_used`, so an analyst reading a
+    # notable sees that the score came from the reference arithmetic and not from the principal's own model.
+    scored = [event for event in _events_of("morpheus_score_l5.jsonlines") if event.get("mean_abs_z") is not None]
+
+    assert len(scored) > 0
+
+    for event in scored:
+        assert event["model_version"] == "reference-arithmetic:0", event
+        assert event["model_fallback_used"] is True, event
+
+    unscored = [event for event in _events_of("morpheus_score_l5.jsonlines") if event.get("mean_abs_z") is None]
+
+    assert len(unscored) > 0
+    assert all(event.get("model_version") is None for event in unscored)
