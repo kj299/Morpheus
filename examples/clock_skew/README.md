@@ -25,7 +25,7 @@ measured. This measures it.
 ./examples/clock_skew/run_experiment.py /tmp/clock_skew.json
 ```
 
-It runs on any machine. No card, no Torch, about forty seconds.
+It runs on any machine. No card, no Torch, about six minutes.
 
 ## What it does
 
@@ -49,20 +49,50 @@ for row.
 
 ## The result
 
-Swept at one millisecond, ten, a hundred, one second, ten, thirty and sixty, on three axes.
+All thirty-eight shipped detections are swept, each over the pipeline that feeds it, through
+[`rules.py`](./rules.py), which reduces every rule to what it accuses and reads every threshold, join tolerance
+and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hundred, one second, ten, thirty and
+sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
+tolerance is two minutes and a ladder that stopped at one could not reach it.
 
-| Rule | Collector clocks | Switch clocks | Layer 5 clocks |
-| --- | --- | --- | --- |
-| R-D-L2-001, MAC count on an access port | unchanged to 60s | unchanged to 60s | -- |
-| R-D-L2-003, ARP anomaly | unchanged to 60s | unchanged to 60s | -- |
-| **R-D-L2-004, MAC in two places** | unchanged to 60s | **changes at 60s** | -- |
-| R-D-L2-005, authorization without authentication | unchanged to 60s | unchanged to 60s | -- |
-| R-D-L5-003, impossible travel | -- | -- | unchanged to 60s |
-| R-D-L5-004, multi-factor fatigue | -- | -- | unchanged to 60s |
-| **R-P-L5-006, drift trajectory** | -- | -- | **changes at 1ms, and at nothing once moved off the hour marks** |
+What a sweep can say depends on the clocks in the corpus, and the thirty-eight fall into three groups that must
+not be added together:
 
-Six of the seven are untouched by a full minute of disagreement. The two that move are the interesting ones,
-and neither moves for the reason the guide predicted.
+| Group | Rules | What the sweep measured |
+| --- | --- | --- |
+| Inputs on clocks that disagree | 12 | A tolerance, or the spread at which the rule changes |
+| Inputs on one clock, in a corpus with several | 11 | Boundary sensitivity under a uniform shift, not a tolerance |
+| Corpus with one clock | 15 | Nothing; reported as not measured |
+
+**Measured against clocks that disagree** -- the estate's five collectors and three switches for layers 1 and 2,
+the campaign's nine collectors for the chains, and the endpoint corpus's seven hosts, each of whose agents stamps
+its own process starts:
+
+| Rule | Breaking spread |
+| --- | --- |
+| R-D-L1-001, R-P-L1-004, R-D-L2-001, R-B-L2-002, R-D-L2-003, R-D-L2-005 | unchanged to 60s on collectors and on switches |
+| **R-D-L2-004, MAC in two places** | unchanged to 60s on collectors; **changes at 60s on switches** |
+| R-B-L7-004, process ancestry novelty | unchanged to 60s on host clocks |
+| **R-C-001, lateral movement chain** | **960s**, gaining a control |
+| **R-C-002, TLS anomaly precedes beaconing** | **1120s**, gaining a control |
+| **R-C-004, staged exfiltration** | **3200s**, gaining a control |
+| **R-C-005, credential replay** | **7201s**, gaining a control |
+
+**On one clock in a corpus with several.** The session corpus has three collectors, but every authentication
+comes through the identity provider, so for the eight sign-in rules -- R-D-L5-003, 004, 007, 008 and 009,
+R-B-L5-001 and 002, and R-P-L5-006 -- the sweep moves all their inputs together; R-B-L5-005's session starts and
+ends each come through one collector too. The application corpus has two, one per class, and each of its two rules
+reads one class. For these eleven the sweep is a uniform shift, which measures how close the events sit to a
+window edge and nothing about disagreement. Ten are unchanged to a minute; R-P-L5-006 changes at a millisecond,
+for the reason below.
+
+**On a corpus with one clock.** The network, transport, presentation and SaaS corpora each arrive through a single
+collector, so a collector sweep gives that one clock no offset and perturbs nothing. Their fifteen rules -- five at
+layer 3, three at layer 4, five at layer 6, R-B-L7-002 and R-P-L7-006 -- are reported as `"one clock"` in the
+artifact rather than as unchanged, because the absence of a measurement is not a tolerance. Measuring them needs
+the clocks a deployment really has, which the corpora do not carry: an exporter per flow at layers 3 and 4, an
+inspection point per egress at layer 6. For SaaS the provider's audit log really is one clock, and the second
+clock that matters is the context store's record time, which the sweep does not reach.
 
 ### The spoof rule fails against switches and not against collectors
 
@@ -82,7 +112,7 @@ sweep and fifty-eight of slack. Tighten the threshold to the sweep and the toler
 
 ### The drift rule is sensitive to boundaries, not to magnitude
 
-At a millisecond of spread the drift trajectory stops flagging three of the seven principal-days it flags on
+At a millisecond of spread the drift trajectory stops flagging three of the six principal-days it flags on
 the reference corpus. That reads like a rule needing millisecond synchronization, and it is not.
 
 Forty-five of the layer 5 corpus's hundred and five authentications sit exactly on an hour mark, because the
@@ -111,6 +141,34 @@ twenty-one rows whose attribution changed.
 while an observation inside it has quietly been re-attributed. Counting spans alone would have reported
 everything fine.
 
+### The chains hold far past their tolerance, and fail by accusing a control
+
+No chain changes at any spread up to ten minutes, five times its two-minute join tolerance. That is a property of
+the corpus rather than of the tolerance: the closest any chain's steps come to the edge of what it allows is four
+minutes, so a spread wide enough to close that gap is wide enough to say nothing about the two minutes itself.
+A corpus that tests the tolerance has to put two steps within a minute or so of each other on different clocks.
+
+Where the chains do break, each breaks the same way, and it is the worse of the two ways: a second before its edge
+nothing has changed, and at it the chain adds a control the corpus planted for it to stay quiet on, while still
+accusing its attacker. Each edge is arithmetic about which clock stamps which step, because the collectors are
+spread by sorted name, so each sits at a fixed fraction of the spread `M`:
+
+- **R-C-001 at 960s.** The login comes through `dc-01` at `-M/2` and the process through `edr-01` at `-M/4`, so
+  they move apart by `M/4`. A control whose novel process ran 360 seconds before its login is admitted once that
+  reaches the 120-second tolerance: `-360 + M/4 >= -120` at `M = 960`.
+- **R-C-002 at 1120s.** The beacon's clock is the middle one and the fingerprint's sits at `+3M/8`, so they close
+  by `3M/8`. A control whose beacon came 4020 seconds after its new fingerprint falls inside the hour at
+  `4020 - 3M/8 <= 3600`, `M = 1120`.
+- **R-C-004 at 3200s.** A control's session ends on `vpn-01` at `+M/2` 1200 seconds before its breach on
+  `pcap-01` at `+M/8`; the end overtakes the breach at `3M/8 >= 1200`. What decided it was the session interval,
+  not a join tolerance.
+- **R-C-005 at 7201s.** It has no join tolerance; both sign-ins come through one identity provider. A control
+  signed in an hour after her lease ended, and the lease table is not a collector the sweep moves, so her sign-in
+  falls back inside the lease once its clock moves by more than an hour, at `M > 7200`.
+
+The attackers are lost later, each measured to the second: R-C-001's at 1081 seconds, R-C-002's at 2561,
+R-C-005's at 9601, and R-C-004's not until 12,961, past the three-hour ladder.
+
 ## What this does not do
 
 It does not correct anything. `clock_source` and `clock_offset_ms` are in the universal envelope and no stage
@@ -128,14 +186,22 @@ arithmetic against its own sweep times and thresholds.
 {
   "at": "…",
   "spread_widths": ["1ms", "10ms", "100ms", "1s", "10s", "30s", "60s"],
+  "chain_spread_widths": ["1ms", "…", "60s", "120s", "240s", "600s", "1800s", "3600s", "7200s", "10800s"],
+  "join_tolerance_ns": {"R-C-001": 120000000000, "…": "…"},
   "breaking_point": {
     "R-D-L2-004": {"estate_collectors": null, "estate_switches": {"spread": "60s"}},
-    "R-P-L5-006": {"session": {"spread": "1ms"}, "session_off_boundary": null}
+    "R-P-L5-006": {"session": {"spread": "1ms"}, "session_off_boundary": null},
+    "R-B-L3-001": {"network": "one clock"},
+    "R-C-001": {"campaign": {"spread": "1800s"}}
   },
-  "sweeps": {"estate_collectors": {"runs": ["…"]}, "…": "…"}
+  "chain_breaking_point_to_the_second": {
+    "R-C-001": {"held_at": "959s", "changed_at": "960s", "no_longer_flagged": [], "newly_flagged": ["…"]}
+  },
+  "sweeps": {"estate_collectors": {"clocks": ["…"], "runs": ["…"]}, "…": "…"}
 }
 ```
 
+`null` is a rule that held across the whole ladder; `"one clock"` is a sweep that could not move anything.
 Each run records the offsets applied, whether the output was identical, every column that moved with a row
 count and a maximum delta, what each rule stopped and started accusing, and how far the ladder reached.
 

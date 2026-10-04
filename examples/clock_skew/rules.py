@@ -270,7 +270,8 @@ def layer_3_decisions(result: pd.DataFrame) -> dict:
         "R-B-L3-002": keys(beaconing, ["flow_pair_key"]),
         # One notable per flow: the search ends in `table`. event_uid comes from the collector sequence, not the clock.
         "R-D-L3-003": keys(reserved, ["src_ip", "dst_ip", "dst_port", "event_uid"]),
-        "R-B-L3-004": {(str(source), ) for (source, count) in shifted.items() if count >= TTL_SHIFTED_FLOWS},
+        "R-B-L3-004": {(str(source), )
+                       for (source, count) in shifted.items() if count >= TTL_SHIFTED_FLOWS},
         "R-P-L3-005": _fan_out_trajectory(flows),
     }
 
@@ -330,8 +331,8 @@ def layer_4_decisions(result: pd.DataFrame) -> dict:
         refusing.loc[outage, "refusal_direction"] = "service_outage"
         refusing.loc[enumeration, "refusal_direction"] = "closed_port_enumeration"
         refusing = refusing[refusing["refusal_direction"].notna()]
-        refusing = refusing.assign(entity_key=refusing["src_ip"].where(
-            refusing["refusal_direction"] == "service_outage", refusing["dst_ip"]))
+        refusing = refusing.assign(
+            entity_key=refusing["src_ip"].where(refusing["refusal_direction"] == "service_outage", refusing["dst_ip"]))
         refusals = keys(refusing, ["entity_key", "refusal_direction", "rollup_time_ns"])
 
     breached = tc4[true(tc4, "flow_data_len_envelope_breached") | true(tc4, "flow_bpp_envelope_breached")]
@@ -357,12 +358,17 @@ def layer_6_decisions(result: pd.DataFrame) -> dict:
                       & (number(tc6, "cert_issuer_distinct") == SINGLE_ISSUER)]
 
     return {
-        "R-B-L6-001": keys(new_stack, ["src_ip"]),
-        "R-D-L6-002": keys(intercepted, ["dst_ip"]),
-        "R-D-L6-003": keys(tc6[true(tc6, "cert_self_signed_external")], ["dst_ip"]),
-        "R-B-L6-004": keys(tc6[true(tc6, "cipher_downgraded") & true(tc6, "cipher_mature")],
-                           ["tls_pair_key", "src_ip", "dst_ip"]),
-        "R-D-L6-005": keys(tc6[true(tc6, "content_category_crossed")], ["src_ip", "dst_ip"]),
+        "R-B-L6-001":
+            keys(new_stack, ["src_ip"]),
+        "R-D-L6-002":
+            keys(intercepted, ["dst_ip"]),
+        "R-D-L6-003":
+            keys(tc6[true(tc6, "cert_self_signed_external")], ["dst_ip"]),
+        "R-B-L6-004":
+            keys(tc6[true(tc6, "cipher_downgraded") & true(tc6, "cipher_mature")],
+                 ["tls_pair_key", "src_ip", "dst_ip"]),
+        "R-D-L6-005":
+            keys(tc6[true(tc6, "content_category_crossed")], ["src_ip", "dst_ip"]),
     }
 
 
@@ -466,7 +472,8 @@ def application_decisions(result: pd.DataFrame) -> dict:
                        & (number(http, "http_4xx_in_window") > ENUMERATION_RATIO * number(http, "http_2xx_in_window"))]
 
     return {
-        "R-B-L7-001": {(str(domain), ) for domain in counts[counts > TUNNEL_SUBDOMAINS].index},
+        "R-B-L7-001": {(str(domain), )
+                       for domain in counts[counts > TUNNEL_SUBDOMAINS].index},
         "R-D-L7-005": keys(enumerating, ["src_ip"]),
     }
 
@@ -489,7 +496,8 @@ def _creeping(saas: pd.DataFrame) -> set:
         for (principal, group) in span.groupby("user_principal"):
             rising = group["rising"].max()
 
-            if (pd.notna(rising) and rising >= BREADTH_RISING_WEEKS and group["role"].nunique() == BREADTH_ROLE_VERSIONS):
+            if (pd.notna(rising) and rising >= BREADTH_RISING_WEEKS
+                    and group["role"].nunique() == BREADTH_ROLE_VERSIONS):
                 fired.add((str(principal), ))
 
     return fired
@@ -620,9 +628,11 @@ def _staged_exfiltration(result: pd.DataFrame) -> set:
     handshake from that address to an issuer new to the estate, all within the window. Keyed `(user_principal,
     src_ip)`. The session interval is `min` of its starts and `max` of its ends, as the search's stats has it."""
     exports = rows(result, "tc7_saas")
-    exports = exports[true(exports, "saas_baseline_mature") & (number(exports, "saas_record_ratio") > EXFIL_RECORD_RATIO)]
+    exports = exports[true(exports, "saas_baseline_mature")
+                      & (number(exports, "saas_record_ratio") > EXFIL_RECORD_RATIO)]
     transfers = rows(result, "tc4")
-    breaches = transfers[true(transfers, "flow_data_len_envelope_breached") | true(transfers, "flow_bpp_envelope_breached")]
+    breaches = transfers[true(transfers, "flow_data_len_envelope_breached")
+                         | true(transfers, "flow_bpp_envelope_breached")]
     handshakes = rows(result, "tc6")
     handshakes = handshakes[true(handshakes, "cert_issuer_new_to_estate")]
 
@@ -643,7 +653,8 @@ def _staged_exfiltration(result: pd.DataFrame) -> set:
             held = own[(own["source_ip"] == address) & (own["opened"] <= t_breach)
                        & (own["closed"].isna() | (own["closed"] >= t_breach))]
 
-            if (len(held) == 0 or not t_export - EXFIL_BREACH_TOLERANCE_NS <= t_breach <= t_export + EXFIL_BREACH_WINDOW_NS):
+            if (len(held) == 0
+                    or not t_export - EXFIL_BREACH_TOLERANCE_NS <= t_breach <= t_export + EXFIL_BREACH_WINDOW_NS):
                 continue
 
             for (_, handshake) in handshakes[handshakes["src_ip"] == address].iterrows():

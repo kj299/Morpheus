@@ -189,6 +189,12 @@ where each fires on exactly the planted cases and nothing else -- twice for `R-D
 plants both a simultaneous and a cross-switch spoof for, alongside a legitimate move it must not fire on. That is evidence the columns and conditions are right; it is not evidence
 the stanzas parse on a search head. Run `btool savedsearches list` after installing.
 
+The run that would settle that is packaged: `validate/run_search_head.sh` starts the validation container, indexes
+the sample events, dispatches all forty-eight searches in the order `validate/VALIDATION.md` prescribes, and writes
+`validate/search_head_results.json`, which `tests/morpheus/determinism/test_search_head_run.py` compares with
+`expected_results.json`. It needs Docker and nothing else. It has not been run, so no search-head result is
+claimed here, and the comparison test skips saying so until one is committed.
+
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields
 at search time and every query silently matches nothing. Seed test events with a JSON `_raw`

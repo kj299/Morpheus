@@ -79,8 +79,7 @@ nanosecond, so a sweep of that corpus measures how round its numbers are as much
 Moving every clock by half a window puts the same events in the middle of theirs and changes nothing else.
 """
 
-CHAIN_MAGNITUDES_NS = MAGNITUDES_NS + tuple(
-    seconds * SECOND_NS for seconds in (120, 240, 600, 1800, 3600, 7200, 10800))
+CHAIN_MAGNITUDES_NS = MAGNITUDES_NS + tuple(seconds * SECOND_NS for seconds in (120, 240, 600, 1800, 3600, 7200, 10800))
 """The chained rules' ladder: the same widths, then on past their 120-second join tolerance to three hours.
 
 A chain allows a later step to precede an earlier one by its tolerance, and its steps come from different
@@ -91,6 +90,7 @@ could not test it. Three hours is past every chain's window.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rules  # noqa: E402  pylint: disable=wrong-import-position
+
 
 def offsets_for(sources: list, magnitude_ns: int) -> dict:
     """
@@ -310,8 +310,8 @@ def sweep(label: str,
 
         difference = diff_frames(baseline, result)
         moved_columns = compare_columns(baseline, result, KEY_COLUMNS, IGNORE_COLUMNS)
-        rules = compare_decisions(baseline_decisions, decisions(result))
-        changed = sorted(rule for (rule, entry) in rules.items() if entry["changed"])
+        verdicts = compare_decisions(baseline_decisions, decisions(result))
+        changed = sorted(rule for (rule, entry) in verdicts.items() if entry["changed"])
 
         runs.append({
             "spread_ns": magnitude,
@@ -320,7 +320,7 @@ def sweep(label: str,
             "output_identical": difference is None,
             "first_difference": difference,
             "columns_moved": moved_columns,
-            "rules": rules,
+            "rules": verdicts,
             "rules_changed": changed,
             "measures": extra(result),
         })

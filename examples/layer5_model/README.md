@@ -183,6 +183,9 @@ predate the wired path; a run that reports them is one that scored the composed 
 naming the column, the canonical row and the two values. A failure can then be read off the artifact rather
 than reproduced on the card it happened on.
 
-Paste it back and the numbers in `README.md` and in the guide can be traced to a run rather than to a memory of
-one -- which is the same standard the GPU conformance verdict is held to, and the reason neither claim in this
-repository was written before its artifact existed.
+Commit it as `examples/layer5_model/artifacts/<date>/layer5_model.json`, the date the run's `at` field gives, and
+the numbers in `README.md`, in the guide and in this file are tested against it by
+`tests/morpheus/determinism/test_verdict_artifacts.py`: every date, count, digest and threshold quoted about the
+newest run is built from its fields, so prose that drifts from the artifact fails without a card. The GPU
+conformance artifact is held to the same standard under `ci/artifacts/`. Until 2026-10-04 both were ignored by
+git, and the September figures outlived the tree they described by two weeks.

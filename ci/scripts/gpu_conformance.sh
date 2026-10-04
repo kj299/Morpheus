@@ -341,3 +341,5 @@ fi
 
 echo ""
 echo "PASSED. Artifact written to ${ARTIFACT}."
+echo "Commit it as ci/artifacts/gpu_conformance-<YYYY-MM-DD>T<HHMM>Z.json, named for its \"at\" field; the documents"
+echo "must then quote it, and tests/morpheus/determinism/test_verdict_artifacts.py checks that they do."
