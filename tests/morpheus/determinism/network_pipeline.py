@@ -62,6 +62,7 @@ from morpheus.stages.telemetry.tc3_cardinality_stage import TC3CardinalityStage
 from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
 from morpheus.stages.telemetry.tc3_ttl_stage import TC3TtlStage
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.column_assign import to_host_frame
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 
@@ -281,7 +282,9 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     for message in sink.get_messages():
         meta = message.payload() if hasattr(message, "payload") else message
         frame = meta.copy_dataframe()
-        frames.append(frame.to_pandas() if hasattr(frame, "to_pandas") else frame)
+        # Integer columns are carried as nullable integers before anything is joined; a plain `to_pandas` gives
+        # numpy int64 on the GPU, and the concatenation widens that to float where another frame has a gap.
+        frames.append(to_host_frame(frame))
 
     if (len(frames) == 0):
         return pd.DataFrame()

@@ -240,3 +240,39 @@ def test_a_skew_needs_both_of_its_columns():
 
     with pytest.raises(KeyError, match="stamped_at"):
         apply_clock_skew(frame, {}, time_column="stamped_at")
+
+
+class _DeviceFrame:
+    """What a cuDF frame looks like to the sort: integer dtypes, and a `to_pandas` that widens a gap to float."""
+
+    def __init__(self, frame: pd.DataFrame):
+        self._frame = frame
+        self.dtypes = pd.Series({
+            name: pd.Series([0], dtype="int64").dtype if str(dtype) == "Int64" else dtype
+            for (name, dtype) in frame.dtypes.items()
+        })
+
+    def to_pandas(self) -> pd.DataFrame:
+        host = self._frame.copy()
+
+        for name in host.columns:
+            if (str(host[name].dtype) == "Int64"):
+                host[name] = host[name].astype("float64")
+
+        return host
+
+
+def test_a_device_frame_keeps_its_nullable_integers_through_the_sort():
+    # TotalOrderStage sorts on the host and hands the frame back to cuDF. A plain `to_pandas` turned every integer
+    # column with a gap into float64 on the way, so on a GPU `session_start` left the sort as 835200000000000.0.
+    frame = pd.DataFrame({
+        "event_time": [3, 1, 2],
+        "collector_id": ["c"] * 3,
+        "collector_seq": [3, 1, 2],
+        "session_start": pd.array([None, 835200000000000, None], dtype="Int64"),
+    })
+
+    ordered = sort_for_cumulative_features(_DeviceFrame(frame), order_columns=["event_time"])
+
+    assert str(ordered["session_start"].dtype) == "Int64"
+    assert ordered["session_start"].tolist()[0] == 835200000000000

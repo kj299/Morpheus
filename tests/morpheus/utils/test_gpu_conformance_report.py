@@ -269,6 +269,28 @@ def test_a_run_that_died_names_where(report):
     assert report.is_clean({"outcome": "exited cleanly", **summary}) is False
 
 
+def test_the_warnings_summary_is_not_read_as_a_test_that_never_finished(report):
+    # The warnings summary names each warning test on a line of its own, with no outcome after it. The run of
+    # 2026-10-03 finished and printed its tally, and the artifact still said it died in the last test to warn.
+    log = "\n".join([
+        PLAIN,
+        "=============================== warnings summary ===============================",
+        "tests/morpheus/determinism/test_transport_harness.py::test_batch_split_sweep[gpu_mode]",
+        "  /workspace/tests/morpheus/determinism/transport_pipeline.py:257: FutureWarning: concatenation",
+        "tests/morpheus/determinism/test_transport_harness.py::test_a_bin_split[gpu_mode]",
+        "=========================== short test summary info ============================",
+        "FAILED tests/a.py::test_x - AssertionError",
+    ])
+
+    assert report.summarize(log)["died_in"] is None
+
+
+def test_a_death_before_the_end_of_run_sections_is_still_a_death(report):
+    died = "tests/morpheus/stages/test_tc2_binding_stage.py::test_a_device_frame_seals"
+
+    assert report.summarize("\n".join([PLAIN, died]))["died_in"] == died
+
+
 def test_a_line_the_parser_could_not_read_does_not_read_as_a_death_if_the_run_continued(report):
     # The distinction the previous version got wrong in the other direction: it called the last unreadable line a
     # death even though the run went on to finish. Anything reporting an outcome afterwards settles it.

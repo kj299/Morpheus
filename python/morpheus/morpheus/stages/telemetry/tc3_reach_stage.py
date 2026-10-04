@@ -191,10 +191,14 @@ class TC3ReachStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         """Run the shared IP classifiers over the destination column, as series rather than row by row."""
         series = df[column]
 
+        def host(values) -> list:
+            # On a GPU the classifiers return a cuDF series, which refuses to be iterated; read it on the host.
+            return values.to_pandas().tolist() if hasattr(values, "to_pandas") else list(values)
+
         return {
-            DST_PRIVATE: list(ip.is_private(series)),
-            DST_RESERVED: list(ip.is_reserved(series)),
-            DST_MULTICAST: list(ip.is_multicast(series)),
+            DST_PRIVATE: host(ip.is_private(series)),
+            DST_RESERVED: host(ip.is_reserved(series)),
+            DST_MULTICAST: host(ip.is_multicast(series)),
         }
 
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):

@@ -155,3 +155,29 @@ def test_a_missing_column_is_refused(config: Config):
 def test_a_non_positive_window_is_refused(config: Config):
     with pytest.raises(ValueError, match="window_seconds"):
         TC3ReachStage(config, window_seconds=0)
+
+
+class _DeviceSeries:
+    """What a cuDF series does when iterated: refuse, and point at `to_pandas`."""
+
+    def __init__(self, values: list):
+        self._values = values
+
+    def __iter__(self):
+        raise TypeError("Series object is not iterable. Consider using `.to_pandas()`")
+
+    def to_pandas(self) -> pd.Series:
+        return pd.Series(self._values)
+
+
+def test_the_destination_classifiers_are_read_on_the_host(monkeypatch):
+    # On a GPU the shared IP classifiers return cuDF series, and `list()` of one raises -- which failed every
+    # layer 3 test in GPU mode and, through them, the network and campaign harnesses.
+    import morpheus.stages.telemetry.tc3_reach_stage as reach
+
+    for name in ("is_private", "is_reserved", "is_multicast"):
+        monkeypatch.setattr(reach.ip, name, lambda series: _DeviceSeries([True, False]))
+
+    classified = TC3ReachStage._classify({"dst_ip": None}, "dst_ip")  # pylint: disable=protected-access
+
+    assert all(values == [True, False] for values in classified.values())
