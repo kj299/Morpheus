@@ -110,7 +110,6 @@ from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.utils.binding_table import NS_PER_SECOND
-from morpheus.utils.column_assign import to_host_frame
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
@@ -846,13 +845,15 @@ def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[Bin
 
 
 def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
+    from host_frame import to_host_frame
+
     frames = []
 
     for message in sink.get_messages():
         meta = message.payload() if hasattr(message, "payload") else message
         frame = meta.copy_dataframe()
-        # Integer columns are carried as nullable integers before anything is joined; a plain `to_pandas` gives
-        # numpy int64 on the GPU, and the concatenation widens that to float where another frame has a gap.
+        # Integer columns are carried as nullable integers in both modes before anything is joined, so the
+        # concatenation cannot widen them to float in one mode and not the other; see `host_frame`.
         frames.append(to_host_frame(frame))
 
     if (len(frames) == 0):
