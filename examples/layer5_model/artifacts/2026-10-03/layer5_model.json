@@ -1,0 +1,49 @@
+{
+  "verdict": "passed",
+  "at": "2026-10-03T23:53:32.533457+00:00",
+  "device": "NVIDIA RTX 5000 Ada Generation Laptop GPU",
+  "torch": "2.4.0+cu124",
+  "seed": 42,
+  "epochs": 20,
+  "principals": {
+    "alice@example.com": 26,
+    "bob@example.com": 18,
+    "carol@example.com": 26,
+    "dave@example.com": 28,
+    "svc-batch@example.com": 7
+  },
+  "features": [
+    "logcount",
+    "locincrement",
+    "appincrement",
+    "deviceincrement",
+    "asns_in_window",
+    "hour_surprise_bits",
+    "weekday_surprise_bits",
+    "mfa_ratio",
+    "auth_attempts_in_window",
+    "auth_failures_in_window"
+  ],
+  "double_run_reproducible": true,
+  "batch_invariant": true,
+  "batch_sizes": [
+    1,
+    8,
+    64
+  ],
+  "pipeline_double_run_reproducible": true,
+  "pipeline_batch_invariant": true,
+  "pipeline_differences": {},
+  "pipeline_scored_rows": 105,
+  "pipeline_principals_pinned": 5,
+  "pipeline_principals_skipped": {},
+  "model_versions": {
+    "alice@example.com": "dfencoder/alice@example.com:ebf33ed32d52626c",
+    "bob@example.com": "dfencoder/bob@example.com:a3355010ab77c564",
+    "carol@example.com": "dfencoder/carol@example.com:47e623d362182a67",
+    "dave@example.com": "dfencoder/dave@example.com:aa2262f43228bb20",
+    "svc-batch@example.com": "dfencoder/svc-batch@example.com:cd5ddb14349473d3"
+  },
+  "pipeline_mean_abs_z_max": 2.3823,
+  "measures": "reproducibility of the scoring path, not detection quality: a week of five principals is far too little data to train an autoencoder that detects anything, and no claim is made that it does. The wired-path checks score the rows the models were trained on, which is a leak made on purpose so the question stays whether the pipeline gives the same numbers twice with a real model in the slot."
+}

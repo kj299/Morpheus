@@ -13,6 +13,8 @@ services:
     environment:
       SPLUNK_START_ARGS: --accept-license
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:-changeme-please}
+      # Recent images refuse to start without accepting Splunk's General Terms as well as the license.
+      SPLUNK_GENERAL_TERMS: --accept-sgt-current-at-splunk-com
       # The app is mounted rather than copied so an edit to a saved search is one restart away from being tested.
       SPLUNK_APPS_URL: ""
     ports:
@@ -21,7 +23,12 @@ services:
     volumes:
       - ../TA-morpheus-lineage:/opt/splunk/etc/apps/TA-morpheus-lineage:ro
       - ./sample_events:/sample_events:ro
-      - ./indexes.conf:/opt/splunk/etc/apps/TA-morpheus-lineage/local/indexes.conf:ro
+      # Validation-only settings, in an app of their own: index paths, and the MAX_DAYS_AGO the dated sample events
+      # need. See validation_app/local/props.conf.
+      - ./validation_app:/opt/splunk/etc/apps/morpheus_validation:ro
+      # The runner, the sample events and the saved searches it reads. Read-only: the runner writes its result
+      # inside the container and run_search_head.sh copies it out.
+      - ..:/splunk_lineage_app:ro
     healthcheck:
       test: ["CMD", "curl", "-fk", "https://localhost:8089/services/server/info"]
       interval: 10s

@@ -132,8 +132,10 @@ UNMARKED=(
     tests/morpheus/determinism/test_layer5_model_runner.py
     tests/morpheus/determinism/test_readme_inventory.py
     tests/morpheus/determinism/test_representation_invariance.py
+    tests/morpheus/determinism/test_search_head_run.py
     tests/morpheus/determinism/test_splunk_validation_package.py
     tests/morpheus/determinism/test_stage_parameter_liveness.py
+    tests/morpheus/determinism/test_verdict_artifacts.py
     tests/morpheus/stages/test_lineage_stage_cli.py
     tests/morpheus/utils/test_arrival_regularity.py
     tests/morpheus/utils/test_binding_closer.py
@@ -189,11 +191,11 @@ WIDER=(
 # stale the moment the tier grows -- which is how a tier that had lost five files still cleared a floor written
 # when it had fourteen.
 #
-# Three per entry, which is what the smallest contributor in the tier actually collects: the stage files run
-# twenty or more mode variants each, but `test_gpu_parity.py` runs three, and a floor above what an honest tier
-# collects fails good runs. This is a gross-loss backstop and nothing finer -- it catches a filter or a missing
-# dependency that took most of the suite, and it would not notice one file going missing. That is the totality
-# test's job, and the reason this script no longer trusts a floor to do it.
+# Three per entry, a floor on the total rather than on any one file: the stage files run twenty or more mode
+# variants each, while the smallest contributors run two (`test_column_assign.py`) and five, and a floor above
+# what an honest tier collects fails good runs. This is a gross-loss backstop and nothing finer -- it catches a
+# filter or a missing dependency that took most of the suite, and it would not notice one file going missing.
+# That is the totality test's job, and the reason this script no longer trusts a floor to do it.
 MINIMUM_SELECTED=$(( ${#TARGETS[@]} * 3 ))
 
 

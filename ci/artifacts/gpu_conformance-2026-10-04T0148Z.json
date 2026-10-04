@@ -1,0 +1,38 @@
+{
+  "verdict": "failed",
+  "at": "2026-10-04T01:48:23.011457+00:00",
+  "device": "NVIDIA RTX 5000 Ada Generation Laptop GPU, 596.71, 8.9",
+  "gpu_mode": {
+    "outcome": "exited 1",
+    "counts": {
+      "failed": 3,
+      "passed": 747
+    },
+    "failures": [
+      "tests/morpheus/determinism/test_application_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/determinism/test_campaign_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/determinism/test_context_harness.py::test_against_golden[gpu_mode]"
+    ],
+    "died_in": null,
+    "counted_from": "pytest's summary",
+    "collected": 750,
+    "unaccounted": 0,
+    "log": "/tmp/gpu_conformance_marked.log"
+  },
+  "unmarked_gpu_coverage": {
+    "outcome": "exited cleanly",
+    "counts": {
+      "passed": 1924,
+      "skipped": 1
+    },
+    "failures": [],
+    "died_in": null,
+    "counted_from": "pytest's summary",
+    "collected": 1925,
+    "unaccounted": 0,
+    "log": "/tmp/gpu_conformance_unmarked.log"
+  },
+  "wider_upstream_suite": {
+    "skipped": "test fixtures are unfetched Git LFS pointers"
+  }
+}

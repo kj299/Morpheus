@@ -153,7 +153,7 @@ Being clear about the boundary is the point of writing it down:
   rather than in anything this fork adds. Every stage and utility added here passes in GPU mode. The suite
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
-- **On 2026-10-04 every `gpu_mode` variant this fork has passed on a GPU, and so did everything else it adds,
+- **On 2026-10-04 every `gpu_mode` variant this fork had passed on a GPU, and so did everything else it adds,
   across all twelve composed pipelines.** At 03:56 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card
   (driver 596.71) over tiers that are total: the marked tier **750 collected, 750 passed**; the tier carrying
   no mode marker -- where the default execution mode on a machine with a card is the GPU -- **1,925 collected,

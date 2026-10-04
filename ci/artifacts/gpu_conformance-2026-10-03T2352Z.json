@@ -1,0 +1,65 @@
+{
+  "verdict": "failed",
+  "at": "2026-10-03T23:52:40.272199+00:00",
+  "device": "NVIDIA RTX 5000 Ada Generation Laptop GPU, 596.71, 8.9",
+  "gpu_mode": {
+    "outcome": "exited 1",
+    "counts": {
+      "failed": 21,
+      "passed": 721,
+      "error": 8
+    },
+    "failures": [
+      "tests/morpheus/determinism/test_application_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/determinism/test_campaign_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/determinism/test_campaign_harness.py::test_batch_split_sweep[gpu_mode]",
+      "tests/morpheus/determinism/test_campaign_harness.py::test_cross_restart_diff[gpu_mode]",
+      "tests/morpheus/determinism/test_campaign_harness.py::test_double_run_diff[gpu_mode]",
+      "tests/morpheus/determinism/test_campaign_harness.py::test_permutation_check_has_teeth[gpu_mode]",
+      "tests/morpheus/determinism/test_campaign_harness.py::test_permutation_within_windows[gpu_mode]",
+      "tests/morpheus/determinism/test_context_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/determinism/test_endpoint_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/determinism/test_gpu_parity.py::test_the_session_pipeline_reaches_the_same_answer_on_a_gpu",
+      "tests/morpheus/determinism/test_network_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/determinism/test_network_harness.py::test_batch_split_sweep[gpu_mode]",
+      "tests/morpheus/determinism/test_network_harness.py::test_cross_restart_diff[gpu_mode]",
+      "tests/morpheus/determinism/test_network_harness.py::test_double_run_diff[gpu_mode]",
+      "tests/morpheus/determinism/test_network_harness.py::test_permutation_check_has_teeth[gpu_mode]",
+      "tests/morpheus/determinism/test_network_harness.py::test_permutation_within_windows[gpu_mode]",
+      "tests/morpheus/determinism/test_presentation_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/determinism/test_saas_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/determinism/test_session_harness.py::test_against_golden[gpu_mode]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_a_missing_byte_count_is_null_rather_than_zero[gpu_mode]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_a_missing_network_is_not_a_new_one[gpu_mode]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_a_networks_novelty_is_permanent_rather_than_windowed[gpu_mode]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_byte_asymmetry_survives_a_flow_that_got_nothing_back[gpu_mode]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_flows_at_one_instant_do_not_excuse_each_other[gpu_mode-order0]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_flows_at_one_instant_do_not_excuse_each_other[gpu_mode-order1]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_no_proportion_is_published_from_one_flow[gpu_mode]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_the_destination_is_classified_by_the_shared_parsers[gpu_mode]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_the_internal_proportion_is_what_turns_a_count_into_a_rule[gpu_mode]",
+      "tests/morpheus/stages/test_tc3_reach_stage.py::test_two_sources_keep_separate_proportions[gpu_mode]"
+    ],
+    "died_in": "tests/morpheus/determinism/test_transport_harness.py::test_a_bin_split_across_messages_still_ends_on_the_right_number[gpu_mode]",
+    "counted_from": "pytest's summary",
+    "collected": 750,
+    "unaccounted": 0,
+    "log": "/tmp/gpu_conformance_marked.log"
+  },
+  "unmarked_gpu_coverage": {
+    "outcome": "exited cleanly",
+    "counts": {
+      "passed": 1921,
+      "skipped": 1
+    },
+    "failures": [],
+    "died_in": null,
+    "counted_from": "pytest's summary",
+    "collected": 1922,
+    "unaccounted": 0,
+    "log": "/tmp/gpu_conformance_unmarked.log"
+  },
+  "wider_upstream_suite": {
+    "skipped": "test fixtures are unfetched Git LFS pointers"
+  }
+}
