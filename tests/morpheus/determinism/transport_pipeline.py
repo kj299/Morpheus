@@ -65,7 +65,6 @@ from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc4_envelope_stage import TC4EnvelopeStage
 from morpheus.stages.telemetry.tc4_flow_stage import TC4FlowStage
 from morpheus.utils.binding_table import NS_PER_SECOND
-from morpheus.utils.column_assign import to_host_frame
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.tcp_flags import ACK
@@ -245,13 +244,15 @@ def build_pipeline_config(execution_mode=None) -> Config:
 
 def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     """Everything the sink received, as one host frame."""
+    from host_frame import to_host_frame
+
     frames = []
 
     for message in sink.get_messages():
         meta = message.payload() if hasattr(message, "payload") else message
         frame = meta.copy_dataframe()
-        # Integer columns are carried as nullable integers before anything is joined; a plain `to_pandas` gives
-        # numpy int64 on the GPU, and the concatenation widens that to float where another frame has a gap.
+        # Integer columns are carried as nullable integers in both modes before anything is joined, so the
+        # concatenation cannot widen them to float in one mode and not the other; see `host_frame`.
         frames.append(to_host_frame(frame))
 
     if (len(frames) == 0):
