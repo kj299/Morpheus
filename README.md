@@ -110,12 +110,15 @@ Being clear about the boundary is the point of writing it down:
   landed first instead, which is the order the guide argues for anyway, since retrofitting determinism
   onto a running pipeline means re-tuning every threshold.
 - **The model's scoring path is reproducible all the way through the pipeline, and that is now measured
-  rather than assumed.** On 2026-09-19 at 23:17 UTC, on the same RTX 5000 Ada card with
+  rather than assumed.** On 2026-10-03 at 23:53 UTC, on the same RTX 5000 Ada card with
   `torch==2.4.0+cu124`, `examples/layer5_model/run_model.py` trained a per-principal autoencoder on the
   layer 5 corpus for five principals and passed all four of its checks: **the model's double run was
   identical and its scores were invariant across batch sizes 1, 8 and 64, and the composed pipeline with
   those models behind `TC5ScoreStage` gave the same 105 scores twice and again under the batch-split
-  sweep.** That is controls 1, 3 and 5, measured. Had any of them failed, R-P-L5-006 -- a rule about a
+  sweep.** That is controls 1, 3 and 5, measured. It repeats the first passing run, on 2026-09-19 at
+  23:17 UTC, on the tree as it stands after the layer 5 rules and context landed: the same five principals
+  with the same 26, 18, 26, 28 and 7 rows, the same 105 scored rows and the same
+  `pipeline_mean_abs_z_max` of 2.3823. Had any of them failed, R-P-L5-006 -- a rule about a
   score rising by fractions of a standard deviation -- would have been measuring the model's own jitter,
   and every threshold tuned against it would have been tuned against noise.
 - **The fourth check earned its place by failing.** Its first run, on 2026-09-13, was reproducible twice
@@ -150,34 +153,32 @@ Being clear about the boundary is the point of writing it down:
   rather than in anything this fork adds. Every stage and utility added here passes in GPU mode. The suite
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
-- **Every `gpu_mode` variant this fork had on 2026-09-20 passed on a GPU, and so did everything else it had
-  then.** On
-  2026-09-20 at 12:23 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card (driver 596.71) over
-  tiers that are total: the marked tier **455 collected, 455 passed**; the tier carrying no mode marker
-  -- where the default execution mode on a machine with a card is the GPU -- **941 collected, 935
-  passed, 6 skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly
-  against what pytest collected. Every remaining skip is a field contract for a sourcetype nothing
-  produces yet; there were seven until `binding:l1` gained a producer, and that test now runs instead of
-  skipping. It is the first device check of the estate pipeline, where a chain reaches three layers.
-  The marked tier grew by exactly seven, which is the number of `gpu_mode` variants that harness has,
-  and the growth reconciles: the same two tiers collect 455 and 931 on a machine with no card, the
-  marked tier identical to the device and the unmarked one exactly ten fewer, the same offset every run
-  has shown. These runs also carry `torch==2.4.0+cu124` alongside
-  the RAPIDS stack, so they say something the earlier ones could not: adding Torch to this environment
-  does not disturb cuDF, and the two coexist in one process. That covered the twenty-six stages and the
-  four composed pipelines (telemetry, session, lineage, estate) that existed on that date, control 13's six
-  checks, the stage parameter liveness registry and the first-detection corpus, in GPU mode. The seven
-  composed pipelines and fifteen stages added since have no recorded device run, and the cross-mode parity
-  test compares three corpora. What a
-  device run still does not reach is the estate harness's nineteen `cpu_mode` assertions -- the ladder
-  itself, and its negative controls -- which are CPU statements by construction, the same way the other
-  harnesses' `cpu_mode` checks are. What it does not cover is the model: the conformance tiers score
-  through stubs, so the autoencoder behind the adapter is measured by `run_model.py` and not here. The wider upstream tier **skipped itself**, because that checkout's `tests/tests_data` fixtures
-  were unfetched Git LFS pointers, so nothing here is a claim about the upstream suite. One card, no CI.
-  This verdict supersedes 448 and 935 on 2026-09-19, 429 and 913 on 2026-09-07, and before those an
-  earlier 353 collected and 353 passed, which was narrower than it read -- see
-  the three bullets below, one per defect, each of which produced an artifact saying `passed` while
-  measuring less than it claimed.
+- **On 2026-10-04 every `gpu_mode` variant this fork has passed on a GPU, and so did everything else it adds,
+  across all twelve composed pipelines.** At 03:56 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card
+  (driver 596.71) over tiers that are total: the marked tier **750 collected, 750 passed**; the tier carrying
+  no mode marker -- where the default execution mode on a machine with a card is the GPU -- **1,925 collected,
+  1,924 passed, 1 skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly
+  against what pytest collected. The one skip is the test for a sourcetype nothing produces, which has no
+  cases left to run because every sourcetype now has a producer; the six skips of September were all of that
+  kind. The tiers reconcile across machines too: the same two collect 750 and 1,915 on a machine with no card,
+  the marked tier identical to the device and the unmarked one exactly ten fewer, the same offset every run
+  has shown. That covers all forty-six stages and **all twelve composed pipelines**, each of whose GPU output
+  matched the golden the CPU path generated, through the canonical rendering with floats quantized to four
+  places, alongside the rest of control 13's checks, the stage parameter liveness registry, the
+  first-detection corpus and the Splunk validation package, in GPU mode. The cross-mode parity test itself
+  still compares three corpora; the golden checks are what carry the other nine. What a device run does not
+  reach is the `cpu_mode` assertions -- the estate ladder and its negative controls among them -- which are
+  CPU statements by construction. What it does not cover is the model: the conformance tiers score through
+  stubs, so the autoencoder behind the adapter is measured by `run_model.py` and not here. The wider upstream
+  tier **skipped itself**, because that checkout's `tests/tests_data` fixtures were unfetched Git LFS
+  pointers, so nothing here is a claim about the upstream suite. One card, and the GPU tiers are not in CI;
+  the CPU tiers are, on every push and pull request, since 2026-10-03. It took two failed runs to get here,
+  and what each found is recorded below, after the September parity repairs it repeated. This verdict
+  supersedes 455 and 935 on 2026-09-20 (which covered the four composed pipelines and twenty-six stages that
+  existed then, and first carried `torch==2.4.0+cu124` beside the RAPIDS stack in one process), 448 and 935 on
+  2026-09-19, 429 and 913 on 2026-09-07, and before those an earlier 353 collected and 353 passed, which was
+  narrower than it read -- see the bullets below, one per defect, each of which produced an artifact saying
+  `passed` while measuring less than it claimed.
 - **Two earlier verdicts were narrower than they read, and both defects were in the runner.** The first
   selected from a list that was not total: it omitted `test_community_id_stage.py` and
   `test_column_assign.py`, and later the five TC-5 stage files, so "227 of 227" was 227 of the variants
@@ -242,11 +243,35 @@ Being clear about the boundary is the point of writing it down:
   on the same GPU, that turned three failures into nine, all of them null-handling tests across the ARP,
   auth, binding-resolver and lineage-stamp stages. It is recorded here because the reasoning for it was
   sound and the result was not.
+- **The October verdict took two failed runs, and the September defect was behind most of both.** The first,
+  on 2026-10-03 at 23:52 UTC, was the first device run of the eight composed pipelines and twenty stages added
+  after 2026-09-20, and of 750 tests 21 failed and 8 raised errors. `TC3ReachStage` iterated a cuDF series to
+  classify destinations, which a device series refuses. Eight of the new corpora collected their output with a
+  plain `to_pandas`, so gap-free integer columns widened to float when the classes were concatenated -- the
+  defect fixed above for the telemetry pipeline, in collectors that never carried the fix. And
+  `sort_for_cumulative_features` crossed to the host the same way, so a `session_start` holding a null came
+  back a float. The same run exposed a fifth runner defect: the parser read on past pytest's progress lines
+  into its failure report and named a test as where the run died when the run had finished; it now stops at
+  the first section header. The second run, on 2026-10-04 after those repairs, failed three golden checks, and
+  this time **the GPU was right**: it rendered `status_code` as `404` where the CPU golden held `404.0`. The
+  repair had pointed the eight collectors at the library's host-frame helper, which leaves a frame already on
+  the host alone, so on CPU the concatenation still widened sixteen columns across three golden files. They
+  now use the test helper that applies the rule in both modes, as the other four corpora did, and every
+  changed cell in the regenerated golden files and Splunk sample events is a numerically equal integer. A rule
+  one mode follows and the other does not is the defect restated, which this file had already said in
+  September.
 - **A GPU run under WSL2 requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1`.** Without it, Numba's default
   driver bindings read back an invalid CUDA context through the WSL driver shim: `cuCtxGetDevice` yields
   a garbage device number and the process crashes partway through the suite. Setting the variable
   switches Numba to NVIDIA's own bindings and the failures disappear. This is an environment defect
   rather than a code one, but it costs a day to rediscover.
+- **The October runs used the dev container, which needs two things the image does not supply.** Started
+  with `DOCKER_IMAGE_TAG=dev-260905-amd64 ./docker/run_container_dev.sh`, the container is removed on exit,
+  so `./scripts/compile.sh` runs on every start. The build's default CUDA architecture list failed to
+  compile `matx_util.cu` on an `atomicAdd` overload; building for the card's own architecture,
+  `CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=89"` for compute capability 8.9, compiles. And `pyarrow` fails
+  to import, partway through the build, for want of `libgflags.so.2.2`; `conda install -c conda-forge
+  "gflags=2.2.*"` supplies it, and has to be repeated in every new container until the image carries it.
 
 ## What you would have to collect
 
@@ -352,7 +377,7 @@ Below that:
 spreads the collectors' clocks across a window of a given width, re-runs the composed pipelines over the same
 seeded corpora, and reports at what width each shipped rule changes what it accuses. Swept from one millisecond
 to one minute, **six of the seven layer 2 and layer 5 rules the experiment covers are untouched by a full
-minute**, the twenty-five others have not been swept, and the two that move do not move for
+minute**, the other thirty-one shipped detections have not been swept, and the two that move do not move for
 the reasons argued above. R-D-L2-004 is immune to collector skew and fails at a minute of switch skew, as the
 row above now says. R-P-L5-006 appears to fail at one millisecond and does not: forty-five of the layer 5
 corpus's hundred and five authentications sit exactly on an hour mark, and an event on a boundary changes

@@ -57,8 +57,9 @@ and
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), feature stages for every telemetry class from TC-0 to TC-7, the layer 5
 scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's six
-checks over twelve composed corpora, which run under pytest on developer machines and have not yet run in
-any CI this fork has executed. That is forty-six stages and forty-one supporting
+checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
+request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
+2026-10-04. That is forty-six stages and forty-one supporting
 modules, covered by 1,932 distinct tests, itemized in
 [Part 6](#provided). Thirty-eight of the forty-two rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
@@ -96,10 +97,12 @@ the hysteresis half of it does not. Control 3 has now been measured, on the one 
 `examples/layer5_model/run_model.py` sets `CUBLAS_WORKSPACE_CONFIG` before Torch is imported, enables
 `torch.use_deterministic_algorithms`, trains a per-principal autoencoder on the layer 5 corpus and checks
 the double run and the batch sweep, and then runs the composed pipeline with those models in the scoring
-slot. On 2026-09-19 at 23:17 UTC, with `torch==2.4.0+cu124` on an RTX 5000 Ada, **all four checks
+slot. On 2026-10-03 at 23:53 UTC, with `torch==2.4.0+cu124` on an RTX 5000 Ada, **all four checks
 passed**: the double run was identical and the scores invariant across batch sizes 1, 8 and 64 for all
 five principals, and the composed pipeline returned the same 105 scores twice and again under the
-batch-split sweep. Had any of them failed, R-P-L5-006 -- a rule about a score rising by fractions of a
+batch-split sweep. That repeats the first passing run, on 2026-09-19 at 23:17 UTC, on the tree after the
+layer 5 rules and context landed, with the same row counts per principal and the same
+`pipeline_mean_abs_z_max` of 2.3823. Had any of them failed, R-P-L5-006 -- a rule about a score rising by fractions of a
 standard deviation -- would have been measuring the model's own jitter rather than a principal's
 behaviour, and every threshold tuned against those scores would have been tuned against noise. The
 fourth check did fail on its first run, and that is written up where the adapter is described.
@@ -124,35 +127,55 @@ the same two upstream failures, and five more passes for the guards those repair
 Later on 2026-09-06, at 17:32 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the
 artifact it exists to produce. It then took four repairs to that runner before an artifact could be
 believed, and each of the four is recorded below, because each produced a verdict that read `passed`
-while measuring less than it claimed.
+while measuring less than it claimed. A fifth, found in October, misreported where a failing run had died
+rather than passing one that had failed, and it is recorded with the run that found it.
 
-**The run that stands is 2026-09-20 at 12:23 UTC**, on the same card under driver 596.71, over tiers
-that are total: the marked tier 455 collected and 455 passed; the tier carrying no mode marker 941
-collected, 935 passed and 6 skipped -- every skip a field contract for a sourcetype nothing produces
-yet. Nothing failed in either, both exited cleanly, and both counts reconcile exactly against what
-pytest collected.
+**The run that stands is 2026-10-04 at 03:56 UTC**, on the same card under driver 596.71, over tiers
+that are total: the marked tier 750 collected and 750 passed; the tier carrying no mode marker 1,925
+collected, 1,924 passed and 1 skipped. Nothing failed in either, both exited cleanly, and both counts
+reconcile exactly against what pytest collected. The skip is the test for a sourcetype nothing produces,
+which has no cases left because every sourcetype now has one; the six skips of the September verdict were
+all of that kind.
 
-It is the first device check of the estate pipeline, and so the first on which a chain spanning three
-layers was assembled by a card rather than by a host. That matters more than it sounds: a chain is a
-Merkle root over its members in order, the estate seals five classes together over their union, and the
-ordering and hashing of that union is exactly the arithmetic this project has seen diverge between host
-and device before.
+It is the first device run in which every composed pipeline this fork has took part: all twelve, eight of
+them on a card for the first time. Each of the twelve golden checks ran in GPU mode and matched the golden
+the CPU path generated, through the canonical rendering with floats quantized to four places, so the
+cross-mode question is answered for every corpus even though `test_gpu_parity.py` itself still compares
+three. The estate harness was the one that mattered most in September, when it first ran on a card: a
+chain is a Merkle root over its members in order, the estate seals five classes together over their
+union, and the ordering and hashing of that union is exactly the arithmetic this project has seen diverge
+between host and device before.
 
-The growth reconciles rather than being taken on trust. The marked tier gained exactly seven since the
-run before, which is the number of `gpu_mode` variants the estate harness has, and the unmarked tier
-gained none because that harness is in the marked list alone. The same two tiers collect 455 and 931 on
-a machine with no card -- the marked tier identical to the device, the unmarked one exactly ten short of
-it, the offset every run so far has shown. A tier that grew by some other number would mean a file had
+The counts reconcile rather than being taken on trust. The same two tiers collect 750 and 1,915 on a
+machine with no card -- the marked tier identical to the device, the unmarked one exactly ten short of it,
+the offset every run so far has shown. A tier that differed by some other number would mean a file had
 fallen out of a list, which is the defect two of the repairs below were for.
 
-These runs also carry `torch==2.4.0+cu124` beside the RAPIDS stack, which answers a question the earlier
-ones could not: the two coexist in one process, and adding Torch does not disturb cuDF. That is every
-stage and all four composed pipelines that existed on 2026-09-20 (lineage, telemetry, session, estate), control 13's six checks, the stage parameter liveness registry and
-the first-detection corpus, in GPU mode. What a device run does not reach, in this harness as in the
-others, is the assertions marked `cpu_mode`: the estate's nineteen include the ladder itself and both
-its negative controls, and they are CPU statements by construction rather than by omission. What it is not is a measurement of the model. The conformance
-tiers score through stubs, deliberately, so that they need no card-trained weights to run; the
-autoencoder behind the adapter is what `run_model.py` measures, and that verdict is separate.
+That is all forty-six stages and all twelve composed pipelines, control 13's checks, the stage parameter
+liveness registry, the first-detection corpus and the Splunk validation package, in GPU mode. What a
+device run does not reach, in these harnesses as before, is the assertions marked `cpu_mode`: the estate's
+nineteen include the ladder itself and both its negative controls, and they are CPU statements by
+construction rather than by omission. What it is not is a measurement of the model. The conformance tiers
+score through stubs, deliberately, so that they need no card-trained weights to run; the autoencoder
+behind the adapter is what `run_model.py` measures, and that verdict is separate.
+
+It took two failed runs to reach, and both failures were the parity defect described below, recurring.
+The first, on 2026-10-03 at 23:52 UTC, had 21 of 750 tests fail and 8 raise errors: `TC3ReachStage` iterated a cuDF
+series, which a device series refuses; eight of the new corpora collected with a plain `to_pandas`, so
+their integer columns widened to float in the concatenation; and `sort_for_cumulative_features` crossed to
+the host the same way. It also exposed a fifth runner defect, a parser that read on past pytest's progress
+lines into its failure report and named a test as where a finished run had died; the parser now stops at
+the first section header. The second, on 2026-10-04 after those repairs, failed three golden checks, and
+there the device was right and the golden wrong: the repair had used the library's host-frame helper,
+which leaves a host frame alone, so the CPU path still widened sixteen columns across three golden files --
+`404.0` where the device wrote `404`. The collectors now apply the integer rule in both modes, which is
+the rule this guide already states below, and every cell that changed in the regenerated golden files is a
+numerically equal integer.
+
+The verdict it supersedes, 2026-09-20 at 12:23 UTC, was 455 of 455 and 935 of 941 over the twenty-six
+stages and four composed pipelines (lineage, telemetry, session, estate) that existed then, and it first
+carried `torch==2.4.0+cu124` beside the RAPIDS stack, which answered a question the earlier ones could not:
+the two coexist in one process, and adding Torch does not disturb cuDF.
 
 Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
 less than it claimed. The runner selected from a list that was not total: two files were outside it from
@@ -196,7 +219,7 @@ now names what went unaccounted rather than only counting it.
 
 The wider upstream tier skipped itself, because that checkout's `tests/tests_data` fixtures were
 unfetched Git LFS pointers. Nothing here is a claim about the upstream suite on a GPU, and the limit
-none of it moves is the one worth repeating: one card, and not CI. The other limit that used to sit
+none of it moves is the one worth repeating: one card, and the GPU tiers are not CI. The other limit that used to sit
 here -- that per-stage runs say nothing about the determinism controls -- has since been closed, and how
 is the subject of the next few paragraphs.
 
@@ -273,7 +296,7 @@ nothing. And the `CompareDataFrameStage` form of the golden check feeds a host g
 does its own conversion back to the host -- the conversion behind both defects above, on a path neither
 repair touches.
 
-Control 13 is therefore verified in both execution modes. It remains one card and it is not CI.
+Control 13 is therefore verified in both execution modes. It remains one card, and the GPU half is not CI.
 
 Reproducing it requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1` under WSL2. Without that variable, Numba's
 default driver bindings read back an invalid CUDA context from the WSL driver shim: `cuCtxGetDevice`
@@ -3272,7 +3295,8 @@ What Morpheus provides versus what has to be built, stated plainly.
   ({py:mod}`~morpheus.utils.window_seal` and
   {py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage`).
 - The determinism harness: control 13's six checks running against the twelve composed pipelines over
-  seeded golden corpora, under pytest on developer machines, since no CI has run on this fork ({py:mod}`~morpheus.utils.determinism` and
+  seeded golden corpora, in CPU mode in the fork's CI (`.github/workflows/fork-cpu.yaml`) and in GPU mode on
+  one card ({py:mod}`~morpheus.utils.determinism` and
   `tests/morpheus/determinism/`).
 - The SIEM wire format, rendered by the stanza the SIEM will parse it with
   ({py:class}`~morpheus.stages.output.siem_wire_stage.SiemWireStage` and
@@ -3670,17 +3694,18 @@ What Morpheus provides versus what has to be built, stated plainly.
 ### Must be built
 
 Rewritten by [the retrospective](./12_behavioral_analytics_retrospective.md) on 2026-10-03 from the gaps it
-verified; each row names the GitHub issue that tracks it, and the retrospective's gap table carries the evidence.
+verified; each row names the GitHub issue that tracks it, and the retrospective's gap table carries the evidence. A row
+leaves the table when its step is merged: steps 1 to 5 (#52 to #56) have, so the documentation
+reconciliation, the read contracts and fork CI, the provenance columns, the layer 5 searches and the layer
+5 context are no longer listed.
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| Documentation reconciliation | Small | The ninety-three stale sentences the retrospective verified, the stages page's twenty-three missing entries, and a test that keeps the shipped-detection count and the stages page true. Tracked in #52 |
 | Upstream reuse decision | Small | A recorded reuse-or-reject decision, with a measured reason, for `morpheus_dfp`'s rolling window, training and inference stages, the identity-provider and CloudTrail source stages, `TimeSeriesStage` and `MLFlowDriftStage`, all named by this document and used by no fork code. Precedes the model, normalization and health rows. Tracked in #67 |
 | Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
-| **The per-entity learned model in the pipeline (principals, then hosts)** | Large | Still the largest gap and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory, `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, and `examples/layer5_model/run_model.py` has trained and run it once on one card, scoring the week it trained on. What fills the slot in every composed pipeline and every shipped artifact is `ReferenceScorer`, frozen population arithmetic the class itself calls not a model. Three things remain: the run's artifact and weight digests committed beside the README that quotes them; a CPU inference path (`state_dict` load or an exported forward pass) so the composed pipeline runs with a pinned real model in CI; a corpus with a train window and a disjoint score window, so R-B-L5-001, R-B-L5-002 and R-P-L5-006 are evaluated against a learned baseline for the first time. Then `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame gives hosts the score and drift principals have. Tracked in #59, after #67 |
+| **The per-entity learned model in the pipeline (principals, then hosts)** | Large | Still the largest gap and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory, `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, and `examples/layer5_model/run_model.py` has trained and run it on one card, most recently on 2026-10-03, scoring the week it trained on. What fills the slot in every composed pipeline and every shipped artifact is `ReferenceScorer`, frozen population arithmetic the class itself calls not a model. Three things remain: the run's artifact and weight digests committed beside the README that quotes them; a CPU inference path (`state_dict` load or an exported forward pass) so the composed pipeline runs with a pinned real model in CI; a corpus with a train window and a disjoint score window, so R-B-L5-001, R-B-L5-002 and R-P-L5-006 are evaluated against a learned baseline for the first time. Then `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame gives hosts the score and drift principals have. Tracked in #59, after #67 |
 | Risk write path and suppression for the shipped detections | Small | Every one of the 38 detection stanzas ends in `/ table` with only `action.correlationsearch.enabled`; none collects, so `risk_score` and `rule_id` never land in an index and "Chain assembly - cross-layer risk" and "Behavior summary" sum null by construction. A `behavior_risk` index, a `collect` per detection, `alert.suppress` keyed on each rule's documented deduplication key (control 9's suppression half; without it R-C-005 would emit the same chain 96 times a day), the chain search reading the risk index, and one `resolution_methods` field so the chain's `methods` names every hop. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
-| Per-sourcetype read contracts and fork CI | Medium | No workflow has executed the suite on this fork; `required_columns` are narrower than the fields the searches read (l3 and l6 omit ten columns, none requires `lineage_id` or `osi_layer`); the estate golden is not linted; layer 5 thresholds are duplicated as test constants; the one health search reads a column its sourcetype never carries; R-C-001's "previous hour" rests on an unstated hourly seal. A CPU workflow over the two tiers and a test that every field a search reads from its sourcetype is in that sourcetype's contract. Tracked in #53 |
-| Live search-head run, GPU conformance over twelve pipelines, clock skew over every rule | Medium | Seven of forty-eight searches have run on a search head and none of the thirty-eight detections as they now stand; GPU conformance covers four of twelve composed pipelines and the 2026-09-20 verdict predates most of the tree; clock skew is measured for seven of thirty-eight rules; the GPU and model verdict artifacts quoted in the README are ignored by git. One recorded pass of each, with the artifacts committed under dated paths and tied to the quoted numbers by test. Tracked in #58 |
+| Live search-head run, GPU conformance over twelve pipelines, clock skew over every rule | Medium | Seven of forty-eight searches have run on a search head and none of the thirty-eight detections as they now stand; the GPU verdict was re-earned on 2026-10-04 over all twelve composed pipelines' golden checks, but `test_gpu_parity.py` still compares three corpora; clock skew is measured for seven of thirty-eight rules; the GPU and model verdict artifacts quoted in the README are ignored by git. One recorded pass of each, with the artifacts committed under dated paths and tied to the quoted numbers by test. Tracked in #58 |
 | Host baselines at layers 3, 4 and 6 | Medium | R-B-L3-001 reads a literal 50 where the design specifies the source's own fourteen-day 99.5th percentile; the `bucket_peak` pattern `TC2BaselineStage` uses for ports was never applied to hosts, and fan-in per destination has no history. Fan-in, distinct ports, byte asymmetry, first-contact ASN, JA4 change and the endpoint host-seen flags are emitted and read by no search; asset criticality, owner and classification are attached to host rows and read by nothing; `device_role` and `os_family` are absent from the asset record; `community_id` is absent from layer 3; `hostname` is case-folded in the chain SPL and not in the stages; R-B-L6-001 dropped its managed-endpoint gate. Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | A host is `src_ip` at layers 3, 6 and 7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint, and nothing bridges them: no time-bounded `hostname`-to-address binding exists, the network, transport, presentation and application corpora run no `BindingResolverStage`, and asset context cannot attach to a network-layer event. The SIEM `binding_l2_l3` refresh selects `binding_table=dhcp_lease` rows nothing produces, `morpheus:edge` carries no `lineage_id`, `osi_layer`, parent or child `uid` or `join_method`, the principal-to-desk rung the estate corpus proves is a Python dict, and only one resolver passes `uid_column`. A lease stage emitting bucketed `dhcp_lease` rows, a `host_inventory` binding and a `host_key` on every layer 3-7 event, an `EdgeEmitStage` behind the resolvers, MAC and 802.1X lookups in the SIEM, and `community_id`/`session_key` joins above layer 3. The DHCP collector itself is not Morpheus. Tracked in #63 |
 | Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | The optical tap step (`optical_rx_dbm_deviation`, the TC-1 section's stated security signal), flap instability, the device reboot flags, the four error and discard deltas and `lldp_neighbor_chassis_id_changed` are computed, asserted in Python and read by no search; no stage divides a delta by its interval; `lldp_neighbor_port_id` is required and unread. No octet counter is designed and `link_speed_bps` is required and unread, so the interface as a thing that carries traffic has no behaviour; `ouis_per_vlan` has no consumer, history or corpus case; `TC2AuthStage` emits a raw elapsed time with no distribution; `BindingCloser.close()` and `reconcile()` are called by no stage so `bind_end_observed` is false on every record. Rules, a rate feature, a link key, a per-VLAN baseline, a per-port auth quantile, and a stop column and snapshot mode on the binding stage. Tracked in #61 |
@@ -3720,7 +3745,7 @@ when, because a detection identified by its timestamp would differ under every n
 measure the injection rather than the damage.
 
 **Six of the seven layer 2 and layer 5 rules the experiment covers are untouched by a full minute of
-disagreement**, and the twenty-five layer 1, 3, 4, 6, 7 and chained rules have not been swept. The two that move do not move for
+disagreement**, and the other thirty-one shipped detections, the chained rules among them, have not been swept. The two that move do not move for
 the reasons this section predicted, and both corrections are worth more than the confirmations would have been.
 
 **R-D-L2-004 fails against switch clocks and is immune to collector clocks.** This document said the

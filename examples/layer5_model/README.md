@@ -106,6 +106,10 @@ conda activate morpheus
 Options: `--epochs` (default 20) and `--seed` (default 42). The positional argument is where the artifact is
 written and defaults to `layer5_model.json` at the repository root.
 
+The development container (`./docker/run_container_dev.sh`) works too, and is what the October run used; it
+needs `./scripts/compile.sh` on every start and two additions the image lacks, which the
+[README](../../README.md#what-this-fork-is-not) lists beside the GPU verdict.
+
 Exit status is zero only when both the double run and the batch sweep came back identical. On a machine without
 Torch or without a device it exits non-zero and writes a `"verdict": "failed"` artifact saying which piece was
 missing -- an artifact that is simply absent reads as not yet run, and a run that quietly skipped the model would
@@ -113,11 +117,25 @@ be worse than one that refuses. That refusal is itself tested, in the container 
 
 ## The result
 
-Run on 2026-09-19 at 23:17 UTC, on an NVIDIA RTX 5000 Ada Generation Laptop GPU with `torch==2.4.0+cu124`,
-over five principals carrying 26, 18, 26, 28 and 7 usable rows: **all four checks passed.** The model's own
-double run was identical and its scores were invariant across batch sizes 1, 8 and 64; the composed pipeline,
-with those models behind `TC5ScoreStage`, gave the same 105 scores twice and again under the batch-split
-sweep, with `pipeline_differences` empty. Verdict `passed`.
+Run on 2026-10-03 at 23:53 UTC, on an NVIDIA RTX 5000 Ada Generation Laptop GPU with `torch==2.4.0+cu124`,
+seed 42 and 20 epochs, over five principals carrying 26, 18, 26, 28 and 7 usable rows: **all four checks
+passed.** The model's own double run was identical and its scores were invariant across batch sizes 1, 8 and
+64; the composed pipeline, with those models behind `TC5ScoreStage`, gave the same 105 scores twice and again
+under the batch-split sweep, with `pipeline_differences` empty, five principals pinned and none skipped.
+Verdict `passed`, `pipeline_mean_abs_z_max` 2.3823, and these weight digests:
+
+| Principal | `model_version` |
+| --- | --- |
+| `alice@example.com` | `dfencoder/alice@example.com:ebf33ed32d52626c` |
+| `bob@example.com` | `dfencoder/bob@example.com:a3355010ab77c564` |
+| `carol@example.com` | `dfencoder/carol@example.com:47e623d362182a67` |
+| `dave@example.com` | `dfencoder/dave@example.com:aa2262f43228bb20` |
+| `svc-batch@example.com` | `dfencoder/svc-batch@example.com:cd5ddb14349473d3` |
+
+That is the first passing run, 2026-09-19 at 23:17 UTC, repeated on the tree after the layer 5 rules and
+context landed: the same row counts, the same 105 rows and the same `pipeline_mean_abs_z_max`. The September
+digests were not written down anywhere this repository keeps, so whether these five match them is not
+something this file can say; recording them here is what makes the next comparison possible.
 
 The fourth check failed on its first attempt, on 2026-09-13, and the failure was real: the adapter was
 letting the size of a message's row group reach the model, so a score depended on how the stream had been
