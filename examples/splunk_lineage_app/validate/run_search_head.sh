@@ -14,9 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The host side of the search-head run: start the container, wait for it, run run_search_head.py inside it under
-# Splunk's own interpreter, and copy the result out to search_head_results.json beside this script. Needs Docker
-# and nothing else; no Python on the host, no license file (the image starts under Splunk's built-in trial).
+# The host side of the search-head run: start the container, wait for it, install the app and the validation
+# settings, restart, run run_search_head.py inside it under Splunk's own interpreter, and copy the result out to
+# search_head_results.json beside this script. Needs Docker and nothing else; no Python on the host, no license
+# file (the image starts under Splunk's built-in trial).
 #
 #   SPLUNK_PASSWORD='choose-one' examples/splunk_lineage_app/validate/run_search_head.sh
 #
@@ -36,24 +37,41 @@ fi
 cd "${HERE}"
 SPLUNK_PASSWORD="${SPLUNK_PASSWORD}" docker compose up -d
 
-echo "waiting for the search head to report healthy"
-for _ in $(seq 1 120); do
-    STATE="$(docker inspect -f '{{.State.Health.Status}}' "${CONTAINER}" 2>/dev/null || echo starting)"
-    if [[ "${STATE}" == "healthy" ]]; then
-        break
-    fi
-    if [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null)" != "true" ]]; then
-        echo "The container stopped. Its log says why:"
-        docker logs --tail 40 "${CONTAINER}"
-        exit 1
-    fi
-    sleep 10
-done
-
-if [[ "${STATE}" != "healthy" ]]; then
-    echo "The search head did not become healthy in twenty minutes; docker logs ${CONTAINER} says why."
+# Ready means an authenticated search succeeds: splunkd is up and provisioning has set the admin password.
+wait_for_search_head() {
+    local what="$1"
+    echo "waiting for the search head (${what})"
+    for _ in $(seq 1 120); do
+        if [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null)" != "true" ]]; then
+            echo "The container stopped. Its log says why:"
+            docker logs --tail 60 "${CONTAINER}"
+            exit 1
+        fi
+        if docker exec -u splunk "${CONTAINER}" /opt/splunk/bin/splunk search "| makeresults" \
+                -auth "admin:${SPLUNK_PASSWORD}" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 10
+    done
+    echo "The search head did not answer an authenticated search in twenty minutes; docker logs ${CONTAINER} says why."
     exit 1
-fi
+}
+
+wait_for_search_head "first start"
+
+# Install both apps by copying them in, rather than mounting them: the image changes the owner of everything under
+# /opt/splunk/etc as it provisions, and a read-only mount there stops it. A copy is rerun every time, so an edited
+# saved search is what gets tested.
+docker exec -u root "${CONTAINER}" bash -c '
+    set -e
+    rm -rf /opt/splunk/etc/apps/TA-morpheus-lineage /opt/splunk/etc/apps/morpheus_validation
+    cp -r /splunk_lineage_app/TA-morpheus-lineage /opt/splunk/etc/apps/TA-morpheus-lineage
+    cp -r /splunk_lineage_app/validate/validation_app /opt/splunk/etc/apps/morpheus_validation
+    chown -R splunk:splunk /opt/splunk/etc/apps/TA-morpheus-lineage /opt/splunk/etc/apps/morpheus_validation'
+echo "apps installed; restarting Splunk so it reads them"
+docker exec -u splunk "${CONTAINER}" /opt/splunk/bin/splunk restart >/dev/null
+
+wait_for_search_head "after installing the apps"
 
 set +e
 docker exec -u splunk -e SPLUNK_PASSWORD="${SPLUNK_PASSWORD}" "${CONTAINER}" \
