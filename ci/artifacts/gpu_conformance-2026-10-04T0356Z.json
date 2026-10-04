@@ -1,0 +1,33 @@
+{
+  "verdict": "passed",
+  "at": "2026-10-04T03:56:14.143691+00:00",
+  "device": "NVIDIA RTX 5000 Ada Generation Laptop GPU, 596.71, 8.9",
+  "gpu_mode": {
+    "outcome": "exited cleanly",
+    "counts": {
+      "passed": 750
+    },
+    "failures": [],
+    "died_in": null,
+    "counted_from": "pytest's summary",
+    "collected": 750,
+    "unaccounted": 0,
+    "log": "/tmp/gpu_conformance_marked.log"
+  },
+  "unmarked_gpu_coverage": {
+    "outcome": "exited cleanly",
+    "counts": {
+      "passed": 1924,
+      "skipped": 1
+    },
+    "failures": [],
+    "died_in": null,
+    "counted_from": "pytest's summary",
+    "collected": 1925,
+    "unaccounted": 0,
+    "log": "/tmp/gpu_conformance_unmarked.log"
+  },
+  "wider_upstream_suite": {
+    "skipped": "test fixtures are unfetched Git LFS pointers"
+  }
+}

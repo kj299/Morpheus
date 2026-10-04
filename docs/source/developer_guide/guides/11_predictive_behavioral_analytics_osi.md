@@ -60,7 +60,7 @@ scoring path with frozen arithmetic in the model's slot, control 8's total order
 checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
 request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
 2026-10-04. That is forty-six stages and forty-one supporting
-modules, covered by 1,932 distinct tests, itemized in
+modules, covered by 1,953 distinct tests, itemized in
 [Part 6](#provided). Thirty-eight of the forty-two rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -140,8 +140,8 @@ all of that kind.
 It is the first device run in which every composed pipeline this fork has took part: all twelve, eight of
 them on a card for the first time. Each of the twelve golden checks ran in GPU mode and matched the golden
 the CPU path generated, through the canonical rendering with floats quantized to four places, so the
-cross-mode question is answered for every corpus even though `test_gpu_parity.py` itself still compares
-three. The estate harness was the one that mattered most in September, when it first ran on a card: a
+cross-mode question is answered for every corpus. `test_gpu_parity.py` compared three corpora on that
+run; it has since been parametrized over all twelve, and the nine variants that adds await the next card run. The estate harness was the one that mattered most in September, when it first ran on a card: a
 chain is a Merkle root over its members in order, the estate seals five classes together over their
 union, and the ordering and hashing of that union is exactly the arithmetic this project has seen diverge
 between host and device before.
@@ -3705,7 +3705,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
 | **The per-entity learned model in the pipeline (principals, then hosts)** | Large | Still the largest gap and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory, `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, and `examples/layer5_model/run_model.py` has trained and run it on one card, most recently on 2026-10-03, scoring the week it trained on. What fills the slot in every composed pipeline and every shipped artifact is `ReferenceScorer`, frozen population arithmetic the class itself calls not a model. Three things remain: the run's artifact and weight digests committed beside the README that quotes them; a CPU inference path (`state_dict` load or an exported forward pass) so the composed pipeline runs with a pinned real model in CI; a corpus with a train window and a disjoint score window, so R-B-L5-001, R-B-L5-002 and R-P-L5-006 are evaluated against a learned baseline for the first time. Then `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame gives hosts the score and drift principals have. Tracked in #59, after #67 |
 | Risk write path and suppression for the shipped detections | Small | Every one of the 38 detection stanzas ends in `/ table` with only `action.correlationsearch.enabled`; none collects, so `risk_score` and `rule_id` never land in an index and "Chain assembly - cross-layer risk" and "Behavior summary" sum null by construction. A `behavior_risk` index, a `collect` per detection, `alert.suppress` keyed on each rule's documented deduplication key (control 9's suppression half; without it R-C-005 would emit the same chain 96 times a day), the chain search reading the risk index, and one `resolution_methods` field so the chain's `methods` names every hop. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
-| Live search-head run, GPU conformance over twelve pipelines, clock skew over every rule | Medium | Seven of forty-eight searches have run on a search head and none of the thirty-eight detections as they now stand; the GPU verdict was re-earned on 2026-10-04 over all twelve composed pipelines' golden checks, but `test_gpu_parity.py` still compares three corpora; clock skew is measured for seven of thirty-eight rules; the GPU and model verdict artifacts quoted in the README are ignored by git. One recorded pass of each, with the artifacts committed under dated paths and tied to the quoted numbers by test. Tracked in #58 |
+| Live search-head run, GPU parity on a card, clock skew where the corpora cannot measure it | Medium | Step 7 built what could be built without a search head or a card: the GPU and model artifacts are committed under `ci/artifacts/` and `examples/layer5_model/artifacts/` and every date and count quoted from them is tested; `test_gpu_parity.py` compares all twelve composed pipelines; the clock skew experiment decides all thirty-eight detections. Three things remain. The search-head run: `validate/run_search_head.sh` dispatches all forty-eight searches against the sample events, and nothing has run it, so `search_head_results.json` does not exist and its comparison test skips. A card run of the nine parity variants added since 2026-10-04. And fifteen detections whose corpora carry one clock -- layers 3, 4 and 6 and the SaaS pair -- which need an exporter, inspection point or context record time per row before skew can be measured on them, and a corpus whose chain steps sit within a minute of each other on different clocks before the 120-second join tolerance itself is tested. Tracked in #58 |
 | Host baselines at layers 3, 4 and 6 | Medium | R-B-L3-001 reads a literal 50 where the design specifies the source's own fourteen-day 99.5th percentile; the `bucket_peak` pattern `TC2BaselineStage` uses for ports was never applied to hosts, and fan-in per destination has no history. Fan-in, distinct ports, byte asymmetry, first-contact ASN, JA4 change and the endpoint host-seen flags are emitted and read by no search; asset criticality, owner and classification are attached to host rows and read by nothing; `device_role` and `os_family` are absent from the asset record; `community_id` is absent from layer 3; `hostname` is case-folded in the chain SPL and not in the stages; R-B-L6-001 dropped its managed-endpoint gate. Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | A host is `src_ip` at layers 3, 6 and 7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint, and nothing bridges them: no time-bounded `hostname`-to-address binding exists, the network, transport, presentation and application corpora run no `BindingResolverStage`, and asset context cannot attach to a network-layer event. The SIEM `binding_l2_l3` refresh selects `binding_table=dhcp_lease` rows nothing produces, `morpheus:edge` carries no `lineage_id`, `osi_layer`, parent or child `uid` or `join_method`, the principal-to-desk rung the estate corpus proves is a Python dict, and only one resolver passes `uid_column`. A lease stage emitting bucketed `dhcp_lease` rows, a `host_inventory` binding and a `host_key` on every layer 3-7 event, an `EdgeEmitStage` behind the resolvers, MAC and 802.1X lookups in the SIEM, and `community_id`/`session_key` joins above layer 3. The DHCP collector itself is not Morpheus. Tracked in #63 |
 | Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | The optical tap step (`optical_rx_dbm_deviation`, the TC-1 section's stated security signal), flap instability, the device reboot flags, the four error and discard deltas and `lldp_neighbor_chassis_id_changed` are computed, asserted in Python and read by no search; no stage divides a delta by its interval; `lldp_neighbor_port_id` is required and unread. No octet counter is designed and `link_speed_bps` is required and unread, so the interface as a thing that carries traffic has no behaviour; `ouis_per_vlan` has no consumer, history or corpus case; `TC2AuthStage` emits a raw elapsed time with no distribution; `BindingCloser.close()` and `reconcile()` are called by no stage so `bind_end_observed` is false on every record. Rules, a rate feature, a link key, a per-VLAN baseline, a per-port auth quantile, and a stop column and snapshot mode on the binding stage. Tracked in #61 |
@@ -3727,7 +3727,7 @@ raises and should not be assumed away. Two of them have since been answered; the
 the question that produced them, rather than moving somewhere tidier, because what a question turned out
 to be is worth more to the next reader than a clean list of open ones.
 
-**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Measured, for seven of the thirty-eight shipped rules over three of the twelve pipelines. Every join here
+**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** Swept for twenty-three of the thirty-eight shipped rules over nine of the twelve pipelines, and measured against clocks that genuinely disagree for twelve of them; the other fifteen arrive through corpora with a single clock and are recorded as not measured. Every join here
 is a join on time across sources that do not share a clock, and the
 [collection section](../../../../README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
 qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0`, as it was first
@@ -3737,16 +3737,37 @@ been measured** -- until now. [`examples/clock_skew/run_experiment.py`](../../..
 is the experiment this paragraph asked for: spread the clocks across a window of a given width, re-run the
 composed pipelines over the same seeded corpora, and report which columns move, by how much, and at what width
 each shipped rule changes its decision. It is the shape control 13's sweeps already had, differing only in what
-it perturbs, and it runs anywhere in about forty seconds.
+it perturbs, and it runs anywhere in about six minutes.
 
 The magnitude is the width of the spread rather than a shift, so that it means one thing: the worst pair of
 clocks in the estate disagrees by exactly that much. A decision is keyed on what a rule accuses rather than on
 when, because a detection identified by its timestamp would differ under every non-zero offset and would
 measure the injection rather than the damage.
 
-**Six of the seven layer 2 and layer 5 rules the experiment covers are untouched by a full minute of
-disagreement**, and the other thirty-one shipped detections, the chained rules among them, have not been swept. The two that move do not move for
-the reasons this section predicted, and both corrections are worth more than the confirmations would have been.
+What a sweep can say depends on the clocks a corpus has, and the thirty-eight rules divide three ways that must
+not be added together. **Twelve read inputs from clocks that genuinely disagree** -- the estate's collectors and
+switches for layers 1 and 2, the campaign's nine collectors for the chains, and seven hosts' own clocks for process
+ancestry -- and of those, only R-D-L2-004 moves within a minute. **Eleven read inputs that all come through one
+clock** in a corpus with several: every layer 5 sign-in comes through the identity provider, and each application
+class through its own collector. For them a sweep is a uniform shift, which measures boundary proximity rather than
+disagreement; ten are unmoved and R-P-L5-006 moves for the reason below. **Fifteen are not measured**: the network,
+transport, presentation and SaaS corpora each arrive through one collector, so the sweep gives that clock no
+offset, and the artifact records `"one clock"` for their rules rather than a tolerance nobody tested. Measuring them
+needs what a deployment's records would carry and these corpora do not -- an exporter per flow, an inspection point
+per egress, the context store's own record time for SaaS. Where rules do move, three findings are worth more than
+the confirmations.
+
+**The chains hold far past their join tolerance, and when they break they accuse a control.** No chain changes up
+to ten minutes of spread, five times its 120-second tolerance -- which says more about the corpus than the
+tolerance, since no chain's steps sit closer than four minutes to the edge of what it allows, and a corpus that
+tests the tolerance has to put two steps within about a minute of each other on different clocks. Each then
+breaks at an edge the clock assignment explains to the second: R-C-001 at 960 seconds, R-C-002 at 1120, R-C-004 at
+3200 and R-C-005 at 7201. Each first break is a **new accusation** -- a control the corpus planted for the chain to
+stay quiet on -- while the attacker is still caught, and the attackers are lost only later, at 1081, 2561, 12,961
+and 9601 seconds. A chain's failure under skew is therefore a false positive before it is a missed detection,
+which is the opposite of what the layer 2 rule below shows, and both are on the record. R-C-004's break was not a
+join tolerance at all: a control's session end, on one collector, overtook her breach on another, and the session
+interval decided it.
 
 **R-D-L2-004 fails against switch clocks and is immune to collector clocks.** This document said the
 MAC-in-two-places interval absorbs each switch's offset directly. It does -- and that is exactly why a

@@ -14,8 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Whether three of the twelve composed pipelines (telemetry, session, lineage) produce the same output in GPU mode as
-in CPU mode; the other nine harnesses carry their own `gpu_and_cpu_mode` golden checks and are not compared here.
+Whether every one of the twelve composed pipelines produces the same output in GPU mode as in CPU mode.
 
 Every stage declares support for both execution modes, and 203 `gpu_mode` variants assert that per stage. None of
 them composes a pipeline. Both determinism harnesses built their configuration in CPU mode and nothing else, so
@@ -38,12 +37,19 @@ These tests carry the `gpu_mode` marker, so on a machine without a GPU they are 
 vacuously. The comparison itself is exercised in CPU mode by `test_the_parity_check_agrees_with_itself_on_cpu`,
 so what is untested on a CPU-only machine is the GPU run, not this file's logic.
 
-Both harnesses now carry the `gpu_and_cpu_mode` marker on their own checks, so the golden comparison here is no
+Every harness now carries the `gpu_and_cpu_mode` marker on its own checks, so the golden comparison here is no
 longer the only one that runs in GPU mode. This file stays because it is the focused statement of the question --
 one place that says what parity means, what it found, and how the repairs are held in place by their own tests --
-and because a duplicated assertion on a five-second run is cheaper than a reader having to reconstruct the story.
+and because a duplicated assertion is cheaper than a reader having to reconstruct the story.
+
+It compared three corpora until 2026-10-04, while the other nine were compared only through their own harnesses.
+That was enough to pass, and it was also how the October runs found the parity defect twice more in pipelines this
+file had never named. Parametrizing it over all twelve makes this the one test whose list of corpora is the list
+of composed pipelines, which `test_the_parity_list_is_every_composed_pipeline` keeps true.
 """
 
+import glob
+import importlib
 import os
 import sys
 
@@ -58,12 +64,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import lineage_pipeline as lp  # noqa: E402
-import session_pipeline as sp  # noqa: E402
-import telemetry_pipeline as tp  # noqa: E402
 
-TELEMETRY_GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_telemetry_expected.csv")
-LINEAGE_GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_lineage_expected.csv")
-SESSION_GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_session_expected.csv")
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+LINEAGE_GOLDEN = os.path.join(HERE, "golden_lineage_expected.csv")
+
+CORPORA = ("application",
+           "campaign",
+           "context",
+           "endpoint",
+           "estate",
+           "lineage",
+           "network",
+           "presentation",
+           "saas",
+           "session",
+           "telemetry",
+           "transport")
+"""Every composed pipeline, by the stem its corpus module and golden share."""
 
 
 def _every_difference(rendered: str, golden_text: str) -> list[str]:
@@ -102,16 +120,6 @@ def _every_difference(rendered: str, golden_text: str) -> list[str]:
     return differences
 
 
-def _telemetry_matches_golden(execution_mode) -> None:
-    """Run the telemetry pipeline in one mode and compare its canonical rendering with the golden, byte for byte."""
-    _matches_golden(execution_mode, tp, TELEMETRY_GOLDEN)
-
-
-def _session_matches_golden(execution_mode) -> None:
-    """The same comparison for the composed layer 5 pipeline, which renders canonically for the same reason."""
-    _matches_golden(execution_mode, sp, SESSION_GOLDEN)
-
-
 def _matches_golden(execution_mode, module, golden_path: str) -> None:
     """Run one composed pipeline in one mode and compare its canonical rendering with its golden, byte for byte."""
     config = module.build_pipeline_config(execution_mode=execution_mode)
@@ -146,37 +154,46 @@ def _lineage_matches_golden(execution_mode) -> None:
     assert diff_frames(result, golden) is None, diff_frames(result, golden)
 
 
+def _reaches_golden(corpus_name: str, execution_mode) -> None:
+    """Run one composed pipeline in one mode against its own golden."""
+    if (corpus_name == "lineage"):
+        _lineage_matches_golden(execution_mode)
+        return
+
+    _matches_golden(execution_mode,
+                    importlib.import_module(f"{corpus_name}_pipeline"),
+                    os.path.join(HERE, f"golden_{corpus_name}_expected.csv"))
+
+
 @pytest.mark.cpu_mode
-def test_the_parity_check_agrees_with_itself_on_cpu():
-    # Not a tautology: it is what keeps the two tests below from being written blind. Everything except the mode is
-    # exercised here, so a machine with a GPU is testing the GPU run rather than this file.
-    _telemetry_matches_golden(ExecutionMode.CPU)
-    _lineage_matches_golden(ExecutionMode.CPU)
-    _session_matches_golden(ExecutionMode.CPU)
+def test_the_parity_list_is_every_composed_pipeline():
+    # A corpus added without being named here would be compared only through its own harness, which is how nine of
+    # them went uncompared by this file while it read as the statement of parity.
+    on_disk = sorted(
+        os.path.basename(path)[len("golden_"):-len("_expected.csv")]
+        for path in glob.glob(os.path.join(HERE, "golden_*_expected.csv")))
+
+    assert list(CORPORA) == on_disk
+
+
+@pytest.mark.cpu_mode
+@pytest.mark.parametrize("corpus_name", CORPORA)
+def test_the_parity_check_agrees_with_itself_on_cpu(corpus_name: str):
+    # Not a tautology: it is what keeps the GPU comparison below from being written blind. Everything except the
+    # mode is exercised here, so a machine with a GPU is testing the GPU run rather than this file.
+    _reaches_golden(corpus_name, ExecutionMode.CPU)
 
 
 @pytest.mark.gpu_mode
-def test_the_telemetry_pipeline_reaches_the_same_answer_on_a_gpu():
-    # Fourteen stages composed, over the whole corpus, against the golden the CPU harness pins. The nullable
-    # integer columns are what this is really asking about: `bind_end` and `bind_gap_ns` are null on most rows, and
-    # the two modes have to render a null identically for the comparison to hold.
-    _telemetry_matches_golden(ExecutionMode.GPU)
-
-
-@pytest.mark.gpu_mode
-def test_the_session_pipeline_reaches_the_same_answer_on_a_gpu():
-    # The five TC-5 stages composed over a week of authentications. The columns at risk here are a different set
-    # from the telemetry pipeline's: two quantized floats per row from the cadence histogram, a third from the
-    # great-circle distance, and nullable integers that are null on most rows because a record excluded from a
-    # measurement carries none of its columns.
-    _session_matches_golden(ExecutionMode.GPU)
-
-
-@pytest.mark.gpu_mode
-def test_the_lineage_pipeline_reaches_the_same_answer_on_a_gpu():
-    # The substrate the telemetry pipeline resolves through: event_uid and link_uid provenance, the Community ID
-    # hash, binding resolution, and event-time window sealing.
-    _lineage_matches_golden(ExecutionMode.GPU)
+@pytest.mark.parametrize("corpus_name", CORPORA)
+def test_the_composed_pipeline_reaches_the_same_answer_on_a_gpu(corpus_name: str):
+    # The whole composed pipeline over its whole corpus, against the golden the CPU harness pins. What is at risk
+    # differs by corpus -- nullable integers that are null on most rows in telemetry and session, `bind_end` and
+    # `bind_gap_ns` among them; quantized floats from the cadence histogram and the great-circle distance; the
+    # Merkle ordering of the estate's chains -- and none of it would crash: a mode disagreement renders `3.0` on
+    # one side and `3` on the other, or `NaN` against an empty cell, and only a comparison of the whole rendering
+    # notices. Every difference is reported at once, annotated with the type its column was carried in.
+    _reaches_golden(corpus_name, ExecutionMode.GPU)
 
 
 @pytest.mark.cpu_mode

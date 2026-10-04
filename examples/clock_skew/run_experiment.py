@@ -47,7 +47,6 @@ import argparse
 import datetime
 import json
 import os
-import re
 import sys
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -80,43 +79,17 @@ nanosecond, so a sweep of that corpus measures how round its numbers are as much
 Moving every clock by half a window puts the same events in the middle of theirs and changes nothing else.
 """
 
-SAVED_SEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "..",
-                              "splunk_lineage_app",
-                              "TA-morpheus-lineage",
-                              "default",
-                              "savedsearches.conf")
+CHAIN_MAGNITUDES_NS = MAGNITUDES_NS + tuple(seconds * SECOND_NS for seconds in (120, 240, 600, 1800, 3600, 7200, 10800))
+"""The chained rules' ladder: the same widths, then on past their 120-second join tolerance to three hours.
 
+A chain allows a later step to precede an earlier one by its tolerance, and its steps come from different
+collectors, so the tolerance is a claim about how far apart two clocks may be. A ladder that stopped at a minute
+could not test it. Three hours is past every chain's window.
+"""
 
-def _threshold(stanza: str, pattern: str) -> float:
-    """A threshold as the shipped search states it, so this experiment decides the app's rule and not a copy."""
-    import configparser  # pylint: disable=import-outside-toplevel
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-    with open(SAVED_SEARCHES, encoding="utf-8") as handle:
-        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.read_string(folded)
-    match = re.search(pattern, parser[stanza]["search"])
-
-    if (match is None):
-        raise ValueError(f"{stanza} no longer states {pattern!r}")
-
-    return float(match.group(1))
-
-
-IMPOSSIBLE_KMH = _threshold("R-D-L5-003 - Impossible travel", r"kmh_threshold\s*=\s*([\d.]+)")
-"""R-D-L5-003's threshold, read from the saved search."""
-
-FATIGUE_CHALLENGES = _threshold("R-D-L5-004 - Multi-factor fatigue", r"challenge_threshold\s*=\s*([\d.]+)")
-FATIGUE_DENIALS = _threshold("R-D-L5-004 - Multi-factor fatigue", r"denial_threshold\s*=\s*([\d.]+)")
-"""R-D-L5-004's two thresholds, read from the saved search: more challenges than the first, at least the second
-denied."""
-
-DRIFT_RISING_WINDOWS = _threshold("R-P-L5-006 - Drift trajectory", r"rising_threshold\s*=\s*([\d.]+)")
-DRIFT_RISE_SIGMAS = _threshold("R-P-L5-006 - Drift trajectory", r"sigma_threshold\s*=\s*([\d.]+)")
-DRIFT_MEAN_CEILING = _threshold("R-P-L5-006 - Drift trajectory", r"mean_ceiling\s*=\s*([\d.]+)")
-"""R-P-L5-006's thresholds, read from the saved search."""
+import rules  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def offsets_for(sources: list, magnitude_ns: int) -> dict:
@@ -186,69 +159,6 @@ def skew_corpus(corpus: dict, offsets: dict, columns) -> dict:
 # --- What each rule accuses -----------------------------------------------------------------------------------
 
 
-def _rows(result, telemetry_class: str):
-    return result[result["telemetry_class"] == telemetry_class]
-
-
-def _keys(frame, columns: list) -> set:
-    return {tuple(str(row[column]) for column in columns) for (_, row) in frame.iterrows()}
-
-
-def layer_2_decisions(result, single_host_ports: set, spoof_gap_ns: int) -> dict:
-    """The four layer 2 detections, each reduced to the set of entities it accuses."""
-    import pandas as pd  # pylint: disable=import-outside-toplevel
-
-    from morpheus.utils.binding_closer import CONFLICT  # pylint: disable=import-outside-toplevel
-    from morpheus.utils.binding_closer import DISPLACED  # pylint: disable=import-outside-toplevel
-
-    macs = _rows(result, "tc2_mac")
-    designated = macs[macs["port_key"].isin(single_host_ports)]
-    too_many = designated[(designated["macs_per_port_first_in_window"] == True)  # noqa: E712  pylint: disable=singleton-comparison
-                          & (designated["macs_per_port"] > 1)]
-
-    arp = _rows(result, "tc2_arp")
-    contested = arp[(arp["macs_claiming_sender_ip"].fillna(0) > 1) & (arp["arp_sender_ip_excluded"] == False)]  # noqa: E712  pylint: disable=singleton-comparison
-
-    bindings = _rows(result, "tc2_binding")
-    elsewhere = bindings[bindings["bind_end_reason"].isin([CONFLICT, DISPLACED])]
-    spoofs = elsewhere[elsewhere["bind_gap_ns"] <= spoof_gap_ns]
-
-    auth = _rows(result, "tc2_auth")
-    unpaired = auth[auth["auth_unpaired"] == True]  # noqa: E712  pylint: disable=singleton-comparison
-
-    del pd
-
-    return {
-        "R-D-L2-001": _keys(too_many, ["port_key", "mac_address"]),
-        "R-D-L2-003": _keys(contested, ["arp_sender_ip", "arp_sender_mac"]),
-        "R-D-L2-004": _keys(spoofs, ["mac_address", "port_key"]),
-        "R-D-L2-005": _keys(unpaired, ["auth_port_key", "mac_address"]),
-    }
-
-
-def layer_5_decisions(result) -> dict:
-    """The three layer 5 rules, each reduced to the set of principals it accuses."""
-    auth = _rows(result, "tc5_auth")
-
-    travelled = auth[auth["travel_kmh"].fillna(0) > IMPOSSIBLE_KMH]
-    fatigued = auth[(auth["mfa_attempts_in_window"].fillna(0) > FATIGUE_CHALLENGES)
-                    & (auth["mfa_denials_in_window"].fillna(0) >= FATIGUE_DENIALS)
-                    & (auth["mfa_denied_then_approved"] == True)]  # noqa: E712  pylint: disable=singleton-comparison
-
-    drifting = auth
-    if ("drift_mature" in auth.columns):
-        drifting = auth[(auth["drift_mature"] == True)  # noqa: E712  pylint: disable=singleton-comparison
-                        & (auth["drift_rising_windows"].fillna(0) >= DRIFT_RISING_WINDOWS)
-                        & (auth["drift_rise_sigmas"].fillna(0) > DRIFT_RISE_SIGMAS)
-                        & (auth["mean_abs_z"].fillna(99) < DRIFT_MEAN_CEILING)]
-
-    return {
-        "R-D-L5-003": _keys(travelled, ["user_principal"]),
-        "R-D-L5-004": _keys(fatigued, ["user_principal"]),
-        "R-P-L5-006": _keys(drifting, ["user_principal", "day_window_id"]),
-    }
-
-
 def chain_reach(result) -> dict:
     """
     How far the ladder still reaches, rung by rung.
@@ -261,10 +171,10 @@ def chain_reach(result) -> dict:
     chained = result[result["lineage_id"].notna() & (result["lineage_id"] != "")]
     spans = chained.groupby("lineage_id")["osi_layer"].nunique()
 
-    auth = _rows(result, "tc5_auth")
+    auth = rules.rows(result, "tc5_auth")
     resolved = int(auth["desk_port_key"].notna().sum()) if ("desk_port_key" in auth.columns) else 0
 
-    arp = _rows(result, "tc2_arp")
+    arp = rules.rows(result, "tc2_arp")
     rooted = 0
 
     if ("chain_anchor_source" in arp.columns):
@@ -345,16 +255,7 @@ def compare_decisions(baseline: dict, skewed: dict) -> dict:
 
 def gap_threshold_ns() -> int:
     """R-D-L2-004's threshold, read from the shipped search rather than restated here."""
-
-    path = os.path.join(REPO_ROOT,
-                        "examples",
-                        "splunk_lineage_app",
-                        "TA-morpheus-lineage",
-                        "default",
-                        "savedsearches.conf")
-
-    with open(path, encoding="utf-8") as handle:
-        return int(re.search(r"gap_threshold\s*=\s*(\d+)", handle.read()).group(1))
+    return rules.SPOOF_GAP_NS
 
 
 KEY_COLUMNS = ["telemetry_class", "row_key"]
@@ -370,7 +271,13 @@ def shift_corpus(corpus: dict, columns, shift_ns: int) -> dict:
     return skew_corpus(corpus, {source: shift_ns for source in sources_in(corpus, columns)}, columns)
 
 
-def sweep(label: str, module, decisions, extra, columns=COLLECTOR_CLOCKS, shift_ns: int = 0) -> dict:
+def sweep(label: str,
+          module,
+          decisions,
+          extra=lambda _: {},
+          columns=COLLECTOR_CLOCKS,
+          shift_ns: int = 0,
+          magnitudes=MAGNITUDES_NS) -> dict:
     """
     Run one pipeline at every magnitude and report what moved.
 
@@ -379,6 +286,10 @@ def sweep(label: str, module, decisions, extra, columns=COLLECTOR_CLOCKS, shift_
     and an event exactly on a boundary crosses it under an offset of one nanosecond. Sweeping the same corpus
     on and off the boundary is what separates a rule that is genuinely sensitive to skew from a rule that
     merely inherited a corpus built on round numbers.
+
+    A sweep over one clock measures nothing: `offsets_for` gives a lone clock no offset, because nothing can
+    disagree with itself. Such a sweep still runs, so its report is complete, and `breaking_point` says it was not
+    measured rather than that the rule never moved.
     """
     from morpheus.utils.determinism import diff_frames  # pylint: disable=import-outside-toplevel
 
@@ -393,14 +304,14 @@ def sweep(label: str, module, decisions, extra, columns=COLLECTOR_CLOCKS, shift_
 
     runs = []
 
-    for magnitude in MAGNITUDES_NS:
+    for magnitude in magnitudes:
         offsets = offsets_for(sources, magnitude)
         result = module.run_pipeline(config, skew_corpus(corpus, offsets, columns))
 
         difference = diff_frames(baseline, result)
         moved_columns = compare_columns(baseline, result, KEY_COLUMNS, IGNORE_COLUMNS)
-        rules = compare_decisions(baseline_decisions, decisions(result))
-        changed = sorted(rule for (rule, entry) in rules.items() if entry["changed"])
+        verdicts = compare_decisions(baseline_decisions, decisions(result))
+        changed = sorted(rule for (rule, entry) in verdicts.items() if entry["changed"])
 
         runs.append({
             "spread_ns": magnitude,
@@ -409,7 +320,7 @@ def sweep(label: str, module, decisions, extra, columns=COLLECTOR_CLOCKS, shift_
             "output_identical": difference is None,
             "first_difference": difference,
             "columns_moved": moved_columns,
-            "rules": rules,
+            "rules": verdicts,
             "rules_changed": changed,
             "measures": extra(result),
         })
@@ -439,6 +350,10 @@ def _readable(nanoseconds: int) -> str:
     return f"{nanoseconds // SECOND_NS}s"
 
 
+NOT_MEASURED = "one clock"
+"""What `breaking_point` reports for a sweep with a single clock, which can perturb nothing."""
+
+
 def breaking_point(sweeps: dict) -> dict:
     """
     Per rule, the narrowest spread at which it changed its mind, in each sweep that carries it.
@@ -448,12 +363,21 @@ def breaking_point(sweeps: dict) -> dict:
     disagreement between switches, and a rule can look fragile on a corpus built from whole hours and be
     unmoved once the same events sit in the middle of their windows. One minimum across all of them would hide
     exactly the finding.
+
+    Three answers, kept distinct because they mean different things: a spread, where the rule changed; `None`,
+    where it held across the whole ladder; and `NOT_MEASURED`, where the sweep had one clock and so perturbed
+    nothing. Reporting the last as `None` would turn the absence of a measurement into a tolerance.
     """
     smallest: dict = {}
 
     for (name, report) in sweeps.items():
+        single = len(report["clocks"]) < 2
+
         for rule in report["baseline_decisions"]:
-            smallest.setdefault(rule, {})[name] = None
+            smallest.setdefault(rule, {})[name] = NOT_MEASURED if single else None
+
+        if (single):
+            continue
 
         for run in report["runs"]:
             for rule in run["rules_changed"]:
@@ -465,6 +389,44 @@ def breaking_point(sweeps: dict) -> dict:
     return {rule: dict(sorted(entry.items())) for (rule, entry) in sorted(smallest.items())}
 
 
+def refine(module, decisions, rule: str, low_ns: int, high_ns: int, columns=COLLECTOR_CLOCKS) -> dict:
+    """
+    Narrow a rule's breaking point to the second, between a spread where it held and one where it did not.
+
+    Bisects on whether the rule's accusations differ from the baseline, which assumes one transition between the
+    two; the result names both edges, so a caller can check them, and what was lost and gained at the upper one.
+    """
+    config = module.build_pipeline_config()
+    corpus = module.build_corpus()
+    sources = sources_in(corpus, columns)
+    baseline = decisions(module.run_pipeline(config, corpus))[rule]
+
+    def decided(magnitude: int) -> set:
+        return decisions(module.run_pipeline(config, skew_corpus(corpus, offsets_for(sources, magnitude),
+                                                                 columns)))[rule]
+
+    while (high_ns - low_ns > SECOND_NS):
+        middle = ((low_ns + high_ns) // 2 // SECOND_NS) * SECOND_NS
+
+        if (middle in (low_ns, high_ns)):
+            break
+
+        if (decided(middle) != baseline):
+            high_ns = middle
+        else:
+            low_ns = middle
+
+    changed = decided(high_ns)
+
+    return {
+        "held_at": _readable(low_ns),
+        "changed_at": _readable(high_ns),
+        "changed_at_ns": high_ns,
+        "no_longer_flagged": sorted(":".join(key) for key in baseline - changed),
+        "newly_flagged": sorted(":".join(key) for key in changed - baseline),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("artifact", nargs="?", default=os.path.join(REPO_ROOT, "clock_skew.json"))
@@ -472,48 +434,96 @@ def main() -> int:
 
     sys.path.insert(0, HARNESS)
 
-    import estate_pipeline  # pylint: disable=import-outside-toplevel
-    import session_pipeline  # pylint: disable=import-outside-toplevel
-    import telemetry_pipeline  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    import application_pipeline
+    import campaign_pipeline
+    import endpoint_pipeline
+    import estate_pipeline
+    import network_pipeline
+    import presentation_pipeline
+    import saas_pipeline
+    import session_pipeline
+    import telemetry_pipeline
+    import transport_pipeline
 
-    threshold = gap_threshold_ns()
+    # pylint: enable=import-outside-toplevel
+
     single_host = telemetry_pipeline.SINGLE_HOST_PORTS
 
-    layer_2 = lambda result: layer_2_decisions(result, single_host, threshold)  # noqa: E731  pylint: disable=unnecessary-lambda-assignment
+    def estate(result) -> dict:
+        return {**rules.layer_1_decisions(result), **rules.layer_2_decisions(result, single_host)}
 
     sweeps = {
         "estate_collectors":
-            sweep("estate, collector clocks: layers 1, 2 and 5 over one hour", estate_pipeline, layer_2, chain_reach),
+            sweep("estate, collector clocks: layers 1, 2 and 5 over one hour", estate_pipeline, estate, chain_reach),
         "estate_switches":
             sweep("estate, switch clocks: the guide's own claim, tested",
                   estate_pipeline,
-                  layer_2,
+                  estate,
                   chain_reach,
                   columns=SWITCH_CLOCKS),
         "session":
-            sweep("session, collector clocks: layer 5 over a week", session_pipeline, layer_5_decisions, lambda _: {}),
+            sweep("session, collector clocks: layer 5 over a week", session_pipeline, rules.layer_5_decisions),
         "session_off_boundary":
             sweep("session, same but moved off the hour marks first",
                   session_pipeline,
-                  layer_5_decisions, lambda _: {},
+                  rules.layer_5_decisions,
                   shift_ns=HALF_WINDOW_NS),
+        "network":
+            sweep("network, collector clocks: layer 3", network_pipeline, rules.layer_3_decisions),
+        "transport":
+            sweep("transport, collector clocks: layer 4", transport_pipeline, rules.layer_4_decisions),
+        "presentation":
+            sweep("presentation, collector clocks: layer 6", presentation_pipeline, rules.layer_6_decisions),
+        "application":
+            sweep("application, collector clocks: DNS and HTTP", application_pipeline, rules.application_decisions),
+        "saas":
+            sweep("saas, collector clocks: the provider's audit log", saas_pipeline, rules.saas_decisions),
+        "endpoint":
+            sweep("endpoint, collector clocks", endpoint_pipeline, rules.endpoint_decisions),
+        "endpoint_hosts":
+            sweep("endpoint, host clocks: each agent stamps its own process starts",
+                  endpoint_pipeline,
+                  rules.endpoint_decisions,
+                  columns="hostname"),
+        "campaign":
+            sweep("campaign, collector clocks: the four chains, to three hours",
+                  campaign_pipeline,
+                  rules.chain_decisions,
+                  magnitudes=CHAIN_MAGNITUDES_NS),
     }
+
+    points = breaking_point(sweeps)
+    chain_edges = {}
+
+    for (rule, per_sweep) in points.items():
+        entry = per_sweep.get("campaign")
+
+        if (isinstance(entry, dict)):
+            ladder = [magnitude for magnitude in CHAIN_MAGNITUDES_NS if magnitude < entry["spread_ns"]]
+            chain_edges[rule] = refine(campaign_pipeline, rules.chain_decisions, rule, ladder[-1], entry["spread_ns"])
 
     report = {
         "at":
             datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "spread_widths": [_readable(magnitude) for magnitude in MAGNITUDES_NS],
+        "chain_spread_widths": [_readable(magnitude) for magnitude in CHAIN_MAGNITUDES_NS],
         "gap_threshold_ns":
-            threshold,
+            gap_threshold_ns(),
+        "join_tolerance_ns":
+            rules.JOIN_TOLERANCE_NS,
         "breaking_point":
-            breaking_point(sweeps),
+            points,
+        "chain_breaking_point_to_the_second":
+            chain_edges,
         "sweeps":
             sweeps,
-        "measures": ("the spread between collectors' clocks that each shipped rule tolerates, on these corpora. "
-                     "The magnitude is the width the clocks are spread across, so the worst pair disagrees by "
-                     "exactly that much. A rule is counted as changed when the set of entities it accuses "
-                     "changes, never when only a timestamp moves. Nothing here corrects for skew: clock_source "
-                     "and clock_offset_ms are in the envelope and no stage reads them, so this is the damage a "
+        "measures": ("the spread between clocks that each shipped rule tolerates, on these corpora. The magnitude is "
+                     "the width the clocks are spread across, so the worst pair disagrees by exactly that much. A "
+                     "rule is counted as changed when the set of entities it accuses changes, never when only a "
+                     "timestamp moves. A sweep over a corpus with one clock perturbs nothing, and is reported as "
+                     "not measured rather than as a tolerance. Nothing here corrects for skew: clock_source and "
+                     "clock_offset_ms are in the envelope and no stage reads them, so this is the damage a "
                      "deployment takes today."),
     }
 
@@ -524,8 +534,13 @@ def main() -> int:
     print("\n=== breaking point: the narrowest spread that changed the rule's mind ===")
 
     for (rule, per_sweep) in report["breaking_point"].items():
-        where = ", ".join(f"{name} {entry['spread'] if entry else 'never'}" for (name, entry) in per_sweep.items())
+        where = ", ".join(f"{name} {entry['spread'] if isinstance(entry, dict) else (entry or 'never')}"
+                          for (name, entry) in per_sweep.items())
         print(f"    {rule}: {where}")
+
+    for (rule, edge) in chain_edges.items():
+        print(f"    {rule}: held at {edge['held_at']}, changed at {edge['changed_at']}; "
+              f"lost {edge['no_longer_flagged'] or 'nothing'}, gained {edge['newly_flagged'] or 'nothing'}")
 
     print(f"\nArtifact written to {arguments.artifact}.")
 

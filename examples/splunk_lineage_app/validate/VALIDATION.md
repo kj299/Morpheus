@@ -5,25 +5,38 @@ diff against a written expectation, rather than a judgement call at the end of a
 
 ## Running it
 
+One command, on a machine with Docker and nothing else -- no Python, and no license file, because the image
+starts under Splunk's built-in trial:
+
 ```bash
-cd examples/splunk_lineage_app/validate
-docker compose up -d
-# wait for the health check to go green, then index the sample events
-docker exec morpheus-lineage-validate bash -lc '
-  for f in /sample_events/*.jsonlines; do
-    st=$(basename "$f" .jsonlines | tr "_" ":")
-    case "$st" in
-      morpheus:score:*|morpheus:edge) idx=behavior_events ;;
-      binding:*)                      idx=behavior_bindings ;;
-      context:*)                      idx=behavior_context ;;
-      *)                              idx=behavior_events ;;
-    esac
-    [ "$st" = "morpheus:edge" ] && idx=behavior_lineage
-    /opt/splunk/bin/splunk add oneshot "$f" -index "$idx" -sourcetype "$st" -auth admin:"$SPLUNK_PASSWORD"
-  done'
+SPLUNK_PASSWORD='choose-one' examples/splunk_lineage_app/validate/run_search_head.sh
 ```
 
-Then run each saved search and compare against [`expected_results.json`](./expected_results.json).
+It starts the container, waits for it to report healthy, and runs [`run_search_head.py`](./run_search_head.py)
+inside it under Splunk's own interpreter. That indexes every file in `sample_events/`, makes the two checks
+below, dispatches all forty-eight searches in the order this document prescribes, and writes
+`search_head_results.json` beside this file: the Splunk version, the date, what was indexed, and a row count per
+search. Commit it; `tests/morpheus/determinism/test_search_head_run.py` compares it with
+[`expected_results.json`](./expected_results.json), and skips saying so until it exists. The container is left
+running for rerunning a search by hand at <http://localhost:8000>; `docker compose down -v` here removes it.
+
+Two adjustments make the run faithful, and both are the runner's rather than the reader's:
+
+- **The events are dated 1970**, because the corpora count from the epoch, and no search head indexes that as
+  itself: `MAX_DAYS_AGO` cannot exceed about thirty years, and an event outside it is silently given another time.
+  The runner moves every timestamp forward by one whole number of weeks, so the newest event lands a few days
+  before the run; hours of day, weekdays and every bin boundary stay where they were, and every search compares
+  `_time` only with another `_time`. The events then span fifty-seven days, more than the thirty layer 1 allows,
+  so the container mounts `validation_app/`, a separate app whose `local/props.conf` raises `MAX_DAYS_AGO` for
+  this run and whose `local/indexes.conf` gives the indexes local paths. It is never deployed.
+- **The searches look back from now**, over windows like `-2h@m` to `-5m@m`. Each is dispatched as
+  `| savedsearch` with an explicit time range covering every event, which overrides the stanza's window, so each
+  is asked its question over all the data at once -- the same simplification the Python recomputation behind
+  `expected_results.json` makes.
+
+The indexing loop this section used to give by hand would have met both problems: it indexed the 1970 timestamps
+as they were, so every event would have failed the first check below. Nothing in this repository records it
+having been run against the files it named.
 
 ## The two things worth checking before any search
 
