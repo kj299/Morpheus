@@ -80,6 +80,15 @@ match: those are a second report of tests already counted, and counting them twi
 reconciliation in the direction that hides a drop.
 """
 
+END_OF_PROGRESS = re.compile(r"^=+ (?:FAILURES|ERRORS|warnings summary|short test summary info) =+$")
+"""The first of pytest's end-of-run sections, after which no line is a test starting.
+
+The warnings summary lists the tests that warned by bare identifier, one per line, with no outcome after it --
+exactly the shape of a test that started and never finished. Read as progress, the last test to warn became the
+test the run "died in", on a run that had finished and printed its tally: the 2026-10-03 artifact named a passing
+transport test as the place a clean run stopped. Progress ends where these sections begin.
+"""
+
 WRAPPED_OUTCOME = re.compile(r"^(?P<outcome>" + "|".join(OUTCOMES) + r")\b(?P<rest>.*)$")
 """An outcome standing alone on its own line, which is where pytest puts it when the identifier did not fit.
 
@@ -125,6 +134,9 @@ def summarize(text: str, collected: typing.Optional[int] = None, collected_names
             failures.add(name)
 
     for line in text.splitlines():
+        if (END_OF_PROGRESS.match(line.strip())):
+            break
+
         if (not STARTED_LINE.match(line)):
             wrapped = WRAPPED_OUTCOME.match(line)
 

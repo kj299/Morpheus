@@ -59,7 +59,7 @@ resolution, window sealing), feature stages for every telemetry class from TC-0 
 scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's six
 checks over twelve composed corpora, which run under pytest on developer machines and have not yet run in
 any CI this fork has executed. That is forty-six stages and forty-one supporting
-modules, covered by 1,928 distinct tests, itemized in
+modules, covered by 1,932 distinct tests, itemized in
 [Part 6](#provided). Thirty-eight of the forty-two rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a

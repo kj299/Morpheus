@@ -90,7 +90,11 @@ def sort_for_cumulative_features(df: pd.DataFrame,
         If `order_columns` is empty, or if `require_total_order` is set and the columns leave ties.
     """
     if (hasattr(df, "to_pandas")):
-        df = df.to_pandas()
+        # Not a plain `to_pandas`: that turns a nullable integer column into float64, and the caller hands the sorted
+        # frame back to cuDF, so every integer input with a gap would leave this sort as a float on a GPU.
+        from morpheus.utils.column_assign import to_host_frame  # pylint: disable=import-outside-toplevel
+
+        df = to_host_frame(df)
 
     order_columns = list(order_columns)
 
