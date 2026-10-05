@@ -416,9 +416,9 @@
       "why": "A maintenance search that deletes day buckets older than the retention window, the layer 1 twin of the L2/L3 expiry job. On a freshly loaded corpus nothing is old enough to expire, so an empty result is the correct one. Note that the current-state binding_l1 collection has no expiry job at all: it holds one row per port, and a decommissioned port's row is the last true thing known about it, so there is nothing there that grows."
     },
     "Principal watchlist - expiry": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "A maintenance search that keeps only the watchlist entries whose expires has not passed. On a freshly loaded corpus the lookup holds what R-P-L5-006 and R-P-L7-006 have just written, and the events behind them are historical, so their thirty-day expiries are long past and the job drops every entry. The empty result is the job working; it is also why the expiry job must run after the predictive searches in a validation pass and not before R-B-L7-002 is checked."
+      "expected_rows": 2,
+      "expected_empty": false,
+      "why": "A maintenance search that keeps only the watchlist entries whose expires has not passed. Its answer depends on how far the events sit behind the clock, and run_search_head.py places them: every timestamp moves by whole weeks so the newest event lands three to ten days before the run. R-P-L7-006 stamps each principal's entry with that principal's latest event, and both of its principals' latest events are the newest in the corpus, so their thirty-day expiries are still ahead and the two entries survive. R-P-L5-006 stamps each principal-day it fired, and the latest layer 5 event is forty-six days before the newest, so its six entries have passed and are dropped. Against the unshifted 1970 events every entry would expire, which is what this note said before the first search-head run showed otherwise. Run it last: run before R-B-L7-002, it empties the list that search reads."
     },
     "Binding lookup - L2/L3 expiry": {
       "expected_rows": 0,
@@ -426,29 +426,13 @@
       "why": "A maintenance search that deletes buckets older than the retention window. On a freshly loaded corpus nothing is old enough to expire, so an empty result is the correct one."
     },
     "Binding health - unresolved rate": {
-      "expected_rows": 5,
-      "why": "One row per sourcetype and telemetry class whose records carry a resolution outcome: the layer 1 port stream, the three layer 2 streams, and the campaign's host logins resolved through DHCP leases on layer 5. The search used to read morpheus:score:l3 alone, a sourcetype whose producer never writes resolution_method, so it could only ever return nothing; the retrospective's gap G24. The ARP stream's 180 unresolved of 1,220 is the corpus's planted rate (0.148), under the 0.2 that marks a class degraded. An operational metric: the value is in the numbers rather than in whether rows came back.",
+      "expected_rows": 1,
+      "why": "One row: the ARP stream, the one class whose records carry a resolution outcome. Its 180 unresolved of 1,220 is the corpus's planted rate (0.148), under the 0.2 that marks a class degraded. Four more classes -- the layer 1 port stream, the MAC table, 802.1X and the layer 5 host logins -- carry the resolution_method column with no value on any row; while the wire sent those as null, resolution_method=* matched them and the search reported four classes as resolving bindings with nothing unresolved, which is how this expectation read five until the first search-head run. An absent field does not match, so they are no longer counted as healthy when nothing about them was measured. The search used to read morpheus:score:l3 alone, a sourcetype whose producer never writes resolution_method; the retrospective's gap G24. An operational metric: the value is in the numbers rather than in whether rows came back.",
       "expected_empty": false,
       "groups": {
-        "morpheus:score:l1/tc1": {
-          "total": 305,
-          "unresolved": 0
-        },
-        "morpheus:score:l2/tc2_mac": {
-          "total": 82,
-          "unresolved": 0
-        },
         "morpheus:score:l2/tc2_arp": {
           "total": 1220,
           "unresolved": 180
-        },
-        "morpheus:score:l2/tc2_auth": {
-          "total": 32,
-          "unresolved": 0
-        },
-        "morpheus:score:l5/tc5_auth": {
-          "total": 24,
-          "unresolved": 0
         }
       }
     },

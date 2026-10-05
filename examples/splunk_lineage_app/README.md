@@ -180,7 +180,8 @@ detections `R-D-L2-001`, `R-D-L2-003`, `R-D-L2-004`, `R-D-L2-005` and, later, `R
 predictive watchlist `R-P-L5-006`, then the `morpheus:score:l3` sourcetype with five layer 3 detections,
 then `morpheus:score:l4` with three more, `morpheus:score:l6` with five, `morpheus:score:l7` with five, the chained `R-C-001`, `R-C-004`
 and `R-C-005`, with `R-C-002` as rewritten, the layer 1 detections `R-D-L1-001` and `R-P-L1-004`, and the layer 5 baseline searches `R-D-L5-007`, `R-D-L5-008` and `R-D-L5-009` with the gated `R-B-L5-001` and `R-B-L5-002` and the session duration rule `R-B-L5-005`, together with the `principal_watchlist` lookup and its expiry job. That is all thirty-eight detection searches this app ships, so the live
-pass above covers the app's oldest part and none of its detections as they now stand. Their SPL follows
+pass above covers the app's oldest part and none of its detections as they now stand; the search-head run
+described below has since run all of them. Their SPL follows
 the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
 Python over the determinism harnesses' planted corpora (`tests/morpheus/determinism/test_first_detections.py` for
 the layer 1, 2 and 5 rules, and the network, transport, presentation, application, SaaS, endpoint and campaign
@@ -192,8 +193,13 @@ the stanzas parse on a search head. Run `btool savedsearches list` after install
 The run that would settle that is packaged: `validate/run_search_head.sh` starts the validation container, indexes
 the sample events, dispatches all forty-eight searches in the order `validate/VALIDATION.md` prescribes, and writes
 `validate/search_head_results.json`, which `tests/morpheus/determinism/test_search_head_run.py` compares with
-`expected_results.json`. It needs Docker and nothing else. It has not been run, so no search-head result is
-claimed here, and the comparison test skips saying so until one is committed.
+`expected_results.json`. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:
+every one of the forty-eight searches ran without error over the pipeline's own events, and forty-six returned
+what was written. The two that did not were nulls on the wire -- a field sent as `null` is not absent to Splunk, and
+`macs_per_port_step>0` and `resolution_method=*` both let null values through. The serializer
+(`morpheus.utils.siem_wire.to_wire_lines`) now leaves null fields out. That run is kept in
+`validate/search_head_runs/`; the run over the regenerated events is still to be recorded, and the comparison test
+skips saying so until it is.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

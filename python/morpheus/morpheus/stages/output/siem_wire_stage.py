@@ -59,6 +59,11 @@ class SiemWireStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     consumer reading `bind_start` off a closed binding should not have to know that one field on the record is a
     string and its sibling is a nineteen-digit integer.
 
+    Nulls are not this stage's to drop, since a frame cannot leave a field out of one row; the sink's serializer
+    does, and it has to be `morpheus.utils.siem_wire.to_wire_lines` rather than the generic JSON-lines writer, which
+    sends every null as `"field":null`. A SIEM does not read that as absent: the first search-head run let four
+    null steps through R-B-L2-002's `macs_per_port_step>0`.
+
     Columns whose names end in `_ns` are deliberately untouched. They are the exact values a consumer computes
     with, nothing takes `_time` from them, and rounding them to microseconds to fit a timestamp format would
     quietly change arithmetic that depends on them.

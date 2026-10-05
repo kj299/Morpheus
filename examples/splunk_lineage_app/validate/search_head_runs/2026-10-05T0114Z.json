@@ -1,0 +1,315 @@
+{
+  "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
+  "at": "2026-10-05T01:14:20.880897+00:00",
+  "timestamp_shift_weeks": 2953,
+  "dispatch_window": {
+    "earliest": 1785888000,
+    "latest": 1791166413
+  },
+  "indexed": {
+    "binding:bucketed": 82,
+    "binding:l1": 7,
+    "binding:l2": 13,
+    "context:asset": 7,
+    "context:identity": 23,
+    "morpheus:edge": 47,
+    "morpheus:score:l1": 305,
+    "morpheus:score:l2": 1334,
+    "morpheus:score:l3": 719,
+    "morpheus:score:l4": 987,
+    "morpheus:score:l5": 371,
+    "morpheus:score:l6": 270,
+    "morpheus:score:l7": 4235
+  },
+  "expected_indexed": {
+    "binding:bucketed": 82,
+    "binding:l1": 7,
+    "binding:l2": 13,
+    "context:asset": 7,
+    "context:identity": 23,
+    "morpheus:edge": 47,
+    "morpheus:score:l1": 305,
+    "morpheus:score:l2": 1334,
+    "morpheus:score:l3": 719,
+    "morpheus:score:l4": 987,
+    "morpheus:score:l5": 371,
+    "morpheus:score:l6": 270,
+    "morpheus:score:l7": 4235
+  },
+  "btool_check": "",
+  "checks": {
+    "time_drift_seconds": [
+      {
+        "max_drift": "-5184814.000000",
+        "min_drift": "-5184936.000000"
+      }
+    ],
+    "binding_tables": [
+      {
+        "binding_table": "mac_table",
+        "count": "80"
+      },
+      {
+        "binding_table": "port_inventory",
+        "count": "2"
+      }
+    ],
+    "principal_watchlist": [
+      {
+        "rule_id": "R-P-L5-006",
+        "reason": "drift-trajectory",
+        "count": "6"
+      },
+      {
+        "rule_id": "R-P-L7-006",
+        "reason": "access-breadth",
+        "count": "2"
+      }
+    ]
+  },
+  "order": [
+    "Binding lookup - L2/L3 refresh",
+    "Binding lookup - L1 refresh",
+    "Binding lookup - L1 history refresh",
+    "Behavior summary - per-layer scores",
+    "R-P-L5-006 - Drift trajectory",
+    "R-P-L7-006 - Access breadth trajectory",
+    "Chain assembly - cross-layer risk",
+    "R-C-002 - TLS anomaly precedes beaconing",
+    "R-C-001 - Lateral movement chain",
+    "R-C-004 - Staged exfiltration",
+    "R-C-005 - Credential replay across the stack",
+    "R-D-L1-001 - Transceiver substitution",
+    "R-P-L1-004 - Optical degradation forecast",
+    "R-D-L2-004 - MAC in two places at once",
+    "R-D-L2-005 - Authorization without authentication",
+    "R-B-L3-001 - Fan-out expansion",
+    "R-B-L3-002 - Beaconing",
+    "R-D-L3-003 - Reserved-range egress",
+    "R-B-L3-004 - TTL fingerprint shift",
+    "R-P-L3-005 - Fan-out trajectory",
+    "R-D-L4-002 - SYN without completion",
+    "R-D-L4-003 - RST ratio",
+    "R-B-L4-005 - Transfer envelope breach",
+    "R-B-L6-001 - New TLS client fingerprint",
+    "R-D-L6-002 - Certificate issuer anomaly",
+    "R-D-L6-003 - Self-signed to external destination",
+    "R-B-L6-004 - Cipher downgrade",
+    "R-D-L6-005 - Content type mismatch",
+    "TLS table coverage - unrecognized values",
+    "R-B-L7-001 - DNS tunneling",
+    "R-D-L7-005 - Enumeration",
+    "R-B-L7-002 - Bulk data access",
+    "R-B-L7-004 - Process ancestry novelty",
+    "R-D-L2-001 - MAC address count exceeded on an access port",
+    "R-B-L2-002 - Port-to-MAC binding novelty",
+    "R-D-L2-003 - ARP anomaly",
+    "Binding health - unresolved rate",
+    "R-D-L5-003 - Impossible travel",
+    "R-D-L5-004 - Multi-factor fatigue",
+    "R-D-L5-007 - Off-hours authentication",
+    "R-D-L5-008 - New authentication location or device",
+    "R-D-L5-009 - Failed authentication run ending in success",
+    "R-B-L5-001 - Composite authentication anomaly",
+    "R-B-L5-002 - Location novelty anomaly",
+    "R-B-L5-005 - Session duration anomaly",
+    "Binding lookup - L2/L3 expiry",
+    "Binding lookup - L1 history expiry",
+    "Principal watchlist - expiry"
+  ],
+  "searches": {
+    "Binding lookup - L2/L3 refresh": {
+      "phase": "refresh",
+      "rows": 0
+    },
+    "Binding lookup - L1 refresh": {
+      "phase": "refresh",
+      "rows": 7
+    },
+    "Binding lookup - L1 history refresh": {
+      "phase": "refresh",
+      "rows": 2
+    },
+    "Behavior summary - per-layer scores": {
+      "phase": "summary",
+      "rows": 4335
+    },
+    "R-P-L5-006 - Drift trajectory": {
+      "phase": "predictive",
+      "rows": 6
+    },
+    "R-P-L7-006 - Access breadth trajectory": {
+      "phase": "predictive",
+      "rows": 2
+    },
+    "Chain assembly - cross-layer risk": {
+      "phase": "search",
+      "rows": 0
+    },
+    "R-C-002 - TLS anomaly precedes beaconing": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-C-001 - Lateral movement chain": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-C-004 - Staged exfiltration": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-C-005 - Credential replay across the stack": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L1-001 - Transceiver substitution": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-P-L1-004 - Optical degradation forecast": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L2-004 - MAC in two places at once": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L2-005 - Authorization without authentication": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-B-L3-001 - Fan-out expansion": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L3-002 - Beaconing": {
+      "phase": "search",
+      "rows": 6
+    },
+    "R-D-L3-003 - Reserved-range egress": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L3-004 - TTL fingerprint shift": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-P-L3-005 - Fan-out trajectory": {
+      "phase": "search",
+      "rows": 0
+    },
+    "R-D-L4-002 - SYN without completion": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L4-003 - RST ratio": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-B-L4-005 - Transfer envelope breach": {
+      "phase": "search",
+      "rows": 6
+    },
+    "R-B-L6-001 - New TLS client fingerprint": {
+      "phase": "search",
+      "rows": 5
+    },
+    "R-D-L6-002 - Certificate issuer anomaly": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L6-003 - Self-signed to external destination": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L6-004 - Cipher downgrade": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L6-005 - Content type mismatch": {
+      "phase": "search",
+      "rows": 1
+    },
+    "TLS table coverage - unrecognized values": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L7-001 - DNS tunneling": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L7-005 - Enumeration": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-B-L7-002 - Bulk data access": {
+      "phase": "search",
+      "rows": 8
+    },
+    "R-B-L7-004 - Process ancestry novelty": {
+      "phase": "search",
+      "rows": 10
+    },
+    "R-D-L2-001 - MAC address count exceeded on an access port": {
+      "phase": "search",
+      "rows": 0
+    },
+    "R-B-L2-002 - Port-to-MAC binding novelty": {
+      "phase": "search",
+      "rows": 6
+    },
+    "R-D-L2-003 - ARP anomaly": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Binding health - unresolved rate": {
+      "phase": "search",
+      "rows": 5
+    },
+    "R-D-L5-003 - Impossible travel": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L5-004 - Multi-factor fatigue": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L5-007 - Off-hours authentication": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L5-008 - New authentication location or device": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L5-009 - Failed authentication run ending in success": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L5-001 - Composite authentication anomaly": {
+      "phase": "search",
+      "rows": 0
+    },
+    "R-B-L5-002 - Location novelty anomaly": {
+      "phase": "search",
+      "rows": 0
+    },
+    "R-B-L5-005 - Session duration anomaly": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Binding lookup - L2/L3 expiry": {
+      "phase": "expiry",
+      "rows": 0
+    },
+    "Binding lookup - L1 history expiry": {
+      "phase": "expiry",
+      "rows": 0
+    },
+    "Principal watchlist - expiry": {
+      "phase": "expiry",
+      "rows": 2
+    }
+  },
+  "measures": "what each shipped saved search returns on one Splunk instance over the checked-in sample events, with every timestamp moved by a whole number of weeks and each search dispatched over all of them at once. A row count per search, not the rows themselves."
+}

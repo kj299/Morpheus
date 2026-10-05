@@ -14,9 +14,9 @@ determinism harness actually emits, which is the only way to catch a column that
 the pipeline, or a class whose timestamps arrive in a dtype the renderer was never handed.
 
 The chain is the deployment path with nothing simulated except the SIEM: run the composed pipeline, take the rows
-for one sourcetype, put them through `SiemWireStage`, serialize with the same `serializers.df_to_json` the Kafka
-sink uses, then apply that stanza's own `TIME_PREFIX` and `TIME_FORMAT` to every line and check the parsed time
-against the nanoseconds the pipeline started with, truncated to microseconds.
+for one sourcetype, put them through `SiemWireStage`, serialize with `siem_wire.to_wire_lines`, the serializer a SIEM
+sink must use because it leaves null fields out, then apply that stanza's own `TIME_PREFIX` and `TIME_FORMAT` to
+every line and check the parsed time against the nanoseconds the pipeline started with, truncated to microseconds.
 """
 
 import configparser
@@ -33,6 +33,7 @@ from morpheus.io import serializers
 from morpheus.messages import MessageMeta
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
 from morpheus.utils.siem_sourcetypes import PRODUCED
+from morpheus.utils.siem_wire import to_wire_lines
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -182,9 +183,10 @@ def assert_parses_as_its_own_stanza(config: Config, frame: pd.DataFrame, stanza:
     payload = MessageMeta(get_df_class(config.execution_mode)(frame.reset_index(drop=True)))
     rendered = SiemWireStage(config, sourcetype=stanza).on_data(payload).copy_dataframe()
     host = rendered.to_pandas() if hasattr(rendered, "to_pandas") else rendered
-    lines = serializers.df_to_json(host, strip_newlines=True)
+    lines = to_wire_lines(host)
 
     assert len(lines) == len(source)
+    assert not any(":null" in line for line in lines), f"{stanza}: a null field reached the wire"
 
     for (position, (line, nanoseconds)) in enumerate(zip(lines, source)):
         match = pattern.search(line)

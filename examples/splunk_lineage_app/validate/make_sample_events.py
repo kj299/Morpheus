@@ -84,9 +84,9 @@ def _render(frame, sourcetype: str) -> list:
     from morpheus.config import Config
     from morpheus.config import CppConfig
     from morpheus.config import ExecutionMode
-    from morpheus.io import serializers
     from morpheus.messages import MessageMeta
     from morpheus.stages.output.siem_wire_stage import SiemWireStage
+    from morpheus.utils.siem_wire import to_wire_lines
 
     CppConfig.set_should_use_cpp(False)
     config = Config()
@@ -95,7 +95,7 @@ def _render(frame, sourcetype: str) -> list:
     stage = SiemWireStage(config, sourcetype=sourcetype, require_columns=False)
     rendered = stage.on_data(MessageMeta(frame.reset_index(drop=True))).copy_dataframe()
 
-    return serializers.df_to_json(rendered, strip_newlines=True)
+    return to_wire_lines(rendered)
 
 
 def main() -> int:

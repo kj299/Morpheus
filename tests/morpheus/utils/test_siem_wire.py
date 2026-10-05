@@ -34,8 +34,10 @@ from morpheus.io import serializers
 from morpheus.utils.siem_wire import SPLUNK_TIME_FORMAT
 from morpheus.utils.binding_table import TABLE_NAME_COLUMN
 from morpheus.utils.binding_table import BindingTable
+from morpheus.utils.siem_wire import omit_null_fields
 from morpheus.utils.siem_wire import render_event_time
 from morpheus.utils.siem_wire import render_event_time_series
+from morpheus.utils.siem_wire import to_wire_lines
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 PROPS_PATH = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheus-lineage", "default", "props.conf")
@@ -265,3 +267,33 @@ def test_the_lookup_refresh_filters_on_a_field_the_expansion_can_emit():
 
     assert "binding_table=dhcp_lease" in searches
     assert TABLE_NAME_COLUMN == "binding_table"
+
+
+def test_a_null_field_is_left_out_rather_than_sent():
+    # What the first search-head run found: a field sent as null was let through `macs_per_port_step>0`, where an
+    # absent one cannot be compared at all.
+    line = omit_null_fields('{"event_time":"1970-01-01T00:00:00.000000UTC","macs_per_port_step":null,"port_key":"p"}')
+
+    assert line == '{"event_time":"1970-01-01T00:00:00.000000UTC","port_key":"p"}'
+
+
+def test_leaving_nulls_out_keeps_order_values_and_nested_nulls():
+    line = omit_null_fields('{"b":1,"a":null,"c":false,"d":0,"e":"","f":[null,1],"g":{"h":null}}')
+
+    assert line == '{"b":1,"c":false,"d":0,"e":"","f":[null,1],"g":{"h":null}}', \
+        "only a top-level null is dropped; false, zero and the empty string are values"
+
+
+def test_the_wire_serializer_sends_no_nulls_from_a_frame_with_gaps():
+    frame = pd.DataFrame({
+        "port_key": ["p1", "p2"],
+        "macs_per_port_step": pd.array([1, None], dtype="Int64"),
+        "ratio": [float("nan"), 0.5],
+        "label": [None, "x"],
+    })
+
+    lines = to_wire_lines(frame)
+
+    assert lines == ['{"port_key":"p1","macs_per_port_step":1}', '{"port_key":"p2","ratio":0.5,"label":"x"}']
+    assert all(":null" not in line for line in serializers.df_to_json(frame, strip_newlines=True)) is False, \
+        "the generic serializer still sends nulls; if it stops, this module's reason to exist should be revisited"
