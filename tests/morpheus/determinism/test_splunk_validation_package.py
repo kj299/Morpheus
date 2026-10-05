@@ -997,7 +997,11 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # for a reason it states: R-B-L5-001 and R-B-L5-002 read only rows a principal's own model scored, and none
     # here was; the watchlist expiry drops entries for events that are years old. Nine of forty-eight after
     # R-B-L5-005, which arrived with a long session planted for it.
-    assert len(empty) == 9
+    #
+    # Eight of forty-eight after the first search-head run, and the change is a correction rather than a rule: the
+    # watchlist expiry was empty only against 1970 timestamps, and the runner dates the events so R-P-L7-006's two
+    # entries are still inside their thirty days when it runs.
+    assert len(empty) == 8
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name
@@ -1169,6 +1173,10 @@ def test_the_binding_health_rows_are_the_classes_that_resolve_bindings(expected:
     assert entry["expected_rows"] == len(groups)
     assert entry["expected_empty"] is False
     assert entry["groups"] == groups
+
+    # One class, and that is the correction the first search-head run forced: four more carried the column with a
+    # null on every row, and while nulls were sent the search counted them as healthy.
+    assert list(groups) == ["morpheus:score:l2/tc2_arp"]
 
     # No class in the corpus is degraded, and the one with unresolved rows is the planted ARP rate.
     for (key, group) in groups.items():

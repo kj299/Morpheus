@@ -24,9 +24,19 @@ to index time -- which turns every windowed rule into a rule about when the pipe
 `event_time` field on every record leaving the pipeline. The rendering is microsecond precision, matching what
 Splunk's `%6N` reads; where the exact nanosecond value must survive the hop, carry it alongside in a separate
 numeric field rather than widening this one.
+
+A null is not sent at all. `to_wire_lines` serializes a frame the way a SIEM sink must, one JSON object per record
+with every null field left out, because a field that is present and null does not read as absent once a SIEM has
+extracted it. The first search-head run showed what that costs: `macs_per_port_step>0` let the four ports whose
+step was `"macs_per_port_step":null` through, and R-B-L2-002 reported six ports where two had stepped. The likely
+mechanism is the extraction keeping the literal `null` as a value, which a base-search comparison then orders as
+text; either way, a record that does not carry the field cannot be compared at all. An absent field fails every
+comparison, satisfies `isnull`, and gives way to `coalesce`'s fallback, which is what every search in the app
+already assumes a null does.
 """
 
 import datetime
+import json
 import typing
 
 from morpheus.utils.binding_table import to_epoch_ns
@@ -90,3 +100,42 @@ def render_event_time_series(values: typing.Sequence, time_unit: str = "ns") -> 
         One rendering per row, `None` where the input was null.
     """
     return [render_event_time(value, time_unit=time_unit) for value in values]
+
+
+def omit_null_fields(line: str) -> str:
+    """
+    One serialized record with its null fields removed.
+
+    Parameters
+    ----------
+    line : str
+        One JSON object, as a JSON-lines serializer writes it.
+
+    Returns
+    -------
+    str
+        The same object without the members whose value is null, keys in their original order. Nulls nested inside
+        a value are left alone; a field is either sent or not, and only a top-level field can be.
+    """
+    record = json.loads(line)
+
+    return json.dumps({key: value for (key, value) in record.items() if value is not None}, separators=(",", ":"))
+
+
+def to_wire_lines(df) -> list[str]:
+    """
+    Serialize a frame the way a SIEM sink must: one JSON object per record, null fields left out.
+
+    Parameters
+    ----------
+    df : `pandas.DataFrame` or `cudf.DataFrame`
+        The frame after `SiemWireStage`, so its timestamps are already rendered.
+
+    Returns
+    -------
+    list of str
+        One line per record, without a trailing newline.
+    """
+    from morpheus.io import serializers  # pylint: disable=import-outside-toplevel
+
+    return [omit_null_fields(line) for line in serializers.df_to_json(df, strip_newlines=True)]

@@ -178,3 +178,46 @@ def test_the_recorded_run_returned_what_is_written():
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
     assert differing == {}, f"rows returned on the search head versus written: {differing}"
+
+
+FIRST_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-05T0114Z.json")
+"""The first search-head run, kept because it is the evidence for the two changes it caused."""
+
+
+def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it_caused_changes():
+    # Splunk 10.2.8, 2026-10-05: forty-six of forty-eight searches returned what was then written. The other two are
+    # why the wire format leaves nulls out and why the watchlist expiry expects two rows: R-B-L2-002 let four ports
+    # through whose `macs_per_port_step` was sent as null, and the expiry kept R-P-L7-006's entries because the
+    # runner dates the events within their thirty days. Reading the nulls out of the wire then showed a third that
+    # had matched only because the expectation shared the defect: Binding health counted four classes whose
+    # `resolution_method` was null on every row. The run itself was of the events as they were then, so it
+    # is not compared with the regenerated ones; `search_head_results.json` is for that.
+    with open(FIRST_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    assert run["splunk_version"].startswith("Splunk 10.2")
+    assert run["indexed"] == run["expected_indexed"] and sum(run["indexed"].values()) == 8400
+    assert not any("error" in entry for entry in run["searches"].values())
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == {
+        "R-B-L2-002 - Port-to-MAC binding novelty": 6,
+        "Binding health - unresolved rate": 5,
+    }, "the watchlist expiry now expects what the run found; the other two are nulls that reached the wire"
+    assert expected["R-B-L2-002 - Port-to-MAC binding novelty"]["expected_rows"] == 2
+    assert expected["Binding health - unresolved rate"]["expected_rows"] == 1
+
+
+def test_no_sample_event_sends_a_null():
+    # The repair, held: an absent field cannot be compared, a null one was.
+    for name in _event_files():
+        with open(os.path.join(VALIDATE, "sample_events", name), encoding="utf-8") as handle:
+            for line in handle:
+                assert all(value is not None for value in json.loads(line).values()), name
