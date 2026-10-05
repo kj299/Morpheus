@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# One Splunk instance, the app mounted, and the sample events on disk ready to index.
+# One Splunk instance, with the app, the validation settings and the sample events on disk ready to install and index.
 #
 # This exists so the search-head verdict costs minutes rather than an afternoon of setup. It is not a deployment
 # topology: a real estate parses on indexers or heavy forwarders and this is one container doing everything.
@@ -15,22 +15,17 @@ services:
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:-changeme-please}
       # Recent images refuse to start without accepting Splunk's General Terms as well as the license.
       SPLUNK_GENERAL_TERMS: --accept-sgt-current-at-splunk-com
-      # The app is mounted rather than copied so an edit to a saved search is one restart away from being tested.
       SPLUNK_APPS_URL: ""
     ports:
       - "8000:8000"   # web
       - "8089:8089"   # management, which VALIDATION.md drives the searches through
     volumes:
-      - ../TA-morpheus-lineage:/opt/splunk/etc/apps/TA-morpheus-lineage:ro
-      - ./sample_events:/sample_events:ro
-      # Validation-only settings, in an app of their own: index paths, and the MAX_DAYS_AGO the dated sample events
-      # need. See validation_app/local/props.conf.
-      - ./validation_app:/opt/splunk/etc/apps/morpheus_validation:ro
-      # The runner, the sample events and the saved searches it reads. Read-only: the runner writes its result
-      # inside the container and run_search_head.sh copies it out.
+      # The app, the validation-only settings, the sample events and the runner, all read-only and all outside
+      # /opt/splunk/etc. The image's provisioning changes the owner of everything under /opt/splunk/etc as it
+      # starts, and a read-only mount there stops it with "chown failed: Read-only file system" -- which is how the
+      # first attempt at this run ended. run_search_head.sh copies both apps into place once Splunk is up, gives
+      # them to the splunk user, and restarts it, so an edit to a saved search is tested by running it again.
       - ..:/splunk_lineage_app:ro
-    healthcheck:
-      test: ["CMD", "curl", "-fk", "https://localhost:8089/services/server/info"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
+    # No healthcheck of our own. The one this file used to carry called the management port without credentials,
+    # which Splunk can refuse, and then the container never reads as healthy. The image ships its own, and
+    # run_search_head.sh waits for an authenticated search to succeed instead, which is the readiness that matters.

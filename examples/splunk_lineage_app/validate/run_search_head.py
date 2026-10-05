@@ -31,7 +31,7 @@ before the run. A whole number of weeks keeps the hour of day, the weekday and e
 boundary where it was, and every search compares `_time` only with another `_time`, so what each rule decides is
 unchanged. Only the timestamp strings move; the window identifiers and buckets in the events are left as they are,
 and they are what the searches join on. The span of the events is still fifty-seven days, which is wider than
-layer 1's thirty-day `MAX_DAYS_AGO`, so the container mounts a validation-only app whose `props.conf` raises it
+layer 1's thirty-day `MAX_DAYS_AGO`, so `run_search_head.sh` installs a validation-only app whose `props.conf` raises it
 for this run alone.
 
 **The searches look back from now.** Every stanza dispatches over a window like `-2h@m` to `-5m@m`. Each is run
@@ -75,6 +75,10 @@ TIMESTAMP = re.compile(r'"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{6})UTC"')
 INDEX_BY_PREFIX = (("morpheus:edge", "behavior_lineage"), ("morpheus:score:", "behavior_events"),
                    ("binding:", "behavior_bindings"), ("context:", "behavior_context"))
 """Where each sourcetype is indexed, as VALIDATION.md's indexing loop has it."""
+
+CALL_TIMEOUT_SECONDS = 900
+"""How long one call to the splunk client may take; a search that has not finished by then is recorded as an error
+rather than left to hold the whole run."""
 
 PREDICTIVE = ("R-P-L5-006 - Drift trajectory", "R-P-L7-006 - Access breadth trajectory")
 SUMMARY = "Behavior summary - per-layer scores"
@@ -139,10 +143,15 @@ def ordered(names: list[str]) -> list[tuple[str, str]]:
 
 
 def splunk(*arguments: str, password: str, check: bool = True) -> subprocess.CompletedProcess:
-    completed = subprocess.run([SPLUNK, *arguments, "-auth", f"admin:{password}"],
-                               capture_output=True,
-                               text=True,
-                               check=False)
+    try:
+        completed = subprocess.run([SPLUNK, *arguments, "-auth", f"admin:{password}"],
+                                   capture_output=True,
+                                   text=True,
+                                   stdin=subprocess.DEVNULL,
+                                   timeout=CALL_TIMEOUT_SECONDS,
+                                   check=False)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(f"splunk {arguments[0]} did not return in {CALL_TIMEOUT_SECONDS}s") from error
 
     if (check and completed.returncode != 0):
         raise RuntimeError(f"splunk {arguments[0]} failed: {completed.stderr.strip() or completed.stdout.strip()}")
@@ -273,7 +282,12 @@ def main() -> int:
                                                    password)
 
     version = splunk("version", password=password, check=False).stdout.strip()
-    btool = subprocess.run([SPLUNK, "btool", "check", f"--app={APP}"], capture_output=True, text=True, check=False)
+    btool = subprocess.run([SPLUNK, "btool", "check", f"--app={APP}"],
+                           capture_output=True,
+                           text=True,
+                           stdin=subprocess.DEVNULL,
+                           timeout=CALL_TIMEOUT_SECONDS,
+                           check=False)
 
     report = {
         "splunk_version":

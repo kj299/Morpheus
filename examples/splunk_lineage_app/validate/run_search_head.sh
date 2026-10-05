@@ -14,9 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The host side of the search-head run: start the container, wait for it, run run_search_head.py inside it under
-# Splunk's own interpreter, and copy the result out to search_head_results.json beside this script. Needs Docker
-# and nothing else; no Python on the host, no license file (the image starts under Splunk's built-in trial).
+# The host side of the search-head run: start the container, wait for it, install the app and the validation
+# settings, restart, run run_search_head.py inside it under Splunk's own interpreter, and copy the result out to
+# search_head_results.json beside this script. Needs Docker and nothing else; no Python on the host, no license
+# file (the image starts under Splunk's built-in trial).
 #
 #   SPLUNK_PASSWORD='choose-one' examples/splunk_lineage_app/validate/run_search_head.sh
 #
@@ -36,28 +37,71 @@ fi
 cd "${HERE}"
 SPLUNK_PASSWORD="${SPLUNK_PASSWORD}" docker compose up -d
 
-echo "waiting for the search head to report healthy"
-for _ in $(seq 1 120); do
-    STATE="$(docker inspect -f '{{.State.Health.Status}}' "${CONTAINER}" 2>/dev/null || echo starting)"
-    if [[ "${STATE}" == "healthy" ]]; then
-        break
-    fi
-    if [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null)" != "true" ]]; then
-        echo "The container stopped. Its log says why:"
-        docker logs --tail 40 "${CONTAINER}"
-        exit 1
-    fi
-    sleep 10
-done
+# Ready means the image's own health check passes, which it does once provisioning has finished. Nothing here waits
+# on the splunk command-line client, because a client call that never returns is how the first runs hung: one
+# waited an hour on a call with no time limit. The wait reports once a minute so it never looks hung either.
+wait_until_healthy() {
+    local what="$1"
+    local state=""
+    echo "waiting for the search head (${what}); a first start provisions for five to ten minutes"
+    for attempt in $(seq 1 180); do
+        if [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null)" != "true" ]]; then
+            echo "The container stopped. Its log says why:"
+            docker logs --tail 60 "${CONTAINER}"
+            exit 1
+        fi
+        state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
+            "${CONTAINER}" 2>/dev/null || echo unknown)"
+        if [[ "${state}" == "healthy" ]]; then
+            echo "  healthy after about $(( (attempt - 1) * 10 ))s"
+            return 0
+        fi
+        if (( attempt % 6 == 0 )); then
+            echo "  still ${state} after $(( attempt * 10 ))s"
+            echo "      container log: $(docker logs --tail 1 "${CONTAINER}" 2>&1 | cut -c1-100)"
+        fi
+        sleep 10
+    done
+    echo "The search head was not healthy after thirty minutes (last state: ${state}). docker logs ${CONTAINER} says:"
+    docker logs --tail 40 "${CONTAINER}"
+    exit 1
+}
 
-if [[ "${STATE}" != "healthy" ]]; then
-    echo "The search head did not become healthy in twenty minutes; docker logs ${CONTAINER} says why."
+wait_until_healthy "first start"
+
+# Install both apps by copying them in, rather than mounting them: the image changes the owner of everything under
+# /opt/splunk/etc as it provisions, and a read-only mount there stops it. A copy is rerun every time, so an edited
+# saved search is what gets tested.
+docker exec -u root "${CONTAINER}" bash -c '
+    set -e
+    rm -rf /opt/splunk/etc/apps/TA-morpheus-lineage /opt/splunk/etc/apps/morpheus_validation
+    cp -r /splunk_lineage_app/TA-morpheus-lineage /opt/splunk/etc/apps/TA-morpheus-lineage
+    cp -r /splunk_lineage_app/validate/validation_app /opt/splunk/etc/apps/morpheus_validation
+    chown -R splunk:splunk /opt/splunk/etc/apps/TA-morpheus-lineage /opt/splunk/etc/apps/morpheus_validation'
+
+# Restart the container rather than calling `splunk restart` through docker exec: the restarted splunkd inherits the
+# exec session's output and the call need never return. The copied apps live in the container's filesystem and
+# survive it; the image provisions again and reports healthy when done.
+echo "apps installed; restarting the container so Splunk reads them"
+docker restart "${CONTAINER}" >/dev/null
+wait_until_healthy "after installing the apps"
+
+# One authenticated call, time-limited, before the run depends on hundreds of them. The admin password is fixed at
+# the container's first start, so a different SPLUNK_PASSWORD on a later run cannot log in.
+if ! CHECK="$(timeout 120 docker exec -u splunk "${CONTAINER}" /opt/splunk/bin/splunk search "| makeresults" \
+        -auth "admin:${SPLUNK_PASSWORD}" </dev/null 2>&1)"; then
+    echo "An authenticated search did not succeed. It said:"
+    echo "${CHECK:-nothing, and did not return within two minutes}"
+    if grep -q "Login failed" <<<"${CHECK}"; then
+        echo "The container keeps the password it was first started with. Remove it with 'docker compose down -v'"
+        echo "in ${HERE} and run this again with the password you want."
+    fi
     exit 1
 fi
 
 set +e
-docker exec -u splunk -e SPLUNK_PASSWORD="${SPLUNK_PASSWORD}" "${CONTAINER}" \
-    /opt/splunk/bin/splunk cmd python3 /splunk_lineage_app/validate/run_search_head.py
+timeout 7200 docker exec -u splunk -e SPLUNK_PASSWORD="${SPLUNK_PASSWORD}" "${CONTAINER}" \
+    /opt/splunk/bin/splunk cmd python3 /splunk_lineage_app/validate/run_search_head.py </dev/null
 STATUS=$?
 set -e
 
