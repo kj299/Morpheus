@@ -37,23 +37,34 @@ fi
 cd "${HERE}"
 SPLUNK_PASSWORD="${SPLUNK_PASSWORD}" docker compose up -d
 
-# Ready means an authenticated search succeeds: splunkd is up and provisioning has set the admin password.
+# Ready means an authenticated search succeeds: splunkd is up and provisioning has set the admin password. The
+# first start provisions for five to ten minutes, so the wait says what it is waiting on once a minute -- the search's
+# own error and the newest line of the container's log -- rather than sitting silent for twenty.
 wait_for_search_head() {
     local what="$1"
-    echo "waiting for the search head (${what})"
-    for _ in $(seq 1 120); do
+    local probe=""
+    echo "waiting for the search head (${what}); the first start takes five to ten minutes"
+    for attempt in $(seq 1 120); do
         if [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null)" != "true" ]]; then
             echo "The container stopped. Its log says why:"
             docker logs --tail 60 "${CONTAINER}"
             exit 1
         fi
-        if docker exec -u splunk "${CONTAINER}" /opt/splunk/bin/splunk search "| makeresults" \
-                -auth "admin:${SPLUNK_PASSWORD}" >/dev/null 2>&1; then
+        if probe="$(timeout 60 docker exec -u splunk "${CONTAINER}" /opt/splunk/bin/splunk search "| makeresults" \
+                -auth "admin:${SPLUNK_PASSWORD}" 2>&1)"; then
+            echo "  ready after about $(( (attempt - 1) * 10 ))s"
             return 0
+        fi
+        if (( attempt % 6 == 0 )); then
+            echo "  still waiting ($(( attempt * 10 ))s): search says: $(echo "${probe:-no output}" | tail -n 1 | cut -c1-120)"
+            echo "      container log: $(docker logs --tail 1 "${CONTAINER}" 2>&1 | cut -c1-120)"
         fi
         sleep 10
     done
-    echo "The search head did not answer an authenticated search in twenty minutes; docker logs ${CONTAINER} says why."
+    echo "The search head did not answer an authenticated search in twenty minutes. The search's last answer was:"
+    echo "${probe}"
+    echo "and docker logs ${CONTAINER} says:"
+    docker logs --tail 40 "${CONTAINER}"
     exit 1
 }
 
@@ -69,7 +80,7 @@ docker exec -u root "${CONTAINER}" bash -c '
     cp -r /splunk_lineage_app/validate/validation_app /opt/splunk/etc/apps/morpheus_validation
     chown -R splunk:splunk /opt/splunk/etc/apps/TA-morpheus-lineage /opt/splunk/etc/apps/morpheus_validation'
 echo "apps installed; restarting Splunk so it reads them"
-docker exec -u splunk "${CONTAINER}" /opt/splunk/bin/splunk restart >/dev/null
+timeout 300 docker exec -u splunk "${CONTAINER}" /opt/splunk/bin/splunk restart >/dev/null || echo "  restart did not return in five minutes; waiting for the search head anyway"
 
 wait_for_search_head "after installing the apps"
 
