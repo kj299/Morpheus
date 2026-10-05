@@ -76,6 +76,10 @@ INDEX_BY_PREFIX = (("morpheus:edge", "behavior_lineage"), ("morpheus:score:", "b
                    ("binding:", "behavior_bindings"), ("context:", "behavior_context"))
 """Where each sourcetype is indexed, as VALIDATION.md's indexing loop has it."""
 
+CALL_TIMEOUT_SECONDS = 900
+"""How long one call to the splunk client may take; a search that has not finished by then is recorded as an error
+rather than left to hold the whole run."""
+
 PREDICTIVE = ("R-P-L5-006 - Drift trajectory", "R-P-L7-006 - Access breadth trajectory")
 SUMMARY = "Behavior summary - per-layer scores"
 
@@ -139,10 +143,15 @@ def ordered(names: list[str]) -> list[tuple[str, str]]:
 
 
 def splunk(*arguments: str, password: str, check: bool = True) -> subprocess.CompletedProcess:
-    completed = subprocess.run([SPLUNK, *arguments, "-auth", f"admin:{password}"],
-                               capture_output=True,
-                               text=True,
-                               check=False)
+    try:
+        completed = subprocess.run([SPLUNK, *arguments, "-auth", f"admin:{password}"],
+                                   capture_output=True,
+                                   text=True,
+                                   stdin=subprocess.DEVNULL,
+                                   timeout=CALL_TIMEOUT_SECONDS,
+                                   check=False)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(f"splunk {arguments[0]} did not return in {CALL_TIMEOUT_SECONDS}s") from error
 
     if (check and completed.returncode != 0):
         raise RuntimeError(f"splunk {arguments[0]} failed: {completed.stderr.strip() or completed.stdout.strip()}")
@@ -273,7 +282,12 @@ def main() -> int:
                                                    password)
 
     version = splunk("version", password=password, check=False).stdout.strip()
-    btool = subprocess.run([SPLUNK, "btool", "check", f"--app={APP}"], capture_output=True, text=True, check=False)
+    btool = subprocess.run([SPLUNK, "btool", "check", f"--app={APP}"],
+                           capture_output=True,
+                           text=True,
+                           stdin=subprocess.DEVNULL,
+                           timeout=CALL_TIMEOUT_SECONDS,
+                           check=False)
 
     report = {
         "splunk_version":
