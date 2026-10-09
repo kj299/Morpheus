@@ -1,10 +1,10 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-09T20:06:23.565383+00:00",
+  "at": "2026-10-09T16:41:05.715548+00:00",
   "timestamp_shift_weeks": 2953,
   "dispatch_window": {
     "earliest": 1785888000,
-    "latest": 1791579937
+    "latest": 1791567590
   },
   "indexed": {
     "binding:bucketed": 82,
@@ -40,8 +40,8 @@
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-5598338.000000",
-        "min_drift": "-5601940.000000"
+        "max_drift": "-5585996.000000",
+        "min_drift": "-5589598.000000"
       }
     ],
     "binding_tables": [

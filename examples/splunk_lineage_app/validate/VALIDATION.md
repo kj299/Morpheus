@@ -11,13 +11,18 @@ expectations say one row and two, and that run is kept in `search_head_runs/` as
 regenerated events, on 2026-10-09 on the same version, returned what was then written for all forty-eight, and is
 kept beside it.
 
-`search_head_results.json` holds the third run, made the same day with the risk write path in place, on Splunk
-10.2.8 started from Splunk's own tarball in the development container rather than from the Docker image. It is the
+The third run, made the same day with the risk write path in place, used Splunk 10.2.8 installed from Splunk's own
+tarball in the development container rather than the Docker image, and is kept in `search_head_runs/`. It is the
 first in which the detections' rows outlive their jobs: every detection collects what it returns into
 `behavior_risk`, and the run checks that the index holds exactly those rows -- 94 -- before the searches that read
 them run. It also found a search that could never have fired. R-P-L3-005 read the value two rows back as
 `last(previous_destinations)` inside the `streamstats` creating `previous_destinations`, which Splunk evaluates as
 null on every row; the second run's zero was that, and agreed with an expectation that blamed the summary instead.
+
+`search_head_results.json` holds the fourth, made that evening with this package exactly as shipped, on the Docker
+image and another machine. It returned what is written for all forty-eight searches, held the same 94 risk records,
+and found the same totals on the fifteen three-layer chains; `test_search_head_run.py` holds the two installs to
+the same answer on every search and every check.
 
 ## Running it
 

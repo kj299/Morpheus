@@ -273,3 +273,28 @@ def test_no_sample_event_sends_a_null():
         with open(os.path.join(VALIDATE, "sample_events", name), encoding="utf-8") as handle:
             for line in handle:
                 assert all(value is not None for value in json.loads(line).values()), name
+
+
+THIRD_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-09T1641Z.json")
+"""The first run with the risk write path, on Splunk installed from its tarball in the development container."""
+
+
+def test_the_tarball_and_the_docker_image_agree_on_every_search():
+    # The run that stands was made with the package as shipped, on the Docker image. The one before it was made on
+    # the same version installed another way, on a different machine; two installs agreeing
+    # on every row count and on both risk checks is what makes either one more than an anecdote.
+    with open(THIRD_RUN, encoding="utf-8") as handle:
+        tarball = json.load(handle)
+
+    if (not os.path.exists(RESULTS)):
+        pytest.skip("validate/search_head_results.json is not committed")
+
+    with open(RESULTS, encoding="utf-8") as handle:
+        docker = json.load(handle)
+
+    assert tarball["splunk_version"] == docker["splunk_version"]
+    assert {name: entry.get("rows") for (name, entry) in tarball["searches"].items()} == \
+        {name: entry.get("rows") for (name, entry) in docker["searches"].items()}
+
+    for check in ("three_layer_chain_risk", "risk_records", "principal_watchlist", "binding_tables"):
+        assert tarball["checks"][check] == docker["checks"][check], check
