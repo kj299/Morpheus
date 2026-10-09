@@ -205,11 +205,13 @@ what was written. The two that did not were nulls on the wire -- a field sent as
 (`morpheus.utils.siem_wire.to_wire_lines`) now leaves null fields out. That run is kept in
 `validate/search_head_runs/`, as is the run over the regenerated events, on 2026-10-09 on the same version, which
 indexed all 8,400 events and returned what was then written for all forty-eight. A third run the same day, with
-every detection collecting into `behavior_risk`, is `validate/search_head_results.json`: the index held the 94
+every detection collecting into `behavior_risk`, made on Splunk installed from its tarball and kept in the same
+directory, found the index held the 94
 records the detections returned, Chain assembly found the one three-layer chain a detection accuses at 55 against
 a threshold of 60, and R-P-L3-005 fired fifteen times once it took two passes over the summary -- its own SPL had
 read a field its `streamstats` was still creating, which is why the second run's zero agreed with an expectation
-that blamed the summary.
+that blamed the summary. A fourth, on the Docker image this package ships with, agreed with it on every search and
+every check, and is `validate/search_head_results.json`.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields
