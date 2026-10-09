@@ -155,20 +155,22 @@ Being clear about the boundary is the point of writing it down:
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
 - **On 2026-10-09 every `gpu_mode` variant this fork had passed on a GPU, and so did everything else it adds,
-  across all twelve composed pipelines.** At 15:20 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card
-  (driver 596.71) over tiers that are total: the marked tier **759 collected, 759 passed**; the tier carrying
-  no mode marker -- where the default execution mode on a machine with a card is the GPU -- **1,959 collected,
-  1,958 passed, 1 skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly
+  across all twelve composed pipelines.** At 22:17 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card
+  (driver 596.71) over tiers that are total: the marked tier **760 collected, 760 passed**; the tier carrying
+  no mode marker -- where the default execution mode on a machine with a card is the GPU -- **1,971 collected,
+  1,970 passed, 1 skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly
   against what pytest collected. The one skip is the test for a sourcetype nothing produces, which has no
   cases left to run because every sourcetype now has a producer; the six skips of September were all of that
-  kind. The tiers reconcile across machines too: the same two collect 759 and 1,949 on a machine with no card,
+  kind. The tiers reconcile across machines too: the same two collect 760 and 1,961 on a machine with no card,
   the marked tier identical to the device and the unmarked one exactly ten fewer, the same offset every run
   has shown. That covers all forty-six stages and **all twelve composed pipelines**, each of whose GPU output
   matched the golden the CPU path generated, through the canonical rendering with floats quantized to four
   places, and the cross-mode parity test over all twelve corpora -- nine of them compared on a card for the
   first time -- alongside the rest of control 13's checks, the stage parameter liveness registry, the
-  first-detection corpus and the Splunk validation package, in GPU mode. It supersedes the run of 2026-10-04
-  at 03:56 UTC, 750 and 1,925 collected, which passed the same way before the nine parity variants existed.
+  first-detection corpus and the Splunk validation package, in GPU mode. It is the run of step 6's tree: the
+  four golden files that gained `resolution_methods` and the resolver code that writes it, on a card for the
+  first time. It supersedes the run at 15:20 UTC the same day, 759 and 1,959 collected, before step 6, and the
+  run of 2026-10-04 at 03:56 UTC, 750 and 1,925, before the nine parity variants existed; both passed the same way.
   What a device run does not
   reach is the `cpu_mode` assertions -- the estate ladder and its negative controls among them -- which are
   CPU statements by construction. What it does not cover is the model: the conformance tiers score through
