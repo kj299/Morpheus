@@ -27,10 +27,12 @@ The findings, and why each is worth pinning:
   guide predicted the failure but not the condition. Two sightings of a displaced MAC arrive through one MAC
   table feed, so a collector's offset moves both and cancels out of the interval entirely; only the switches'
   own clocks pull them apart. A test that swept one axis would have confirmed the guide and missed the point.
-- **R-P-L5-006 looks fragile at a millisecond and is not.** Forty-five of the layer 5 corpus's hundred and five
-  authentications sit exactly on an hour mark, and an event on a boundary changes window under an offset of one
-  nanosecond. Move the same events into the middle of their windows and a minute of skew changes nothing. The
-  sensitivity is to boundary proximity, not to magnitude.
+- **A millisecond moves R-P-L5-006's inputs and not its accusations.** A hundred and twenty-seven of the layer 5
+  corpus's three hundred and eighty-five authentications sit exactly on an hour mark, and an event on a boundary
+  changes hour under an offset of one nanosecond, so a millisecond moves their hours, their surprise and their
+  scores. With the reference arithmetic that once changed which principal-days the rule accused; with the
+  learned models it does not, and neither does a minute once the events are moved off the marks. The sensitivity
+  is to boundary proximity, not to magnitude, and whether it reaches a decision depends on the scorer.
 - **The ladder holds.** Three-layer chains and the sign-ins that resolved to a port are unchanged at every width
   swept. Which window a chain belongs to moves; whether the ladder reaches does not.
 """
@@ -56,8 +58,8 @@ import telemetry_pipeline as tp  # noqa: E402
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 RUNNER = os.path.join(REPO_ROOT, "examples", "clock_skew", "run_experiment.py")
 
-BOUNDARY_ALIGNED_AUTHENTICATIONS = 45
-"""Layer 5 authentications sitting exactly on an hour mark, out of one hundred and five.
+BOUNDARY_ALIGNED_AUTHENTICATIONS = 127
+"""Layer 5 authentications sitting exactly on an hour mark, out of three hundred and eighty-five.
 
 The whole explanation of the millisecond finding rests on this number, so it is asserted rather than asserted
 about. If the corpus stops building its times from whole hours, this fails and the explanation is rewritten
@@ -108,7 +110,7 @@ def test_the_corpus_the_millisecond_finding_is_explained_by_is_the_corpus_that_e
     hour = 3600 * sp.NS_PER_SECOND
     on_the_mark = int((auth["event_time"].astype("int64") % hour == 0).sum())
 
-    assert len(auth) == 105
+    assert len(auth) == 385
     assert on_the_mark == BOUNDARY_ALIGNED_AUTHENTICATIONS
 
 
@@ -175,21 +177,31 @@ def test_the_spoof_rule_fails_when_the_switches_disagree_by_a_minute(experiment)
 
 @pytest.mark.slow
 @pytest.mark.cpu_mode
-def test_the_drift_rule_changes_on_the_hour_marks_and_not_off_them(experiment):
-    # A millisecond of skew changes what this rule accuses, and a minute of it does not, once the same events
-    # are moved into the middle of their windows. Both halves are the finding: reporting only the first would
-    # say the rule needs millisecond synchronization, which is not what was measured.
+def test_a_millisecond_moves_the_drift_rules_inputs_and_not_what_it_accuses(experiment):
+    # A millisecond of skew moves every boundary-aligned sign-in into the previous hour, and with it that hour's
+    # surprise and the score; under the reference arithmetic that changed three of the six principal-days the
+    # rule accused. Under the learned models the rise each principal-day shows still moves and the accusations do
+    # not, and a minute moves nothing once the events are off the marks. Both halves are asserted, so a later
+    # scorer that makes the rule fragile again is a failure here rather than a paragraph nobody rereads.
     config = sp.build_pipeline_config()
     corpus = sp.build_corpus()
     sources = experiment.sources_in(corpus, experiment.COLLECTOR_CLOCKS)
 
     millisecond = experiment.offsets_for(sources, experiment.MILLISECOND_NS)
-    on_mark = _drift(experiment,
-                     sp.run_pipeline(config, experiment.skew_corpus(corpus, millisecond, experiment.COLLECTOR_CLOCKS)))
-    baseline = _drift(experiment, sp.run_pipeline(config, corpus))
+    skewed = sp.run_pipeline(config, experiment.skew_corpus(corpus, millisecond, experiment.COLLECTOR_CLOCKS))
+    reference = sp.run_pipeline(config, corpus)
+    on_mark = _drift(experiment, skewed)
+    baseline = _drift(experiment, reference)
 
     assert len(baseline) == 6
-    assert len(baseline - on_mark) == 3 and on_mark < baseline, "three of the six principal-days are lost"
+    assert on_mark == baseline
+
+    before = reference[reference["telemetry_class"] == "tc5_auth"].set_index("event_uid")
+    after = skewed[skewed["telemetry_class"] == "tc5_auth"].set_index("event_uid").loc[before.index]
+
+    assert int((before["local_hour"] != after["local_hour"]).sum()) == BOUNDARY_ALIGNED_AUTHENTICATIONS
+    rise = (before["drift_rise_sigmas"].astype(float).fillna(-1), after["drift_rise_sigmas"].astype(float).fillna(-1))
+    assert (rise[0] != rise[1]).any()
 
     moved = experiment.shift_corpus(corpus, experiment.COLLECTOR_CLOCKS, experiment.HALF_WINDOW_NS)
     minute = experiment.offsets_for(sources, 60 * experiment.SECOND_NS)

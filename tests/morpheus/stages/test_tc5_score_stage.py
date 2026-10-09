@@ -273,3 +273,35 @@ def test_constructor_validation(config: Config):
 
     with pytest.raises(ValueError, match="feature_columns must name at least one"):
         TC5ScoreStage(config, scorer=RecordingScorer(), manifest=MANIFEST, feature_columns=[])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_row_inside_the_training_data_is_not_scored(config: Config):
+    # The model was fitted on everything before scores_from_ns. Scoring those rows reports how well it
+    # memorized them, so they carry null scores and the scorer is never asked about them.
+    scorer = RecordingScorer()
+    boundary = ModelManifest(window_id=7, models={ALICE: "dfp-alice:3"}, scores_from_ns=100)
+    payload = frame([ALICE, ALICE, ALICE], [2.0, 4.0, 6.0], [0.5, 0.25, 0.5])
+    payload["event_time"] = [50, 100, 150]
+
+    result = run(config, payload, scorer=scorer, manifest=boundary)
+
+    assert pd.isna(result["mean_abs_z"].iloc[0])
+    assert result["logcount_z_loss"].iloc[1:].tolist() == [4.0, 6.0]
+    assert scorer.calls == [("dfp-alice:3", 2)]
+
+
+@pytest.mark.cpu_mode
+def test_a_training_boundary_needs_an_event_time(config: Config):
+    boundary = ModelManifest(window_id=7, models={ALICE: "dfp-alice:3"}, scores_from_ns=100)
+
+    with pytest.raises(KeyError, match="event_time"):
+        run(config, frame([ALICE], [2.0], [0.5]), manifest=boundary)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_event_time_is_not_read_without_a_training_boundary(config: Config):
+    # No boundary, no requirement: the column is only needed to place a row against one.
+    result = run(config, frame([ALICE], [2.0], [0.5]))
+
+    assert result["logcount_z_loss"].tolist() == [2.0]

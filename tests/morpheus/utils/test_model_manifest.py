@@ -112,3 +112,28 @@ def test_resolving_twice_gives_the_same_answer():
     subject = manifest()
 
     assert subject.resolve(ALICE, WINDOW) == subject.resolve(ALICE, WINDOW)
+
+
+def test_a_manifest_with_no_training_boundary_covers_every_row():
+    subject = manifest()
+
+    assert subject.scores_from_ns is None
+    assert subject.covers(0)
+    assert subject.covers(None)
+
+
+def test_a_training_boundary_covers_what_falls_on_or_after_it_and_nothing_before():
+    # A row before the boundary was available to training; scoring it reports memorization. A row with no
+    # event time cannot be placed after the boundary, so it is not covered either.
+    subject = manifest(scores_from_ns=1_000)
+
+    assert not subject.covers(999)
+    assert subject.covers(1_000)
+    assert subject.covers(1_001)
+    assert not subject.covers(None)
+
+
+@pytest.mark.parametrize("boundary", [1.5, "1000", True])
+def test_a_training_boundary_that_is_not_an_integer_time_is_refused(boundary):
+    with pytest.raises(ValueError, match="epoch nanoseconds"):
+        manifest(scores_from_ns=boundary)

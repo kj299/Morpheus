@@ -37,7 +37,9 @@ from morpheus.config import Config
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
 from morpheus.utils.determinism import permute_within_contiguous_groups
+from morpheus.utils.determinism import quantize_value
 from morpheus.utils.dfencoder_scorer import DfencoderScorer
+from morpheus.utils.dfencoder_scorer import load_models
 from morpheus.utils.model_manifest import ModelManifest
 from morpheus.utils.lineage import window_id_from_timestamp
 
@@ -88,6 +90,27 @@ def _principal(result: pd.DataFrame, principal: str) -> pd.DataFrame:
     auth = _rows(result, "tc5_auth")
 
     return auth[auth["user_principal"] == principal].sort_values("event_time")
+
+
+def _scored_week(auth: pd.DataFrame) -> pd.DataFrame:
+    """The rows on or after the end of the training fortnight: the only ones a model may score."""
+    return auth[auth["event_time"].astype("int64") >= sp.SCORES_FROM_NS]
+
+
+def _fortnight(auth: pd.DataFrame) -> pd.DataFrame:
+    """The rows the models were trained on."""
+    return auth[auth["event_time"].astype("int64") < sp.SCORES_FROM_NS]
+
+
+MODELLED = (sp.ALICE, sp.BOB, sp.CAROL, sp.DAVE, sp.BATCH, sp.ERIN)
+"""Every principal with a fortnight to train on, and so a model of their own."""
+
+DEPARTED = {sp.ERIN, sp.ALICE, sp.BOB, sp.CAROL}
+"""The modelled principals whose scored week departs from their fortnight: the takeover, the fumbled password and
+the off-hours sign-in and the journey, the flight and the move to New York, and the fatigue burst."""
+
+UNCHANGED = {sp.DAVE, sp.BATCH}
+"""The modelled principals whose scored week is their fortnight again: the controls."""
 
 
 def _windows(frame: pd.DataFrame) -> list[int]:
@@ -221,7 +244,7 @@ class _ShapeSensitiveModel:
 
 def _shape_sensitive(rows_per_call: int):
     version = "dfencoder/probe:0001"
-    principals = [sp.ALICE, sp.BOB, sp.CAROL, sp.DAVE, sp.BATCH]
+    principals = list(MODELLED) + [sp.GRACE]
     scorer = DfencoderScorer({version: _ShapeSensitiveModel()}, sp.SCORED_FEATURES, rows_per_call=rows_per_call)
     manifest = ModelManifest(window_id=sp.SCORING_WINDOW,
                              models={principal: version
@@ -496,38 +519,82 @@ def test_nothing_else_fires(result: pd.DataFrame):
 def test_the_columns_four_rules_have_waited_for_now_exist(result: pd.DataFrame):
     # `mean_abs_z` and `max_abs_z` had no producer anywhere in this fork. R-B-L5-001, R-B-L5-002, R-B-L5-005 and
     # R-P-L5-006 read them, so all four fired on nothing and the drift trajectory read a column of nulls.
-    scored = result[result["telemetry_class"] == "tc5_auth"]
+    #
+    # Every row of the scored week carries them, and no row of the fortnight does: those rows were the models'
+    # training data, and a score on them would say how well a model memorized its own inputs.
+    auth = _rows(result, "tc5_auth")
+    week = _scored_week(auth)
+    fortnight = _fortnight(auth)
 
-    assert len(scored) > 0
-    assert scored["mean_abs_z"].notna().all()
-    assert scored["max_abs_z"].notna().all()
+    assert len(week) > 0 and len(fortnight) > 0
+    assert week["mean_abs_z"].notna().all()
+    assert week["max_abs_z"].notna().all()
+    assert fortnight["mean_abs_z"].isna().all()
+    assert fortnight["max_abs_z"].isna().all()
 
     for name in sp.SCORED_FEATURES:
-        assert f"{name}_z_loss" in scored.columns
+        assert f"{name}_z_loss" in auth.columns
 
 
 @pytest.mark.cpu_mode
 def test_the_summaries_agree_with_the_losses_beside_them(result: pd.DataFrame):
     # Derived here rather than asked of the scorer, so a model cannot report a mean that disagrees with the
     # per-feature losses printed next to it -- a discrepancy no rule would catch and every analyst would trust.
-    scored = result[result["telemetry_class"] == "tc5_auth"]
+    # Summed in feature order and quantized the way the stage does it: at the tens of thousands a learned model
+    # reaches here, a sum taken in another order can land the mean on the other side of a half-quantum.
+    scored = _scored_week(_rows(result, "tc5_auth"))
     losses = [f"{name}_z_loss" for name in sp.SCORED_FEATURES]
-    frame = scored[losses].astype(float)
 
-    assert (frame.max(axis=1).round(4) - scored["max_abs_z"].astype(float)).abs().max() < 1e-9
-    assert (frame.mean(axis=1).round(4) - scored["mean_abs_z"].astype(float)).abs().max() < 1e-9
+    for (_, row) in scored.iterrows():
+        values = [float(row[column]) for column in losses]
+
+        assert max(values) == float(row["max_abs_z"])
+        assert quantize_value(sum(values) / len(values)) == float(row["mean_abs_z"])
 
 
 @pytest.mark.cpu_mode
-def test_every_scored_row_says_it_was_scored_against_a_fallback(result: pd.DataFrame):
-    # The corpus has no trained models in it, so every principal resolves to the placeholder. A row claiming its
-    # own model here would be claiming a history that does not exist.
-    scored = result[result["telemetry_class"] == "tc5_auth"]
+def test_each_principal_is_scored_against_its_own_committed_model(result: pd.DataFrame):
+    # Control 1 with a learned model in the slot. Every principal with a fortnight to train on is pinned to the
+    # digest of the numbers committed for them, and every row of theirs in the scored week names that version
+    # and says it was not a fallback. The joiner, who has no fortnight, is scored against the population and
+    # says so on every row.
+    manifest = sp.scoring_manifest()
+    committed = load_models(sp.MODELS_PATH)
 
-    assert (scored["mean_abs_z"].notna()).all()
-    assert sp.SCORING_MANIFEST.resolve("anyone@example.com", sp.SCORING_WINDOW).fallback_used is True
-    assert (scored["model_version"] == "reference-arithmetic:0").all()
-    assert scored["model_fallback_used"].astype("boolean").all()
+    assert sorted(manifest.models) == sorted(MODELLED)
+    assert manifest.fallback == sp.FALLBACK_VERSION
+    assert manifest.scores_from_ns == sp.SCORES_FROM_NS
+
+    week = _scored_week(_rows(result, "tc5_auth"))
+
+    for principal in MODELLED:
+        rows = week[week["user_principal"] == principal]
+        version = committed[principal][0]
+
+        assert manifest.models[principal] == version
+        assert version.startswith(f"dfencoder/{principal}:")
+        assert len(rows) > 0
+        assert (rows["model_version"] == version).all(), principal
+        assert not rows["model_fallback_used"].astype("boolean").any(), principal
+
+    joiner = week[week["user_principal"] == sp.GRACE]
+
+    assert len(joiner) > 0
+    assert (joiner["model_version"] == sp.FALLBACK_VERSION).all()
+    assert joiner["model_fallback_used"].astype("boolean").all()
+    assert set(week[week["model_fallback_used"].astype("boolean")]["user_principal"]) == {sp.GRACE}
+
+
+@pytest.mark.cpu_mode
+def test_the_fortnight_names_no_model_and_the_session_class_is_not_scored(result: pd.DataFrame):
+    # A row the models were trained on was not scored, so naming a model beside it would claim a score nobody
+    # produced. The session class has no scorer at all.
+    fortnight = _fortnight(_rows(result, "tc5_auth"))
+
+    assert len(fortnight) > 0
+    assert fortnight["model_version"].isna().all()
+    assert fortnight["model_fallback_used"].isna().all()
+    assert sp.GRACE not in set(fortnight["user_principal"])
 
     unscored = result[result["telemetry_class"] == "tc5_session"]
 
@@ -548,21 +615,120 @@ def test_every_row_carries_the_determinism_envelope(result: pd.DataFrame):
     assert (result["rng_seed"] == 0).all()
 
 
-@pytest.mark.cpu_mode
-def test_the_composite_rule_does_not_fire_on_the_reference_scores(result: pd.DataFrame):
-    # The guard against what this wiring most risks: numbers that read like detections. R-B-L5-001 asks for
-    # max_abs_z at or above 6.0 *and* mean_abs_z at or above 2.0, and the conjunction is the rule -- requiring
-    # both is what the guide says suppresses the common case where one feature spikes for a benign reason.
-    #
-    # One row does reach 6.0 on its own: the multi-factor fatigue burst, whose failure count sits six deviations
-    # above a mean of a quarter. That is the arithmetic noticing a genuinely unusual row on one feature, and it
-    # is exactly the case the conjunction exists to hold back, since that row's other nine features are ordinary
-    # and its mean stays under 1.8. The rule does not fire, and no threshold was adjusted to arrange that.
-    scored = result[result["telemetry_class"] == "tc5_auth"]
-    fires = scored[(scored["max_abs_z"].astype(float) >= 6.0) & (scored["mean_abs_z"].astype(float) >= 2.0)]
+def _model_rules(auth: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """R-B-L5-001 and R-B-L5-002 as their searches state them, gate included."""
+    limits = stamping.rule_thresholds(["R-B-L5-001", "R-B-L5-002"])
+    own = auth[auth["mean_abs_z"].notna() & ~auth["model_fallback_used"].astype("boolean").fillna(True)]
 
-    assert len(fires) == 0
-    assert scored["mean_abs_z"].max() < 2.0
+    composite = own[(own["max_abs_z"].astype(float) >= limits["R-B-L5-001"]["max_threshold"])
+                    & (own["mean_abs_z"].astype(float) >= limits["R-B-L5-001"]["mean_threshold"])]
+    location = own[own["locincrement_z_loss"].astype(float) >= limits["R-B-L5-002"]["loss_threshold"]]
+
+    return (composite, location)
+
+
+@pytest.mark.cpu_mode
+def test_the_model_rules_fire_on_the_takeover_and_not_on_the_controls(result: pd.DataFrame):
+    # The case the models exist for. Erin's afternoon is nothing the deterministic rules call impossible -- four
+    # hours is time enough to reach Amsterdam -- and it is unlike every row of her fortnight on half the features
+    # at once. Both model rules fire on every sign-in of it.
+    auth = _rows(result, "tc5_auth")
+    (composite, location) = _model_rules(auth)
+    erin = _principal(result, sp.ERIN)
+    takeover = erin[erin["source_city"] == sp.AMSTERDAM_PLACE[2]]
+
+    assert len(takeover) == len(sp.TAKEOVER_HOURS) * len(sp.TAKEOVER_APPS)
+    assert set(takeover.index) <= set(composite.index)
+    assert set(takeover.index) <= set(location.index)
+
+    # Nothing of hers fires before the first takeover sign-in.
+    before = erin[erin["event_time"] < takeover["event_time"].min()]
+    assert not set(before.index) & (set(composite.index) | set(location.index))
+
+    # The controls. Dave and the service account have models of their own and a week that repeats their
+    # fortnight, and neither rule fires on them; the joiner has no model, and the gate keeps both rules off her.
+    for principal in UNCHANGED | {sp.GRACE}:
+        assert principal not in set(composite["user_principal"]), principal
+        assert principal not in set(location["user_principal"]), principal
+
+    assert set(composite["user_principal"]) == DEPARTED
+
+
+@pytest.mark.cpu_mode
+def test_every_departure_the_week_was_built_with_is_one_the_composite_rule_reads(result: pd.DataFrame):
+    # The other planted cases are departures too, and the composite rule fires on each from the row it starts:
+    # Alice's first failed password, Bob's sign-in at an hour he has never used before his flight, and the first
+    # of Carol's refused prompts. These are the rows a per-principal model should find unlike a fortnight of
+    # office hours; asserting them stops a later change from quietly losing one.
+    auth = _rows(result, "tc5_auth")
+    (composite, _) = _model_rules(auth)
+
+    def first(principal: str) -> pd.Series:
+        rows = composite[composite["user_principal"] == principal].sort_values("event_time")
+        return rows.iloc[0]
+
+    assert first(sp.ALICE)["auth_result"] == "failure"
+    assert int(first(sp.ALICE)["local_hour"]) == sp.FUMBLE_HOUR
+    assert int(first(sp.BOB)["local_hour"]) == sp.FLIGHT_DEPART_HOUR
+    assert first(sp.CAROL)["mfa_result"] == "denied"
+
+
+@pytest.mark.cpu_mode
+def test_the_location_rule_fires_on_the_three_who_went_somewhere_new(result: pd.DataFrame):
+    # R-B-L5-002 reads the reconstruction error on `locincrement`, which is that feature's error given all ten,
+    # not a flag for a new place: Bob's sign-in before his flight moves it, from London, because the hour is one
+    # his fortnight never used. Every principal it fires on reached a new place in the week, and the ones who did
+    # not are quiet.
+    auth = _rows(result, "tc5_auth")
+    (_, location) = _model_rules(auth)
+
+    assert set(location["user_principal"]) == {sp.ERIN, sp.ALICE, sp.BOB}
+    assert not set(location["user_principal"]) & (UNCHANGED | {sp.CAROL, sp.GRACE})
+
+
+@pytest.mark.cpu_mode
+def test_a_cumulative_feature_keeps_the_score_raised_until_the_next_training(result: pd.DataFrame):
+    # The `*increment` features never fall: once Erin's account has reached four applications, two devices and two
+    # places, every later row of hers carries those counts, back in London on Thursday and Friday included. A
+    # model trained before the afternoon has never seen them, so both rules keep firing on her until a model is
+    # trained on a window that includes it. That is the property, recorded rather than tuned away.
+    auth = _rows(result, "tc5_auth")
+    (composite, location) = _model_rules(auth)
+    erin = _scored_week(_principal(result, sp.ERIN))
+    days = ((erin["event_time"].astype("int64") // NS - sp.CORPUS_EPOCH_S) // sp.DAY_S).astype(int)
+    after = erin[days > sp.TAKEOVER_DAY]
+
+    assert len(after) > 0
+    assert (after["source_city"] == sp.LONDON_PLACE[2]).all()
+    assert (after["appincrement"].astype(float) == 1 + len(sp.TAKEOVER_APPS)).all()
+    assert set(after.index) <= set(composite.index)
+    assert set(after.index) <= set(location.index)
+
+
+@pytest.mark.cpu_mode
+def test_the_scores_are_not_calibrated_where_the_fortnight_never_varied(result: pd.DataFrame):
+    # The upstream loss scaler standardizes each feature's reconstruction error against the errors seen in
+    # training. Where the fortnight never varied a feature -- every office worker used one application on one
+    # device -- the model reconstructs it almost exactly and the spread of those errors is a rounding residue,
+    # so any change at all is divided by next to nothing. Erin's afternoon scores in the tens of thousands. That
+    # is not tens of thousands of deviations of anything: it means "departed from the fortnight", and it is why
+    # the rules' thresholds of 6 and 2 read as that and nothing finer, and why scores are not comparable across
+    # principals. A floor on the spread, or a longer and more varied training window, is what calibration needs.
+    committed = load_models(sp.MODELS_PATH)
+    document = None
+
+    with open(sp.MODELS_PATH, encoding="utf-8") as handle:
+        import json  # pylint: disable=import-outside-toplevel
+        document = json.load(handle)["models"][sp.ERIN]["model"]
+
+    assert committed[sp.ERIN][1].features == sp.SCORED_FEATURES
+    assert document["loss_scaler"]["appincrement"]["std"] < 1e-3
+
+    erin = _principal(result, sp.ERIN)
+    takeover = erin[erin["source_city"] == sp.AMSTERDAM_PLACE[2]]
+
+    assert takeover["max_abs_z"].astype(float).min() > 1_000
+    assert _principal(result, sp.DAVE)["max_abs_z"].astype(float).max() < 1.0
 
 
 # --- The trajectory --------------------------------------------------------------------------------------------
@@ -578,10 +744,15 @@ def test_the_trajectory_is_one_observation_per_principal_per_day(result: pd.Data
     # The scores are per event and the rule is per day, so the day has to be reduced before it is tracked. The
     # drift stage reduces each complete day to the mean of its events and stamps that on every row, which is
     # what makes the columns readable from any event of the day and identical across them.
-    auth = _rows(result, "tc5_auth")
+    #
+    # A day of the fortnight has no scores to reduce, so its trajectory columns are null; the trajectory starts
+    # with the scored week.
+    everything = _rows(result, "tc5_auth")
+    auth = _scored_week(everything)
 
-    assert auth["day_window_id"].notna().all()
+    assert everything["day_window_id"].notna().all()
     assert auth["drift_rising_windows"].notna().all()
+    assert _fortnight(everything)["drift_rising_windows"].isna().all()
 
     within = auth.groupby(["user_principal", "day_window_id"
                            ])[["drift_velocity", "drift_rising_windows", "drift_rise_sigmas",
@@ -614,23 +785,19 @@ def test_the_daily_windows_seal_the_way_the_hourly_ones_do(result: pd.DataFrame)
 
 
 @pytest.mark.cpu_mode
-def test_the_drift_rule_fires_on_exactly_the_reference_arithmetic_it_should(result: pd.DataFrame):
+def test_the_drift_rule_fires_on_exactly_the_climbs_it_should(result: pd.DataFrame):
     # R-P-L5-006 as written: four consecutive rising days, a rise above 1.5 of the principal's own standard
-    # deviations, and no day crossing R-B-L5-001's mean of 2.0. It fires on three principals, none of them
-    # behaviour, and each has to be explained here or the golden could grow a fourth without anyone noticing.
+    # deviations, no day crossing R-B-L5-001's mean of 2.0, and a steady rise rather than a spike. It fires on
+    # the last three days of the week for the two principals whose week repeats their fortnight, and neither is
+    # behaviour; each is explained here or the golden could grow another without anyone noticing.
     #
-    # Two of them climb for six straight days because the reference scorer's parameters are frozen while
-    # `logcount` and the `*increment` features are cumulative. A score with a baseline that never moves, under a
-    # feature that only grows, must rise -- which is the guide's own warning about `locincrement` arriving in the
-    # trajectory rather than in the rule. The third is the fatigue burst: three rises of hundredths and then the
-    # burst, a spike the rule's letter admits because the day's mean stays under 2.0. `drift_acceleration` tells
-    # the two shapes apart, and that is the column a deployment tuning this rule should read first.
-    #
-    # The search now carries that reading as a condition: a steady rise only, |drift_acceleration| under a
-    # ceiling. The burst is a spike, which R-D-L5-004 and R-B-L5-001 exist to report, and it leaves; the two
-    # climbs stay, and stay documented as arithmetic. All three are asserted, so the ceiling cannot quietly grow
-    # to admit the spike or shrink to drop the climbs.
-    auth = _rows(result, "tc5_auth")
+    # Their daily mean rises by hundredths a day, never as much as a twentieth. The cadence features keep moving
+    # after the fortnight ends -- each ordinary sign-in makes its hour a little less surprising -- so every day
+    # sits a little further from anything the model was trained on. The rule measures the rise in units of the
+    # principal's own day-to-day spread, and for a principal who never changes that spread is tiny, so a rise of
+    # hundredths reads as several of it. The days that do depart, Erin's, Alice's, Bob's and Carol's, all cross the mean
+    # ceiling and leave, which is the ceiling doing its job: those are R-B-L5-001's to report.
+    auth = _scored_week(_rows(result, "tc5_auth"))
     days = _days(auth)
     limits = stamping.rule_thresholds(["R-P-L5-006"])["R-P-L5-006"]
 
@@ -640,16 +807,12 @@ def test_the_drift_rule_fires_on_exactly_the_reference_arithmetic_it_should(resu
                       & (days["mean_abs_z"].astype(float) < limits["mean_ceiling"])]
     fires = trajectory[trajectory["drift_acceleration"].astype(float).abs() < limits["acceleration_ceiling"]]
 
-    climbs = {(sp.DAVE, 8), (sp.DAVE, 9), (sp.DAVE, 10), (sp.BATCH, 8), (sp.BATCH, 9), (sp.BATCH, 10)}
+    last = sp.CORPUS_EPOCH_S // sp.DAY_S + sp.CORPUS_DAYS - 1
+    climbs = {(principal, day) for principal in UNCHANGED for day in (last - 2, last - 1, last)}
 
-    assert set(zip(trajectory["user_principal"], trajectory["day_window_id"].astype(int))) == climbs | {(sp.CAROL, 9)}
+    assert set(zip(trajectory["user_principal"], trajectory["day_window_id"].astype(int))) == climbs
     assert set(zip(fires["user_principal"], fires["day_window_id"].astype(int))) == climbs
-
-    # The two shapes. The climbers accelerate by hundredths; the burst accelerates by most of a unit.
-    burst = trajectory[trajectory["user_principal"] == sp.CAROL]
-
-    assert float(burst["drift_acceleration"].iloc[0]) > 0.5
-    assert fires["drift_acceleration"].astype(float).abs().max() < limits["acceleration_ceiling"]
+    assert fires["drift_velocity"].astype(float).abs().max() < 0.05
 
 
 def _true(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -664,15 +827,18 @@ def test_the_off_hours_rule_fires_on_the_planted_login_and_not_on_the_nightly_ba
     auth = _rows(result, "tc5_auth")
     fires = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature") & (auth["auth_result"] == "success")]
 
+    # Erin's takeover afternoon fires twice, at the two of its hours her office week never used.
     assert set(zip(fires["user_principal"], fires["local_hour"].astype(int))) == {
         (sp.ALICE, sp.OFF_HOURS_HOUR),
         (sp.BOB, sp.FLIGHT_DEPART_HOUR),
+        (sp.ERIN, 15),
+        (sp.ERIN, 17),
     }
     assert sp.BATCH not in set(fires["user_principal"])
 
     # The fatigue burst is at an unseen hour too, and its rows are refusals: R-D-L5-004's and R-D-L5-009's.
     unseen = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature")]
-    assert set(unseen["user_principal"]) == {sp.ALICE, sp.BOB, sp.CAROL}
+    assert set(unseen["user_principal"]) == {sp.ALICE, sp.BOB, sp.CAROL, sp.ERIN}
 
 
 @pytest.mark.cpu_mode
@@ -693,6 +859,28 @@ def test_the_novelty_rule_fires_on_the_new_country_and_not_on_the_controls(resul
 
 
 @pytest.mark.cpu_mode
+def test_the_novelty_rule_misses_a_new_place_whose_first_sign_in_failed(result: pd.DataFrame):
+    # A gap in R-D-L5-008, found by the takeover and recorded rather than worked around. The first sign-in from
+    # Amsterdam failed, and it is the row that carries `location_first_seen` and `device_first_seen`; every
+    # success after it is the second sighting. The rule reads successes only, so the new place and the new device
+    # never reach it -- an attacker who gets the password wrong once first is invisible to it. The model rules
+    # fire on the whole afternoon.
+    erin = _principal(result, sp.ERIN)
+    takeover = erin[erin["source_city"] == sp.AMSTERDAM_PLACE[2]]
+    first = takeover.iloc[0]
+
+    assert first["auth_result"] == "failure"
+    assert bool(first["location_first_seen"]) and bool(first["device_first_seen"])
+
+    successes = takeover[takeover["auth_result"] == "success"]
+    assert not _true(successes, "location_first_seen").any()
+    assert not _true(successes, "device_first_seen").any()
+
+    (composite, _) = _model_rules(_rows(result, "tc5_auth"))
+    assert set(successes.index) <= set(composite.index)
+
+
+@pytest.mark.cpu_mode
 def test_the_failure_run_rule_fires_on_the_burst_and_not_on_the_fumbled_password(result: pd.DataFrame):
     # R-D-L5-009. Both are failure-then-success; only the threshold separates them.
     auth = _rows(result, "tc5_auth")
@@ -707,21 +895,37 @@ def test_the_failure_run_rule_fires_on_the_burst_and_not_on_the_fumbled_password
 
 @pytest.mark.cpu_mode
 def test_the_model_rules_read_nothing_a_fallback_scored(result: pd.DataFrame):
-    # R-B-L5-001 and R-B-L5-002 read only rows whose model was fitted to the principal. Every row here was scored
-    # by the reference arithmetic under the manifest's fallback, so both are empty -- and nothing was tuned to
-    # make them so: with the gate removed they are empty as well, which is asserted rather than assumed.
+    # R-B-L5-001 and R-B-L5-002 read only rows whose model was fitted to the principal. The joiner's rows are
+    # scored by the population fallback and are never read -- and nothing was tuned to make her quiet: with the
+    # gate removed, her population scores cross neither threshold either, which is asserted rather than assumed.
     auth = _rows(result, "tc5_auth")
     limits = stamping.rule_thresholds(["R-B-L5-001", "R-B-L5-002"])
-    scored = auth[auth["mean_abs_z"].notna()]
+    fallback = auth[auth["model_fallback_used"].astype("boolean").fillna(False)]
 
-    assert scored["model_fallback_used"].astype("boolean").all()
+    assert set(fallback["user_principal"]) == {sp.GRACE}
 
-    composite = scored[(scored["max_abs_z"].astype(float) >= limits["R-B-L5-001"]["max_threshold"])
-                       & (scored["mean_abs_z"].astype(float) >= limits["R-B-L5-001"]["mean_threshold"])]
-    location = scored[scored["locincrement_z_loss"].astype(float) >= limits["R-B-L5-002"]["loss_threshold"]]
+    composite = fallback[(fallback["max_abs_z"].astype(float) >= limits["R-B-L5-001"]["max_threshold"])
+                         & (fallback["mean_abs_z"].astype(float) >= limits["R-B-L5-001"]["mean_threshold"])]
+    location = fallback[fallback["locincrement_z_loss"].astype(float) >= limits["R-B-L5-002"]["loss_threshold"]]
 
     assert composite.empty
     assert location.empty
+
+    (gated_composite, gated_location) = _model_rules(auth)
+    assert not set(gated_composite.index) & set(fallback.index)
+    assert not set(gated_location.index) & set(fallback.index)
+
+
+@pytest.mark.cpu_mode
+def test_the_population_fallback_is_fitted_on_the_fortnight(result: pd.DataFrame):
+    # The fallback is a model of the population and is held to the models' rule: fitted on the fortnight alone,
+    # never on the week it scores. Recomputed here from the fortnight's features, so the frozen constants cannot
+    # drift from what they claim to be.
+    pooled = pd.concat(sp.training_frames(result).values(), ignore_index=True)
+
+    for (name, (mean, deviation)) in sp.REFERENCE_PARAMETERS.items():
+        assert round(float(pooled[name].mean()), 6) == mean, name
+        assert round(float(pooled[name].std()), 6) == deviation, name
 
 
 def _day(result: pd.DataFrame, principal: str, corpus_day: int) -> pd.DataFrame:

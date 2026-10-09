@@ -105,6 +105,26 @@ def test_each_entity_carries_the_model_it_was_scored_against(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_a_row_inside_the_training_data_names_no_model(config: Config):
+    # TC5ScoreStage does not score a row before the manifest's scores_from_ns, so naming a model beside it
+    # would claim a score nobody produced. Alice's row is at event time 0, Bob's at 1, and the models start at 1.
+    meta = run(config, frame(), manifest=manifest(scores_from_ns=1))
+
+    assert _as_list(meta, "model_version") == [None, "dfp-bob:3"]
+    assert _as_list(meta, "model_fallback_used") == [None, False]
+    assert _as_list(meta, "determinism_tier") == ["D1", "D1"]
+
+
+@pytest.mark.cpu_mode
+def test_a_training_boundary_with_no_event_time_to_place_rows_against_is_refused(config: Config):
+    payload = frame()
+    del payload["event_time"]
+
+    with pytest.raises(KeyError, match="scores_from_ns"):
+        run(config, payload, manifest=manifest(scores_from_ns=1))
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_a_fallback_is_visible_on_the_row(config: Config):
     # An event scored against a population model is a different claim from one scored against the entity's own,
     # and the difference has to reach the SIEM rather than being inferable only from the model name.

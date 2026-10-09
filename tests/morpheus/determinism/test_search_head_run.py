@@ -204,6 +204,19 @@ def test_the_recorded_run_returned_what_is_written():
         expected["Chain assembly - cross-layer risk"]["three_layer_chain_risk"]
 
 
+BEFORE_THE_MODELS = {
+    "R-D-L5-007 - Off-hours authentication": 2,
+    "R-B-L5-001 - Composite authentication anomaly": 0,
+    "R-B-L5-002 - Location novelty anomaly": 0,
+    "Behavior summary - per-layer scores": 4335,
+}
+"""What every run before the learned layer 5 models found where the models changed the answer.
+
+The two model rules were empty by their gate, the off-hours rule had no takeover afternoon to find, and the summary
+had no fortnight of training rows to group. Every earlier run is compared with what is written now, so these four
+differ in each of them for that reason and no other.
+"""
+
 FIRST_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-05T0114Z.json")
 """The first search-head run, kept because it is the evidence for the two changes it caused."""
 
@@ -235,6 +248,7 @@ def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it
         "R-B-L2-002 - Port-to-MAC binding novelty": 6,
         "Binding health - unresolved rate": 5,
         "R-P-L3-005 - Fan-out trajectory": 0,
+        **BEFORE_THE_MODELS,
     }, ("the watchlist expiry now expects what the run found; two are nulls that reached the wire; the trajectory "
         "rule's own SPL could not fire, which the third run found")
     assert expected["R-B-L2-002 - Port-to-MAC binding novelty"]["expected_rows"] == 2
@@ -263,7 +277,7 @@ def test_the_second_run_differed_from_what_is_written_only_where_the_trajectory_
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {"R-P-L3-005 - Fan-out trajectory": 0}
+    assert differing == {"R-P-L3-005 - Fan-out trajectory": 0, **BEFORE_THE_MODELS}
     assert "risk_records" not in run["checks"], "the write path did not exist when this run was made"
 
 
@@ -278,18 +292,17 @@ def test_no_sample_event_sends_a_null():
 THIRD_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-09T1641Z.json")
 """The first run with the risk write path, on Splunk installed from its tarball in the development container."""
 
+FOURTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-09T2006Z.json")
+"""The same tree as the third, run with the package as shipped on the Docker image, on another machine."""
+
 
 def test_the_tarball_and_the_docker_image_agree_on_every_search():
-    # The run that stands was made with the package as shipped, on the Docker image. The one before it was made on
-    # the same version installed another way, on a different machine; two installs agreeing
-    # on every row count and on both risk checks is what makes either one more than an anecdote.
+    # Two installs of the same version, on two machines, over the same events: agreeing on every row count and on
+    # every check is what makes either one more than an anecdote.
     with open(THIRD_RUN, encoding="utf-8") as handle:
         tarball = json.load(handle)
 
-    if (not os.path.exists(RESULTS)):
-        pytest.skip("validate/search_head_results.json is not committed")
-
-    with open(RESULTS, encoding="utf-8") as handle:
+    with open(FOURTH_RUN, encoding="utf-8") as handle:
         docker = json.load(handle)
 
     assert tarball["splunk_version"] == docker["splunk_version"]
@@ -298,3 +311,24 @@ def test_the_tarball_and_the_docker_image_agree_on_every_search():
 
     for check in ("three_layer_chain_risk", "risk_records", "principal_watchlist", "binding_tables"):
         assert tarball["checks"][check] == docker["checks"][check], check
+
+
+def test_the_fourth_run_differs_from_what_is_written_only_where_the_learned_models_arrived():
+    # Made before the layer 5 models, on 2026-10-09: all forty-eight then matched. Against the events the models
+    # now score, it differs in exactly the searches that read them or the events they added -- the two model
+    # rules, which were empty by their gate; the off-hours rule, which finds the takeover afternoon; and the
+    # summary, which groups the fortnight the models were trained on -- and its risk index is the 94 rows the
+    # detections then wrote.
+    with open(FOURTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_MODELS
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 94

@@ -401,8 +401,8 @@ def layer_5_decisions(result: pd.DataFrame) -> dict:
     """
     The nine layer 5 rules. Keyed on the principal, the search's `entity_key`, and for R-P-L5-006 the day it fired;
     the notable dedup keys carry an hourly `window_id`, which is a time and would count an accusation that moved an
-    hour as a different one. R-B-L5-001 and R-B-L5-002 are gated on `model_fallback_used=false` and so are empty
-    over reference scores, gate and all.
+    hour as a different one. R-B-L5-001 and R-B-L5-002 are gated on `model_fallback_used=false`, so they read the
+    principals' own committed models and never the joiner's population score.
     """
     auth = rows(result, "tc5_auth")
     sessions = rows(result, "tc5_session")

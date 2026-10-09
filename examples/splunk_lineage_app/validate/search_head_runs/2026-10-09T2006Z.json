@@ -1,10 +1,10 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-09T23:26:05.809263+00:00",
+  "at": "2026-10-09T20:06:23.565383+00:00",
   "timestamp_shift_weeks": 2953,
   "dispatch_window": {
     "earliest": 1785888000,
-    "latest": 1791591900
+    "latest": 1791579937
   },
   "indexed": {
     "binding:bucketed": 82,
@@ -17,7 +17,7 @@
     "morpheus:score:l2": 1334,
     "morpheus:score:l3": 719,
     "morpheus:score:l4": 987,
-    "morpheus:score:l5": 651,
+    "morpheus:score:l5": 371,
     "morpheus:score:l6": 270,
     "morpheus:score:l7": 4235
   },
@@ -32,7 +32,7 @@
     "morpheus:score:l2": 1334,
     "morpheus:score:l3": 719,
     "morpheus:score:l4": 987,
-    "morpheus:score:l5": 651,
+    "morpheus:score:l5": 371,
     "morpheus:score:l6": 270,
     "morpheus:score:l7": 4235
   },
@@ -40,8 +40,8 @@
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-5610304.000000",
-        "min_drift": "-5613906.000000"
+        "max_drift": "-5598338.000000",
+        "min_drift": "-5601940.000000"
       }
     ],
     "binding_tables": [
@@ -77,8 +77,8 @@
       }
     ],
     "risk_records": {
-      "written": 166,
-      "indexed": 166,
+      "written": 94,
+      "indexed": 94,
       "by_rule": [
         {
           "rule_id": "R-B-L2-002",
@@ -99,14 +99,6 @@
         {
           "rule_id": "R-B-L4-005",
           "count": "6"
-        },
-        {
-          "rule_id": "R-B-L5-001",
-          "count": "42"
-        },
-        {
-          "rule_id": "R-B-L5-002",
-          "count": "28"
         },
         {
           "rule_id": "R-B-L5-005",
@@ -186,7 +178,7 @@
         },
         {
           "rule_id": "R-D-L5-007",
-          "count": "4"
+          "count": "2"
         },
         {
           "rule_id": "R-D-L5-008",
@@ -428,7 +420,7 @@
     },
     "R-D-L5-007 - Off-hours authentication": {
       "phase": "search",
-      "rows": 4
+      "rows": 2
     },
     "R-D-L5-008 - New authentication location or device": {
       "phase": "search",
@@ -440,11 +432,11 @@
     },
     "R-B-L5-001 - Composite authentication anomaly": {
       "phase": "search",
-      "rows": 42
+      "rows": 0
     },
     "R-B-L5-002 - Location novelty anomaly": {
       "phase": "search",
-      "rows": 28
+      "rows": 0
     },
     "R-B-L5-005 - Session duration anomaly": {
       "phase": "search",
@@ -452,7 +444,7 @@
     },
     "Behavior summary - per-layer scores": {
       "phase": "summary",
-      "rows": 4615
+      "rows": 4335
     },
     "R-P-L3-005 - Fan-out trajectory": {
       "phase": "trajectory",

@@ -940,12 +940,13 @@ def _envelope(tier: str = "D1", seed: int = 42) -> DeterminismEnvelope:
                                rng_seed=seed)
 
 
-def _manifest(fallback=None) -> ModelManifest:
+def _manifest(fallback=None, scores_from_ns=None) -> ModelManifest:
     return ModelManifest(window_id=SCORED_WINDOW,
                          models={
                              "alice@example.com": "dfp-alice:14", "bob@example.com": "dfp-bob:3"
                          },
-                         fallback=fallback)
+                         fallback=fallback,
+                         scores_from_ns=scores_from_ns)
 
 
 def _binding_table(values=("hq:sw1:Gi1/0/1", )) -> BindingTable:
@@ -1200,13 +1201,15 @@ REGISTRY: dict = {
             frame=scorable,
             base={
                 "scorer": _LengthScorer(),
-                "manifest": _manifest(fallback="dfp-generic:1"),
+                # Training ends a minute in, so Alice's row is not scored and `time_column` is read.
+                "manifest": _manifest(fallback="dfp-generic:1", scores_from_ns=MINUTE),
                 "feature_columns": ["logcount", "mfa_ratio"]
             },
             knobs=(
                 Knob("scorer", DIFFERS, benign=_LengthScorer(), extreme=_LengthScorer(scale=2.0)),
                 Knob("entity_column", INPUT_COLUMN, benign="user_principal"),
                 Knob("window_column", INPUT_COLUMN, benign="window_id"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("feature_columns", DIFFERS, benign=["logcount", "mfa_ratio"], extreme=["logcount"]),
                 Knob("manifest",
                      DIFFERS,
@@ -1560,13 +1563,14 @@ REGISTRY: dict = {
             stage=DeterminismStampStage,
             frame=scored,
             base={
-                "envelope": _envelope(), "manifest": _manifest()
+                "envelope": _envelope(), "manifest": _manifest(scores_from_ns=MINUTE)
             },
             knobs=(
                 Knob("envelope", DIFFERS, benign=_envelope(), extreme=_envelope(tier="D0", seed=7)),
                 Knob("manifest", DIFFERS, benign=_manifest(), extreme=_manifest(fallback="dfp-generic:2")),
                 Knob("entity_column", INPUT_COLUMN, benign="user_principal"),
                 Knob("window_column", INPUT_COLUMN, benign="window_id"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
             ),
         ),
     "WindowSealStage":

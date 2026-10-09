@@ -60,6 +60,11 @@ assembly and gave R-P-L3-005 its second `streamstats` pass, on 2026-10-09, besid
 changes: the two artifacts are identical apart from their timestamps. None of it moved a decision, and R-P-L3-005's
 model in `rules.py` already took two passes; it is the search that now agrees with it.
 
+It was run once more the same night after step 8 (#59) gave each layer 5 principal a learned model of their own
+and the session corpus the fortnight those models are trained on. Every rule's answer is the same as before but
+one: R-P-L5-006, which changed at a millisecond under the reference arithmetic, now changes at no spread swept,
+on the hour marks or off them. Why is below.
+
 What a sweep can say depends on the clocks in the corpus, and the thirty-eight fall into three groups that must
 not be added together:
 
@@ -88,8 +93,8 @@ comes through the identity provider, so for the eight sign-in rules -- R-D-L5-00
 R-B-L5-001 and 002, and R-P-L5-006 -- the sweep moves all their inputs together; R-B-L5-005's session starts and
 ends each come through one collector too. The application corpus has two, one per class, and each of its two rules
 reads one class. For these eleven the sweep is a uniform shift, which measures how close the events sit to a
-window edge and nothing about disagreement. Ten are unchanged to a minute; R-P-L5-006 changes at a millisecond,
-for the reason below.
+window edge and nothing about disagreement. All eleven are unchanged to a minute; R-P-L5-006 used to change at a
+millisecond, for the reason below.
 
 **On a corpus with one clock.** The network, transport, presentation and SaaS corpora each arrive through a single
 collector, so a collector sweep gives that one clock no offset and perturbs nothing. Their fifteen rules -- five at
@@ -117,19 +122,26 @@ sweep and fifty-eight of slack. Tighten the threshold to the sweep and the toler
 
 ### The drift rule is sensitive to boundaries, not to magnitude
 
-At a millisecond of spread the drift trajectory stops flagging three of the six principal-days it flags on
-the reference corpus. That reads like a rule needing millisecond synchronization, and it is not.
+Under the reference arithmetic, a millisecond of spread made the drift trajectory stop flagging three of the six
+principal-days it flagged. That read like a rule needing millisecond synchronization, and it was not.
 
-Forty-five of the layer 5 corpus's hundred and five authentications sit exactly on an hour mark, because the
-corpus builds its times from whole hours. An event on a boundary changes window under an offset of one
-nanosecond. Move the same events into the middle of their windows -- a uniform shift, which is not a skew at
-all, since no two clocks disagree any more than before -- and a full minute of spread changes nothing the rule
-accuses.
+A hundred and twenty-seven of the layer 5 corpus's three hundred and eighty-five authentications sit exactly on
+an hour mark, because the corpus builds its times from whole hours. An event on a boundary changes hour under an
+offset of one nanosecond, and with it the hour's surprise and the row's score. Move the same events into the
+middle of their windows -- a uniform shift, which is not a skew at all, since no two clocks disagree any more
+than before -- and a full minute of spread changes nothing the rule accuses.
+
+With the learned models a millisecond still moves those inputs: every boundary-aligned sign-in changes hour, and
+forty-five principal-days' rise in standard deviations moves with it. What the rule accuses does not move. The
+climbs it reports are steady enough under the models that a changed hour on some of their rows leaves them
+climbing, where under frozen arithmetic it broke three runs.
 
 **The exposure is therefore not the size of the clock error. It is the fraction of events sitting near a
-window edge.** An estate cannot read a tolerance off this rule. What it can read is that window-boundary proximity is
-the variable to think about, and that a corpus built on round numbers will overstate the fragility of anything
-measured against it.
+window edge, and whether the scorer turns a changed input into a changed decision.** An estate cannot read a
+tolerance off this rule. What it can read is that window-boundary proximity is the variable to think about, that
+a corpus built on round numbers will overstate the fragility of anything measured against it, and that the answer
+belongs to the scorer as much as to the rule: `test_clock_skew_experiment.py` asserts both the moved inputs and
+the unmoved accusations, so a scorer that makes the rule fragile again fails there.
 
 ### The ladder's rungs do not fail together
 
@@ -181,7 +193,7 @@ produces or consumes either; they are schema, not a control. This measures the d
 not the damage after a correction that has not been built.
 
 It also measures these corpora. The magnitudes at which things break are properties of an hour of one estate
-and a week of five principals, with these thresholds. The mechanisms generalize; the numbers are a worked
+and three weeks of seven principals, with these thresholds. The mechanisms generalize; the numbers are a worked
 example, and the reason each number is what it is, is written down beside it so an estate can redo the
 arithmetic against its own sweep times and thresholds.
 

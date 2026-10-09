@@ -39,6 +39,10 @@ obvious one -- would otherwise produce output depending on which entity happened
 varies with how the stream is batched. Sorting the groups costs nothing and removes the failure mode; the
 per-principal reseeding in `examples/layer5_model/run_model.py` exists for the same reason.
 
+**A row the models were trained on is not scored.** Where the manifest declares `scores_from_ns`, a row whose
+event time falls before it was available to training, and its score would say how well the model memorized it.
+It carries null scores, as a row with a gap does, and is counted separately so the two reasons stay apart.
+
 A row with no entity, or with a gap in any feature, carries a null score rather than a zero. A zero is a
 confident statement that the entity looked exactly average, which is the opposite of what a missing measurement
 says, and the drift trajectory downstream treats a null as a break in the run rather than bridging it.
@@ -59,6 +63,7 @@ from morpheus.messages import MessageMeta
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
@@ -123,6 +128,8 @@ class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     window_column : str, default = "window_id"
         The window each row belongs to, checked against the manifest's. Absent, every row is taken to be the
         manifest's own window, which is the single-window case.
+    time_column : str, default = "event_time"
+        The row's event time, read only when the manifest declares `scores_from_ns`.
     decimals : int, default = 4
         Decimal places every emitted score is rounded to, under determinism control 9.
     """
@@ -134,6 +141,7 @@ class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  feature_columns: list[str],
                  entity_column: str = "user_principal",
                  window_column: str = "window_id",
+                 time_column: str = "event_time",
                  decimals: int = DEFAULT_FLOAT_DECIMALS):
         super().__init__(c)
 
@@ -151,6 +159,7 @@ class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._feature_columns = list(feature_columns)
         self._entity_column = entity_column
         self._window_column = window_column
+        self._time_column = time_column
         self._decimals = decimals
 
         self._needed_columns[MEAN_COLUMN] = TypeId.FLOAT64
@@ -207,7 +216,12 @@ class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             return message
 
         with meta.mutable_dataframe() as df:
-            missing = [name for name in [self._entity_column] + self._feature_columns if name not in df.columns]
+            required = [self._entity_column] + self._feature_columns
+
+            if (self._manifest.scores_from_ns is not None):
+                required.append(self._time_column)
+
+            missing = [name for name in required if name not in df.columns]
 
             if (len(missing) > 0):
                 raise KeyError(f"TC5ScoreStage requires columns {missing} which are not present in the "
@@ -217,13 +231,20 @@ class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             row_count = len(entities)
             features = {name: to_host_list(df, name) for name in self._feature_columns}
             windows = to_host_list(df, self._window_column) if self._window_column in df.columns else None
+            times = ([to_epoch_ns(value) for value in to_host_list(df, self._time_column)]
+                     if self._manifest.scores_from_ns is not None else None)
 
             # Grouped by entity, and the groups visited in sorted order. A scorer with shared state would
             # otherwise depend on which entity came first, which depends on batching.
             groups: dict = {}
             unscorable = 0
+            in_training = 0
 
             for position in range(row_count):
+                if (times is not None and not self._manifest.covers(times[position])):
+                    in_training += 1
+                    continue
+
                 entity = normalize_text(entities[position])
                 row = {name: features[name][position] for name in self._feature_columns}
 
@@ -284,6 +305,13 @@ class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 "scores rather than zeros, because a zero is a confident claim that the entity looked exactly "
                 "average and a gap is the absence of any claim at all.",
                 unscorable,
+                row_count)
+
+        if (in_training > 0):
+            logger.debug(
+                "TC5ScoreStage left %d of %d rows unscored because they fall before the manifest's "
+                "scores_from_ns, inside the data its models were trained on.",
+                in_training,
                 row_count)
 
         return message
