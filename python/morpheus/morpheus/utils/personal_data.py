@@ -531,6 +531,7 @@ _OPERATIONAL = (
     "query_type",
     "recorded_at",
     "resolution_method",
+    "resolution_methods",
     "result",
     "rollup_time_ns",
     "resolved_vlan_id",

@@ -115,9 +115,18 @@
       "why": "One notable, for 10.0.0.100, whose traffic starts arriving one hop short from the third hour onward: twelve flows, every one of them shifted by exactly -1, which is what a single interposed device costs. The control is 10.0.0.110, whose TTL never moves. The aggregate threshold of three shifted flows is what makes this a statement about a distribution rather than about a packet, which is what the guide's rule asks for; a single shifted flow is noise."
     },
     "R-P-L3-005 - Fan-out trajectory": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "Empty, and for the same reason the chain assembly search is: it reads index=behavior_summary, which the Behavior summary saved search populates as it runs, and this package indexes pipeline output only. The trajectory is present in the data -- the scanner's fan-out rises 5, 20, 45, 80 across four consecutive windows, which is exactly the shape the rule reads -- so running the summary search first on a search head that keeps its output is what would make this fire. That is a deployment step rather than a corpus one."
+      "expected_rows": 15,
+      "expected_empty": false,
+      "by_source": {
+        "10.0.0.50": 3,
+        "10.20.0.11": 2,
+        "10.20.0.5": 2,
+        "10.20.0.6": 2,
+        "10.20.0.7": 2,
+        "10.20.0.8": 2,
+        "10.20.0.9": 2
+      },
+      "why": "Fifteen rows: three for the planted scanner, whose fan-out reads 5, 20, 35, 45, 45, 78, 80 across the summary's five-minute bins, three of them a third rise in a row, and two for each of six campaign sources whose fan-out rises through three bins in a row. It was empty on the first two search-head runs, and not only because this package indexes pipeline output and the summary had to be collected first: the search read the value two rows back as `last(previous_destinations)` inside the streamstats that creates `previous_destinations`, which Splunk evaluates as null on every row. It now takes two passes, and the runner dispatches it after the summary is searchable. A watchlist rule, so fifteen is not fifteen pages."
     },
     "R-D-L4-002 - SYN without completion": {
       "expected_rows": 1,
@@ -389,11 +398,17 @@
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "chains_with_a_method": 60,
+      "chains_with_a_method": 146,
       "three_layer_chain_methods": [
+        "soft:directory",
+        "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "Empty, and for a different reason than it has ever been empty before. The threshold this search was built around, `dc(osi_layer) >= 3`, is now met: 15 of the 3347 distinct `lineage_id` values hold a port's layer 1 samples, the layer 2 observations the ladder resolved onto that port, and the layer 5 authentications of the person sitting at it. The estate pipeline takes a `user_principal` through a supplied directory to a `dot1x_identity`, and through the 802.1X bindings to the port, and seals all three layers together. What stops the search is the line after it: `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`. `risk_score` is written into the index by the detection searches as they fire, not by the pipeline, and this package indexes pipeline output only -- so `sum(risk_score)` is null for every chain, and no span reaches four. Running the detections first, on a search head that keeps their notables, is what would make this fire; that is a deployment step rather than a corpus or ladder one. Layer 4's arrival moved the denominator and nothing else: a flow is its own entity, so its 432 records carry 432 chains of one layer each, and Part 4's layer 3 to layer 4 hop is what would join them to anything. `methods` once read `join_method`, which no pipeline writes, and was blank on every chain; it now reads the `resolution_method` the binding resolver records, so all 15 three-layer chains say `soft:mac_table` and 60 chains in all carry a method."
+      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3347 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and one detection accuses any of them: R-D-L2-003, the address claimed by two MACs, at 55. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short and no span reaches four. The other 14 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` now reads `resolution_methods`, every hop a resolver ladder took, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 146 chains in all carry one.",
+      "three_layer_chain_risk": {
+        "0": 14,
+        "55": 1
+      }
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,

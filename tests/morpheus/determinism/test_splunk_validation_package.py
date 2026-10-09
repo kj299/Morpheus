@@ -821,25 +821,85 @@ def test_the_behavior_summary_groups_exactly_what_is_written(expected: dict):
     assert entry["expected_empty"] is False
 
 
-def test_the_chain_assembly_blocker_is_the_risk_and_not_the_span(expected: dict):
-    # An expected-empty search is only honest while its stated reason is the reason, and this one has now been
-    # empty for three different reasons. It was a missing `osi_layer`, then single-layer lineage, and neither
-    # holds any more: the estate pipeline carries a principal down to the port they sat at, so chains reach three
-    # layers. What is left is the risk threshold on the next line, which no pipeline event can satisfy because
-    # `risk_score` is written by the detection searches rather than by a stage. Both halves are asserted, so the
-    # entry cannot go on claiming a blocker it has outgrown, and cannot claim this one after risk starts arriving.
-    entry = expected["searches"]["Chain assembly - cross-layer risk"]
+def _fan_out_trajectory(events: list) -> list:
+    """
+    R-P-L3-005 over the summary the Behavior summary search would collect from these events: the layer 3 rows,
+    grouped as that search groups them, with `peak_destinations` the bin's largest `dsts_per_src`, then two passes
+    of `streamstats current=f last(...)` per entity in `sort 0 entity_key _time lineage_id` order. `last` skips
+    nulls, so `previous` is the last peak seen before a row and `earlier` the last `previous`.
+    """
+    peaks = {}
 
+    for event in events:
+        if (event.get("osi_layer") != 3):
+            continue
+
+        key = (event["entity_key"], _five_minute_bin(event["event_time"]), event["lineage_id"])
+        value = event.get("dsts_per_src")
+        current = peaks.setdefault(key, None)
+
+        if (value is not None):
+            peaks[key] = value if current is None else max(current, value)
+
+    fired = []
+    (entity, previous, earlier) = (None, None, None)
+
+    for key in sorted(peaks):
+        if (key[0] != entity):
+            (entity, previous, earlier) = (key[0], None, None)
+
+        peak = peaks[key]
+
+        if (None not in (peak, previous, earlier) and peak > previous > earlier):
+            fired.append((key, earlier, previous, peak))
+
+        (previous, earlier) = (peak if peak is not None else previous, previous if previous is not None else earlier)
+
+    return fired
+
+
+def test_the_fan_out_trajectory_returns_exactly_what_is_written(expected: dict):
+    # Empty on the first two search-head runs, and not only because the summary had not been collected: the rule
+    # read the value two rows back as `last(previous_destinations)` inside the same streamstats that created
+    # `previous_destinations`, which Splunk evaluates as null on every row. The search now takes two passes, and
+    # the runner dispatches it after the summary is searchable.
+    import re  # pylint: disable=import-outside-toplevel
+
+    search = _search_text("R-P-L3-005 - Fan-out trajectory")
+    passes = re.findall(r"streamstats current=f last\((\w+)\) AS (\w+) BY entity_key", search)
+
+    assert passes == [("peak_destinations", "previous_destinations"), ("previous_destinations", "earlier_destinations")]
+
+    fired = _fan_out_trajectory(_scored_events())
+    entry = expected["searches"]["R-P-L3-005 - Fan-out trajectory"]
+
+    assert entry["expected_rows"] == len(fired) > 0
+    assert entry["expected_empty"] is False
+    assert entry["by_source"] == dict(sorted(collections.Counter(key[0] for (key, _, _, _) in fired).items()))
+
+    # The planted scanner's hours climb 5, 20, 45, 80; in five-minute bins that is the rising run the rule reads.
+    scanner = [(earlier, previous, peak) for (key, earlier, previous, peak) in fired if key[0] == "10.0.0.50"]
+
+    assert scanner and all(earlier < previous < peak for (earlier, previous, peak) in scanner)
+
+
+def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(expected: dict):
+    # An expected-empty search is only honest while its stated reason is the reason, and this one has been empty
+    # for four reasons in turn: a missing `osi_layer`, single-layer lineage, a risk sum nothing wrote, and now a
+    # risk sum that is written and is too small. Every detection collects its rows into `behavior_risk`; the one
+    # detection that accuses a lineage spanning three layers is the ARP anomaly, at 55, under the 60 the search
+    # needs. Both halves are asserted from the events, and the search-head run records the per-chain totals.
+    import re  # pylint: disable=import-outside-toplevel
+
+    entry = expected["searches"]["Chain assembly - cross-layer risk"]
+    chain = _search_text("Chain assembly - cross-layer risk")
     events = _scored_events()
 
     with open(os.path.join(EVENTS, "morpheus_edge.jsonlines"), encoding="utf-8") as handle:
         edges = [json.loads(line) for line in handle if line.strip()]
 
-    # Read from the search rather than assumed, so a search collecting a field the events do not carry fails here.
-    import re  # pylint: disable=import-outside-toplevel
-
-    method_field = re.search(r"values\((\w+)\)\s+AS\s+methods",
-                             _search_text("Chain assembly - cross-layer risk")).group(1)
+    method_field = re.search(r"values\((\w+)\)\s+AS\s+methods", chain).group(1)
+    risk_threshold = float(re.search(r"total_risk\s*>=\s*([\d.]+)", chain).group(1))
     layers = collections.defaultdict(set)
     methods = collections.defaultdict(set)
 
@@ -847,31 +907,36 @@ def test_the_chain_assembly_blocker_is_the_risk_and_not_the_span(expected: dict)
         if (event.get("lineage_id") is not None):
             layers[event["lineage_id"]].add(event.get("osi_layer"))
 
+            # `makemv delim=";"` before the stats: one value per hop the ladder took.
             if (event.get(method_field) is not None):
-                methods[event["lineage_id"]].add(event[method_field])
+                methods[event["lineage_id"]].update(event[method_field].split(";"))
 
-    spans = [len(seen - {None}) for seen in layers.values()]
+    spans = {lineage: len(seen - {None}) for (lineage, seen) in layers.items()}
+    three_layer = {lineage for (lineage, span) in spans.items() if span >= 3}
 
     assert entry["distinct_lineage_ids"] == len(layers)
-    assert entry["maximum_layer_span"] == max(spans)
-    assert entry["two_layer_chains"] == spans.count(2)
-    assert entry["three_layer_chains"] == sum(1 for span in spans if span >= 3)
-
-    # `methods` is how an analyst tells an exact attribution from an inferred one. It read a field nothing wrote,
-    # so it was blank on every chain; every chain that reaches the span threshold must now say how it was joined.
+    assert entry["maximum_layer_span"] == max(spans.values()) == 3
+    assert entry["two_layer_chains"] == sum(1 for span in spans.values() if span == 2)
+    assert entry["three_layer_chains"] == len(three_layer)
     assert entry["chains_with_a_method"] == len(methods)
-    assert entry["three_layer_chain_methods"] == sorted({
-        method
-        for (lineage, seen) in layers.items() if len(seen - {None}) >= 3 for method in methods.get(lineage, ())
-    })
-    assert all(methods.get(lineage) for (lineage, seen) in layers.items() if len(seen - {None}) >= 3)
+    assert entry["three_layer_chain_methods"] == sorted(
+        {method
+         for lineage in three_layer
+         for method in methods[lineage]})
 
-    assert max(spans) >= 3, "the search's own threshold is dc(osi_layer) >= 3, and nothing reaches it"
-    assert max(spans) < 4, "a span of four would fire through the peak_z branch, so empty would be wrong"
+    # R-D-L2-003 as the search states it: claimed by more than one MAC, not excluded, grouped by the address, its
+    # risk record naming every lineage the group's events were on.
+    arp = re.search(r'rule_id = "R-D-L2-003", risk_score = (\d+)', _search_text("R-D-L2-003 - ARP anomaly"))
+    accused = set()
 
-    scored_with_risk = [event for event in events if event.get("risk_score") is not None]
+    for event in events:
+        if (event.get("macs_claiming_sender_ip", 0) > 1 and event.get("arp_sender_ip_excluded") is False):
+            accused.add(event["lineage_id"])
 
-    assert scored_with_risk == [], "risk_score is now on pipeline events, so the stated blocker is gone"
+    assert len(accused & three_layer) == 1
+    assert float(arp.group(1)) < risk_threshold
+    assert entry["three_layer_chain_risk"] == {"0": len(three_layer) - 1, arp.group(1): 1}
+    assert entry["expected_rows"] == 0 and entry["expected_empty"] is True
 
 
 def test_the_validation_document_says_the_same_thing_the_expectation_file_does(expected: dict):
@@ -1001,7 +1066,11 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # Eight of forty-eight after the first search-head run, and the change is a correction rather than a rule: the
     # watchlist expiry was empty only against 1970 timestamps, and the runner dates the events so R-P-L7-006's two
     # entries are still inside their thirty days when it runs.
-    assert len(empty) == 8
+    #
+    # Seven after the risk write path, and the one that left was broken rather than starved: R-P-L3-005 read the
+    # value two rows back from a field its own streamstats was still creating, and fires fifteen times now that
+    # it takes two passes over a summary the run collects first.
+    assert len(empty) == 7
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name
@@ -1213,3 +1282,21 @@ def test_the_scored_layer_5_samples_name_the_model_and_the_fallback():
 
     assert len(unscored) > 0
     assert all(event.get("model_version") is None for event in unscored)
+
+
+def test_the_documents_quote_the_risk_records_the_detections_write(expected: dict):
+    # Every detection's rows become risk records, so the count the documents give is the detections' row total.
+    total = sum(entry["expected_rows"] for (name, entry) in expected["searches"].items() if name.startswith("R-"))
+    guide = os.path.join(REPO_ROOT,
+                         "docs",
+                         "source",
+                         "developer_guide",
+                         "guides",
+                         "11_predictive_behavioral_analytics_osi.md")
+
+    with open(VALIDATION, encoding="utf-8") as handle:
+        assert f"holds exactly those rows -- {total} --" in " ".join(handle.read().split())
+
+    with open(guide, encoding="utf-8") as handle:
+        assert f"holds {total} risk records for the {total} rows the detections returned" in " ".join(
+            handle.read().split())

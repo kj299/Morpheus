@@ -8,8 +8,16 @@ and `macs_per_port_step>0` let four null steps through R-B-L2-002 -- six ports w
 health had matched only because its expectation shared the defect: it counted four classes whose
 `resolution_method` was null on every row as resolving bindings. The serializer now leaves null fields out, the
 expectations say one row and two, and that run is kept in `search_head_runs/` as the evidence. The run over the
-regenerated events, on 2026-10-09 on the same version, returned what is written for all forty-eight, and
-`search_head_results.json` holds it.
+regenerated events, on 2026-10-09 on the same version, returned what was then written for all forty-eight, and is
+kept beside it.
+
+`search_head_results.json` holds the third run, made the same day with the risk write path in place, on Splunk
+10.2.8 started from Splunk's own tarball in the development container rather than from the Docker image. It is the
+first in which the detections' rows outlive their jobs: every detection collects what it returns into
+`behavior_risk`, and the run checks that the index holds exactly those rows -- 94 -- before the searches that read
+them run. It also found a search that could never have fired. R-P-L3-005 read the value two rows back as
+`last(previous_destinations)` inside the `streamstats` creating `previous_destinations`, which Splunk evaluates as
+null on every row; the second run's zero was that, and agreed with an expectation that blamed the summary instead.
 
 ## Running it
 
@@ -23,8 +31,9 @@ SPLUNK_PASSWORD='choose-one' examples/splunk_lineage_app/validate/run_search_hea
 It starts the container, waits for it to report healthy, and runs [`run_search_head.py`](./run_search_head.py)
 inside it under Splunk's own interpreter. That indexes every file in `sample_events/`, makes the two checks
 below, dispatches all forty-eight searches in the order this document prescribes, and writes
-`search_head_results.json` beside this file: the Splunk version, the date, what was indexed, and a row count per
-search. Commit it; `tests/morpheus/determinism/test_search_head_run.py` compares it with
+`search_head_results.json` beside this file: the Splunk version, the date, what was indexed, a row count per
+search, how many risk records the detections wrote and the index holds, and the risk on every chain that spans
+three layers. Commit it; `tests/morpheus/determinism/test_search_head_run.py` compares it with
 [`expected_results.json`](./expected_results.json). The container is left
 running for rerunning a search by hand at <http://localhost:8000>; `docker compose down -v` here removes it.
 
@@ -41,6 +50,18 @@ Two adjustments make the run faithful, and both are the runner's rather than the
   `| savedsearch` with an explicit time range covering every event, which overrides the stanza's window, so each
   is asked its question over all the data at once -- the same simplification the Python recomputation behind
   `expected_results.json` makes.
+
+The order is the one a schedule would settle into, made explicit: the binding refreshes, so the lookups exist; the
+two predictive searches, so R-B-L7-002 reads a populated watchlist; every other detection, each collecting its rows
+into `behavior_risk`; the behavior summary; R-P-L3-005, which reads the summary; Chain assembly, which sums the
+risk; and the expiry jobs last, because the events are historical and expiry drops what they wrote. `collect`
+hands its rows to the indexer and returns, so a search that reads an index another search wrote is dispatched only
+once that index holds every row written to it. The runner also waits for an ordinary search, not only the
+index-time count, to see every event before the first dispatch: on 2026-10-09 the two disagreed for long enough that
+a summary dispatched in between returned 3,649 rows instead of 4,335. Then it rolls the hot buckets to warm, because
+a count is still not enough: on one run every count reported layer 1's 305 events while R-D-L1-001 could not see the
+one poll it needs, and returned that row a minute later. With the roll, three consecutive runs returned the same row
+count for every search.
 
 The indexing loop this section used to give by hand would have met both problems: it indexed the 1970 timestamps
 as they were, so every event would have failed the first check below. Nothing in this repository records it
@@ -77,7 +98,7 @@ should return nothing:
 | R-B-L3-002, beaconing | **6** | One notable from the layer 3 corpus, for the pair on a five-minute timer; the worker making plenty of flows to one file server at ragged intervals does not appear. Five more are R-C-002's hosts in the campaign corpus, each on a sixty-second timer -- the rule reports all five on their regularity alone. |
 | R-D-L3-003, reserved-range egress | **1** | One flow, to `240.0.0.1`. What the number really asserts is that the other 410 flows are classified correctly. |
 | R-B-L3-004, TTL fingerprint shift | **1** | One notable: twelve flows from one source, every one short by exactly the single hop an interposed device costs. The steady host beside it never moves. |
-| R-P-L3-005, fan-out trajectory | **0** | Correct. Reads `index=behavior_summary`, which the summary search populates as it runs and this package does not. The trajectory is in the data. |
+| R-P-L3-005, fan-out trajectory | **15** | Three for the planted scanner, whose fan-out climbs through the summary's five-minute bins, and two for each of six campaign sources whose fan-out rises three bins in a row. Empty until 2026-10-09, when a search head showed the search read a field its own `streamstats` was still creating; it now takes two passes. A watchlist rule, so fifteen is not fifteen pages. |
 | R-D-L4-002, SYN without completion | **1** | One notable: 60 destination ports in one bin, none of them answering. The workstation's handshakes complete, and the sweep touches one port across thirty hosts rather than sixty on one. |
 | R-D-L4-003, RST ratio | **2** | Two notables from one predicate. 50 flows sit at the same ratio; one server refusing 20 clients is an outage, 30 servers refusing one client is enumeration, and they need different responses. |
 | R-B-L4-005, transfer envelope breach | **6** | One notable from the layer 4 corpus: 60000 bytes against the triple's own envelope of 1200. The busy triple beside it moves more in total and never breaches, which is what a global threshold could not express. Five more are the campaign's R-C-004 actors, each breaching its own sync envelope identically; which one was the exporting principal's, in session, is R-C-004's to say. |
@@ -105,7 +126,7 @@ should return nothing:
 | R-C-002, TLS before beaconing | **1** | One chain, and the first this rule has ever returned: it now reads the scored events rather than the two detections' notables. A settled host presents a new stack to a destination and fourteen minutes later its beacon there matures. Four hosts do both halves with one condition broken and are quiet: a beacon already running an hour before, a beacon to another address, a beacon maturing after sixty-seven minutes, and a host with five handshakes behind it. |
 | R-C-005, credential replay across the stack | **1** | One principal at two switch ports 534 km apart twenty minutes apart: the leases name the workstations behind both sign-in addresses, and the MAC bindings closed from the two sites' switches put them at headquarters and in Edinburgh. Five others are one step short and quiet -- two ports at the same site, the same journey in three hours, an address no lease names, a lease that had ended an hour before, and a refused second attempt. Nothing here rests on geolocation: both ends of the journey are ports. |
 | Behavior summary, per-layer scores | **4335** | One row per five-minute bin, layer, entity and lineage over the 8221 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5, because only `TC5ScoreStage` produces `max_abs_z`. |
-| Chain assembly, cross-layer risk | **0** | Correct, and for a new reason. The threshold the search was built around is met: 15 of the 3347 chains span three layers, holding a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there. What stops it is the line after -- `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)` -- and `risk_score` is written into the index by the detection searches as they fire, not by a stage. This package indexes pipeline output alone, so every chain sums null. Each of the 15 says how it was joined: `methods` reads the `resolution_method` the binding resolver records and is `soft:mac_table` on all of them. |
+| Chain assembly, cross-layer risk | **0** | Correct, and now because the risk is written and is not enough. Every detection collects its rows into `behavior_risk` and this search sums them per lineage, once each. 15 of the 3347 chains span three layers -- a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there -- and one detection accuses any of them: R-D-L2-003, at 55, under the 60 the search needs. The other 14 carry none; the run records both totals. `methods` reads every hop the resolver ladder took, so the 15 name `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. |
 | Binding lookup, L2/L3 refresh | **0** | Correct, and it always was. The search selects `binding_table=dhcp_lease`; this corpus has no DHCP source, and the 80 bucketed rows it used to be credited with are a MAC table under a different name. |
 | Binding lookup, L1 refresh | **7** | Seven port intervals across five ports: three stable, two on each of the two ports whose optics are swapped. The lookup keys on port and switch with no bucket, so a swapped port's two collapse to one row and the later optic wins -- it answers what is in a port now, not what was in it then. |
 | Binding lookup, L1 history refresh | **2** | Two rows, and two rows is the point. Only the ports whose optics were replaced have a superseded interval; the other three are described for all time by the current-state row and cost the history nothing. |
@@ -115,14 +136,16 @@ should return nothing:
 | Binding health, unresolved rate | **1** | The ARP stream, the one class whose records carry a resolution outcome: 180 unresolved of 1,220 (0.148), under the 0.2 that marks a class degraded. It read five while the wire sent null fields: four classes carry `resolution_method` with no value, `resolution_method=*` matched the nulls, and the search reported them as resolving with nothing unresolved. An operational metric; the value matters, not whether it fired. |
 | R-P-L5-006, drift trajectory | **6** | Two principals, neither of them behaviour, explained in `expected_results.json`: both climb for six days because the reference scorer's baseline is frozen under cumulative features. The shallow run ended by the planted burst is a spike rather than a climb, and the acceleration ceiling keeps it out. Watchlist, never a page: every firing is written to `principal_watchlist`. |
 
-**Eight of the forty-eight should return nothing.** That is the point of writing them down. An empty result is
+**Seven of the forty-eight should return nothing.** That is the point of writing them down. An empty result is
 this app's characteristic failure, and without a list saying which emptiness is correct, a deployment cannot
 tell a rule that is working from a rule that is broken. The ratio has moved both ways, which is what makes it
 worth stating: it improved as layers 3, 4, 5, 6 and 7 gained producers, and went the other way when the L2/L3 refresh
-was found to have been empty all along under a note that credited it with 80 rows. Chain assembly is the one
-worth following, because it has now been empty for three different reasons in turn: a missing `osi_layer`, then
-lineage that never left one layer, and now a risk sum no pipeline event contributes to. Each fix made the next
-blocker visible, which is what an expectation file is for.
+was found to have been empty all along under a note that credited it with 80 rows, and again when R-P-L3-005
+turned out to have been empty because its own SPL could not fire. Chain assembly is the one worth following,
+because it has now been empty for four different reasons in turn: a missing `osi_layer`, then lineage that never
+left one layer, then a risk sum nothing wrote, and now a risk sum that is written and falls five points short on
+the one three-layer chain a detection accuses. Each fix made the next blocker visible, which is what an
+expectation file is for.
 
 ## The watchlist the predictive searches write
 

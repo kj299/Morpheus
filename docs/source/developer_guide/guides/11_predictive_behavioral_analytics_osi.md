@@ -60,7 +60,7 @@ scoring path with frozen arithmetic in the model's slot, control 8's total order
 checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
 request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve. That is forty-six stages and forty-one supporting
-modules, covered by 1,958 distinct tests, itemized in
+modules, covered by 1,970 distinct tests, itemized in
 [Part 6](#provided). Thirty-eight of the forty-two rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -76,7 +76,7 @@ scores what all of that adds up to for each class of entity on a network, and li
 What remains design rather than a running system: four of the forty-two rules (R-B-L4-001 and
 R-B-L7-003, which need a Triton endpoint; R-B-L4-004, which needs a stack fingerprint on the flow and a
 flow identifier on the request that rode it; and R-C-003), a trained model in the composed pipeline, the
-hysteresis half of control 9, controls 10 and 11 as code, the sharding router's wiring, and clock
+hysteresis half of control 9 (its suppression half ships on every detection), controls 10 and 11 as code, the sharding router's wiring, and clock
 correction, since `clock_source` and `clock_offset_ms` are schema that nothing produces or checks. Layer 5
 is the case to state precisely: **there is no trained per-user model in any shipped artifact.**
 `mean_abs_z` and `max_abs_z` have a producer,
@@ -1502,7 +1502,11 @@ than one hop-equivalent. Indicates an interposed device or spoofing.
 
 **R-P-L3-005 - Fan-out trajectory.** Second difference of the per-source distinct-destination count
 positive across three consecutive windows while the first difference is also positive. This fires during
-the expansion phase of a scan rather than at its peak. It is a watchlist rule, not an alert rule.
+the expansion phase of a scan rather than at its peak. It is a watchlist rule, not an alert rule. As shipped it
+reads the behavior summary's five-minute rows, so its consecutive windows are consecutive bins, and it takes the
+value two rows back in a second `streamstats` pass: in one pass, `last(previous_destinations)` reads a field the
+same command is creating, which Splunk treats as null on every row, and the rule could not fire until a search
+head showed it.
 
 All five of these are built and ship as saved searches. The features they read come from
 {py:class}`~morpheus.stages.telemetry.tc3_cardinality_stage.TC3CardinalityStage`,
@@ -2747,7 +2751,8 @@ For rules driven off the summary index rather than the raw index, the same stanz
 - Summary-index the per-layer scores at 5-minute granularity. Chained rules should run against the summary,
   not the raw index, which makes their runtime independent of raw volume and their results independent of
   index-time variability. Status: only R-P-L3-005 reads the summary today; the four shipped chained rules
-  read scored events in `behavior_events`.
+  read scored events in `behavior_events`, and Chain assembly reads the detections' own risk records in
+  `behavior_risk`, which every detection writes with `| collect`.
 - Pin every scheduled search to a fixed relative time range with a lag offset that exceeds the lateness
   horizon from Part 5. A search with `earliest=-30m latest=now` produces different results depending on
   when it runs. `earliest=-45m latest=-15m` does not.
@@ -3046,6 +3051,14 @@ and libraries. Emit both `score` and `score_q`; rules compare `score_q`.
 `threshold - delta`. This eliminates the flapping that occurs when an entity's score oscillates around
 the boundary, which is a distinct problem from float noise and much more common in practice. Both
 `threshold` and `hysteresis` appear in the rule metadata block in Part 3 and in `config_hash`.
+
+**As built.** Suppression ships and hysteresis does not. Every detection in the Splunk app is a per-result alert
+(`alert.digest_mode = 0`) suppressed on the deduplication key its stanza states, for the length of its own dispatch
+window rounded up to the hour and never under one: a row two overlapping windows both return raises one notable.
+`lookups/rule_metadata.csv` holds the key, the period and a `hysteresis` column that reads `none` for every rule,
+and a test holds the stanzas to it. Suppression throttles the notable, not the record: every run still collects
+what it returned into `behavior_risk`, and the chain search counts each record once. Hysteresis waits for a
+model that scores near a threshold, which the reference arithmetic in every shipped pipeline does not.
 
 ### Control 10: Keep LLM stages out of the decision path
 
@@ -3708,7 +3721,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Upstream reuse decision | Small | A recorded reuse-or-reject decision, with a measured reason, for `morpheus_dfp`'s rolling window, training and inference stages, the identity-provider and CloudTrail source stages, `TimeSeriesStage` and `MLFlowDriftStage`, all named by this document and used by no fork code. Precedes the model, normalization and health rows. Tracked in #67 |
 | Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
 | **The per-entity learned model in the pipeline (principals, then hosts)** | Large | Still the largest gap and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory, `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, and `examples/layer5_model/run_model.py` has trained and run it on one card, most recently on 2026-10-03, scoring the week it trained on. What fills the slot in every composed pipeline and every shipped artifact is `ReferenceScorer`, frozen population arithmetic the class itself calls not a model. Three things remain: the run's artifact and weight digests committed beside the README that quotes them; a CPU inference path (`state_dict` load or an exported forward pass) so the composed pipeline runs with a pinned real model in CI; a corpus with a train window and a disjoint score window, so R-B-L5-001, R-B-L5-002 and R-P-L5-006 are evaluated against a learned baseline for the first time. Then `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame gives hosts the score and drift principals have. Tracked in #59, after #67 |
-| Risk write path and suppression for the shipped detections | Small | Every one of the 38 detection stanzas ends in `/ table` with only `action.correlationsearch.enabled`; none collects, so `risk_score` and `rule_id` never land in an index and "Chain assembly - cross-layer risk" and "Behavior summary" sum null by construction. A `behavior_risk` index, a `collect` per detection, `alert.suppress` keyed on each rule's documented deduplication key (control 9's suppression half; without it R-C-005 would emit the same chain 96 times a day), the chain search reading the risk index, and one `resolution_methods` field so the chain's `methods` names every hop. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
+| Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run holds 94 risk records for the 94 rows the detections returned. Chain assembly stays empty on the sample events because the one three-layer chain a detection accuses sums 55 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
 | Clock skew where the corpora cannot measure it | Medium | Step 7's runs are recorded: the search-head run of all forty-eight searches on Splunk 10.2.8 on 2026-10-09 returned what `expected_results.json` says for every one, over events whose wire format the first run, on 2026-10-05, corrected; the conformance run of 2026-10-09 passed 759 of 759 marked variants on a card, the parity test over all twelve corpora among them; both results and the model artifact are committed and the documents' numbers are tested against them; the clock skew experiment decides all thirty-eight detections. What it could not measure remains: fifteen detections whose corpora carry one clock -- layers 3, 4 and 6 and the SaaS pair -- need an exporter, inspection point or context record time per row before skew can be measured on them, and the 120-second join tolerance itself needs a corpus whose chain steps sit within a minute of each other on different clocks. Recorded under #58; correcting the clocks rather than measuring them is #62 |
 | Host baselines at layers 3, 4 and 6 | Medium | R-B-L3-001 reads a literal 50 where the design specifies the source's own fourteen-day 99.5th percentile; the `bucket_peak` pattern `TC2BaselineStage` uses for ports was never applied to hosts, and fan-in per destination has no history. Fan-in, distinct ports, byte asymmetry, first-contact ASN, JA4 change and the endpoint host-seen flags are emitted and read by no search; asset criticality, owner and classification are attached to host rows and read by nothing; `device_role` and `os_family` are absent from the asset record; `community_id` is absent from layer 3; `hostname` is case-folded in the chain SPL and not in the stages; R-B-L6-001 dropped its managed-endpoint gate. Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | A host is `src_ip` at layers 3, 6 and 7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint, and nothing bridges them: no time-bounded `hostname`-to-address binding exists, the network, transport, presentation and application corpora run no `BindingResolverStage`, and asset context cannot attach to a network-layer event. The SIEM `binding_l2_l3` refresh selects `binding_table=dhcp_lease` rows nothing produces, `morpheus:edge` carries no `lineage_id`, `osi_layer`, parent or child `uid` or `join_method`, the principal-to-desk rung the estate corpus proves is a Python dict, and only one resolver passes `uid_column`. A lease stage emitting bucketed `dhcp_lease` rows, a `host_inventory` binding and a `host_key` on every layer 3-7 event, an `EdgeEmitStage` behind the resolvers, MAC and 802.1X lookups in the SIEM, and `community_id`/`session_key` joins above layer 3. The DHCP collector itself is not Morpheus. Tracked in #63 |
@@ -3849,13 +3862,15 @@ naming the remote worker in the directory, rooting layer 5 on the principal, mak
 eternal, and sealing layer 5 apart -- with each break failing the test that exists for it.
 
 `Chain assembly - cross-layer risk` is still empty, and it is worth being exact about why, because the reason has
-changed. Its first threshold, `dc(osi_layer) >= 3`, is met. The line after it is not: `total_risk >= 60 OR
-(layer_span >= 4 AND peak_z >= 4.0)`, and `risk_score` is written into the index by the detection searches as
-they fire rather than by any stage, so a package that indexes pipeline output alone sums null for every chain.
-That is not a deployment step either: no detection stanza collects, raises a notable or alerts, so `risk_score`
-never lands in any index the chain search reads, and a `collect` per detection with a source change in the
-chain search is what closes it (gap G11, issue #57). The `morpheus:edge` events still carry no `lineage_id`,
-because they come from the flow corpus rather than from a composed pipeline.
+changed again. Its first threshold, `dc(osi_layer) >= 3`, is met. The line after it is not: `total_risk >= 60 OR
+(layer_span >= 4 AND peak_z >= 4.0)`. Every detection now ends in `| collect index=behavior_risk`, so its rows
+outlive its job, and the chain search sums those records per lineage, once each (gap G11, issue #57). On the
+sample events one detection accuses a three-layer chain -- R-D-L2-003, the address two MACs claimed, at 55 --
+and the other fourteen carry none, so the search returns nothing for a reason the search-head run now records
+rather than infers. Before that change no detection stanza collected, raised a notable or alerted, so
+`risk_score` never landed in any index the chain search read, and three documents called that a deployment step.
+The `morpheus:edge` events still carry no `lineage_id`, because they come from the flow corpus rather than from a
+composed pipeline, so they drop out of the chain's stats.
 
 One consequence of sealing the union is worth stating because it looks like a change and is not. 129 rows in
 the layer 2 corpus moved from `sealed_by = flush` to `sealed_by = watermark`: the ARP and 802.1X streams end

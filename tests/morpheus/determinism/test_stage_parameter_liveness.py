@@ -1795,6 +1795,7 @@ REGISTRY: dict = {
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
                 Knob("output_columns", DIFFERS, benign=None, extreme={"port_key": "resolved_port"}),
                 Knob("method_column", DIFFERS, benign="resolution_method", extreme="how_resolved"),
+                Knob("methods_column", DIFFERS, benign="resolution_methods", extreme="hops_resolved"),
                 Knob("uid_column", DIFFERS, benign=None, extreme="binding_uid"),
                 Knob("raise_on_unresolved", RAISES, benign=False, extreme=True),
             ),
