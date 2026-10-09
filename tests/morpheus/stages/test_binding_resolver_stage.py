@@ -88,6 +88,7 @@ def test_needed_columns(config: Config, table: BindingTable):
         "mac": TypeId.STRING,
         "port_id": TypeId.STRING,
         "resolution_method": TypeId.STRING,
+        "resolution_methods": TypeId.STRING,
         "binding_uid": TypeId.STRING,
     }
 
@@ -115,6 +116,33 @@ def test_method_column_marks_every_row(config: Config, table: BindingTable, obs_
 
     # An unresolved row must be distinguishable from a resolved one, which is the whole point of the field.
     assert _as_list(meta, "resolution_method") == ["soft:dhcp_lease", "soft:dhcp_lease", UNRESOLVED, UNRESOLVED]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_every_rung_of_a_ladder_appends_to_one_methods_field(config: Config, table: BindingTable, obs_df):
+    # Two rungs naming their own method columns, as the estate's directory and supplicant rungs do. Each column
+    # names one hop; the shared field names both, in the order they ran, and says which table a miss was against.
+    switch = BindingTable.from_dataframe(pd.DataFrame({
+        "mac": ["aa:bb:cc:00:00:01"], "switch_port": ["sw1:Gi1/0/1"], "bind_start": [0], "bind_end": [4 * HOUR_NS]
+    }),
+                                         name="mac_table",
+                                         key_column="mac",
+                                         value_columns=["switch_port"],
+                                         start_column="bind_start",
+                                         end_column="bind_end")
+    meta = MessageMeta(obs_df)
+
+    BindingResolverStage(config, binding_table=table, key_column="src_ip", method_column="lease_method").on_data(meta)
+    BindingResolverStage(config, binding_table=switch, key_column="mac", method_column="port_method").on_data(meta)
+
+    assert _as_list(meta, "lease_method") == ["soft:dhcp_lease", "soft:dhcp_lease", UNRESOLVED, UNRESOLVED]
+    assert _as_list(meta, "port_method") == ["soft:mac_table", UNRESOLVED, UNRESOLVED, UNRESOLVED]
+    assert _as_list(meta, "resolution_methods") == [
+        "soft:dhcp_lease;soft:mac_table",
+        "soft:dhcp_lease;unresolved:mac_table",
+        "unresolved:dhcp_lease;unresolved:mac_table",
+        "unresolved:dhcp_lease;unresolved:mac_table",
+    ]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -223,6 +251,9 @@ def test_constructor_validation(config: Config, table: BindingTable):
 
     with pytest.raises(ValueError):
         BindingResolverStage(config, binding_table=table, key_column="src_ip", method_column="")
+
+    with pytest.raises(ValueError, match="methods_column"):
+        BindingResolverStage(config, binding_table=table, key_column="src_ip", methods_column="resolution_method")
 
     with pytest.raises(ValueError, match="does not provide"):
         BindingResolverStage(config, binding_table=table, key_column="src_ip", output_columns={"nope": "nope"})

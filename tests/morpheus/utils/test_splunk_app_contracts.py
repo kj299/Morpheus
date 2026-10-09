@@ -250,3 +250,101 @@ def test_kvstore_lookups_expose_the_key_they_are_written_by():
 
     for tail in writes:
         assert "key_field=_key" in tail, f"a lookup is written without a key: {tail!r}"
+
+
+RULE_METADATA_PATH = os.path.join(APP_ROOT, "lookups", "rule_metadata.csv")
+TRANSFORMS_PATH = os.path.join(APP_ROOT, "default", "transforms.conf")
+
+
+def _parsed_savedsearches() -> configparser.ConfigParser:
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.optionxform = str
+    parser.read_string(re.sub(r"\\\s*\r?\n\s*", " ", read_text(SAVEDSEARCHES_PATH)))
+
+    return parser
+
+
+def _detections() -> dict:
+    parsed = _parsed_savedsearches()
+
+    return {name: parsed[name] for name in parsed.sections() if name.startswith("R-")}
+
+
+def _rule_metadata() -> dict:
+    import csv  # pylint: disable=import-outside-toplevel
+
+    with open(RULE_METADATA_PATH, encoding="utf-8", newline="") as handle:
+        return {row["rule_id"]: row for row in csv.DictReader(handle)}
+
+
+def _offset_seconds(spec: str) -> int:
+    if (spec.startswith("@")):
+        return 0
+
+    (amount, unit) = re.match(r"-(\d+)([mhdw])", spec).groups()
+
+    return int(amount) * {"m": 60, "h": 3600, "d": 86400, "w": 604800}[unit]
+
+
+def _period_seconds(period: str) -> int:
+    (amount, unit) = re.fullmatch(r"(\d+)([smhd])", period).groups()
+
+    return int(amount) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+
+
+def test_every_detection_writes_its_rows_to_the_risk_index():
+    # The output loop, closed: a detection's rows were discarded when its job ended, so the chain and summary
+    # searches summed a risk_score nothing stored. Every detection now ends by collecting what it returned.
+    detections = _detections()
+
+    assert len(detections) == 38
+    assert read_text(SAVEDSEARCHES_PATH).count("| collect index=behavior_risk") == len(detections)
+
+    for (name, stanza) in detections.items():
+        assert stanza["search"].rstrip().endswith("| collect index=behavior_risk"), name
+        assert re.search(r'rule_id\s*=\s*"' + re.escape(name.split(" - ")[0]) + '"', stanza["search"]), name
+
+    assert "[behavior_risk]" in read_text(INDEXES_PATH)
+
+
+def test_every_detection_is_suppressed_on_its_stated_key_for_its_stated_period():
+    detections = _detections()
+    metadata = _rule_metadata()
+
+    assert set(metadata) == {name.split(" - ")[0] for name in detections}
+
+    for (name, stanza) in detections.items():
+        row = metadata[name.split(" - ")[0]]
+
+        assert row["saved_search"] == name
+        assert stanza["alert.suppress"] == "1", name
+        assert stanza["alert.digest_mode"] == "0", f"{name}: field suppression needs one alert per result"
+        assert stanza["alert.suppress.fields"] == row["suppress_fields"], name
+        assert stanza["alert.suppress.period"] == row["suppress_period"], name
+
+
+def test_the_suppression_key_is_on_every_row_the_detection_returns():
+    # A suppression field the rows do not carry suppresses on a null, which is every notable the rule ever raises
+    # after the first, for as long as the period runs.
+    for (name, stanza) in _detections().items():
+        projected = set(re.findall(r"\|\s*table\s+([^|]*)", stanza["search"])[-1].split())
+
+        for field in stanza["alert.suppress.fields"].split(","):
+            assert field in projected, f"{name} suppresses on {field}, which its table does not carry"
+
+
+def test_the_suppression_period_covers_every_run_that_can_see_the_same_row():
+    # Overlapping windows return a row on every run that covers it; the period is the window, at least an hour,
+    # rounded up to the hour, so the notable is raised once.
+    for (name, stanza) in _detections().items():
+        span = _offset_seconds(stanza["dispatch.earliest_time"]) - _offset_seconds(stanza["dispatch.latest_time"])
+        period = _period_seconds(stanza["alert.suppress.period"])
+
+        assert period >= max(span, 3600), name
+        assert period % 3600 == 0 and period - max(span, 3600) < 3600, name
+
+
+def test_no_rule_claims_hysteresis_it_does_not_have():
+    # Control 9's other half waits on a model scoring near a threshold; until then every row says so.
+    assert {row["hysteresis"] for row in _rule_metadata().values()} == {"none"}
+    assert "[rule_metadata]" in read_text(TRANSFORMS_PATH)

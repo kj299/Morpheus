@@ -145,7 +145,8 @@ PRODUCED: dict = {
                               "optical_rx_dbm_floor_dbm",
                               "optical_rx_dbm_trend_db_per_day",
                               "optical_rx_dbm_trend_samples",
-                              "resolution_method"),
+                              "resolution_method",
+                              "chain_anchor_source"),
         ),
     "morpheus:score:l3":
         Sourcetype(
@@ -409,6 +410,7 @@ PRODUCED: dict = {
                  "login_port_key",
                  "login_site_id",
                  "resolution_method",
+                 "resolution_methods",
                  "site_travel_status",
                  "site_travel_kmh",
                  "site_travel_elapsed_ns"),

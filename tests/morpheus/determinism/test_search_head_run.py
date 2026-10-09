@@ -22,9 +22,9 @@ changes nothing but the timestamps, by a whole number of weeks; that every shipp
 once, in the order VALIDATION.md prescribes; that each sourcetype goes to the index the procedure names; and that
 the validation-only settings cover every sourcetype the app defines.
 
-The run's own result, `validate/search_head_results.json`, is compared with `expected_results.json` once it is
-committed. Until then that comparison skips and says why: a run that has not happened cannot be compared with
-anything, and a skip that names the missing file is the honest reading of that.
+The run's own result, `validate/search_head_results.json`, is compared with `expected_results.json`, risk index
+included. The runs before it are kept in `validate/search_head_runs/`, each with the differences it found; were the
+result removed, the comparison would skip and name the missing file rather than pass on nothing.
 """
 
 import importlib.util
@@ -117,13 +117,28 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     expiries = [name for name in names if phases[name] == "expiry"]
 
     assert len(refreshes) == 3 and len(expiries) == 3
-    assert max(position[name] for name in refreshes) < position[runner.SUMMARY]
-    assert position[runner.SUMMARY] < position["R-P-L3-005 - Fan-out trajectory"]
+    assert max(position[name] for name in refreshes) < min(position[name] for name in runner.PREDICTIVE)
 
     for writer in runner.PREDICTIVE:
         assert position[writer] < position["R-B-L7-002 - Bulk data access"]
 
+    # Every detection writes its risk record before the search that sums them, and the summary is collected before
+    # the trajectory rule reads it.
+    writers = [name for name in names if runner.writes_risk(name)]
+
+    assert len(writers) == 38
+    assert max(position[name] for name in writers) < position[runner.CHAIN]
+    assert position[runner.SUMMARY] < position[runner.TRAJECTORY] < position[runner.CHAIN]
     assert min(position[name] for name in expiries) > max(position[name] for name in names if name not in expiries)
+
+
+def test_the_chain_risk_check_is_chain_assembly_up_to_its_threshold(runner):
+    # The check reports how close each chain came; it must be the shipped search's own arithmetic, not a copy.
+    shipped = runner.search_text(runner.CHAIN)
+    check = runner.chain_risk_query()
+
+    assert check.startswith(shipped.split("| where total_risk", 1)[0])
+    assert "| where layer_span >= 3" in check and check.endswith("| stats count BY total_risk")
 
 
 def test_each_sourcetype_goes_where_the_procedure_sends_it(runner):
@@ -179,6 +194,15 @@ def test_the_recorded_run_returned_what_is_written():
     }
     assert differing == {}, f"rows returned on the search head versus written: {differing}"
 
+    # The write path, end to end: every row a detection returned is a record in the risk index, and the chains
+    # that span three layers carry the risk the expectation says.
+    written = sum(entry["rows"] for (name, entry) in run["searches"].items() if name.startswith("R-"))
+    risk = run["checks"]["risk_records"]
+
+    assert risk["written"] == risk["indexed"] == written
+    assert {row["total_risk"]: int(row["count"]) for row in run["checks"]["three_layer_chain_risk"]} == \
+        expected["Chain assembly - cross-layer risk"]["three_layer_chain_risk"]
+
 
 FIRST_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-05T0114Z.json")
 """The first search-head run, kept because it is the evidence for the two changes it caused."""
@@ -210,9 +234,37 @@ def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it
     assert differing == {
         "R-B-L2-002 - Port-to-MAC binding novelty": 6,
         "Binding health - unresolved rate": 5,
-    }, "the watchlist expiry now expects what the run found; the other two are nulls that reached the wire"
+        "R-P-L3-005 - Fan-out trajectory": 0,
+    }, ("the watchlist expiry now expects what the run found; two are nulls that reached the wire; the trajectory "
+        "rule's own SPL could not fire, which the third run found")
     assert expected["R-B-L2-002 - Port-to-MAC binding novelty"]["expected_rows"] == 2
     assert expected["Binding health - unresolved rate"]["expected_rows"] == 1
+
+
+SECOND_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-09T1400Z.json")
+"""The run over the regenerated events, which matched every expectation then written, and found nothing."""
+
+
+def test_the_second_run_differed_from_what_is_written_only_where_the_trajectory_rule_was_broken():
+    # Splunk 10.2.8, 2026-10-09: all forty-eight returned what was then written, R-P-L3-005's zero among them. A
+    # third run, on a search head started in the development container, found the zero was the search and not the
+    # data: `last(previous_destinations)` read a field its own streamstats was creating, which is null on every row.
+    with open(SECOND_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    assert run["splunk_version"].startswith("Splunk 10.2")
+    assert run["indexed"] == run["expected_indexed"] and sum(run["indexed"].values()) == 8400
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == {"R-P-L3-005 - Fan-out trajectory": 0}
+    assert "risk_records" not in run["checks"], "the write path did not exist when this run was made"
 
 
 def test_no_sample_event_sends_a_null():

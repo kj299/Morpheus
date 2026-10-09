@@ -30,12 +30,13 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 
 | File | Deploy to | What it defines |
 | --- | --- | --- |
-| `default/indexes.conf` | Indexers | `behavior_events`, `behavior_lineage`, `behavior_bindings`, `behavior_context`, `behavior_summary`, with deliberately asymmetric retention, and a statement of what each one holds about a person beside the period it holds it for |
+| `default/indexes.conf` | Indexers | `behavior_events`, `behavior_lineage`, `behavior_bindings`, `behavior_context`, `behavior_summary`, `behavior_risk`, with deliberately asymmetric retention, and a statement of what each one holds about a person beside the period it holds it for |
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored on a field the record carries -- `event_time` for scores and edges, an interval bound for bindings, `valid_from` for context |
 | `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, the bucketed L1 history beside them, and the principal watchlist the predictive rules write, with accelerated fields |
-| `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1`, `binding_l1_history` and `principal_watchlist` lookups |
-| `default/savedsearches.conf` | Search heads | Forty-eight searches: lookup refresh and expiry jobs, including the principal watchlist's, the 5-minute summary rollup, chain assembly, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the two layer 1 detections R-D-L1-001 and the predictive R-P-L1-004, the five layer 2 detections R-B-L2-002 and R-D-L2-001, 003, 004 and 005, the five layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004 and the predictive R-P-L3-005, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the five deterministic layer 5 detections R-D-L5-003, R-D-L5-004, R-D-L5-007, R-D-L5-008 and R-D-L5-009, the two layer 5 model rules R-B-L5-001 and R-B-L5-002, gated on a principal's own model and empty until one is pinned, the layer 5 session duration rule R-B-L5-005, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric |
+| `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1`, `binding_l1_history` and `principal_watchlist` lookups, and `rule_metadata` |
+| `default/savedsearches.conf` | Search heads | Forty-eight searches: lookup refresh and expiry jobs, including the principal watchlist's, the 5-minute summary rollup, chain assembly, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the two layer 1 detections R-D-L1-001 and the predictive R-P-L1-004, the five layer 2 detections R-B-L2-002 and R-D-L2-001, 003, 004 and 005, the five layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004 and the predictive R-P-L3-005, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the five deterministic layer 5 detections R-D-L5-003, R-D-L5-004, R-D-L5-007, R-D-L5-008 and R-D-L5-009, the two layer 5 model rules R-B-L5-001 and R-B-L5-002, gated on a principal's own model and empty until one is pinned, the layer 5 session duration rule R-B-L5-005, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric. Every detection ends by collecting its rows into `behavior_risk`, which Chain assembly sums, and is a per-result alert suppressed on its stated deduplication key for its dispatch window |
 | `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
+| `lookups/rule_metadata.csv` | Search heads | One row per detection: `rule_id,saved_search,suppress_fields,suppress_period,hysteresis`. The stanzas' `alert.suppress.*` keys are held to it by a test; `hysteresis` is `none` for every rule until a model scores near a threshold |
 | `lookups/scanner_allowlist.csv` | Search heads | The estate's own scanners, which R-B-L3-001 excludes: `src_ip,allowed,owner,note`. Ships header-only; until it is populated the rule fires on every scanner, authorized ones included |
 
 ## Installation
@@ -142,6 +143,10 @@ side alone breaks the joins silently.
 - `behavior_summary` starts filling on the 5-minute cadence, lagged by the 15-minute lateness
   horizon. R-P-L3-005 reads from it; the four chained rules read the scored events directly. Detections
   trail real time by design; the guide's Part 5 explains why that trade is correct.
+- `behavior_risk` fills as the detections fire: one record per row a detection returns, carrying the rule, its
+  risk score, the layer, the accused entity and the lineage it was accused on. Overlapping windows write a row
+  more than once; suppression throttles the notable, not the record, and Chain assembly counts each record once.
+  `index=behavior_risk | stats count BY rule_id` is the quickest way to see which rules are firing at all.
 - The `Binding health - unresolved rate` alert is the canary for the soft-join substrate. If it
   fires, the collector is losing lease or expiry records, and attributions are degrading into
   guesses; fix collection before trusting anything downstream.
@@ -171,7 +176,7 @@ Three levels, strongest last:
    cross-layer chain with the expected span and risk, and R-C-002 detects its ordered sequence with
    the expected gap. That seed carried edge and risk fields the pipeline does not yet emit; against pipeline
    output the chain assembly returns no rows and `binding_l2_l3` is empty (see `validate/VALIDATION.md`). That R-C-002 correlated two detections' notables; it has since been rewritten to read the
-   scored events, and the rewrite has not met a search head.
+   scored events, and the rewrite returned its one expected row in the search-head run of 2026-10-09.
 
 Several things were added after that validation and have **not** been run against a live instance: the
 `binding:l2` and `binding:l2:open` sourcetypes, the `port_designations` lookup, the layer 2
@@ -198,8 +203,13 @@ every one of the forty-eight searches ran without error over the pipeline's own 
 what was written. The two that did not were nulls on the wire -- a field sent as `null` is not absent to Splunk, and
 `macs_per_port_step>0` and `resolution_method=*` both let null values through. The serializer
 (`morpheus.utils.siem_wire.to_wire_lines`) now leaves null fields out. That run is kept in
-`validate/search_head_runs/`; the run over the regenerated events is still to be recorded, and the comparison test
-skips saying so until it is.
+`validate/search_head_runs/`, as is the run over the regenerated events, on 2026-10-09 on the same version, which
+indexed all 8,400 events and returned what was then written for all forty-eight. A third run the same day, with
+every detection collecting into `behavior_risk`, is `validate/search_head_results.json`: the index held the 94
+records the detections returned, Chain assembly found the one three-layer chain a detection accuses at 55 against
+a threshold of 60, and R-P-L3-005 fired fifteen times once it took two passes over the summary -- its own SPL had
+read a field its `streamstats` was still creating, which is why the second run's zero agreed with an expectation
+that blamed the summary.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

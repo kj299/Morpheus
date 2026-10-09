@@ -39,9 +39,12 @@ here as `| savedsearch` with an explicit time range covering every event, which 
 so a search is asked the same question its schedule would ask, over all the data at once rather than a slice.
 That is the same simplification the Python recomputation in `expected_results.json` makes.
 
-The order follows VALIDATION.md: the binding refreshes first, so the lookups exist; the summary search, so
-R-P-L3-005 has something to read; the two predictive searches, so R-B-L7-002 reads a populated watchlist; every
-other search; and the expiry jobs last, because the events are historical and expiry drops what they wrote.
+The order follows VALIDATION.md: the binding refreshes first, so the lookups exist; the two predictive searches,
+so R-B-L7-002 reads a populated watchlist; every other detection, each writing its rows into `behavior_risk`; the
+summary search, so R-P-L3-005 has something to read; R-P-L3-005; Chain assembly, which sums what the detections
+wrote; and the expiry jobs last, because the events are historical and expiry drops what they wrote. A search
+that reads an index another search wrote is dispatched only once that index holds every row that was written to
+it: `collect` hands its rows to the indexer and returns, and they become searchable a few seconds later.
 """
 
 import argparse
@@ -82,6 +85,8 @@ rather than left to hold the whole run."""
 
 PREDICTIVE = ("R-P-L5-006 - Drift trajectory", "R-P-L7-006 - Access breadth trajectory")
 SUMMARY = "Behavior summary - per-layer scores"
+TRAJECTORY = "R-P-L3-005 - Fan-out trajectory"
+CHAIN = "Chain assembly - cross-layer risk"
 
 
 def sourcetype_of(path: str) -> str:
@@ -134,12 +139,37 @@ def ordered(names: list[str]) -> list[tuple[str, str]]:
     """Every stanza, with the phase it runs in, in the order VALIDATION.md prescribes."""
     refresh = [name for name in names if name.startswith("Binding lookup") and "refresh" in name]
     expiry = [name for name in names if "expiry" in name]
-    first = set(refresh) | set(expiry) | {SUMMARY} | set(PREDICTIVE)
-    rest = [name for name in names if name not in first]
+    placed = set(refresh) | set(expiry) | set(PREDICTIVE) | {SUMMARY, TRAJECTORY, CHAIN}
+    rest = [name for name in names if name not in placed]
 
-    return ([(name, "refresh") for name in refresh] + [(SUMMARY, "summary")] +
-            [(name, "predictive") for name in PREDICTIVE] + [(name, "search") for name in rest] + [(name, "expiry")
-                                                                                                   for name in expiry])
+    return ([(name, "refresh") for name in refresh] + [(name, "predictive") for name in PREDICTIVE] +
+            [(name, "search") for name in rest] + [(SUMMARY, "summary"), (TRAJECTORY, "trajectory"),
+                                                   (CHAIN, "assembly")] + [(name, "expiry") for name in expiry])
+
+
+def search_text(name: str, path: str = SAVED_SEARCHES) -> str:
+    """One stanza's SPL with its continuation lines folded."""
+    with open(path, encoding="utf-8") as handle:
+        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
+
+    body = folded.split(f"[{name}]", 1)[1].split("\n[", 1)[0]
+
+    return re.search(r"^search\s*=\s*(.*)$", body, re.MULTILINE).group(1).strip()
+
+
+def chain_risk_query(path: str = SAVED_SEARCHES) -> str:
+    """
+    Chain assembly as shipped, up to its risk threshold: the risk on every chain that spans three layers, counted by
+    total. An empty Chain assembly says no chain cleared the threshold; this says how close each came.
+    """
+    head = search_text(CHAIN, path).split("| where total_risk", 1)[0]
+
+    return head + "| eval total_risk = coalesce(total_risk, 0) | stats count BY total_risk"
+
+
+def writes_risk(name: str) -> bool:
+    """Every detection, and only the detections, ends in `| collect index=behavior_risk`."""
+    return name.startswith("R-")
 
 
 def splunk(*arguments: str, password: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -183,6 +213,18 @@ def counts_by_sourcetype(earliest: int, latest: int, password: str) -> dict:
     return {row["sourcetype"]: int(row["count"]) for row in rows}
 
 
+def searchable_by_sourcetype(earliest: int, latest: int, password: str) -> dict:
+    """
+    The same count as `counts_by_sourcetype`, by an ordinary search. The two disagree for a while after indexing:
+    on 2026-10-09 the index-time count reached every sourcetype's total while a search still saw ten of layer 1's
+    sixty-five summary groups, and the summary search dispatched in that interval returned 3,649 rows instead of
+    4,335. What the searches see is what has to be complete.
+    """
+    rows = search("index=behavior_* | stats count BY sourcetype", earliest, latest, password)
+
+    return {row["sourcetype"]: int(row["count"]) for row in rows}
+
+
 def wait_for(expected: dict, earliest: int, latest: int, password: str, limit_seconds: int = 900) -> dict:
     deadline = time.time() + limit_seconds
     seen: dict = {}
@@ -191,9 +233,43 @@ def wait_for(expected: dict, earliest: int, latest: int, password: str, limit_se
         seen = counts_by_sourcetype(earliest, latest, password)
 
         if (all(seen.get(sourcetype, 0) >= count for (sourcetype, count) in expected.items())):
-            return seen
+            seen = searchable_by_sourcetype(earliest, latest, password)
+
+            if (all(seen.get(sourcetype, 0) >= count for (sourcetype, count) in expected.items())):
+                return seen
 
         time.sleep(5)
+
+    return seen
+
+
+def roll(indexes: set, password: str):
+    """
+    Roll each index's hot buckets to warm, so every event already indexed is committed before a search reads it.
+
+    A count is not enough. On 2026-10-09 every count, index-time and search-time, reported layer 1's 305 events
+    while R-D-L1-001 -- which needs one of them, the poll whose serial changed -- returned nothing, and the same
+    search returned its row a minute later and on every run since. Events become searchable in a hot bucket in no
+    order a count can see; a warm bucket is complete.
+    """
+    for index in sorted(indexes):
+        splunk("_internal", "call", f"/data/indexes/{index}/roll-hot-buckets", "-method", "POST", password=password)
+
+
+def index_count(index: str, earliest: int, latest: int, password: str) -> int:
+    rows = search(f"index={index} | stats count", earliest, latest, password)
+
+    return int(rows[0]["count"]) if rows else 0
+
+
+def wait_for_index(index: str, count: int, earliest: int, latest: int, password: str, limit_seconds: int = 300) -> int:
+    """Wait until an index another search writes holds `count` events, and say how many it holds."""
+    deadline = time.time() + limit_seconds
+    seen = index_count(index, earliest, latest, password)
+
+    while (seen < count and time.time() < deadline):
+        time.sleep(3)
+        seen = index_count(index, earliest, latest, password)
 
     return seen
 
@@ -241,6 +317,8 @@ def main() -> int:
         splunk("add", "oneshot", target, "-index", index_of(sourcetype), "-sourcetype", sourcetype, password=password)
 
     indexed = wait_for(expected_counts, earliest, latest, password)
+    roll({index_of(sourcetype) for sourcetype in expected_counts}, password)
+    indexed = wait_for(expected_counts, earliest, latest, password)
     print(f"indexed: {indexed}")
 
     checks = {
@@ -260,8 +338,18 @@ def main() -> int:
 
     results: dict = {}
     order = ordered(stanzas())
+    written = {"behavior_risk": 0, "behavior_summary": 0}
 
     for (name, phase) in order:
+        # A reader of an index another search writes waits for that index to hold everything written to it.
+        if (phase in ("trajectory", "assembly")):
+            wait_for_index("behavior_risk", written["behavior_risk"], earliest, latest, password)
+            roll({"behavior_risk"}, password)
+
+        if (phase == "trajectory"):
+            wait_for_index("behavior_summary", written["behavior_summary"], earliest, latest, password)
+            roll({"behavior_summary"}, password)
+
         query = f'| savedsearch "{name}" | stats count AS rows'
 
         try:
@@ -272,8 +360,21 @@ def main() -> int:
 
         print(f"  {phase:>10}  {results[name].get('rows', 'ERROR')!s:>6}  {name}")
 
-        if (phase == "summary"):
-            time.sleep(15)
+        if (writes_risk(name)):
+            written["behavior_risk"] += results[name].get("rows", 0)
+
+        if (name == SUMMARY):
+            written["behavior_summary"] += results[name].get("rows", 0)
+
+        if (name == CHAIN):
+            # Every detection has run, so the risk index should hold exactly what they returned between them.
+            held = wait_for_index("behavior_risk", written["behavior_risk"], earliest, latest, password)
+            checks["three_layer_chain_risk"] = search(chain_risk_query(), earliest, latest, password)
+            checks["risk_records"] = {
+                "written": written["behavior_risk"],
+                "indexed": held,
+                "by_rule": search("index=behavior_risk | stats count BY rule_id", earliest, latest, password),
+            }
 
         if (name == PREDICTIVE[-1]):
             checks["principal_watchlist"] = search("| inputlookup principal_watchlist | stats count BY rule_id reason",

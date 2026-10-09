@@ -177,7 +177,7 @@ def test_every_record_carries_what_the_alert_shows(notables: list):
     # The `| table` clause names the fields an analyst reads. A blank column on a notable is the defect the field
     # linter exists for, checked here against records that actually reached a file.
     search = _conf(SAVEDSEARCHES)[f"{RULE} - MAC in two places at once"]["search"]
-    tabled = re.search(r"\|\s*table\s+(.*)$", search).group(1).split()
+    tabled = re.search(r"\|\s*table\s+([^|]*)", search).group(1).split()
     evaluated = {"_time", "rule_id", "risk_score", "osi_layer", "entity_key", "gap_seconds"}
 
     for line in notables:

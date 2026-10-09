@@ -228,10 +228,14 @@ def behavior_summary(result: pd.DataFrame) -> pd.DataFrame:
 def _fan_out_trajectory(flows: pd.DataFrame) -> set:
     """
     R-P-L3-005 over the summary rebuilt above: `streamstats current=f last(peak_destinations) AS
-    previous_destinations last(previous_destinations) AS earlier_destinations BY entity_key | where
-    isnotnull(earlier_destinations) AND peak_destinations > previous_destinations AND previous_destinations >
-    earlier_destinations`, keyed on the source and the hourly chain the rise completed in. Whether Splunk lets the
-    second `last()` see the field the same streamstats is creating is a question for the search-head run.
+    previous_destinations BY entity_key | streamstats current=f last(previous_destinations) AS earlier_destinations
+    BY entity_key | where isnotnull(earlier_destinations) AND peak_destinations > previous_destinations AND
+    previous_destinations > earlier_destinations`, keyed on the source and the hourly chain the rise completed in.
+
+    This modelled two passes before the search had them. The search used to compute both in one streamstats, and
+    a search head answered the question this docstring left open: the second `last()` cannot see a field the same
+    command is creating, so the search fired on nothing while this function fired on the rise. The search now
+    takes two passes, and this is what it computes.
     """
     summary = behavior_summary(flows).sort_values(["entity_key", "_time", "lineage_id"], kind="mergesort")
     accused = set()

@@ -55,6 +55,11 @@ and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hund
 sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
 tolerance is two minutes and a ladder that stopped at one could not reach it.
 
+It was run again after step 6 (#57) added a risk record and suppression to every detection, rewrote Chain
+assembly and gave R-P-L3-005 its second `streamstats` pass, on 2026-10-09, beside a run of the tree before those
+changes: the two artifacts are identical apart from their timestamps. None of it moved a decision, and R-P-L3-005's
+model in `rules.py` already took two passes; it is the search that now agrees with it.
+
 What a sweep can say depends on the clocks in the corpus, and the thirty-eight fall into three groups that must
 not be added together:
 

@@ -248,6 +248,9 @@ SPL_WORDS = {
     "where",
     "table",
     "dedup",
+    "keepempty",
+    "makemv",
+    "delim",
     "stats",
     "fields",
     "lookup",
@@ -356,26 +359,60 @@ def bucketed_columns() -> set:
     return set(table.to_bucketed_records()[0])
 
 
-def notable_fields() -> set:
-    """
-    Fields one search writes for another to read.
+COLLECT_INTO = re.compile(r"\|\s*collect\s+index\s*=\s*\"?(\w+)\"?")
+INDEX_FILTER = re.compile(r"(?<![\w.])index\s*=\s*\"?(\w+)\"?")
 
-    The detections `| eval` a rule identifier, a risk score and a layer onto every notable; the summary and chain
-    searches then read those from the notable index. That is a real contract between two artifacts in this app,
-    so it resolves -- but only to something a search in this same app actually creates.
+
+def written_by(search: str) -> set:
     """
-    created = set()
+    The fields a search's own rows carry when it writes them somewhere: what it creates, what its last `table`
+    projects, and what its last `stats` groups by.
+    """
+    written = set(created_in(search))
+    tables = re.findall(r"\|\s*table\s+([^|]*)", search)
+
+    if (tables):
+        written.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", tables[-1]))
+
+    groupings = re.findall(r"\|\s*stats\s[^|]*?\bby\s+([^|]*)", search, flags=re.IGNORECASE)
+
+    if (groupings):
+        written.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", groupings[-1]))
+
+    return written
+
+
+def collected_fields() -> dict:
+    """
+    For each index a search in this app writes with `| collect`, the fields those searches put on its records.
+
+    This is the write side of the one contract between two searches this app has. Every detection collects its
+    rows into `behavior_risk` and Chain assembly reads them there; the behavior summary collects into
+    `behavior_summary` and R-P-L3-005 reads it. A field one search creates resolves for another only through an
+    index the first writes and the second reads -- it once resolved for any search at all, through an assumed
+    notable index nothing wrote, and Chain assembly summed a `risk_score` no search had ever stored.
+    """
+    written = {}
 
     for search in searches().values():
-        created.update(created_in(search))
+        for index in COLLECT_INTO.findall(search):
+            written.setdefault(index, set()).update(written_by(search))
 
-    return created
+    return written
+
+
+def from_other_searches(search: str) -> set:
+    """The fields a search may read because another search collected them into an index this one queries."""
+    indexes = set(INDEX_FILTER.findall(COLLECT_INTO.sub(" ", search)))
+    collected = collected_fields()
+
+    return set().union(*(collected.get(index, set()) for index in indexes))
 
 
 def producible() -> set:
-    """Everything a field reference can legitimately resolve to."""
-    return (stage_columns() | golden_columns() | bucketed_columns() | lookup_fields() | notable_fields()
-            | SPLUNK_INTRINSICS | set(KNOWN_UNPRODUCED) | SPL_WORDS)
+    """Everything a field reference can resolve to without another search's help."""
+    return (stage_columns() | golden_columns() | bucketed_columns() | lookup_fields() | SPLUNK_INTRINSICS
+            | set(KNOWN_UNPRODUCED) | SPL_WORDS)
 
 
 STATS_COMMANDS = {"stats", "tstats", "chart", "timechart"}
@@ -507,7 +544,7 @@ def test_the_app_is_where_we_think_it_is():
 @pytest.mark.parametrize("name", sorted(searches()))
 def test_every_field_a_search_reads_is_a_field_something_writes(name: str):
     search = searches()[name]
-    unresolved = referenced_in(search) - created_in(search) - producible()
+    unresolved = referenced_in(search) - created_in(search) - producible() - from_other_searches(search)
 
     assert not unresolved, (
         f"{name} reads {sorted(unresolved)}, which nothing in this repository writes. Either a stage should emit "
@@ -669,6 +706,25 @@ def test_no_search_reads_a_field_its_own_stats_dropped(name: str):
         f"null there; aggregate it, group by it, or read it before the stats.")
 
 
+def test_a_field_another_search_creates_resolves_only_through_an_index_it_collects_into():
+    # The negative control for the write side: `risk_score` is created by every detection and collected into
+    # behavior_risk, so a reader of behavior_risk may read it and a reader of the scored events may not.
+    on_events = "index=behavior_events sourcetype=morpheus:score:l3 | stats sum(risk_score) AS total BY src_ip"
+    on_risk = "index=behavior_risk rule_id=* | stats sum(risk_score) AS total BY entity_key"
+
+    for (search, resolves) in ((on_events, False), (on_risk, True)):
+        unresolved = referenced_in(search) - created_in(search) - producible() - from_other_searches(search)
+
+        assert ("risk_score" not in unresolved) is resolves, search
+
+
+def test_every_detection_writes_what_chain_assembly_reads_from_its_record():
+    risk = collected_fields()["behavior_risk"]
+
+    assert {"rule_id", "risk_score", "osi_layer", "entity_key", "lineage_id", "_time"} <= risk
+    assert {"peak_destinations", "entity_key", "lineage_id"} <= collected_fields()["behavior_summary"]
+
+
 def test_a_threshold_on_a_field_nothing_writes_would_be_caught():
     invented = "a_field_no_stage_will_ever_emit"
     # A bare filter term, with no `where` or `table` to catch it another way.
@@ -718,9 +774,47 @@ NARROWING_COMMANDS = STATS_COMMANDS | JOINING_COMMANDS
 PROJECTING_COMMANDS = {"table", "fields"}
 
 
+def union_members(base: str) -> list:
+    """
+    What a base search reads from: one sourcetype, or each member of a union of parenthesised groups.
+
+    `(index=a sourcetype=x) OR (index=b sourcetype=y) OR (index=c rule_id=*)` reads three things. A group naming no
+    sourcetype is named by its index, which is how a reader of an index another search collects into is checked
+    against what that search wrote.
+    """
+    groups = re.findall(r"\(([^()]*)\)", base)
+
+    if (len(groups) > 1 and re.search(r"\)\s+OR\s+\(", base)):
+        members = []
+
+        for group in groups:
+            sourcetype = SOURCETYPE_FILTER.search(group)
+            index = INDEX_FILTER.search(group)
+
+            if (sourcetype is not None):
+                members.append(sourcetype.group(1))
+            elif (index is not None):
+                members.append(f"index={index.group(1)}")
+
+        return members
+
+    match = SOURCETYPE_FILTER.search(base)
+
+    return [match.group(1)] if match is not None else []
+
+
 def contract_columns(sourcetype: str) -> set:
-    """Every column the wire contract guarantees for a sourcetype, or for every sourcetype a wildcard names."""
+    """
+    Every column the wire contract guarantees for a sourcetype, or for every sourcetype a wildcard names; for an
+    `index=` member, what the searches collecting into that index write; for a union, what any member guarantees.
+    """
     from morpheus.utils.siem_sourcetypes import PRODUCED  # pylint: disable=import-outside-toplevel
+
+    if (" OR " in sourcetype):
+        return set().union(*(contract_columns(member) for member in sourcetype.split(" OR ")))
+
+    if (sourcetype.startswith("index=")):
+        return collected_fields().get(sourcetype[len("index="):], set())
 
     pattern = re.compile("^" + re.escape(sourcetype).replace("\\*", ".*") + "$")
     columns = set()
@@ -761,15 +855,19 @@ def reads_by_sourcetype(search: str) -> dict:
     too). Projections (`table`, `fields`) are not reads: a missing column there shows empty rather than dropping
     rows. Every subsearch is walked the same way, so a chained rule's three base searches are each attributed to
     their own sourcetype.
+
+    A union's reads are attributed to the union, whose rows carry a field when any member does. Its first `stats`
+    group-by fields are attributed to every member as well: a member whose rows lack a group-by field has every
+    row dropped from the aggregate, which is the union quietly reading one fewer source.
     """
     reads = {}
 
     def visit(pipeline: str):
         segments = _split_top_level(pipeline)
         base = re.sub(r"^search\s+", "", segments[0])
-        match = SOURCETYPE_FILTER.search(base)
+        members = union_members(base)
         (created, collected) = (set(), set())
-        attributing = match is not None
+        attributing = len(members) > 0
 
         if (attributing):
             collected |= referenced_in("| search " + base)
@@ -789,11 +887,18 @@ def reads_by_sourcetype(search: str) -> dict:
             collected |= _read_by_command(name, body, created)
             created |= created_in("| " + body)
 
+            if (name in STATS_COMMANDS and len(members) > 1):
+                grouping = re.search(r"\bby\s+(.*)$", body, flags=re.IGNORECASE)
+                keys = set(re.findall(r"[A-Za-z_]\w*", grouping.group(1))) - created if grouping else set()
+
+                for member in members:
+                    reads.setdefault(member, set()).update(keys - SPL_WORDS - SPLUNK_INTRINSICS - {"_time"})
+
             if (name in NARROWING_COMMANDS):
                 attributing = False
 
-        if (match is not None):
-            reads.setdefault(match.group(1), set()).update(collected - SPL_WORDS - SPLUNK_INTRINSICS - {"_time"})
+        if (members):
+            reads.setdefault(" OR ".join(members), set()).update(collected - SPL_WORDS - SPLUNK_INTRINSICS - {"_time"})
 
     visit(search)
 
@@ -801,17 +906,9 @@ def reads_by_sourcetype(search: str) -> dict:
 
 
 KNOWN_HOLLOW_READS = {
-    ("Behavior summary - per-layer scores", "morpheus:score:l*"): {
-        "risk_score": "written by no stage and collected by no detection; the risk write path is issue #57",
-        "rule_id": "written by no stage and collected by no detection; the risk write path is issue #57",
-    },
     ("Chain assembly - cross-layer risk", "morpheus:edge"): {
-        "lineage_id": "the edge stream carries no lineage_id; the edge producer is issue #63",
-        "osi_layer": "the edge stream carries no osi_layer; the edge producer is issue #63",
-        "max_abs_z": "a score, read off edges that carry none; the edge producer is issue #63",
-        "resolution_method": "carried by the lineage corpus's edges and promised by no contract; issue #63",
-        "risk_score": "written by no stage and collected by no detection; the risk write path is issue #57",
-        "rule_id": "written by no stage and collected by no detection; the risk write path is issue #57",
+        "lineage_id": "the edge stream carries no lineage_id, so its rows leave the chain's stats; the edge "
+                      "producer is issue #63",
     },
 }
 """

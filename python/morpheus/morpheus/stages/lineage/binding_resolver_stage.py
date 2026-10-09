@@ -54,6 +54,12 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     optional -- an unresolved row that looks identical to a resolved one is how soft joins produce confidently wrong
     attribution.
 
+    Every row also gets this rung appended to `methods_column`, which every resolver in a ladder shares: the methods
+    each rung wrote, in the order the rungs ran, joined with `;` -- `soft:directory;soft:dot1x`, or
+    `unresolved:<table name>` for a rung that did not resolve. A ladder whose rungs each name their own
+    `method_column` is otherwise one column per hop, and a search reading one of them reports a chain as resolved by
+    whichever hop it happened to name.
+
     Resolution is a pure function of the row and the table, so a replay against the same table produces the same
     columns. It is *not* a pure function of wall-clock time, which means the table must be snapshotted alongside the
     model and configuration for a replay to be meaningful. Part 5 of the OSI behavioral analytics guide covers that.
@@ -77,6 +83,8 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         name. Existing columns are overwritten.
     method_column : str, default = "resolution_method"
         Column recording how each row was resolved.
+    methods_column : str, default = "resolution_methods"
+        Column every resolver in a ladder appends its rung to, so one field names every hop.
     uid_column : str, optional
         When set, the winning binding's content-addressed identifier is written here, so an attribution can be traced
         back to the exact lease or forwarding-table entry behind it.
@@ -94,6 +102,7 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_unit: str = "ns",
                  output_columns: dict = None,
                  method_column: str = "resolution_method",
+                 methods_column: str = "resolution_methods",
                  uid_column: str = None,
                  raise_on_unresolved: bool = False):
         super().__init__(c)
@@ -106,6 +115,9 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         if (not method_column):
             raise ValueError("method_column is required")
+
+        if (not methods_column or methods_column == method_column):
+            raise ValueError("methods_column is required and must differ from method_column")
 
         known = binding_table.value_columns
         output_columns = dict(output_columns) if output_columns is not None else {name: name for name in known}
@@ -125,6 +137,7 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._time_unit = time_unit
         self._output_columns = output_columns
         self._method_column = method_column
+        self._methods_column = methods_column
         self._uid_column = uid_column
         self._raise_on_unresolved = raise_on_unresolved
 
@@ -132,6 +145,7 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             self._needed_columns[target] = TypeId.STRING
 
         self._needed_columns[method_column] = TypeId.STRING
+        self._needed_columns[methods_column] = TypeId.STRING
 
         if (uid_column is not None):
             self._needed_columns[uid_column] = TypeId.STRING
@@ -219,6 +233,18 @@ class BindingResolverStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_str_column(df,
                               self._method_column,
                               [UNRESOLVED if binding is None else f"soft:{self._table.name}" for binding in resolved])
+
+            # Read before writing: a rung earlier in the ladder has already written its hop here. A frame that never
+            # went through a preallocating source has no column at all, which is the same as no earlier rung.
+            earlier = ([normalize_text(value) for value in to_host_list(df, self._methods_column)]
+                       if self._methods_column in df.columns else [None] * len(resolved))
+            hops = [
+                f"{UNRESOLVED}:{self._table.name}" if binding is None else f"soft:{self._table.name}"
+                for binding in resolved
+            ]
+            assign_str_column(df,
+                              self._methods_column,
+                              [hop if before is None else f"{before};{hop}" for (before, hop) in zip(earlier, hops)])
 
             if (self._uid_column is not None):
                 assign_str_column(df,
