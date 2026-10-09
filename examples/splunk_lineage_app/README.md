@@ -171,7 +171,7 @@ Three levels, strongest last:
    cross-layer chain with the expected span and risk, and R-C-002 detects its ordered sequence with
    the expected gap. That seed carried edge and risk fields the pipeline does not yet emit; against pipeline
    output the chain assembly returns no rows and `binding_l2_l3` is empty (see `validate/VALIDATION.md`). That R-C-002 correlated two detections' notables; it has since been rewritten to read the
-   scored events, and the rewrite has not met a search head.
+   scored events, and the rewrite returned its one expected row in the search-head run of 2026-10-09.
 
 Several things were added after that validation and have **not** been run against a live instance: the
 `binding:l2` and `binding:l2:open` sourcetypes, the `port_designations` lookup, the layer 2
@@ -198,8 +198,8 @@ every one of the forty-eight searches ran without error over the pipeline's own 
 what was written. The two that did not were nulls on the wire -- a field sent as `null` is not absent to Splunk, and
 `macs_per_port_step>0` and `resolution_method=*` both let null values through. The serializer
 (`morpheus.utils.siem_wire.to_wire_lines`) now leaves null fields out. That run is kept in
-`validate/search_head_runs/`; the run over the regenerated events is still to be recorded, and the comparison test
-skips saying so until it is.
+`validate/search_head_runs/`. The run over the regenerated events, on 2026-10-09 on the same version, indexed all 8,400 events and returned what `expected_results.json` says for all forty-eight searches; it is
+committed as `validate/search_head_results.json`, and the comparison test holds it there.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

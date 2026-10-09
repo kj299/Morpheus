@@ -22,9 +22,9 @@ changes nothing but the timestamps, by a whole number of weeks; that every shipp
 once, in the order VALIDATION.md prescribes; that each sourcetype goes to the index the procedure names; and that
 the validation-only settings cover every sourcetype the app defines.
 
-The run's own result, `validate/search_head_results.json`, is compared with `expected_results.json` once it is
-committed. Until then that comparison skips and says why: a run that has not happened cannot be compared with
-anything, and a skip that names the missing file is the honest reading of that.
+The run's own result, `validate/search_head_results.json`, is compared with `expected_results.json`. It was
+recorded on 2026-10-09, over the regenerated events; were it removed, the comparison would skip and name the
+missing file rather than pass on nothing.
 """
 
 import importlib.util

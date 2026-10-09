@@ -8,7 +8,8 @@ and `macs_per_port_step>0` let four null steps through R-B-L2-002 -- six ports w
 health had matched only because its expectation shared the defect: it counted four classes whose
 `resolution_method` was null on every row as resolving bindings. The serializer now leaves null fields out, the
 expectations say one row and two, and that run is kept in `search_head_runs/` as the evidence. The run over the
-regenerated events is the one `search_head_results.json` will hold.
+regenerated events, on 2026-10-09 on the same version, returned what is written for all forty-eight, and
+`search_head_results.json` holds it.
 
 ## Running it
 
@@ -24,7 +25,7 @@ inside it under Splunk's own interpreter. That indexes every file in `sample_eve
 below, dispatches all forty-eight searches in the order this document prescribes, and writes
 `search_head_results.json` beside this file: the Splunk version, the date, what was indexed, and a row count per
 search. Commit it; `tests/morpheus/determinism/test_search_head_run.py` compares it with
-[`expected_results.json`](./expected_results.json), and skips saying so until it exists. The container is left
+[`expected_results.json`](./expected_results.json). The container is left
 running for rerunning a search by hand at <http://localhost:8000>; `docker compose down -v` here removes it.
 
 Two adjustments make the run faithful, and both are the runner's rather than the reader's:

@@ -59,7 +59,7 @@ resolution, window sealing), feature stages for every telemetry class from TC-0 
 scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's six
 checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
 request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
-2026-10-04. That is forty-six stages and forty-one supporting
+2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve. That is forty-six stages and forty-one supporting
 modules, covered by 1,958 distinct tests, itemized in
 [Part 6](#provided). Thirty-eight of the forty-two rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
@@ -70,7 +70,7 @@ pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
 the seven searches then present. On 2026-10-05 all forty-eight ran on Splunk 10.2.8 over the pipeline's own
 sample events: forty-six returned what the written expectation said, and the two that did not found a defect in
 the wire format rather than in a search -- null fields sent as `null`, which Splunk compared as values -- now
-repaired, with the run over the repaired events still to be recorded. [The retrospective](./12_behavioral_analytics_retrospective.md)
+repaired. On 2026-10-09 the run over the repaired events returned what was written for all forty-eight. [The retrospective](./12_behavioral_analytics_retrospective.md)
 scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
 What remains design rather than a running system: four of the forty-two rules (R-B-L4-001 and
@@ -132,23 +132,25 @@ believed, and each of the four is recorded below, because each produced a verdic
 while measuring less than it claimed. A fifth, found in October, misreported where a failing run had died
 rather than passing one that had failed, and it is recorded with the run that found it.
 
-**The run that stands is 2026-10-04 at 03:56 UTC**, on the same card under driver 596.71, over tiers
-that are total: the marked tier 750 collected and 750 passed; the tier carrying no mode marker 1,925
-collected, 1,924 passed and 1 skipped. Nothing failed in either, both exited cleanly, and both counts
+**The run that stands is 2026-10-09 at 15:20 UTC**, on the same card under driver 596.71, over tiers
+that are total: the marked tier 759 collected and 759 passed; the tier carrying no mode marker 1,959
+collected, 1,958 passed and 1 skipped. Nothing failed in either, both exited cleanly, and both counts
 reconcile exactly against what pytest collected. The skip is the test for a sourcetype nothing produces,
 which has no cases left because every sourcetype now has one; the six skips of the September verdict were
 all of that kind.
 
-It is the first device run in which every composed pipeline this fork has took part: all twelve, eight of
-them on a card for the first time. Each of the twelve golden checks ran in GPU mode and matched the golden
-the CPU path generated, through the canonical rendering with floats quantized to four places, so the
-cross-mode question is answered for every corpus. `test_gpu_parity.py` compared three corpora on that
-run; it has since been parametrized over all twelve, and the nine variants that adds await the next card run. The estate harness was the one that mattered most in September, when it first ran on a card: a
+The run of 2026-10-04 at 03:56 UTC was the first in which every composed pipeline this fork has took
+part: all twelve, eight of them on a card for the first time, 750 and 1,925 collected, and it passed the
+same way. Each of the twelve golden checks ran in GPU mode and matched the golden the CPU path generated,
+through the canonical rendering with floats quantized to four places, so the cross-mode question is
+answered for every corpus. `test_gpu_parity.py` compared three corpora on that run; it was then
+parametrized over all twelve, and the nine variants that added are what the standing run has over it,
+each passing on the card. The estate harness was the one that mattered most in September, when it first ran on a card: a
 chain is a Merkle root over its members in order, the estate seals five classes together over their
 union, and the ordering and hashing of that union is exactly the arithmetic this project has seen diverge
 between host and device before.
 
-The counts reconcile rather than being taken on trust. The same two tiers collect 750 and 1,915 on a
+The counts reconcile rather than being taken on trust. The same two tiers collect 759 and 1,949 on a
 machine with no card -- the marked tier identical to the device, the unmarked one exactly ten short of it,
 the offset every run so far has shown. A tier that differed by some other number would mean a file had
 fallen out of a list, which is the defect two of the repairs below were for.
@@ -3638,7 +3640,7 @@ What Morpheus provides versus what has to be built, stated plainly.
   It has since been run, and the verdict it rendered is the one recorded at the top of this guide.
   [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
   the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
-  and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Nine of the
+  and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Eight of the
   forty-eight searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
   empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
   is working from a rule that is broken.
@@ -3707,7 +3709,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
 | **The per-entity learned model in the pipeline (principals, then hosts)** | Large | Still the largest gap and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory, `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, and `examples/layer5_model/run_model.py` has trained and run it on one card, most recently on 2026-10-03, scoring the week it trained on. What fills the slot in every composed pipeline and every shipped artifact is `ReferenceScorer`, frozen population arithmetic the class itself calls not a model. Three things remain: the run's artifact and weight digests committed beside the README that quotes them; a CPU inference path (`state_dict` load or an exported forward pass) so the composed pipeline runs with a pinned real model in CI; a corpus with a train window and a disjoint score window, so R-B-L5-001, R-B-L5-002 and R-P-L5-006 are evaluated against a learned baseline for the first time. Then `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame gives hosts the score and drift principals have. Tracked in #59, after #67 |
 | Risk write path and suppression for the shipped detections | Small | Every one of the 38 detection stanzas ends in `/ table` with only `action.correlationsearch.enabled`; none collects, so `risk_score` and `rule_id` never land in an index and "Chain assembly - cross-layer risk" and "Behavior summary" sum null by construction. A `behavior_risk` index, a `collect` per detection, `alert.suppress` keyed on each rule's documented deduplication key (control 9's suppression half; without it R-C-005 would emit the same chain 96 times a day), the chain search reading the risk index, and one `resolution_methods` field so the chain's `methods` names every hop. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
-| Live search-head run, GPU parity on a card, clock skew where the corpora cannot measure it | Medium | Step 7 built what could be built without a search head or a card: the GPU and model artifacts are committed under `ci/artifacts/` and `examples/layer5_model/artifacts/` and every date and count quoted from them is tested; `test_gpu_parity.py` compares all twelve composed pipelines; the clock skew experiment decides all thirty-eight detections. Three things remain. The search-head run over the regenerated events: the first run, on Splunk 10.2.8 on 2026-10-05, matched forty-six of forty-eight searches and found that null fields on the wire were compared as values, so the serializer now leaves them out, and the run over the events that change produced is still to be recorded in `search_head_results.json`. A card run of the nine parity variants added since 2026-10-04. And fifteen detections whose corpora carry one clock -- layers 3, 4 and 6 and the SaaS pair -- which need an exporter, inspection point or context record time per row before skew can be measured on them, and a corpus whose chain steps sit within a minute of each other on different clocks before the 120-second join tolerance itself is tested. Tracked in #58 |
+| Clock skew where the corpora cannot measure it | Medium | Step 7's runs are recorded: the search-head run of all forty-eight searches on Splunk 10.2.8 on 2026-10-09 returned what `expected_results.json` says for every one, over events whose wire format the first run, on 2026-10-05, corrected; the conformance run of 2026-10-09 passed 759 of 759 marked variants on a card, the parity test over all twelve corpora among them; both results and the model artifact are committed and the documents' numbers are tested against them; the clock skew experiment decides all thirty-eight detections. What it could not measure remains: fifteen detections whose corpora carry one clock -- layers 3, 4 and 6 and the SaaS pair -- need an exporter, inspection point or context record time per row before skew can be measured on them, and the 120-second join tolerance itself needs a corpus whose chain steps sit within a minute of each other on different clocks. Recorded under #58; correcting the clocks rather than measuring them is #62 |
 | Host baselines at layers 3, 4 and 6 | Medium | R-B-L3-001 reads a literal 50 where the design specifies the source's own fourteen-day 99.5th percentile; the `bucket_peak` pattern `TC2BaselineStage` uses for ports was never applied to hosts, and fan-in per destination has no history. Fan-in, distinct ports, byte asymmetry, first-contact ASN, JA4 change and the endpoint host-seen flags are emitted and read by no search; asset criticality, owner and classification are attached to host rows and read by nothing; `device_role` and `os_family` are absent from the asset record; `community_id` is absent from layer 3; `hostname` is case-folded in the chain SPL and not in the stages; R-B-L6-001 dropped its managed-endpoint gate. Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | A host is `src_ip` at layers 3, 6 and 7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint, and nothing bridges them: no time-bounded `hostname`-to-address binding exists, the network, transport, presentation and application corpora run no `BindingResolverStage`, and asset context cannot attach to a network-layer event. The SIEM `binding_l2_l3` refresh selects `binding_table=dhcp_lease` rows nothing produces, `morpheus:edge` carries no `lineage_id`, `osi_layer`, parent or child `uid` or `join_method`, the principal-to-desk rung the estate corpus proves is a Python dict, and only one resolver passes `uid_column`. A lease stage emitting bucketed `dhcp_lease` rows, a `host_inventory` binding and a `host_key` on every layer 3-7 event, an `EdgeEmitStage` behind the resolvers, MAC and 802.1X lookups in the SIEM, and `community_id`/`session_key` joins above layer 3. The DHCP collector itself is not Morpheus. Tracked in #63 |
 | Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | The optical tap step (`optical_rx_dbm_deviation`, the TC-1 section's stated security signal), flap instability, the device reboot flags, the four error and discard deltas and `lldp_neighbor_chassis_id_changed` are computed, asserted in Python and read by no search; no stage divides a delta by its interval; `lldp_neighbor_port_id` is required and unread. No octet counter is designed and `link_speed_bps` is required and unread, so the interface as a thing that carries traffic has no behaviour; `ouis_per_vlan` has no consumer, history or corpus case; `TC2AuthStage` emits a raw elapsed time with no distribution; `BindingCloser.close()` and `reconcile()` are called by no stage so `bind_end_observed` is false on every record. Rules, a rate feature, a link key, a per-VLAN baseline, a per-port auth quantile, and a stop column and snapshot mode on the binding stage. Tracked in #61 |
