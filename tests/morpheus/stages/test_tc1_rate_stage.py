@@ -37,6 +37,9 @@ PERIOD_NS = 5 * MINUTE_NS
 PORT = "hq:sw1:Gi1/0/1"
 TEN_GIGABIT = 10_000_000_000
 
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A device clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
 
 def frame(errors: list, octets_in: list = None, octets_out: list = None, times: list = None, **columns) -> dict:
     """One port's polls, already normalized: deltas over sixty seconds, one poll per five-minute period."""
@@ -260,3 +263,19 @@ def test_rates_compose_behind_the_normalize_stage(config: Config):
 
     assert _as_list(meta, "error_rate") == [None, 0.5, 1.0]
     assert _as_list(meta, "bits_per_second") == [None, 10_000.0, 10_000.0]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    meta = run(config, frame([2, 2, 2, 2], times=[0, PERIOD_NS, YEARS_AHEAD_NS, 2 * PERIOD_NS]))
+
+    assert _as_list(meta, "clock_refused") == [False, False, True, False]
+    assert _as_list(meta, "error_rate")[2] is None
+    # Believed, the decade-ahead poll would have committed every open period and left the next honest poll out of
+    # order; refused, the history holds the two periods before it.
+    assert _as_list(meta, "error_rate_baseline_buckets")[3] == 2
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC1RateStage(config, max_clock_skew_seconds=0)

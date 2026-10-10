@@ -32,6 +32,9 @@ from morpheus.utils.type_utils import get_df_class
 
 MINUTE_NS = 60 * NS_PER_SECOND
 
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A device clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
 
 def frame(rx_levels: list, entity: str = "hq:sw1:Gi1/0/1", tx_levels: list = None) -> dict:
     count = len(rx_levels)
@@ -269,3 +272,22 @@ def test_null_entity_keys_do_not_share_a_baseline(config: Config):
 
     assert _as_list(meta, "rx_power_dbm_baseline") == [None] * 5
     assert _as_list(meta, "rx_power_dbm_deviation") == [None] * 5
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    payload = frame([-7.0, -7.0, -7.0, -7.0, -20.0, -7.0])
+    payload["event_time"] = [0, MINUTE_NS, 2 * MINUTE_NS, 3 * MINUTE_NS, YEARS_AHEAD_NS, 4 * MINUTE_NS]
+    meta = run(config, payload)
+
+    assert _as_list(meta, "clock_refused") == [False, False, False, False, True, False]
+    assert _as_list(meta, "optical_rx_dbm_deviation")[4] is None
+    # Believed, the reading would have expired the window behind it; refused, the next honest reading is measured
+    # against the four before it.
+    assert _as_list(meta, "optical_rx_dbm_baseline_samples")[5] == 4
+    assert _as_list(meta, "optical_rx_dbm_deviation")[5] == 0.0
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC1OpticalStage(config, max_clock_skew_seconds=0)

@@ -6,12 +6,15 @@
     "context:asset": 7,
     "context:identity": 23,
     "morpheus:edge": 47,
+    "morpheus:health": 851,
+    "morpheus:late": 1,
+    "morpheus:quarantine": 3,
     "morpheus:score:l1": 793,
     "morpheus:score:l2": 1501,
     "morpheus:score:l3": 1525,
     "morpheus:score:l4": 987,
     "morpheus:score:l5": 661,
     "morpheus:score:l6": 296,
-    "morpheus:score:l7": 4272
+    "morpheus:score:l7": 4484
   }
 }

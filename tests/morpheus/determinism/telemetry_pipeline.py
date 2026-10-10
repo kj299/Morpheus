@@ -56,6 +56,11 @@ Into that corpus are planted the things the layer 1 and layer 2 features exist t
   the snapshot, and one the switch's own notification says was removed, closed as an end somebody observed;
 - an 802.1X exchange that **took three attempts** and one that **took no time at all**, which R-B-L2-007 and
   R-B-L2-008 read against the port's own exchanges;
+- a **poller whose clock cannot be trusted**: a second SNMP poller, in the DMZ, whose last measured offset is four
+  and a half seconds, polling one port three times -- quarantined by `EnvelopeValidateStage` before any stateful
+  stage sees it, and returned as the `quarantine` class, which is what reaches `morpheus:quarantine`;
+- a **sequence gap**: the ARP sensor numbers three records it never delivers, partway through the hour, which
+  `CollectorSequenceStage` reports on the next record it does deliver and the health record counts;
 - and one thing that must **not** fire: a VRRP pair whose two MACs legitimately share one address, carried on the
   exclusion list, so the ARP rule's exclusion path is exercised rather than assumed.
 
@@ -76,9 +81,10 @@ stages flag out-of-order arrival rather than repairing it.
 import random
 import typing
 
+import envelope as universal_envelope
 import pandas as pd
-
 import stamping
+
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
@@ -86,12 +92,14 @@ from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
+from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
+from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
 from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
@@ -100,7 +108,6 @@ from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
 from morpheus.stages.telemetry.tc1_rate_stage import TC1RateStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
-from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc2_baseline_stage import TC2BaselineStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
@@ -198,6 +205,16 @@ HUB_FROM_SECONDS = 1800
 SPOOF_AT_SECONDS = 2700
 FLOOD_AT_SECONDS = 2400
 FLOOD_PACKETS = 20
+ARP_LOSS_AT_SECONDS = 1205
+LOST_ARP_RECORDS = 3
+"""The ARP sensor numbers three records it never delivers, a third of the way through the hour."""
+QUARANTINED_POLLER = "snmp-poller-dmz"
+QUARANTINED_SWITCH = "sw3"
+QUARANTINED_PORT = "Gi1/0/1"
+QUARANTINED_OFFSET_MS = 4500
+QUARANTINED_MINUTES = (20, 21, 22)
+"""A second poller whose NTP has drifted four and a half seconds, more than `EnvelopeValidateStage` allows, polls one
+port three times. Its records are kept and reach no stateful stage."""
 REBOOT_AT_MINUTE = 30
 TAP_AT_MINUTE = 40
 TAP_LOSS_DB = 3.0
@@ -438,12 +455,16 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     rng = random.Random(CORPUS_SEED)
     extra = random.Random(EXTRA_SEED)
 
-    return {
+    corpus = {
         "tc1": _build_layer_1(rng, extra),
         "tc2_mac": _build_mac_snapshots(rng, extra),
         "tc2_arp": _build_arp(rng),
         "tc2_auth": _build_auth(rng, extra),
     }
+
+    # The rest of the envelope each collector owes: when its sensor saw the record, its clock, its sampling, the
+    # tenant. Added after the records are drawn, so it moves none of them.
+    return {name: universal_envelope.attach(frame) for (name, frame) in corpus.items()}
 
 
 def _octets_per_minute(extra: random.Random, bits_per_second: float) -> int:
@@ -582,6 +603,41 @@ def _build_layer_1(rng: random.Random, extra: random.Random) -> pd.DataFrame:
                 **_envelope(draw, "snmp-poller", "TC-1/1.0.0", seq),
             })
 
+    # The DMZ poller. Fixed values rather than draws, so planting it moves nothing else; it carries its own clock
+    # fields because they are what is wrong with it.
+    for (index, minute) in enumerate(QUARANTINED_MINUTES, start=1):
+        rows.append({
+            "event_time": minute * 60 * NS_PER_SECOND,
+            "site_id": SITE,
+            "device_id": QUARANTINED_SWITCH,
+            "port_id": QUARANTINED_PORT,
+            "uptime": boot_uptime_cs + minute * 60 * CS_PER_SECOND,
+            "if_last_change": 10 * CS_PER_SECOND,
+            "oper_status": "up",
+            "link_speed_bps": LINK_SPEED_BPS,
+            "optical_tx_dbm": -2.0,
+            "optical_rx_dbm": -7.0,
+            "transceiver_serial": f"XCVR-{QUARANTINED_SWITCH}-{QUARANTINED_PORT}",
+            "transceiver_type": OPTIC_TYPE,
+            "lldp_neighbor_chassis_id": f"nbr-{QUARANTINED_SWITCH}-{QUARANTINED_PORT}",
+            "lldp_neighbor_port_id": "Gi0/1",
+            "crc_errors": 100,
+            "symbol_errors": 0,
+            "input_discards": 5,
+            "output_discards": 1,
+            "if_hc_in_octets": 10**12,
+            "if_hc_out_octets": 10**12,
+            "collector_id": QUARANTINED_POLLER,
+            "schema_version": "TC-1/1.0.0",
+            "origin_hash": f"{QUARANTINED_POLLER}-{index:04d}",
+            "collector_seq": index,
+            "clock_source": "ntp_undisciplined",
+            "clock_offset_ms": QUARANTINED_OFFSET_MS,
+        })
+
+    # In event order, the DMZ polls after the main poller's in each minute they share.
+    rows.sort(key=lambda row: row["event_time"])
+
     return pd.DataFrame(rows)
 
 
@@ -696,6 +752,8 @@ def _build_arp(rng: random.Random) -> pd.DataFrame:
     rows = []
 
     for (seq, (time_s, sender_ip, sender_mac, target_ip, operation)) in enumerate(events, start=1):
+        # The records numbered and never delivered: every number from the loss onward is three further on.
+        seq += LOST_ARP_RECORDS if time_s >= ARP_LOSS_AT_SECONDS else 0
         rows.append({
             "event_time": time_s * NS_PER_SECOND,
             "arp_sender_ip": sender_ip,
@@ -883,6 +941,8 @@ def _run_class(config: Config,
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
 
+    pipe.add_stage(CollectorSequenceStage(config))
+
     for stage in stages:
         pipe.add_stage(stage)
 
@@ -926,6 +986,13 @@ def _seal_chains(config: Config, outputs: dict[str, pd.DataFrame], parts: int = 
     Each class comes back with its own columns plus the ones sealing adds, so nothing about a class's shape depends
     on which other classes it was sealed beside.
     """
+    # A class every record of which was quarantined has nothing to seal, and stays empty.
+    empty = {name: frame for (name, frame) in outputs.items() if len(frame) == 0}
+    outputs = {name: frame for (name, frame) in outputs.items() if len(frame) > 0}
+
+    if (len(outputs) == 0):
+        return empty
+
     columns = {name: list(frame.columns) for (name, frame) in outputs.items()}
     tagged = []
 
@@ -960,11 +1027,15 @@ def _seal_chains(config: Config, outputs: dict[str, pd.DataFrame], parts: int = 
         rows = sealed[sealed["telemetry_class"] == name]
         result[name] = rows[columns[name] + added].reset_index(drop=True)
 
-    return result
+    return {**empty, **result}
 
 
 def build_binding_table(bindings: pd.DataFrame) -> BindingTable:
     """The layer 2 bindings as the resolver consumes them: MAC to the port as layer 1 spells it."""
+    # A MAC table collector every record of which was quarantined closed no bindings, and the table is empty.
+    if (len(bindings) == 0):
+        return BindingTable(name="mac_table", value_columns=["port_key", "vlan_id"], bindings=[])
+
     return BindingTable.from_dataframe(bindings,
                                        name="mac_table",
                                        key_column="mac_address",
@@ -1036,7 +1107,14 @@ def run_classes(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
+    # Every class's records are validated once, ahead of every pipeline the class feeds: `ingest_time` stamped, the
+    # envelope checked, and a record whose clock cannot be trusted taken out before any stateful stage sees it.
+    (batches, quarantined) = universal_envelope.validate(config, batches, ID_COLUMNS)
     outputs = {}
+
+    if (len(quarantined) > 0):
+        quarantined["row_key"] = quarantined["event_uid"]
+        outputs[universal_envelope.QUARANTINE_CLASS] = quarantined
 
     # Layer 1: counters, the rates they become and the port's history of them, optics, flaps, identifier changes.
     # The rate history is kept over the sealing period with the corpus's floor, as the layer 2 baseline is; the
@@ -1068,8 +1146,10 @@ def run_classes(config: Config,
                                seal=False,
                                envelope=CLASS_ENVELOPE["tc1_binding"],
                                telemetry_class="tc1_binding")
-    port_bindings["row_key"] = port_bindings["binding_uid"]
-    outputs["tc1_binding"] = port_bindings
+    # A class every record of which was quarantined leaves nothing to key; the class is then simply absent.
+    if (len(port_bindings) > 0):
+        port_bindings["row_key"] = port_bindings["binding_uid"]
+        outputs["tc1_binding"] = port_bindings
 
     # Layer 2, from the same snapshots: the cardinality features, each port's count and each VLAN's vendor count
     # against the peaks of their own earlier periods, and the closed bindings.
@@ -1101,12 +1181,15 @@ def run_classes(config: Config,
         envelope=CLASS_ENVELOPE["tc2_binding"],
         telemetry_class="tc2_binding")
 
-    bindings["row_key"] = [
-        event_uid("binding", *values)
-        for values in zip(bindings["mac_address"], bindings["port_key"], bindings["bind_start"], bindings["bind_end"],
-                          bindings["bind_end_reason"])
-    ]
-    outputs["tc2_binding"] = bindings
+    if (len(bindings) > 0):
+        bindings["row_key"] = [
+            event_uid("binding", *values) for values in zip(bindings["mac_address"],
+                                                            bindings["port_key"],
+                                                            bindings["bind_start"],
+                                                            bindings["bind_end"],
+                                                            bindings["bind_end_reason"])
+        ]
+        outputs["tc2_binding"] = bindings
 
     # Layer 2 ARP, resolved through the bindings the previous pipeline just closed. This is the composition the
     # ladder depends on: a stage's output becomes a table, and another stage resolves through it.

@@ -49,22 +49,29 @@ from morpheus.config import ExecutionMode
 from morpheus.messages import MessageMeta
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
+from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
+from morpheus.stages.lineage.envelope_validate_stage import DEFAULT_REQUIRED_COLUMNS
+from morpheus.stages.lineage.envelope_validate_stage import EnvelopeValidateStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.minimization_stage import MinimizationStage
+from morpheus.stages.lineage.pipeline_health_stage import PipelineHealthStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
+from morpheus.stages.telemetry.tc0_asset_stage import TC0AssetStage
+from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
+from morpheus.stages.telemetry.tc0_identity_stage import TC0IdentityStage
 from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_feature_stage import TC1FeatureStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
 from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
 from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
-from morpheus.stages.telemetry.tc1_rate_stage import TC1RateStage
 from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
+from morpheus.stages.telemetry.tc1_rate_stage import TC1RateStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
 from morpheus.stages.telemetry.tc2_baseline_stage import TC2BaselineStage
@@ -77,17 +84,6 @@ from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
 from morpheus.stages.telemetry.tc3_ttl_stage import TC3TtlStage
 from morpheus.stages.telemetry.tc4_envelope_stage import TC4EnvelopeStage
 from morpheus.stages.telemetry.tc4_flow_stage import TC4FlowStage
-from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
-from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
-from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
-from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
-from morpheus.stages.telemetry.tc0_asset_stage import TC0AssetStage
-from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
-from morpheus.stages.telemetry.tc0_identity_stage import TC0IdentityStage
-from morpheus.stages.telemetry.tc7_dns_stage import TC7DnsStage
-from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
-from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
-from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
@@ -95,6 +91,14 @@ from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
 from morpheus.stages.telemetry.tc5_score_stage import TC5ScoreStage
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
+from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
+from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
+from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
+from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
+from morpheus.stages.telemetry.tc7_dns_stage import TC7DnsStage
+from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
+from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
+from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage
 from morpheus.utils.binding_table import Binding
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.bitemporal import MEMBERSHIP
@@ -786,6 +790,11 @@ def arp() -> dict:
     }
 
 
+def arp_minutes_apart() -> dict:
+    """The ARP frame a minute between packets rather than a second, so a clock bound of one second refuses them."""
+    return {**arp(), "event_time": [index * MINUTE for index in range(7)]}
+
+
 def auth() -> dict:
     return {
         "site_id": ["hq"] * 5,
@@ -872,6 +881,54 @@ def windows() -> dict:
     }
 
 
+def envelopes() -> dict:
+    """Three records from one collector; the second reports a clock a second and a half out."""
+    times = [0, MINUTE, 2 * MINUTE]
+
+    return {
+        "schema_version": ["tc1.v1"] * 3,
+        "collector_id": ["poller-1"] * 3,
+        "collector_seq": [0, 1, 2],
+        "observed_time": times,
+        "event_time": times,
+        "clock_source": ["ntp_disciplined"] * 3,
+        "clock_offset_ms": [3, 1500, -4],
+        "sampling_policy": ["full"] * 3,
+        "origin_hash": ["o-0", "o-1", "o-2"],
+        "tenant_id": ["corp"] * 3,
+    }
+
+
+def _ingest_after(seconds: int) -> typing.Callable:
+    """A replay's ingest clock: every record reaches the pipeline `seconds` after the sensor saw it."""
+    return lambda observed: [None if value is None else int(value) + seconds * SECOND for value in observed]
+
+
+def sequences() -> dict:
+    """Two collectors; the first skips two numbers."""
+    return {"collector_id": ["poller-1", "poller-1", "poller-1", "poller-2"], "collector_seq": [1, 2, 5, 1]}
+
+
+def sealed_windows() -> dict:
+    """Four sealed windows of one feed, five rows then one, one and two, with every count a health record reads."""
+    sealed = [0] * 5 + [1, 2] + [3] * 2
+    period = 300 * SECOND
+    count = len(sealed)
+
+    return {
+        "window_id": sealed,
+        "window_start_ns": [window * period for window in sealed],
+        "window_end_ns": [(window + 1) * period for window in sealed],
+        "collector_id": ["poller-1"] * count,
+        "tenant_id": ["corp"] * count,
+        "auth_unpaired": [True] + [False] * (count - 1),
+        "auth_abandoned": [1] + [0] * (count - 1),
+        "session_unclassified": [False, True] + [False] * (count - 2),
+        "sample_out_of_order": [False] * (count - 1) + [True],
+        "model_fallback_used": [True] * count,
+    }
+
+
 def wire() -> dict:
     return {
         "event_time": [1788114300123456789, 1788114360123456789],
@@ -879,6 +936,9 @@ def wire() -> dict:
         "lineage_id": ["l-a", "l-b"],
         "osi_layer": [2, 2],
         "window_id": [1, 1],
+        "collector_id": ["mac-table", "mac-table"],
+        "tenant_id": ["corp", "corp"],
+        "window_complete": [True, True],
         "determinism_tier": ["D1", "D1"],
         "pipeline_fingerprint": ["f1", "f1"],
         "config_hash": ["c1", "c1"],
@@ -1095,6 +1155,7 @@ REGISTRY: dict = {
                 Knob("port_column", INPUT_COLUMN, benign="port_id"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("counter_columns", DIFFERS, benign=["crc_errors"], extreme=["crc_errors", "symbol_errors"]),
                 Knob("counter32_columns", DIFFERS, benign=[], extreme=["crc_errors"]),
                 Knob("uptime_column", DIFFERS, benign="uptime", extreme=None),
@@ -1118,6 +1179,7 @@ REGISTRY: dict = {
                 Knob("entity_key_column", INPUT_COLUMN, benign="entity_key"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("delta_suffix", DIFFERS, benign="_delta", extreme="_change"),
                 Knob("error_columns", DIFFERS, benign=["crc_errors", "symbol_errors"], extreme=["crc_errors"]),
                 Knob("discard_columns",
@@ -1143,6 +1205,7 @@ REGISTRY: dict = {
                 Knob("entity_key_column", INPUT_COLUMN, benign="entity_key"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("channel_columns",
                      DIFFERS,
                      benign=["optical_rx_dbm"],
@@ -1162,6 +1225,7 @@ REGISTRY: dict = {
                 Knob("entity_key_column", INPUT_COLUMN, benign="entity_key"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("channel_column", DIFFERS, benign="optical_rx_dbm", extreme="optical_tx_dbm"),
                 Knob("type_column", DIFFERS, benign="transceiver_type", extreme="absent_type"),
                 Knob("floors", DIFFERS, benign=OPTIC_FLOORS, extreme={"10GBASE-LR": -30.0}),
@@ -1185,6 +1249,7 @@ REGISTRY: dict = {
                 Knob("entity_key_column", INPUT_COLUMN, benign="entity_key"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("status_column", INPUT_COLUMN, benign="oper_status"),
                 Knob("last_change_column", DIFFERS, benign=None, extreme="if_last_change"),  # noqa: E501
                 Knob("last_change_unit",
@@ -1206,6 +1271,7 @@ REGISTRY: dict = {
                 Knob("entity_key_column", INPUT_COLUMN, benign="entity_key"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 # Seconds rather than microseconds: this stage has no time window, so a uniform rescale is
                 # invisible to it by construction and the observable is that a nanosecond value read as seconds is
                 # past what a timestamp can hold. That still only happens if the parameter reaches the conversion.
@@ -1257,6 +1323,7 @@ REGISTRY: dict = {
                 Knob("oui_column", DIFFERS, benign="oui", extreme="absent_oui"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
                 Knob("max_samples", DIFFERS, benign=1024, extreme=1),
             ),
@@ -1273,6 +1340,7 @@ REGISTRY: dict = {
                 Knob("value_column", DIFFERS, benign="macs_per_port", extreme="ports_per_mac"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("bucket_seconds", DIFFERS, benign=300, extreme=3600),
                 Knob("window_seconds", DIFFERS, benign=30 * 24 * 3600, extreme=900),
                 Knob("min_buckets", DIFFERS, benign=4, extreme=100),
@@ -1291,6 +1359,7 @@ REGISTRY: dict = {
                 Knob("operation_column", INPUT_COLUMN, benign="arp_operation"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1, frame=arp_minutes_apart),
                 Knob("window_seconds", DIFFERS, benign=3600, extreme=1),
                 Knob("min_denominator", DIFFERS, benign=1, extreme=100),
                 Knob("include_gratuitous_requests", DIFFERS, benign=True, extreme=False),
@@ -1779,6 +1848,50 @@ REGISTRY: dict = {
                      "frame that does not is the subject of the window seal stage's own tests; the flag changes "
                      "nothing about a well-formed batch by design."),
                 Knob("column_prefix", DIFFERS, benign="", extreme="day_"),
+            ),
+        ),
+    "EnvelopeValidateStage":
+        Scenario(
+            stage=EnvelopeValidateStage,
+            frame=envelopes,
+            base={"ingest_clock": _ingest_after(1)},
+            knobs=(
+                Knob("required_columns",
+                     DIFFERS,
+                     benign=list(DEFAULT_REQUIRED_COLUMNS),
+                     extreme=[*DEFAULT_REQUIRED_COLUMNS, "site_id"]),
+                Knob("max_offset_ms", DIFFERS, benign=2000, extreme=1000),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="ms"),
+                Knob("ingest_clock", DIFFERS, benign=_ingest_after(1), extreme=_ingest_after(5)),
+                Knob("on_quarantine", DIFFERS, benign=None, extreme=[].append),
+            ),
+        ),
+    "CollectorSequenceStage":
+        Scenario(
+            stage=CollectorSequenceStage,
+            frame=sequences,
+            base={},
+            knobs=(
+                Knob("collector_column", INPUT_COLUMN, benign="collector_id"),
+                Knob("seq_column", INPUT_COLUMN, benign="collector_seq"),
+            ),
+        ),
+    "PipelineHealthStage":
+        Scenario(
+            stage=PipelineHealthStage,
+            frame=sealed_windows,
+            base={"min_buckets": 1},
+            knobs=(
+                Knob("period_seconds", DIFFERS, benign=300, extreme=600),
+                Knob("window_seconds", DIFFERS, benign=30 * 86400, extreme=600),
+                Knob("min_buckets", DIFFERS, benign=1, extreme=3),
+                Knob("max_buckets", DIFFERS, benign=1024, extreme=1),
+                Knob("telemetry_class", DIFFERS, benign="tc1", extreme="tc2_mac"),
+                Knob("unpaired_columns", DIFFERS, benign=["auth_unpaired"], extreme=[]),
+                Knob("abandoned_columns", DIFFERS, benign=["auth_abandoned"], extreme=[]),
+                Knob("unclassified_columns", DIFFERS, benign=["session_unclassified"], extreme=[]),
+                Knob("out_of_order_columns", DIFFERS, benign=["sample_out_of_order"], extreme=[]),
+                Knob("fallback_columns", DIFFERS, benign=["model_fallback_used"], extreme=[]),
             ),
         ),
     "TotalOrderStage":

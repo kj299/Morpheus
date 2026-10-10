@@ -87,16 +87,18 @@ The attacker signs in at headquarters and, twenty minutes later, in Edinburgh. F
 
 import typing
 
+import envelope
 import pandas as pd
 import presentation_pipeline
 import saas_pipeline
+import stamping
 import transport_pipeline
 
-import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
@@ -781,6 +783,10 @@ def build_lease_table() -> BindingTable:
 
 def build_mac_table(bindings: pd.DataFrame) -> BindingTable:
     """Which port, at which site, a workstation was plugged into, as TC2BindingStage closed it."""
+    # A MAC table collector every record of which was quarantined closed no bindings, and the table is empty.
+    if (len(bindings) == 0):
+        return BindingTable(name="mac_table", value_columns=["port_key", "site_id"], bindings=[])
+
     return BindingTable.from_dataframe(bindings,
                                        name="mac_table",
                                        key_column="mac_address",
@@ -794,6 +800,14 @@ def _build_replays(logins: list):
         (first, second) = _replay_times(index, replay)
         _login(logins, replay.principal, replay.first.address, "intranet", first)
         _login(logins, replay.principal, replay.second.address, "intranet", second, result=replay.second_result)
+
+
+FLOW_EXPORTERS = (("10.20.0.", "rtr-campus-0:256"), ("10.20.1.", "rtr-campus-1:512"), ("10.20.2.", "rtr-campus-2:768"))
+"""The router that exports a source's flows, and its IPFIX observation domain, by the source's subnet."""
+
+
+def _flow_exporter(source: str) -> str:
+    return next(exporter for (prefix, exporter) in FLOW_EXPORTERS if source.startswith(prefix))
 
 
 def build_corpus() -> dict[str, pd.DataFrame]:
@@ -832,7 +846,10 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     def frame(rows: list) -> pd.DataFrame:
         result = pd.DataFrame(rows).sort_values(["event_time", "collector_seq"], kind="mergesort")
         result = result.reset_index(drop=True)
-        result["collector_seq"] = range(len(result))
+        # Each collector numbers its own records, in the order it saw them. Two collectors writing into one frame --
+        # the two session sources, the two sites' MAC tables -- keep a sequence each, so neither one's records read
+        # as a gap in the other's.
+        result["collector_seq"] = result.groupby("collector_id", sort=False).cumcount()
 
         return result
 
@@ -846,8 +863,12 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     mac_tables: list = []
     _build_mac_tables(mac_tables)
 
-    return {
-        FLOW_CLASS: frame(flows),
+    # Every flow names the router that metered it, which is what stamped its times.
+    flow_frame = frame(flows)
+    flow_frame["exporter_id"] = [_flow_exporter(source) for source in flow_frame["src_ip"]]
+
+    return envelope.attach_all({
+        FLOW_CLASS: flow_frame,
         AUTH_CLASS: frame(logins),
         PROCESS_CLASS: frame(processes),
         SESSION_CLASS: frame(sessions),
@@ -855,7 +876,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
         HANDSHAKE_CLASS: frame(handshakes),
         SAAS_CLASS: frame(exports),
         MAC_CLASS: frame(mac_tables),
-    }
+    })
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -963,6 +984,8 @@ def close_mac_bindings(config: Config, dataframes: list[pd.DataFrame], impose_or
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
 
+    pipe.add_stage(CollectorSequenceStage(config))
+
     pipe.add_stage(TC2BindingStage(config))
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
@@ -985,6 +1008,8 @@ def run_class(config: Config,
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
 
+    pipe.add_stage(CollectorSequenceStage(config))
+
     for stage in stages:
         pipe.add_stage(stage)
 
@@ -1002,6 +1027,11 @@ def run_class(config: Config,
     pipe.run()
 
     frame = _collect(sink)
+
+    # A class every record of which was quarantined produced nothing to key.
+    if (len(frame) == 0):
+        return frame
+
     frame["telemetry_class"] = telemetry_class
     frame["row_key"] = frame["event_uid"]
 
@@ -1034,6 +1064,10 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
+    # Validated once per class, ahead of every stage: ingest_time stamped, the envelope checked, untrusted clocks
+    # taken out of the stream and kept.
+    (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
+
     # R-C-004's last three collectors go through the composed pipelines their own rules are asserted over, so the
     # chain is measured on exactly what R-B-L4-005, the layer 6 stages and R-B-L7-002 see.
     delegated = {TRANSFER_CLASS: transport_pipeline, HANDSHAKE_CLASS: presentation_pipeline, SAAS_CLASS: saas_pipeline}
@@ -1047,6 +1081,10 @@ def run_pipeline(config: Config,
     stores = {HANDSHAKE_CLASS: {"store": build_address_store()}}
 
     for name in CLASSES:
+        # A collector every record of which was quarantined delivered nothing for its class to run over.
+        if (len(batches[name]) == 0):
+            continue
+
         if (name in delegated):
             frames.append(delegated[name].run_pipeline(config, {name: batches[name][0]},
                                                        batches={name: batches[name]},
@@ -1055,7 +1093,9 @@ def run_pipeline(config: Config,
         else:
             frames.append(run_class(config, name, batches[name], impose_order=impose_order, mac_table=mac_table))
 
-    return canonicalize(pd.concat(frames, ignore_index=True), key_columns=KEY_COLUMNS, ignore_columns=IGNORE_COLUMNS)
+    return canonicalize(envelope.with_quarantine(pd.concat(frames, ignore_index=True), quarantined),
+                        key_columns=KEY_COLUMNS,
+                        ignore_columns=IGNORE_COLUMNS)
 
 
 def render(result: pd.DataFrame) -> str:

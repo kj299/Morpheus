@@ -29,18 +29,20 @@ binding resolution, and deterministic window sealing.
 import random
 import typing
 
+import envelope
 import pandas as pd
-
 import stamping
+
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
+from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
+from morpheus.stages.lineage.envelope_validate_stage import EnvelopeValidateStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
-from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
@@ -141,6 +143,7 @@ def build_corpus() -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     df["collector_seq"] = range(1, len(df) + 1)
+    df = envelope.attach(df)
 
     return df
 
@@ -202,6 +205,9 @@ def run_pipeline(config: Config,
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(
         LineageStampStage(config, id_columns=["collector_id", "schema_version", "origin_hash", "collector_seq"]))
+    # The envelope is checked and `ingest_time` stamped. Nothing here has a clock to quarantine, so there is no route
+    # and the stage would keep any such record in the stream, marked.
+    pipe.add_stage(EnvelopeValidateStage(config, ingest_clock=envelope.replay_ingest_clock))
     pipe.add_stage(CommunityIdStage(config))
     pipe.add_stage(BindingResolverStage(config, binding_table=build_binding_table(), key_column="src_ip"))
     pipe.add_stage(DeterminismStampStage(config, envelope=ENVELOPE))

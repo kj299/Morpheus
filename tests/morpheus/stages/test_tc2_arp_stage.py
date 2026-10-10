@@ -36,6 +36,9 @@ VICTIM = "10.0.0.9"
 ATTACKER_MAC = "00:11:22:33:44:55"
 ROUTER_MAC = "aa:bb:cc:dd:ee:ff"
 
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A device clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
 
 def frame(senders: list, targets: list, macs: list = None, ops: list = None, times: list = None) -> dict:
     count = len(senders)
@@ -362,3 +365,22 @@ def test_an_unsaturated_measure_says_so_rather_than_carrying_a_null(config: Conf
 
     assert _as_list(meta, "macs_claiming_sender_ip_saturated") == [False, False]
     assert _as_list(meta, "gratuitous_arp_ratio_saturated") == [False, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    payload = frame([GATEWAY] * 3, [VICTIM] * 3,
+                    macs=[ROUTER_MAC, ATTACKER_MAC, ATTACKER_MAC],
+                    times=[0, YEARS_AHEAD_NS, NS_PER_SECOND])
+    meta = run(config, payload)
+
+    assert _as_list(meta, "clock_refused") == [False, True, False]
+    assert _as_list(meta, "macs_claiming_sender_ip")[1] is None
+    # Believed, the decade-ahead packet would have emptied the window and the contested address would have read
+    # as claimed by one MAC; refused, the router's claim is still there beside the attacker's.
+    assert _as_list(meta, "macs_claiming_sender_ip")[2] == 2
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC2ArpStage(config, max_clock_skew_seconds=0)

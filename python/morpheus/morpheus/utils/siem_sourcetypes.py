@@ -14,7 +14,7 @@
 """
 What produces each sourcetype the shipped Splunk app is configured to parse, or what is missing where nothing does.
 
-The app's `props.conf` declares fourteen stanzas. Each names the field its `TIME_PREFIX` anchors `_time` on, and
+The app's `props.conf` declares seventeen stanzas. Each names the field its `TIME_PREFIX` anchors `_time` on, and
 each of those fields has to reach the wire as a quoted string in the app's `TIME_FORMAT` or Splunk stamps the
 event at index time instead -- silently, with no error anywhere, turning every windowed detection into a rule
 about when the pipeline happened to be busy.
@@ -27,8 +27,8 @@ exist yet. `tests/morpheus/utils/test_siem_sourcetypes.py` asserts the two halve
 configuration file appears here, every entry here corresponds to a stanza, and each declared time column is the
 one that stanza's own `TIME_PREFIX` regex anchors on.
 
-Being unproduced is a fact worth recording rather than a gap worth hiding. Eight of the fourteen stanzas were
-once configuration for producers this fork had not built, and saying so in one place is what kept "the app supports
+Being unproduced is a fact worth recording rather than a gap worth hiding. Eight of the app's first fourteen stanzas
+were once configuration for producers this fork had not built, and saying so in one place is what kept "the app supports
 seven layers" from reading as "seven layers are implemented". None is any longer -- the TC-0 context store was the
 last -- and `UNPRODUCED` stays, empty, so that the next stanza shipped ahead of its producer is recorded the same way.
 
@@ -113,6 +113,19 @@ image digest, feature schema version and seed travel beside these three and are 
 records `unknown` for the first two honestly and a deployment is what supplies them.
 """
 
+ENVELOPE_COLUMNS = ("collector_id", "tenant_id", "window_complete")
+"""What every scored event says about where it came from and whether its window was whole.
+
+`collector_id` and `tenant_id` are the two scoping fields of Part 2's envelope, and every health and platform search
+groups by them, so a scored event without them could be counted nowhere. `window_complete` is here because every
+detection's base search filters on it: a row that arrived after its window sealed belongs on `morpheus:late`, and a
+detection that read one would be reading a window it had already reported on.
+"""
+
+ENVELOPE_TIME_COLUMNS = ("event_time", "observed_time", "ingest_time")
+"""The three timestamps the envelope carries, all rendered. `_time` is anchored on the first; the other two are what
+a lag is measured from, and a consumer comparing them should not have to convert one of three."""
+
 MODEL_COLUMNS = (MODEL_VERSION_COLUMN, MODEL_FALLBACK_COLUMN)
 """Control 1 on the row: the model a scored event was scored against, and whether that was a fallback."""
 
@@ -121,7 +134,7 @@ PRODUCED: dict = {
         Sourcetype(
             name="morpheus:score:l1",
             time_column="event_time",
-            time_columns=("event_time", ),
+            time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-1 stages (normalize, rate, optical, forecast, flap, change) behind WindowSealStage; the "
             "`tc1` class of `tests/morpheus/determinism/telemetry_pipeline.py`.",
             # R-D-L1-001 reads the serial change, the flap count and the collector's own `oper_status`, carried
@@ -138,6 +151,7 @@ PRODUCED: dict = {
                               "osi_layer",
                               "window_id",
                               *PROVENANCE_COLUMNS,
+                              *ENVELOPE_COLUMNS,
                               "site_id",
                               "device_id",
                               "port_id",
@@ -187,7 +201,7 @@ PRODUCED: dict = {
         Sourcetype(
             name="morpheus:score:l3",
             time_column="event_time",
-            time_columns=("event_time", ),
+            time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-3 stages (cardinality, reach, host baselines, beacon, TTL), with CommunityIdStage before "
             "them and TC0EnrichStage on the destination after, behind a WindowSealStage sealing hourly, which "
             "R-C-001's `window_id + 1` depends on; the `tc3` class "
@@ -203,10 +217,12 @@ PRODUCED: dict = {
                               "osi_layer",
                               "window_id",
                               *PROVENANCE_COLUMNS,
+                              *ENVELOPE_COLUMNS,
                               "src_ip",
                               "dst_ip",
                               "flow_pair_key",
                               "community_id",
+                              "exporter_id",
                               "dsts_per_src",
                               "dsts_per_src_saturated",
                               "dsts_per_src_step",
@@ -244,7 +260,7 @@ PRODUCED: dict = {
         Sourcetype(
             name="morpheus:score:l4",
             time_column="event_time",
-            time_columns=("event_time", ),
+            time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-4 stages (flow rollup, transfer envelope) behind WindowSealStage; the `tc4` class "
             "of `tests/morpheus/determinism/transport_pipeline.py`.",
             # The three fireable layer 4 detections read these off this sourcetype. The counts are here and the
@@ -256,6 +272,7 @@ PRODUCED: dict = {
                               "osi_layer",
                               "window_id",
                               *PROVENANCE_COLUMNS,
+                              *ENVELOPE_COLUMNS,
                               "src_ip",
                               "dst_ip",
                               "dst_port",
@@ -280,7 +297,7 @@ PRODUCED: dict = {
         Sourcetype(
             name="morpheus:score:l6",
             time_column="event_time",
-            time_columns=("event_time", ),
+            time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-6 stages (fingerprint, certificate, cipher, content), with CommunityIdStage before them "
             "and TC0EnrichStage on the source after, behind WindowSealStage; the "
             "`tc6` class of `tests/morpheus/determinism/presentation_pipeline.py`.",
@@ -295,6 +312,7 @@ PRODUCED: dict = {
                               "osi_layer",
                               "window_id",
                               *PROVENANCE_COLUMNS,
+                              *ENVELOPE_COLUMNS,
                               "src_ip",
                               "dst_ip",
                               "community_id",
@@ -332,7 +350,7 @@ PRODUCED: dict = {
         Sourcetype(
             name="morpheus:score:l7",
             time_column="event_time",
-            time_columns=("event_time", ),
+            time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-7 DNS and HTTP stages behind WindowSealStage, the `tc7_dns` and `tc7_http` classes of "
             "`tests/morpheus/determinism/application_pipeline.py`; and TC7SaasStage, enriched by TC0EnrichStage and "
             "followed by a weekly TC5DriftStage, the `tc7_saas` class of "
@@ -345,7 +363,13 @@ PRODUCED: dict = {
             # attached is carried as the stage recorded it, with the host's criticality, which weights the risk, and
             # the normalized host name the search keys on rather than the name the collector reported. R-C-001 reads
             # the host's role, because a lateral movement chain ends on a server.
-            required_columns=("event_uid", "entity_key", "lineage_id", "osi_layer", "window_id", *PROVENANCE_COLUMNS),
+            required_columns=("event_uid",
+                              "entity_key",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              *PROVENANCE_COLUMNS,
+                              *ENVELOPE_COLUMNS),
             variant_columns=(
                 ("src_ip",
                  "query_name",
@@ -391,7 +415,7 @@ PRODUCED: dict = {
         Sourcetype(
             name="morpheus:score:l2",
             time_column="event_time",
-            time_columns=("event_time", ),
+            time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-2 stages (cardinality, baseline, ARP, auth) behind WindowSealStage; the `tc2_mac`, "
             "`tc2_arp` and `tc2_auth` classes of `tests/morpheus/determinism/telemetry_pipeline.py`.",
             # R-D-L2-001, R-D-L2-003 and R-D-L2-005 read these off this sourcetype, and R-B-L2-002 reads the step
@@ -403,6 +427,7 @@ PRODUCED: dict = {
                               "osi_layer",
                               "window_id",
                               *PROVENANCE_COLUMNS,
+                              *ENVELOPE_COLUMNS,
                               "mac_address",
                               "macs_per_port",
                               "macs_per_port_saturated",
@@ -431,7 +456,7 @@ PRODUCED: dict = {
         Sourcetype(
             name="morpheus:score:l5",
             time_column="event_time",
-            time_columns=("event_time", ),
+            time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-5 stages (session, novelty, cadence, travel, risk, score and, over daily windows, drift) "
             "behind TC0EnrichStage and WindowSealStage; the "
             "`tc5_auth` and `tc5_session` classes of `tests/morpheus/determinism/session_pipeline.py`; and host "
@@ -455,7 +480,8 @@ PRODUCED: dict = {
                               "lineage_id",
                               "osi_layer",
                               "window_id",
-                              *PROVENANCE_COLUMNS),
+                              *PROVENANCE_COLUMNS,
+                              *ENVELOPE_COLUMNS),
             variant_columns=(
                 ("auth_result",
                  "ctx_groups",
@@ -511,6 +537,71 @@ PRODUCED: dict = {
                  "ctx_department",
                  "ctx_employment_status"),
             ),
+        ),
+    "morpheus:quarantine":
+        Sourcetype(
+            name="morpheus:quarantine",
+            time_column="ingest_time",
+            time_columns=ENVELOPE_TIME_COLUMNS,
+            producer="`morpheus.stages.lineage.envelope_validate_stage.EnvelopeValidateStage` with `on_quarantine`, "
+            "one record per record taken out of the stream; the `quarantine` class of "
+            "`tests/morpheus/determinism/estate_pipeline.py` and `telemetry_pipeline.py`.",
+            # Timed on when Morpheus received it, the one clock in the record nobody doubts: the record is here
+            # because its own event time cannot be trusted, and anchoring `_time` on that would file it wherever the
+            # broken clock said. The refusal-rate search counts these by collector and tenant beside the rows that
+            # were delivered, and the clock fields are what an operator fixing the collector needs.
+            required_columns=("event_uid",
+                              "collector_id",
+                              "tenant_id",
+                              "clock_source",
+                              "clock_offset_ms",
+                              "quarantine_reason",
+                              "quarantined_from"),
+        ),
+    "morpheus:health":
+        Sourcetype(
+            name="morpheus:health",
+            time_column="event_time",
+            time_columns=("event_time", ),
+            producer="`morpheus.stages.lineage.pipeline_health_stage.PipelineHealthStage` behind WindowSealStage, one "
+            "record per window, collector, class and tenant; `envelope.health` over every score corpus in "
+            "`tests/morpheus/determinism/`.",
+            # `event_time` is the window's end. The three health searches read these: the refusal rate the counts,
+            # Collector health the sequence and the clock, and the platform step the record count against its own
+            # history.
+            required_columns=("window_id",
+                              "collector_id",
+                              "telemetry_class",
+                              "tenant_id",
+                              "rows",
+                              "envelope_invalid",
+                              "clock_refused",
+                              "late",
+                              "seq_gap",
+                              "seq_regressed",
+                              "max_ingest_lag_seconds",
+                              "clock_offset_ms_max",
+                              "rows_baseline_max",
+                              "rows_baseline_mature",
+                              "rows_step"),
+        ),
+    "morpheus:late":
+        Sourcetype(
+            name="morpheus:late",
+            time_column="event_time",
+            time_columns=ENVELOPE_TIME_COLUMNS,
+            producer="WindowSealStage, a row it marks `is_late` because its window had sealed before it arrived; the "
+            "late flow of `tests/morpheus/determinism/network_pipeline.py`.",
+            # Timed on its event, so it lands in the window it belongs to, and kept out of the scored index so no
+            # detection reads it as part of a window already reported on. Late arrivals by class counts these, and
+            # the backfill procedure in the app's README replays them.
+            required_columns=("event_uid",
+                              "telemetry_class",
+                              "collector_id",
+                              "tenant_id",
+                              "window_id",
+                              "is_late",
+                              "window_complete"),
         ),
     "morpheus:edge":
         Sourcetype(

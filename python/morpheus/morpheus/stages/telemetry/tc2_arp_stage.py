@@ -33,6 +33,10 @@ from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import DistinctWindowTracker
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.ratio_window import NS_PER_SECOND
 from morpheus.utils.ratio_window import RatioWindowTracker
 
@@ -117,6 +121,12 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     excluded_sender_ips : list of str, optional
         Addresses whose multi-MAC claims are legitimate, typically HSRP and VRRP virtuals. Rows whose sender
         address is listed are marked, not dropped, so the exclusion is visible rather than silent.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. Both windows expire
+        packets on event time, so one packet seen through a sensor whose clock is wrong by years would empty every
+        sender's window at once, and an address claimed by two MACs would read as claimed by one. A refused row carries
+        no per-entity features from this stage, sets `clock_refused`, and moves no horizon. See
+        `morpheus.utils.event_clock`.
     """
 
     def __init__(self,
@@ -130,8 +140,12 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_denominator: int = 10,
                  include_gratuitous_requests: bool = False,
-                 excluded_sender_ips: list[str] = None):
+                 excluded_sender_ips: list[str] = None,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -157,6 +171,9 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._needed_columns[EXCLUDED_COLUMN] = TypeId.BOOL8
         self._needed_columns[RATIO_SATURATED_COLUMN] = TypeId.BOOL8
         self._needed_columns[CLAIMANTS_SATURATED_COLUMN] = TypeId.BOOL8
+
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -247,6 +264,7 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             claimants_saturated: list = []
             ratio_saturated: list = []
             excluded: list = []
+            refused = [False] * len(sender_ips)
             unordered = 0
             keyless = 0
 
@@ -274,6 +292,16 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     ratio_saturated.append(False)
                     claimants_saturated.append(False)
                     unordered += 1
+                    continue
+
+                if (not self._clock.accept(event_time_ns)):
+                    ratios.append(None)
+                    numerators.append(None)
+                    denominators.append(None)
+                    claimants.append(None)
+                    ratio_saturated.append(False)
+                    claimants_saturated.append(False)
+                    refused[position] = True
                     continue
 
                 counts = is_gratuitous and (self._include_requests or not has_operation
@@ -321,6 +349,14 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_int_column(df, NUMERATOR_COLUMN, numerators)
             assign_nullable_int_column(df, DENOMINATOR_COLUMN, denominators)
             assign_nullable_int_column(df, CLAIMANTS_COLUMN, claimants)
+            mark_refused(df, refused)
+
+        if (any(refused)):
+            logger.warning(
+                "TC2ArpStage refused %d of %d packets whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they entered no window, set clock_refused and expired nothing.",
+                sum(refused),
+                len(sender_ips))
 
         if (keyless > 0):
             logger.warning(

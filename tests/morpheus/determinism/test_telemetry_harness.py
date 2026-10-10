@@ -42,6 +42,7 @@ from morpheus.utils.optical_forecast import STATUS_PROJECTED
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import envelope as universal_envelope  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_telemetry_expected.csv")
@@ -124,10 +125,11 @@ def test_corpus_is_shaped_like_the_network(corpus: dict[str, pd.DataFrame]):
     assert corpus["tc2_auth"]["mac_address"].notna().all()
     assert corpus["tc2_auth"].groupby("port_id")["mac_address"].nunique().max() > 1, "no port carries two devices"
 
-    # Every class carries the envelope the identifiers derive from, with a monotonic sequence.
+    # Every class carries the envelope the identifiers derive from, each collector's sequence rising. The DMZ poller
+    # numbers its own polls beside the main poller's in the layer 1 class.
     for frame in corpus.values():
         assert set(tp.ID_COLUMNS) <= set(frame.columns)
-        assert frame["collector_seq"].is_monotonic_increasing
+        assert frame.groupby("collector_id")["collector_seq"].apply(lambda seq: seq.is_monotonic_increasing).all()
 
 
 # --- Checks 2 through 6: determinism ----------------------------------------------------------------------------
@@ -338,7 +340,8 @@ def test_a_mac_resolves_to_the_port_layer_1_knows(result: pd.DataFrame):
 
 @pytest.mark.cpu_mode
 def test_every_class_ran_and_sealed(result: pd.DataFrame):
-    assert set(result["telemetry_class"]) == set(tp.TELEMETRY_CLASSES)
+    # And the quarantine: the DMZ poller's polls, held for an untrusted clock rather than scored.
+    assert set(result["telemetry_class"]) == set(tp.TELEMETRY_CLASSES) | {universal_envelope.QUARANTINE_CLASS}
 
     for name in ("tc1", "tc2_mac", "tc2_arp", "tc2_auth"):
         sealed = _rows(result, name)

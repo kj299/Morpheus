@@ -49,12 +49,14 @@ catch.
 import random
 import typing
 
+import envelope
 import pandas as pd
-
 import stamping
+
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
@@ -219,7 +221,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     frame = pd.DataFrame(rows).sort_values("event_time", kind="mergesort").reset_index(drop=True)
     frame["collector_seq"] = range(len(frame))
 
-    return {TELEMETRY_CLASS: frame}
+    return envelope.attach_all({TELEMETRY_CLASS: frame})
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -300,12 +302,18 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
+    # Validated once per class, ahead of every stage: ingest_time stamped, the envelope checked, untrusted clocks
+    # taken out of the stream and kept.
+    (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
+
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=batches[TELEMETRY_CLASS]))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
+
+    pipe.add_stage(CollectorSequenceStage(config))
 
     for stage in build_stages(config):
         pipe.add_stage(stage)
@@ -327,7 +335,9 @@ def run_pipeline(config: Config,
     result["telemetry_class"] = TELEMETRY_CLASS
     result["row_key"] = result["event_uid"]
 
-    return canonicalize(result, key_columns=KEY_COLUMNS, ignore_columns=IGNORE_COLUMNS)
+    return canonicalize(envelope.with_quarantine(result, quarantined),
+                        key_columns=KEY_COLUMNS,
+                        ignore_columns=IGNORE_COLUMNS)
 
 
 def render(result: pd.DataFrame) -> str:

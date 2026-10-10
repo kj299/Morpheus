@@ -76,7 +76,9 @@ TIMESTAMP = re.compile(r'"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{6})UTC"')
 """Every timestamp the wire format renders, in the one form `props.conf` parses."""
 
 INDEX_BY_PREFIX = (("morpheus:edge", "behavior_lineage"), ("morpheus:score:", "behavior_events"),
-                   ("binding:", "behavior_bindings"), ("context:", "behavior_context"))
+                   ("morpheus:health", "behavior_health"), ("morpheus:quarantine", "behavior_quarantine"),
+                   ("morpheus:late", "behavior_late"), ("binding:", "behavior_bindings"), ("context:",
+                                                                                           "behavior_context"))
 """Where each sourcetype is indexed, as VALIDATION.md's indexing loop has it."""
 
 CALL_TIMEOUT_SECONDS = 900

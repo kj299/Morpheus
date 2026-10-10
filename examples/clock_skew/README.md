@@ -81,24 +81,34 @@ flapping link and the error climb, the re-patch and the insertion, the surge and
 one bench exchange each for the two timing rules. All eight are unchanged to a minute on collector clocks and on
 switch clocks, and nothing else moved.
 
+It was run again that night after step 11 (#62) put the envelope on every record, quarantined the estate's DMZ
+poller and named the exporter on every flow. It gained two things. The network corpus is swept a second time on
+its routers' clocks, which measures its eight rules for the first time. And every sweep over collector clocks runs
+twice: uncorrected, as before, and with quarantine on, which is the corrected curve below. The uncorrected numbers
+are unchanged: every rule that held still holds, and every chain breaks at the second it broke at before. The DMZ
+poller is a sixth clock in the estate's spread, which moves the ladder's lower rung by a few observations and
+nothing else.
+
 What a sweep can say depends on the clocks in the corpus, and the forty-nine fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
-| Inputs on clocks that disagree | 20 | A tolerance, or the spread at which the rule changes |
+| Inputs on clocks that disagree | 28 | A tolerance, or the spread at which the rule changes |
 | Inputs on one clock, in a corpus with several | 11 | Boundary sensitivity under a uniform shift, not a tolerance |
-| Corpus with one clock | 18 | Nothing; reported as not measured |
+| Corpus with one clock | 10 | Nothing; reported as not measured |
 
-**Measured against clocks that disagree** -- the estate's five collectors and three switches for layers 1 and 2,
-the campaign's nine collectors for the chains, and the endpoint corpus's seven hosts, each of whose agents stamps
-its own process starts:
+**Measured against clocks that disagree** -- the estate's six collectors and three switches for layers 1 and 2,
+the campaign's nine collectors for the chains, the network corpus's three routers, each of which stamps its own
+flows, and the endpoint corpus's seven hosts, each of whose agents stamps its own process starts:
 
 | Rule | Breaking spread |
 | --- | --- |
 | R-D-L1-001, 002, 003 and 006, R-B-L1-005 and 007, R-P-L1-004, R-D-L2-001, 003 and 005, R-B-L2-002, 006, 007 and 008 | unchanged to 60s on collectors and on switches |
 | **R-D-L2-004, MAC in two places** | unchanged to 60s on collectors; **changes at 60s on switches** |
 | R-B-L7-004, process ancestry novelty | unchanged to 60s on host clocks |
+| R-B-L3-001, 002, 004, 006 and 007, R-D-L3-003 and 008 | unchanged to 60s on router clocks |
+| **R-P-L3-005, fan-out trajectory** | **changes at 30s on router clocks**, losing one of the scanner's twenty rises |
 | **R-C-001, lateral movement chain** | **960s**, gaining a control |
 | **R-C-002, TLS anomaly precedes beaconing** | **1120s**, gaining a control |
 | **R-C-004, staged exfiltration** | **3200s**, gaining a control |
@@ -112,12 +122,13 @@ reads one class. For these eleven the sweep is a uniform shift, which measures h
 window edge and nothing about disagreement. All eleven are unchanged to a minute; R-P-L5-006 used to change at a
 millisecond, for the reason below.
 
-**On a corpus with one clock.** The network, transport, presentation and SaaS corpora each arrive through a single
-collector, so a collector sweep gives that one clock no offset and perturbs nothing. Their eighteen rules -- eight at
-layer 3, three at layer 4, five at layer 6, R-B-L7-002 and R-P-L7-006 -- are reported as `"one clock"` in the
-artifact rather than as unchanged, because the absence of a measurement is not a tolerance. Measuring them needs
-the clocks a deployment really has, which the corpora do not carry: an exporter per flow at layers 3 and 4, an
-inspection point per egress at layer 6. For SaaS the provider's audit log really is one clock, and the second
+**On a corpus with one clock.** The transport, presentation and SaaS corpora each arrive through a single
+collector, so a collector sweep gives that one clock no offset and perturbs nothing. Their ten rules -- three at
+layer 4, five at layer 6, R-B-L7-002 and R-P-L7-006 -- are reported as `"one clock"` in the artifact rather than as
+unchanged, because the absence of a measurement is not a tolerance. Measuring them needs the clocks a deployment
+really has, which the corpora do not carry: an exporter per packet capture at layer 4, an inspection point per
+egress at layer 6. Layer 3 was in this group until step 11 named the exporter on every flow; its collector sweep
+still moves nothing, and its router sweep is the measurement. For SaaS the provider's audit log really is one clock, and the second
 clock that matters is the context store's record time, which the sweep does not reach.
 
 ### The spoof rule fails against switches and not against collectors
@@ -167,8 +178,9 @@ session lasting most of the hour, and a minute never takes it outside.
 
 The rung below is not so comfortable. An ARP observation reaches a port through a MAC binding that lasts one
 poll cadence, and a minute is a large fraction of that. At sixty seconds, of the 1040 ARP observations rooted
-on a port, fifteen fall back to their own address and six acquire a port they did not have -- a net nine, and
-twenty-one rows whose attribution changed.
+on a port, ten fall back to their own address and five acquire a port they did not have -- a net five, and
+fifteen rows whose attribution changed. It was fifteen and six before step 11 added the DMZ poller: a sixth clock in
+the spread places the other five a little differently at the same width.
 
 **Attribution and reach are different properties and do not fail together.** A chain can span three layers
 while an observation inside it has quietly been re-attributed. Counting spans alone would have reported
@@ -202,11 +214,37 @@ spread by sorted name, so each sits at a fixed fraction of the spread `M`:
 The attackers are lost later, each measured to the second: R-C-001's at 1081 seconds, R-C-002's at 2561,
 R-C-005's at 9601, and R-C-004's not until 12,961, past the three-hour ladder.
 
+### Quarantine trades a wrong answer for no answer
+
+Every sweep over collector clocks runs a second time with quarantine on: each skewed collector reports the offset
+it was given in `clock_offset_ms`, as a disciplined collector reports its last measured offset, and
+`EnvelopeValidateStage` holds every record more than its default second out. The two curves, for the corpora with
+more than one collector:
+
+| Corpus | Uncorrected | Quarantine on |
+| --- | --- | --- |
+| Estate, layers 1 and 2 | No rule changes to 60s | No change to 1s; at 10s four of the six collectors are held whole -- 2040 records, all but the MAC table's and the RADIUS server's -- and the eight rules reading them lose all eleven accusations; at 30s all six are held and all fifteen rules lose all twenty-six |
+| Session, layer 5 | No rule changes to 60s, on the hour marks or off | No change to 1s; at 10s the identity provider and the RADIUS accounting feed are held and all nine rules lose all twenty-two accusations |
+| Application | No rule changes to 60s | No change to 1s; at 10s both collectors are held, and both rules lose their three accusations |
+| Campaign, the chains | No change below 960s; past it each chain **gains** a control | No change to 1s; from 10s every collector but one is held and all four chains lose their attackers |
+
+Two things are worth reading off it. Inside the bound, quarantine costs nothing: at a second's spread every clock
+is within half a second of true and nothing but the DMZ poller is held, in any corpus. And beyond it, quarantine
+never makes a rule accuse something it should not -- across every run, no rule gained an accusation -- but it takes
+away everything the held collectors carried, at spreads where the uncorrected pipeline still decided correctly. A
+one-second bound is far tighter than any of these rules needs: the single-layer rules held to a minute uncorrected,
+and the chains to sixteen minutes. The bound is a statement about which wrong answer an estate prefers, and the
+measurement says it can be set per class from the tolerance above, not globally from the clock source.
+
+The exporter sweep has no quarantine curve. A router stamps its own flows and reports no offset, so nothing in the
+envelope could hold them; a router's clock is exactly the case the collector's `clock_offset_ms` cannot see.
+
 ## What this does not do
 
-It does not correct anything. `clock_source` and `clock_offset_ms` are in the universal envelope and no stage
-produces or consumes either; they are schema, not a control. This measures the damage a deployment takes today,
-not the damage after a correction that has not been built.
+It does not correct an event time. Quarantine holds a record whose collector reports its clock out of bound; it
+does not subtract the reported offset, because a correction is only as good as the offset measurement, and an
+experiment that injected an offset and subtracted the same number would measure its own arithmetic. Nor can it see
+a clock the envelope does not describe: a switch's, a router's or a host's.
 
 It also measures these corpora. The magnitudes at which things break are properties of an hour of one estate
 and three weeks of seven principals, with these thresholds. The mechanisms generalize; the numbers are a worked

@@ -36,8 +36,10 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.determinism import quantize_value
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.session_timer import NS_PER_SECOND
 from morpheus.utils.session_timer import SessionTimer
 from morpheus.utils.transfer_envelope import DEFAULT_QUANTILE
@@ -113,8 +115,10 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
     Sessions that never end are abandoned once `timeout_seconds` of event time has passed with no stop record.
     Expiry runs off the event stream rather than a wall clock, so a replay abandons the same sessions the live run
-    did. Abandoned sessions are counted and logged; no row is synthesized for them, because this stage annotates
-    the records it is given and does not invent any.
+    did. No row is synthesized for an abandoned session, because this stage annotates the records it is given and
+    does not invent any; the record whose arrival abandoned them carries the count in `session_abandoned`, and a
+    record whose action is neither a start nor a stop is marked `session_unclassified`, so the pipeline's health
+    record can count both per collector and window rather than leaving them to a log line.
 
     The session key it writes, `session_key`, is the principal and the session identifier composed together. It is
     the TC-5 entity key the guide specifies, and it is what a downstream `WindowSealStage` should anchor
@@ -234,6 +238,9 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._needed_columns["session_starts"] = TypeId.INT64
         self._needed_columns["session_unpaired"] = TypeId.BOOL8
         self._needed_columns["session_out_of_order"] = TypeId.BOOL8
+        self._needed_columns["session_abandoned"] = TypeId.INT64
+        self._needed_columns["session_unclassified"] = TypeId.BOOL8
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
         self._needed_columns["session_lifecycle"] = TypeId.STRING
         self._needed_columns["session_duration_baseline"] = TypeId.FLOAT64
         self._needed_columns["session_duration_ratio"] = TypeId.FLOAT64
@@ -365,6 +372,9 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             unclassified = 0
             abandoned = 0
             implausible = 0
+            abandoned_rows = [0] * len(sessions)
+            unclassified_rows = [False] * len(sessions)
+            refused = [False] * len(sessions)
 
             for (position, raw_session) in enumerate(sessions):
                 session_id = normalize_text(raw_session)
@@ -412,6 +422,7 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
                     keyless += int(session_id is None or event_time_ns is None)
                     unclassified += int(session_id is not None and lifecycle is None)
+                    unclassified_rows[position] = session_id is not None and lifecycle is None
                     continue
 
                 # Expiry is driven by the stream's own clock, so a replay abandons the same sessions a live run
@@ -423,9 +434,12 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unpaired.append(None)
                     out_of_order.append(False)
                     implausible += 1
+                    refused[position] = True
                     continue
 
-                abandoned += len(self._timer.expire(event_time_ns))
+                expired = len(self._timer.expire(event_time_ns))
+                abandoned += expired
+                abandoned_rows[position] = expired
 
                 # The identifier alone is what a start and its stop share. Keying on the principal too would fail to
                 # pair the two whenever one of the records carries the principal and the other does not, which is
@@ -460,6 +474,9 @@ class TC5SessionStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_float_column(df, "session_duration_baseline", baselines)
             assign_nullable_float_column(df, "session_duration_ratio", ratios)
             assign_nullable_bool_column(df, "session_duration_mature", mature)
+            assign_nullable_int_column(df, "session_abandoned", abandoned_rows)
+            assign_nullable_bool_column(df, "session_unclassified", unclassified_rows)
+            mark_refused(df, refused)
 
         if (keyless > 0):
             logger.warning(

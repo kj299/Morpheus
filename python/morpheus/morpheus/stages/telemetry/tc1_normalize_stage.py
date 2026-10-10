@@ -33,11 +33,15 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.counter_delta import NS_PER_SECOND
-from morpheus.utils.counter_delta import CounterTracker
 from morpheus.utils.counter_delta import TIMETICKS_CEILING_NS
+from morpheus.utils.counter_delta import CounterTracker
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import compose_link_key
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import mark_refused
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +130,11 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     neighbor_port_column : str, default = "lldp_neighbor_port_id"
         Column holding the LLDP neighbour's port identifier. With the chassis and the port's own key it names the
         link, written to `link_key`; a row without either neighbour column carries a null link.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a sample's event time may be before it is refused. The counter
+        state is kept per port in event-time order, so one sample from a device whose clock is wrong by years would
+        become every later sample's predecessor and turn each of them into an out-of-order sample with no delta. A
+        refused sample carries no deltas, sets `clock_refused`, and moves nothing. See `morpheus.utils.event_clock`.
     """
 
     def __init__(self,
@@ -143,8 +152,12 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  entity_key_column: str = "entity_key",
                  octet_columns: list[str] = None,
                  neighbor_chassis_column: str = "lldp_neighbor_chassis_id",
-                 neighbor_port_column: str = "lldp_neighbor_port_id"):
+                 neighbor_port_column: str = "lldp_neighbor_port_id",
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         # An empty list is a configuration error, not a request for the defaults, so `None` is what selects them.
         counter_columns = list(DEFAULT_COUNTER_COLUMNS) if counter_columns is None else list(counter_columns)
@@ -187,8 +200,10 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             counter_bits={name: 32 if name in counter32_columns else 64
                           for name in counter_columns + octet_columns},
             uptime_ceiling_ns=TIMETICKS_CEILING_NS if uptime_unit == "cs" else None)
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
 
         self._needed_columns[entity_key_column] = TypeId.STRING
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
         self._needed_columns[LINK_KEY_COLUMN] = TypeId.STRING
         self._needed_columns["interval_seconds"] = TypeId.FLOAT64
 
@@ -290,6 +305,7 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             deltas: dict[str, list] = {name: [] for name in differenced}
             intervals: list[typing.Optional[float]] = []
             flags: dict[str, list[bool]] = {"counter_reset": [], "counter_wrapped": [], "sample_out_of_order": []}
+            refused = [False] * len(entity_keys)
             unordered = 0
             keyless = 0
 
@@ -323,6 +339,19 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unordered += 1
                     continue
 
+                # A time the stream cannot believe must not become the port's previous sample: every honest sample
+                # after it would then read as out of order and lose its delta.
+                if (not self._clock.accept(event_time_ns)):
+                    for name in differenced:
+                        deltas[name].append(None)
+
+                    intervals.append(None)
+                    flags["counter_reset"].append(False)
+                    flags["counter_wrapped"].append(False)
+                    flags["sample_out_of_order"].append(False)
+                    refused[position] = True
+                    continue
+
                 result = self._tracker.observe(entity_key,
                                                event_time_ns, {name: counters[name][position]
                                                                for name in measured},
@@ -347,6 +376,16 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             for (flag, values) in flags.items():
                 df[flag] = values
+
+            mark_refused(df, refused)
+
+        if (any(refused)):
+            logger.warning(
+                "TC1NormalizeStage refused %d of %d samples whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they carry no deltas and set clock_refused. A device whose clock is "
+                "wrong by years is the usual cause.",
+                sum(refused),
+                len(entity_keys))
 
         if (keyless > 0):
             logger.warning(

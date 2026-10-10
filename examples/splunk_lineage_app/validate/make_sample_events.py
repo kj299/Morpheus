@@ -98,11 +98,53 @@ def _render(frame, sourcetype: str) -> list:
     return to_wire_lines(rendered)
 
 
+LATE_SOURCETYPE = "morpheus:late"
+QUARANTINE_SOURCETYPE = "morpheus:quarantine"
+HEALTH_SOURCETYPE = "morpheus:health"
+
+
+def _late(frame):
+    """Which rows WindowSealStage marked late: those go on `morpheus:late`, never on a score sourcetype."""
+    if ("is_late" not in frame.columns):
+        return frame.index.to_series(index=frame.index).map(lambda _: False)
+
+    return frame["is_late"].astype("boolean").fillna(False).astype(bool)
+
+
+def _scored(by_sourcetype: dict, frame, sourcetype: str):
+    """
+    Render a class's rows onto its score sourcetype, and its late rows onto `morpheus:late`.
+
+    A deployment routes on `is_late` before the sink, so a row that arrived after its window sealed never reaches
+    the index the detections read. Every detection also filters on `window_complete=true`, which is the second of the
+    two guards; this is the first.
+    """
+    late = _late(frame)
+
+    if (late.any()):
+        by_sourcetype.setdefault(LATE_SOURCETYPE, []).extend(_render(frame[late], LATE_SOURCETYPE))
+
+    if ((~late).any()):
+        by_sourcetype.setdefault(sourcetype, []).extend(_render(frame[~late], sourcetype))
+
+
+def _health(by_sourcetype: dict, module, result):
+    """The health records a deployment's health branch would write for one corpus's sealed output."""
+    import envelope  # pylint: disable=import-outside-toplevel
+
+    from morpheus.stages.lineage.pipeline_health_stage import (  # pylint: disable=import-outside-toplevel
+        DEFAULT_MIN_BUCKETS,
+    )
+
+    records = envelope.health(module.build_pipeline_config(), result, module.PERIOD_SECONDS, DEFAULT_MIN_BUCKETS)
+
+    if (len(records) > 0):
+        by_sourcetype.setdefault(HEALTH_SOURCETYPE, []).extend(_render(records, HEALTH_SOURCETYPE))
+
+
 def main() -> int:
     # Imported here rather than at module scope, like everything else this file takes from morpheus: the path
     # setup above has to run before the package is reachable.
-    from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS  # pylint: disable=import-outside-toplevel
-
     import application_pipeline  # pylint: disable=import-outside-toplevel
     import campaign_pipeline  # pylint: disable=import-outside-toplevel
     import context_pipeline  # pylint: disable=import-outside-toplevel
@@ -116,6 +158,8 @@ def main() -> int:
     import telemetry_pipeline as tp  # pylint: disable=import-outside-toplevel
     import transport_pipeline  # pylint: disable=import-outside-toplevel
 
+    from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS  # pylint: disable=import-outside-toplevel
+
     EVENTS.mkdir(parents=True, exist_ok=True)
     telemetry = ep.run_pipeline(ep.build_pipeline_config(), ep.build_corpus())
     written = {}
@@ -128,7 +172,12 @@ def main() -> int:
         if (len(rows) == 0):
             continue
 
-        by_sourcetype.setdefault(sourcetype, []).extend(_render(rows, sourcetype))
+        _scored(by_sourcetype, rows, sourcetype)
+
+    # The DMZ poller's records, quarantined for a clock four and a half seconds out, on their own sourcetype.
+    quarantined = telemetry[telemetry["telemetry_class"] == "quarantine"]
+    by_sourcetype[QUARANTINE_SOURCETYPE] = _render(quarantined.dropna(axis=1, how="all"), QUARANTINE_SOURCETYPE)
+    _health(by_sourcetype, ep, telemetry)
 
     sessions = sp.run_pipeline(sp.build_pipeline_config(), sp.build_corpus())
 
@@ -136,7 +185,9 @@ def main() -> int:
         rows = sessions[sessions["telemetry_class"] == name]
 
         if (len(rows) > 0):
-            by_sourcetype.setdefault(sourcetype, []).extend(_render(rows, sourcetype))
+            _scored(by_sourcetype, rows, sourcetype)
+
+    _health(by_sourcetype, sp, sessions)
 
     lineage = lineage_pipeline.run_pipeline(lineage_pipeline.build_pipeline_config(), [lineage_pipeline.build_corpus()])
     by_sourcetype["morpheus:edge"] = _render(lineage, "morpheus:edge")
@@ -145,21 +196,24 @@ def main() -> int:
     # the estate's -- an address is not a port and not a principal -- so they carry their own chains and the
     # cross-layer search sees them as a fourth layer's worth of events rather than as part of the estate's.
     flows = network_pipeline.run_pipeline(network_pipeline.build_pipeline_config(), network_pipeline.build_corpus())
-    by_sourcetype["morpheus:score:l3"] = _render(flows, "morpheus:score:l3")
+    _scored(by_sourcetype, flows, "morpheus:score:l3")
+    _health(by_sourcetype, network_pipeline, flows)
 
     # Layer 4 likewise. Its entity is a conversation rather than an address, so its records share no entity with
     # layer 3's either, even where the two corpora use the same addresses -- which is the thing Part 4's layer 3
     # to layer 4 hop would have to supply and does not yet.
     packets = transport_pipeline.run_pipeline(transport_pipeline.build_pipeline_config(),
                                               transport_pipeline.build_corpus())
-    by_sourcetype["morpheus:score:l4"] = _render(packets, "morpheus:score:l4")
+    _scored(by_sourcetype, packets, "morpheus:score:l4")
+    _health(by_sourcetype, transport_pipeline, packets)
 
     # Layer 6 likewise, and it is the layer that makes R-C-002 expressible: the chained rule correlates a new
     # client fingerprint here with beaconing at layer 3 on the same host. The two corpora are separate, so the
     # rule still returns nothing -- what changed is that both halves now have producers.
     handshakes = presentation_pipeline.run_pipeline(presentation_pipeline.build_pipeline_config(),
                                                     presentation_pipeline.build_corpus())
-    by_sourcetype["morpheus:score:l6"] = _render(handshakes, "morpheus:score:l6")
+    _scored(by_sourcetype, handshakes, "morpheus:score:l6")
+    _health(by_sourcetype, presentation_pipeline, handshakes)
 
     # Layer 7's DNS, HTTP, SaaS and endpoint classes share one sourcetype, as layer 2's classes do. The SaaS and
     # endpoint classes come from their own pipelines, because they read the TC-0 context store -- and the SaaS one
@@ -169,9 +223,11 @@ def main() -> int:
     operations = saas_pipeline.run_pipeline(saas_pipeline.build_pipeline_config(), saas_pipeline.build_corpus())
     processes = endpoint_pipeline.run_pipeline(endpoint_pipeline.build_pipeline_config(),
                                                endpoint_pipeline.build_corpus())
-    by_sourcetype["morpheus:score:l7"] = (_render(requests, "morpheus:score:l7") +
-                                          _render(operations, "morpheus:score:l7") +
-                                          _render(processes, "morpheus:score:l7"))
+
+    for (module, result) in ((application_pipeline, requests), (saas_pipeline, operations), (endpoint_pipeline,
+                                                                                             processes)):
+        _scored(by_sourcetype, result, "morpheus:score:l7")
+        _health(by_sourcetype, module, result)
 
     # The campaign: one estate seen by all its collectors, which is what R-C-001 and R-C-004 are asserted on. Its
     # records go on the sourcetypes their layers' records always go on, because that is where a chained rule has to
@@ -181,7 +237,9 @@ def main() -> int:
 
     for (name, sourcetype) in CAMPAIGN_SOURCETYPES.items():
         rows = campaign[campaign["telemetry_class"] == name]
-        by_sourcetype.setdefault(sourcetype, []).extend(_render(rows.dropna(axis=1, how="all"), sourcetype))
+        _scored(by_sourcetype, rows.dropna(axis=1, how="all"), sourcetype)
+
+    _health(by_sourcetype, campaign_pipeline, campaign)
 
     # The TC-0 context store: every version the two producers recorded, refused ones included, because a count of
     # refusals is something an estate should be able to see on its search head. The probes are the harness's own

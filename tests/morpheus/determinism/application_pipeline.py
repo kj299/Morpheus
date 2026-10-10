@@ -50,12 +50,14 @@ import base64
 import random
 import typing
 
+import envelope
 import pandas as pd
-
 import stamping
+
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
@@ -257,7 +259,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     """The seeded corpus, one frame per layer 7 class."""
     rng = random.Random(CORPUS_SEED)
 
-    return {DNS_CLASS: _build_dns(rng), HTTP_CLASS: _build_http(rng)}
+    return envelope.attach_all({DNS_CLASS: _build_dns(rng), HTTP_CLASS: _build_http(rng)})
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -320,6 +322,8 @@ def _run_class(config: Config, telemetry_class: str, dataframes: list[pd.DataFra
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
 
+    pipe.add_stage(CollectorSequenceStage(config))
+
     for stage in build_stages(config, telemetry_class):
         pipe.add_stage(stage)
 
@@ -365,17 +369,28 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
+    # Validated once per class, ahead of every stage: ingest_time stamped, the envelope checked, untrusted clocks
+    # taken out of the stream and kept.
+    (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
+
     frames = []
 
     for name in TELEMETRY_CLASSES:
         frame = _run_class(config, name, batches[name], impose_order)
+
+        # A class every record of which was quarantined produced nothing, and is absent rather than an empty frame.
+        if (len(frame) == 0):
+            continue
+
         frame["telemetry_class"] = name
         frame["row_key"] = frame["event_uid"]
         frames.append(frame)
 
-    combined = pd.concat(frames, ignore_index=True)
+    combined = pd.concat(frames, ignore_index=True) if len(frames) > 0 else pd.DataFrame()
 
-    return canonicalize(combined, key_columns=KEY_COLUMNS, ignore_columns=IGNORE_COLUMNS)
+    return canonicalize(envelope.with_quarantine(combined, quarantined),
+                        key_columns=KEY_COLUMNS,
+                        ignore_columns=IGNORE_COLUMNS)
 
 
 def render(result: pd.DataFrame) -> str:

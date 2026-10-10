@@ -37,12 +37,13 @@ from morpheus.utils.siem_wire import to_wire_lines
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# pylint: disable=wrong-import-position
-import lineage_pipeline  # noqa: E402
 import application_pipeline  # noqa: E402
 import campaign_pipeline  # noqa: E402
 import context_pipeline  # noqa: E402
 import endpoint_pipeline  # noqa: E402
+import envelope  # noqa: E402
+# pylint: disable=wrong-import-position
+import lineage_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
 import presentation_pipeline  # noqa: E402
 import saas_pipeline  # noqa: E402
@@ -332,6 +333,37 @@ def test_the_lineage_pipeline_produces_a_parsable_timestamp(wire_config: Config,
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_a_quarantined_record_is_timed_on_its_ingest(wire_config: Config, telemetry: pd.DataFrame):
+    # The DMZ poller's records, held for a clock four and a half seconds out. Anchored on the clock nobody doubts.
+    rows = telemetry[telemetry["telemetry_class"] == envelope.QUARANTINE_CLASS].reset_index(drop=True)
+
+    assert len(rows) > 0, "the harness quarantined nothing"
+
+    assert_parses_as_its_own_stanza(wire_config, rows.dropna(axis=1, how="all"), "morpheus:quarantine")
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_late_row_is_timed_on_its_event(wire_config: Config, network: pd.DataFrame):
+    rows = network[network["is_late"].astype("boolean").fillna(False).astype(bool)].reset_index(drop=True)
+
+    assert len(rows) > 0, "the network corpus delivered nothing late"
+
+    assert_parses_as_its_own_stanza(wire_config, rows, "morpheus:late")
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_health_record_is_timed_on_its_window_end(wire_config: Config, operations: pd.DataFrame):
+    records = envelope.health(saas_pipeline.build_pipeline_config(),
+                              operations,
+                              saas_pipeline.PERIOD_SECONDS,
+                              saas_pipeline.HEALTH_MIN_BUCKETS)
+
+    assert len(records) > 0
+
+    assert_parses_as_its_own_stanza(wire_config, records, "morpheus:health")
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_an_open_binding_is_timed_on_its_start(wire_config: Config, telemetry: pd.DataFrame):
     # binding:l2:open has no producer in the harness, because the harness runs the closed-binding configuration.
     # Reaching for the open rows here rather than skipping the stanza keeps every produced sourcetype covered.
@@ -377,6 +409,9 @@ def test_every_produced_sourcetype_is_covered_here():
         "morpheus:score:l7",
         "context:identity",
         "context:asset",
+        "morpheus:quarantine",
+        "morpheus:late",
+        "morpheus:health",
     }
 
     assert covered == set(PRODUCED), f"not covered: {sorted(set(PRODUCED) - covered)}"

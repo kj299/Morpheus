@@ -44,9 +44,10 @@ with everything -- so each case can be asserted as a pair of answers rather than
 
 import typing
 
+import envelope
 import pandas as pd
-
 import stamping
+
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -412,12 +413,20 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     identity_rows = _rows(identity_log(), "user_principal", DEFAULT_PROFILE_COLUMNS, group_column="group_name")
     identity_rows += [dict(UNRECORDED_ROW), dict(INVERTED_ROW)]
 
-    return {
+    corpus = {
         IDENTITY_CLASS: _frame(identity_rows),
         ASSET_CLASS: _frame(_rows(asset_log(), "hostname", DEFAULT_ASSET_COLUMNS)),
         IDENTITY_PROBES: _probes("user_principal", IDENTITY_PROBE_EVENTS),
         ASSET_PROBES: _probes("hostname", ASSET_PROBE_EVENTS),
     }
+
+    # A context record is bitemporal: its valid time and its recording time are its clock, and it has no sensor or
+    # sampling for the collector envelope to describe. What it shares with every other record is the tenant it
+    # belongs to.
+    for frame in corpus.values():
+        frame["tenant_id"] = envelope.TENANT
+
+    return corpus
 
 
 def build_pipeline_config(execution_mode=None) -> Config:

@@ -47,6 +47,15 @@ NS_PER_SECOND = 10**9
 DEFAULT_MAX_SKEW_SECONDS = 7 * 24 * 3600
 """How far ahead of the stream's own progress a single row may be and still be believed."""
 
+CLOCK_REFUSED_COLUMN = "clock_refused"
+"""Per row: a guarded stage refused this row's event time as further ahead of the stream than it allows.
+
+One column shared by every guarded stage rather than one per stage, because the question an operator asks is whether
+the row was believed, and a row refused by any stage carries no per-entity features from that stage. Each stage ORs
+its own refusals in, so a later stage cannot clear an earlier one's. It is a column rather than a log line so the
+pipeline's health record can count it per collector and window, which is where a clock wrong by years shows up.
+"""
+
 
 class EventClock:
     """
@@ -107,3 +116,64 @@ class EventClock:
             self._value_ns = event_time_ns
 
         return True
+
+
+def _truthy(value: typing.Any) -> bool:
+    try:
+        # A nullable boolean, compared by value rather than identity.
+        return value is not None and bool(value == True)  # noqa: E712 pylint: disable=singleton-comparison
+    except (TypeError, ValueError):
+        return False
+
+
+def mark_refused(df, refused: typing.Sequence[bool]) -> None:
+    """
+    OR one stage's refusals into `CLOCK_REFUSED_COLUMN`.
+
+    Parameters
+    ----------
+    df : `pandas.DataFrame` or `cudf.DataFrame`
+        The frame the stage is writing, in place.
+    refused : sequence of bool
+        One entry per row: whether this stage refused it.
+    """
+    # Imported here so that this module stays free of a frame library for the stages that only need the clock.
+    from morpheus.utils.column_assign import assign_nullable_bool_column
+    from morpheus.utils.column_assign import to_host_list
+
+    earlier = to_host_list(df, CLOCK_REFUSED_COLUMN) if CLOCK_REFUSED_COLUMN in df.columns else [None] * len(refused)
+
+    assign_nullable_bool_column(df,
+                                CLOCK_REFUSED_COLUMN,
+                                [_truthy(prior) or bool(now) for (prior, now) in zip(earlier, refused)])
+
+
+def guard_times(clock: EventClock, times: typing.Sequence[typing.Optional[int]]) -> tuple[list, list]:
+    """
+    Pass a column of event times through a clock, in row order.
+
+    For the stages that hand a whole column of times to a tracker rather than walking the rows themselves. A
+    refused time becomes `None`, which every tracker already treats as a row with nothing to measure, so the row
+    carries no per-entity features and moves no horizon.
+
+    Parameters
+    ----------
+    clock : `EventClock`
+        The stage's clock; advanced as a side effect.
+    times : sequence of int or None
+        Event times in nanoseconds, `None` where the row had none.
+
+    Returns
+    -------
+    tuple of (list, list)
+        The times with refused ones replaced by `None`, and one boolean per row saying which were refused.
+    """
+    guarded = []
+    refused = []
+
+    for value in times:
+        believed = value is None or clock.accept(value)
+        guarded.append(value if believed else None)
+        refused.append(not believed)
+
+    return (guarded, refused)
