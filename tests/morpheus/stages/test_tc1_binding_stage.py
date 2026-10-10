@@ -36,7 +36,7 @@ OTHER = ("hq", "sw1", "Gi1/0/2")
 
 
 def samples(rows: list) -> dict:
-    """One row per poll: (port tuple, time, transceiver, neighbor)."""
+    """One row per poll: (port tuple, time, transceiver, neighbor chassis[, neighbor port])."""
     return {
         "site_id": [row[0][0] for row in rows],
         "device_id": [row[0][1] for row in rows],
@@ -44,6 +44,7 @@ def samples(rows: list) -> dict:
         "event_time": [row[1] for row in rows],
         "transceiver_serial": [row[2] for row in rows],
         "lldp_neighbor_chassis_id": [row[3] for row in rows],
+        "lldp_neighbor_port_id": [row[4] if len(row) > 4 else "Te0/1" for row in rows],
     }
 
 
@@ -178,7 +179,8 @@ def test_the_uid_is_built_the_way_the_binding_table_builds_it(config: Config):
                                              int(first["bind_start"]),
                                              int(first["bind_end"]),
                                              "SN-AAA",
-                                             "chassis-a")
+                                             "chassis-a",
+                                             "Te0/1")
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -278,3 +280,22 @@ def test_constructor_validation(config: Config):
 
     with pytest.raises(ValueError, match="key_columns must name at least one column"):
         TC1BindingStage(config, key_columns=[])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_repatch_to_another_port_on_the_same_neighbor_is_a_change_too(config: Config):
+    result = run(config,
+                 samples([(PORT, 0, "SN-AAA", "chassis-a", "Te0/1"), (PORT, HOUR, "SN-AAA", "chassis-a", "Te0/2")]))
+
+    assert list(result["lldp_neighbor_port_id"]) == ["Te0/1", "Te0/2"]
+    assert list(result["link_key"]) == ["chassis-a:Te0/1|hq:sw1:Gi1/0/1", "chassis-a:Te0/2|hq:sw1:Gi1/0/1"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_binding_without_its_neighbor_carries_no_link(config: Config):
+    payload = samples([(PORT, 0, "SN-AAA", "chassis-a")])
+    del payload["lldp_neighbor_port_id"]
+
+    result = run(config, payload, attribute_columns=["transceiver_serial", "lldp_neighbor_chassis_id"])
+
+    assert result["link_key"].isna().all()

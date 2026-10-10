@@ -47,6 +47,7 @@ Salesforce
 Splunk
 Suricata
 ULPs
+VLAN(s|'s)?
 WAFs
 Workday
 XGBoost
@@ -120,6 +121,7 @@ Zeek
 [Pp]seudonymize(d|s)?
 [Pp]seudonymizing
 [Qq]uantize(d?)
+[Rr]eauthenticat(e|es|ed|ing)
 [Rr]econstructible
 [Rr]eindexing
 [Rr]eplayable

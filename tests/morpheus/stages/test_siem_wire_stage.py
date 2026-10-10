@@ -67,6 +67,17 @@ SCORE_L2_COLUMNS = {
     "arp_sender_mac": ["aa:bb:cc:00:00:01", "aa:bb:cc:00:00:02"],
     "auth_unpaired": [False, True],
     "auth_port_key": ["site-1:sw1:Gi1/0/1", "site-1:sw1:Gi1/0/2"],
+    "vlan_key": ["site-1:10", "site-1:10"],
+    "ouis_per_vlan": [1, 1],
+    "ouis_per_vlan_first_in_window": [True, False],
+    "ouis_per_vlan_step": [0, 0],
+    "ouis_per_vlan_baseline_max": [1, 1],
+    "ouis_per_vlan_baseline_mature": [True, True],
+    "auth_attempts": [1, 1],
+    "auth_elapsed_seconds": [3.0, 3.0],
+    "auth_elapsed_p99": [3.0, 3.0],
+    "auth_elapsed_ratio": [1.0, 1.0],
+    "auth_elapsed_samples": [100, 101],
     "resolution_method": ["exact", "unresolved"],
 }
 

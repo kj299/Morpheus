@@ -37,6 +37,7 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,12 @@ GAP_COLUMN = "bind_gap_ns"
 OPEN_REASON = "open"
 """`bind_end_reason` on a provisional record: the binding has not ended, and the end is null."""
 
+DEFAULT_STOP_VALUES = ["stop", "removed", "release", "deleted", "aged"]
+"""Values of `action_column` that mean the source has said the binding ended: a RADIUS accounting stop, a MAC
+notification trap's removal or ageing, a DHCP release. Compared case-insensitively."""
 
-@register_stage("tc2-binding", ignore_args=["attribute_columns"])
+
+@register_stage("tc2-binding", ignore_args=["attribute_columns", "stop_values", "snapshot_scope_columns"])
 class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
     """
     Emit closed layer 2 bindings from a stream of observations.
@@ -82,6 +87,18 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
     row per *closed* binding, so a message in may produce no message at all, which is the normal case for a stable
     estate where nothing moved. A binding that is still open has not been emitted yet and is held in memory until
     something ends it.
+
+    **Two inputs let a source say so, rather than leave the end to inference.** With `action_column`, a row whose
+    action is one of `stop_values` closes the key's open binding at that row's time, as an explicit end:
+    `bind_end_observed` is true on exactly these. With `snapshot_scope_columns`, rows that carry no action are read
+    as a full-table snapshot of the scope those columns name -- a switch's whole MAC table, stamped at one instant --
+    and when the scope's next snapshot begins, every binding in it that the previous one no longer listed is closed
+    as `snapshot_absent`, one tick past its last sighting. Which source yields which reason:
+
+    - a switch MAC table walked on a cadence yields `snapshot_absent` in snapshot mode, and `idle_timeout` without;
+    - MAC notification traps, RADIUS accounting stops and DHCP releases yield `explicit`, when they arrive;
+    - a key seen on another port yields `displaced` or `conflict` from any source;
+    - and the end of a replay yields `drained`, which says only that the stream stopped.
 
     Ends are inferred at the earliest time consistent with the observations, which leaves gaps between bindings
     rather than stretching one to meet the next. That is the point: a gap resolves to nothing and tells an analyst
@@ -127,6 +144,17 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         duration (`BindingTable.from_dataframe(open_end_duration_ns=...)`), and the closed record that follows,
         carrying the same key and `bind_start`, supersedes it. One record per binding, not per sample: a sample
         that merely extends an open binding emits nothing.
+    action_column : str, optional
+        Column holding what the source says happened to the binding. A row whose value is one of `stop_values`
+        ends the key's open binding there and then, as an observed end, and binds nothing; any other value is an
+        ordinary observation. Without it every end is inferred.
+    stop_values : list of str, optional
+        Values of `action_column` that end a binding. Defaults to `DEFAULT_STOP_VALUES`.
+    snapshot_scope_columns : list of str, optional
+        Binding attributes naming what one snapshot covers, typically `["site_id", "switch_id"]`. Given, rows that
+        carry no action are read as snapshots of their scope, and a binding a scope's previous snapshot did not list
+        is closed as `snapshot_absent` when its next snapshot begins. A scope's snapshot is known to be complete only
+        when the next one starts, so the last snapshot of a stream reconciles nothing.
     """
 
     def __init__(self,
@@ -138,10 +166,21 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,
                  idle_timeout_seconds: int = DEFAULT_IDLE_TIMEOUT_SECONDS,
                  emit_open_on_complete: bool = True,
-                 emit_open_bindings: bool = False):
+                 emit_open_bindings: bool = False,
+                 action_column: str = None,
+                 stop_values: list[str] = None,
+                 snapshot_scope_columns: list[str] = None):
         super().__init__(c)
 
         attribute_columns = list(DEFAULT_ATTRIBUTE_COLUMNS) if attribute_columns is None else list(attribute_columns)
+        stop_values = list(DEFAULT_STOP_VALUES) if stop_values is None else list(stop_values)
+        snapshot_scope_columns = [] if snapshot_scope_columns is None else list(snapshot_scope_columns)
+
+        outside = [name for name in snapshot_scope_columns if name not in attribute_columns]
+
+        if (len(outside) > 0):
+            raise ValueError(f"snapshot_scope_columns names {outside}, which are not binding attributes; a snapshot "
+                             f"can only reconcile the bindings it can tell are in its scope")
 
         if (idle_timeout_seconds <= 0):
             raise ValueError(f"idle_timeout_seconds must be positive, received {idle_timeout_seconds}")
@@ -155,6 +194,12 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         self._attribute_columns = attribute_columns
         self._emit_open_on_complete = emit_open_on_complete
         self._emit_open_bindings = emit_open_bindings
+        self._action_column = action_column
+        self._stop_values = {str(value).strip().lower() for value in stop_values}
+        self._snapshot_scope = snapshot_scope_columns
+
+        # Per scope, the instant of the snapshot being collected and the keys it has listed so far.
+        self._snapshots: dict[tuple, tuple] = {}
 
         self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
 
@@ -297,10 +342,16 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         raw_times = to_host_list(source, self._time_column)
         attributes = {name: to_host_list(source, name) for name in self._attribute_columns}
 
+        if (self._action_column is not None and self._action_column in source.columns):
+            actions = [normalize_text(value) for value in to_host_list(source, self._action_column)]
+        else:
+            actions = [None] * len(keys)
+
         closed = []
         opened_keys: list[str] = []
         unordered = 0
         implausible = 0
+        unmatched_stops = 0
 
         for (position, key) in enumerate(keys):
             try:
@@ -326,6 +377,22 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
             # stream is divided into batches.
             closed.extend(self._closer.expire(event_time_ns))
 
+            action = actions[position]
+
+            # The source said the binding ended. That is the one end that is a fact, and the row binds nothing.
+            if (action is not None and action.lower() in self._stop_values):
+                ended = self._closer.close(str(key), event_time_ns)
+
+                if (ended is None):
+                    unmatched_stops += 1
+                else:
+                    closed.append(ended)
+
+                continue
+
+            if (len(self._snapshot_scope) > 0 and action is None):
+                closed.extend(self._snapshot(position, attributes, event_time_ns, str(key)))
+
             result = self._closer.observe(str(key),
                                           event_time_ns,
                                           {name: attributes[name][position]
@@ -343,6 +410,13 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
                 "usable event time; they did not advance any binding. Shard by switch and preserve per-key "
                 "ordering upstream.",
                 unordered,
+                len(keys))
+
+        if (unmatched_stops > 0):
+            logger.info(
+                "TC2BindingStage saw %d of %d stop records for keys with no open binding: a duplicate stop, or a stop "
+                "for a binding already closed some other way.",
+                unmatched_stops,
                 len(keys))
 
         if (implausible > 0):
@@ -370,6 +444,29 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
                 opened.append(record)
 
         return self._emit(closed, opened)
+
+    def _snapshot(self, position: int, attributes: dict, event_time_ns: int, key: str) -> list:
+        """
+        Add one row to its scope's snapshot, reconciling the scope's previous snapshot when this row begins a new one.
+
+        A snapshot is known to be complete only when the next one starts, which is the only signal a stream of rows
+        gives. A row older than the snapshot being collected is a late arrival and changes nothing about it.
+        """
+        scope = tuple(attributes[name][position] for name in self._snapshot_scope)
+        current = self._snapshots.get(scope)
+
+        if (current is None or event_time_ns > current[0]):
+            self._snapshots[scope] = (event_time_ns, {key})
+
+            if (current is None):
+                return []
+
+            return self._closer.reconcile(current[0], current[1], scope=dict(zip(self._snapshot_scope, scope)))
+
+        if (event_time_ns == current[0]):
+            current[1].add(key)
+
+        return []
 
     def on_completed(self) -> list:
         """

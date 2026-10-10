@@ -1,13 +1,13 @@
 {
   "events_per_sourcetype": {
-    "binding:bucketed": 82,
-    "binding:l1": 7,
-    "binding:l2": 13,
+    "binding:bucketed": 131,
+    "binding:l1": 23,
+    "binding:l2": 19,
     "context:asset": 7,
     "context:identity": 23,
     "morpheus:edge": 47,
-    "morpheus:score:l1": 305,
-    "morpheus:score:l2": 1334,
+    "morpheus:score:l1": 793,
+    "morpheus:score:l2": 1501,
     "morpheus:score:l3": 1525,
     "morpheus:score:l4": 987,
     "morpheus:score:l5": 661,

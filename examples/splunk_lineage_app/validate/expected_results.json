@@ -30,8 +30,8 @@
     "R-D-L2-001 - MAC address count exceeded on an access port": {
       "expected_rows": 0,
       "expected_empty": true,
-      "why": "The rule joins port_designations, which ships header-only. Until an inventory populates it the lookup returns nothing and the join yields nothing. 11 candidate rows carry macs_per_port_first_in_window=true, so a non-zero result after populating the lookup is the signal that the join works.",
-      "candidate_rows_before_the_lookup": 11
+      "why": "The rule joins port_designations, which ships header-only. Until an inventory populates it the lookup returns nothing and the join yields nothing. 17 candidate rows carry macs_per_port_first_in_window=true, so a non-zero result after populating the lookup is the signal that the join works.",
+      "candidate_rows_before_the_lookup": 17
     },
     "R-B-L2-002 - Port-to-MAC binding novelty": {
       "expected_rows": 2,
@@ -455,15 +455,15 @@
       ]
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 5173,
+      "expected_rows": 5345,
       "expected_empty": false,
-      "contributing_rows": 9380,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 9380 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week because only TC5ScoreStage produces `max_abs_z`, and it leaves the session corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline. The figures grew again when step 9 gave layer 3 a fortnight of ordinary history before its scored hours: the network corpus now contributes 1184 flows where it contributed 411, and the presentation corpus 130 handshakes with a personal device among them; the campaign gained a principal who reaches a workstation and the flows of its exfiltrators' breach connections."
+      "contributing_rows": 10035,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 10035 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week because only TC5ScoreStage produces `max_abs_z`, and it leaves the session corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline. The figures grew again when step 9 gave layer 3 a fortnight of ordinary history before its scored hours: the network corpus now contributes 1184 flows where it contributed 411, and the presentation corpus 130 handshakes with a personal device among them; the campaign gained a principal who reaches a workstation and the flows of its exfiltrators' breach connections. And again when step 10 gave the port, the link, the VLAN and the 802.1X exchange behaviour of their own: the layer 1 stream grew from 305 polls of five ports to 793 of thirteen, the MAC table by 45 rows with a camera VLAN, a printer and a guest, and the 802.1X stream by 122 events from two lab benches reauthenticating every two minutes, 655 events in all."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 3994,
+      "distinct_lineage_ids": 4166,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
@@ -473,26 +473,27 @@
         "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3994 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and one detection accuses any of them: R-D-L2-003, the address claimed by two MACs, at 55. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short and no span reaches four. The other 14 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` now reads `resolution_methods`, every hop a resolver ladder took, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 156 chains in all carry one.",
+      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 4166 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` now reads `resolution_methods`, every hop a resolver ladder took, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 156 chains in all carry one.",
       "three_layer_chain_risk": {
-        "0": 14,
+        "0": 13,
+        "50": 1,
         "55": 1
       }
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 0,
-      "why": "Empty, and the reason is the corpus rather than the search. This search selects binding_table=dhcp_lease, because several binding sources land on the one binding:bucketed sourcetype and a refresh that cannot tell them apart builds the wrong lookup. The 80 bucketed rows in binding_bucketed.jsonlines carry binding_table=mac_table: they are the layer 2 forwarding bindings TC2BindingStage closed, keyed on a MAC and resolving to a port, and binding_l2_l3 is keyed on an IP and resolves to a MAC. Nothing here speaks DHCP, so there is no lease to expand and the lookup this search builds stays empty. Pointing a DHCP feed at the pipeline and expanding it with to_bucketed_records(table_name=\"dhcp_lease\") is what fills it; until then a zero here is the honest answer and the previous count of 80 was reading the whole sourcetype rather than the search's filter.",
+      "why": "Empty, and the reason is the corpus rather than the search. This search selects binding_table=dhcp_lease, because several binding sources land on the one binding:bucketed sourcetype and a refresh that cannot tell them apart builds the wrong lookup. Of the 131 bucketed rows in binding_bucketed.jsonlines, 124 carry binding_table=mac_table and the other 7 are the layer 1 history's port_inventory intervals. The mac_table rows are the layer 2 forwarding bindings TC2BindingStage closed, keyed on a MAC and resolving to a port, and binding_l2_l3 is keyed on an IP and resolves to a MAC. Nothing here speaks DHCP, so there is no lease to expand and the lookup this search builds stays empty. Pointing a DHCP feed at the pipeline and expanding it with to_bucketed_records(table_name=\"dhcp_lease\") is what fills it; until then a zero here is the honest answer and the previous count of 80 was reading the whole sourcetype rather than the search's filter.",
       "expected_empty": true
     },
     "Binding lookup - L1 refresh": {
-      "expected_rows": 7,
+      "expected_rows": 23,
       "expected_empty": false,
-      "why": "Seven port intervals across five ports: three stable, and two on each of the two ports whose optics are swapped partway through the corpus. Produced by TC1BindingStage from the TC-1 stream. The lookup is keyed on port_id and switch_id with no bucket, so a swapped port's two intervals collapse to one document and the row that survives is whichever the search wrote last -- which is why the search sorts ascending on bind_start before writing, making the surviving row the later optic rather than the earlier one. This lookup answers what is in a port now. What was in it on a given day is the history lookup below."
+      "why": "Twenty-three port intervals across thirteen ports: eight that never changed, two on each of the two ports whose optics are swapped partway through the corpus, two on each of the re-patched and the inserted-into ports, and three on each of the restarted switch's ports, whose neighbour was unknown for the first poll after it came back. Produced by TC1BindingStage from the TC-1 stream, which binds the optic and the LLDP neighbour port. The lookup is keyed on port_id and switch_id with no bucket, so a port's intervals collapse to one document and the row that survives is whichever the search wrote last -- which is why the search sorts ascending on bind_start before writing, making the surviving row the latest interval rather than the earliest. This lookup answers what is in a port now. What was in it on a given day is the history lookup below."
     },
     "Binding lookup - L1 history refresh": {
-      "expected_rows": 2,
+      "expected_rows": 7,
       "expected_empty": false,
-      "why": "Two rows, and two rows is the whole point. Of the five ports in the corpus only Gi1/0/2 and Gi1/0/6 have their optics replaced, so only their first intervals are superseded, and only superseded intervals are expanded into day-wide buckets by BindingTable.superseded(). The other three ports are described correctly for all time by the row the current-state lookup holds and cost nothing here. A number close to the port count would mean the superseded filter had been dropped and the history collection had started carrying the whole estate once per day."
+      "why": "Seven rows, one per port whose binding was ever superseded, and none for the six that never were. Gi1/0/2 and Gi1/0/6 had their optics replaced; Gi1/0/11 was re-patched and Gi1/0/12 had a device inserted in its path; and the restarted switch's three ports each split twice, the neighbour unknown for one poll and then back, which is two superseded intervals per port in the same day bucket. That last is a cost the history pays for a reboot, recorded rather than hidden: the binding stage cannot tell a neighbour not yet relearned from a cable pulled. A number close to the port count would mean the superseded filter had been dropped and the history collection had started carrying the whole estate once per day."
     },
     "Binding lookup - L1 history expiry": {
       "expected_rows": 0,
@@ -734,6 +735,125 @@
           "user_principal": "quin@example.com",
           "previous_port": "hq:hq-sw1:Gi1/0/11",
           "login_port_key": "edinburgh:edi-sw1:Gi2/0/21"
+        }
+      ]
+    },
+    "R-D-L1-002 - Optical tap step": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 21,
+      "why": "One port. hq:sw1:Gi1/0/3 loses three decibels of receive light at minute forty while its transmit level holds, and every poll from then to the end of the hour reads at least a decibel under the median of the port's prior readings: twenty-one polls, which the search's stats BY entity_key reduces to one notable carrying the deepest deviation, -3.031 dB. The failing optic on hq:sw1:Gi1/0/6 slides a few hundredths of a decibel a poll and its median slides with it, so its deepest deviation is -0.867 and it is R-P-L1-004's; the two replaced optics change serial and are excluded on that poll, and no other port moves.",
+      "key_values": [
+        {
+          "entity_key": "hq:sw1:Gi1/0/3"
+        }
+      ]
+    },
+    "R-D-L1-003 - Link flap instability": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 27,
+      "why": "One port. hq:sw1:Gi1/0/7 goes down and comes back in every polling gap from the half hour, which the device records in ifLastChange and TC1FlapStage counts as two transitions a poll; its hour's count reaches ten on the fifth flapping poll and every poll after it, twenty-seven in all, one notable. The single flap on hq:sw1:Gi1/0/1 is two transitions in the hour and the maintenance swap's, the re-patch's and the insertion's are two each; the restarted switch's transitions are labelled link_flap_device_reset and excluded.",
+      "key_values": [
+        {
+          "entity_key": "hq:sw1:Gi1/0/7"
+        }
+      ]
+    },
+    "Device restart": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "why": "One row. hq's sw2 restarts at minute thirty, and the first poll after it reports counter_reset and link_flap_device_reset on each of the switch's three ports: three flags, one device, one window, which is the collapse the report exists for. An operational report: it writes nothing to the risk index.",
+      "key_values": [
+        {
+          "site_id": "hq",
+          "device_id": "sw2",
+          "ports_reporting": 3
+        }
+      ]
+    },
+    "R-B-L1-005 - Error rate step": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 16,
+      "why": "One port. hq:sw1:Gi1/0/8's CRC errors climb by thirty more each minute than the last from minute forty-five, and every one of its sixteen polls from then stands more than 0.1 errors a second above the highest five-minute peak of the port's own history, which the climb itself joins period by period. Every other port runs a few errors a minute and never stands more than 0.0167 a second above its own record; the restarted ports carry no rate on the poll whose delta covers the uptime.",
+      "key_values": [
+        {
+          "entity_key": "hq:sw1:Gi1/0/8"
+        }
+      ]
+    },
+    "R-D-L1-006 - LLDP neighbor change": {
+      "expected_rows": 2,
+      "expected_empty": false,
+      "why": "Two ports, one row each: hq:sw1:Gi1/0/11 re-patched at minute thirty-five from dist-sw3 to dist-sw4, and hq:sw1:Gi1/0/12, which at minute thirty-eight reports a neighbour the estate has never seen, 00:1b:21:7f:3a:01 -- a device inserted between the access switch and its distribution switch. Both changes took the link down, as cabling does. The restarted switch's three ports report no neighbour on their first poll back and their old one on the next: two changes each and no neighbour any of them has not had, so none fires.",
+      "key_values": [
+        {
+          "entity_key": "hq:sw1:Gi1/0/11",
+          "lldp_neighbor_chassis_id": "dist-sw4"
+        },
+        {
+          "entity_key": "hq:sw1:Gi1/0/12",
+          "lldp_neighbor_chassis_id": "00:1b:21:7f:3a:01"
+        }
+      ]
+    },
+    "R-B-L1-007 - Interface volume departure": {
+      "expected_rows": 2,
+      "expected_empty": false,
+      "contributing_rows": 10,
+      "why": "Two ports, one each way, for the five polls from minute fifty until the next five-minute period's peak and trough join the history: hq:sw1:Gi1/0/9 sends nine hundred megabits a second where it never carried more than about sixty, and hq:sw1:Gi1/0/10, which never went quiet, carries nothing with its link up. Every other port carries what it always has, a tenth either way, and the restarted ports carry no rate on the poll after the restart.",
+      "key_values": [
+        {
+          "entity_key": "hq:sw1:Gi1/0/10",
+          "direction": "silence"
+        },
+        {
+          "entity_key": "hq:sw1:Gi1/0/9",
+          "direction": "surge"
+        }
+      ]
+    },
+    "Topology - LLDP adjacency": {
+      "expected_rows": 15,
+      "expected_empty": false,
+      "why": "Fifteen links: one for each of the thirteen ports the estate polls, and one more on each of the two ports whose neighbour changed. The restarted switch's ports carry no link on the poll where they had no neighbour, rather than a link to nobody. The search merges with what the lookup already holds, so a second run writes the same fifteen rows."
+    },
+    "R-B-L2-006 - New vendor on a VLAN": {
+      "expected_rows": 2,
+      "expected_empty": false,
+      "contributing_rows": 2,
+      "why": "Two VLANs. hq:20, the camera VLAN, carried one vendor until a single-board computer appeared on it at minute forty, a vendor the segment had never carried; hq:10 carried one vendor until the hub's own MACs arrived at minute thirty, which is the hub R-B-L2-002 also names. The third camera, of the vendor the camera VLAN already carries, is a new device and not a new kind and does not step.",
+      "key_values": [
+        {
+          "vlan_key": "hq:10",
+          "new_ouis": "de:ad:be"
+        },
+        {
+          "vlan_key": "hq:20",
+          "new_ouis": "b8:27:eb"
+        }
+      ]
+    },
+    "R-B-L2-007 - Slow 802.1X authorization": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "why": "One exchange: the first lab bench's at minute forty-five took three attempts and succeeded nine seconds after the last, three times the slowest of the port's twenty-two prior exchanges, which is what its 99th percentile is below a hundred. The desk ports reauthenticate every fifteen minutes and never have the twenty prior exchanges a distribution needs inside the hour.",
+      "key_values": [
+        {
+          "auth_port_key": "hq:sw1:Gi1/0/19",
+          "dot1x_identity": "bench-01"
+        }
+      ]
+    },
+    "R-B-L2-008 - Instant 802.1X authorization": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "why": "One exchange: the second lab bench's at 2940 seconds was accepted in the second it was requested, where each of the twenty-four before it took four. The two bypasses carry no elapsed time at all, which is R-D-L2-005's signal and not this rule's.",
+      "key_values": [
+        {
+          "auth_port_key": "hq:sw1:Gi1/0/20",
+          "dot1x_identity": "bench-02"
         }
       ]
     }

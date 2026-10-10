@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pandas as pd
 import pytest
 
 from morpheus.common import TypeId
@@ -124,7 +125,6 @@ def test_the_output_resolves_through_a_binding_table(config: Config):
     (emitted, stage) = feed(config, frame([MAC_A, MAC_A, MAC_A], ["Gi1/0/1", "Gi1/0/1", "Gi1/0/2"]))
     closed = emitted + stage.on_completed()
 
-    import pandas as pd
     records = pd.concat([
         meta.copy_dataframe() if not hasattr(meta.copy_dataframe(), "to_pandas") else meta.copy_dataframe().to_pandas()
         for meta in closed
@@ -146,7 +146,6 @@ def test_the_output_resolves_through_a_binding_table(config: Config):
 def test_the_gap_between_bindings_resolves_to_nothing(config: Config):
     (emitted, _) = feed(config, frame([MAC_A, MAC_A], ["Gi1/0/1", "Gi1/0/2"], times=[0, 10 * MINUTE_NS]))
 
-    import pandas as pd
     records = emitted[0].copy_dataframe()
     records = records.to_pandas() if hasattr(records, "to_pandas") else records
 
@@ -387,7 +386,6 @@ def test_a_provisional_record_resolves_with_an_explicit_assumed_duration(config:
     # the guess is trusted is the consumer's, stated explicitly, never invented by this stage.
     (emitted, _) = feed(config, frame([MAC_A], ["Gi1/0/1"], times=[10 * MINUTE_NS]), emit_open_bindings=True)
 
-    import pandas as pd
     records = emitted[0].copy_dataframe()
     records = records.to_pandas() if hasattr(records, "to_pandas") else records
 
@@ -537,3 +535,86 @@ def test_a_believable_gap_is_not_mistaken_for_a_broken_clock(config: Config):
     reasons = [reason for meta in emitted for reason in _as_list(meta, "bind_end_reason")]
 
     assert IDLE_TIMEOUT in reasons, "a three-day gap is believable and still expires the quiet binding"
+
+
+def _bindings(config: Config, payload: dict, **kwargs) -> pd.DataFrame:
+    """Every binding a batch closed, then every one still open at the end, as one host frame."""
+    (emitted, stage) = feed(config, payload, **kwargs)
+    frames = [meta.copy_dataframe() for meta in list(emitted) + list(stage.on_completed())]
+    frames = [frame.to_pandas() if hasattr(frame, "to_pandas") else frame for frame in frames]
+
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_stop_the_source_reports_is_an_observed_end(config: Config):
+    payload = frame([MAC_A, MAC_A, MAC_A], ["Gi1/0/1"] * 3)
+    payload["mac_action"] = [None, None, "removed"]
+
+    result = _bindings(config, payload, action_column="mac_action")
+
+    # The stop ends the binding at its own time, not one tick past the last sighting, and binds nothing itself.
+    assert len(result) == 1
+    assert result.iloc[0]["bind_end_reason"] == "explicit"
+    assert bool(result.iloc[0]["bind_end_observed"]) is True
+    assert result.iloc[0]["bind_end"] == 2 * MINUTE_NS
+    assert result.iloc[0]["bind_observations"] == 2
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_stop_for_nothing_open_closes_nothing(config: Config):
+    payload = frame([MAC_A, MAC_B], ["Gi1/0/1", "Gi1/0/2"])
+    payload["mac_action"] = [None, "Removed"]
+
+    result = _bindings(config, payload, action_column="mac_action")
+
+    assert list(result["mac_address"]) == [MAC_A]
+    assert list(result["bind_end_reason"]) == ["drained"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_key_the_next_snapshot_does_not_list_ends_at_its_last_sighting(config: Config):
+    # Two snapshots of one switch list both MACs; the third lists only MAC_A. When the fourth begins, the third is
+    # known to be complete, and MAC_B's binding closes one tick past the second snapshot, where it was last seen.
+    times = [0, 0, 5 * MINUTE_NS, 5 * MINUTE_NS, 10 * MINUTE_NS, 15 * MINUTE_NS]
+    payload = frame([MAC_A, MAC_B, MAC_A, MAC_B, MAC_A, MAC_A], ["Gi1/0/1", "Gi1/0/2"] * 2 + ["Gi1/0/1"] * 2,
+                    times=times)
+
+    result = _bindings(config, payload, snapshot_scope_columns=["site_id", "switch_id"])
+    absent = result[result["mac_address"] == MAC_B].iloc[0]
+
+    assert absent["bind_end_reason"] == "snapshot_absent"
+    assert bool(absent["bind_end_observed"]) is False
+    assert absent["bind_end"] == 5 * MINUTE_NS + 1
+    assert list(result[result["mac_address"] == MAC_A]["bind_end_reason"]) == ["drained"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_snapshot_reconciles_only_its_own_switch(config: Config):
+    # sw2's table is walked a moment after sw1's and never lists MAC_A, which is on sw1. That says nothing about
+    # MAC_A, and closing it on sw2's silence would end every binding in the estate but the last switch's.
+    times = [0, 2 * NS_PER_SECOND, 5 * MINUTE_NS, 5 * MINUTE_NS + 2 * NS_PER_SECOND, 10 * MINUTE_NS]
+    payload = frame([MAC_A, MAC_B, MAC_A, MAC_B, MAC_A], ["Gi1/0/1", "Gi2/0/1", "Gi1/0/1", "Gi2/0/1", "Gi1/0/1"],
+                    times=times,
+                    switches=["sw1", "sw2", "sw1", "sw2", "sw1"])
+
+    result = _bindings(config, payload, snapshot_scope_columns=["site_id", "switch_id"])
+
+    assert set(result["bind_end_reason"]) == {"drained"}
+
+
+def test_a_snapshot_scope_must_be_part_of_what_is_bound(config: Config):
+    with pytest.raises(ValueError, match="snapshot_scope_columns"):
+        TC2BindingStage(config, snapshot_scope_columns=["building"])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_without_either_input_every_end_is_inferred_as_before(config: Config):
+    times = [0, 0, 5 * MINUTE_NS, 10 * MINUTE_NS]
+    payload = frame([MAC_A, MAC_B, MAC_A, MAC_A], ["Gi1/0/1", "Gi1/0/2", "Gi1/0/1", "Gi1/0/1"], times=times)
+    payload["mac_action"] = [None, None, None, "removed"]
+
+    result = _bindings(config, payload)
+
+    assert set(result["bind_end_reason"]) == {"drained"}
+    assert not result["bind_end_observed"].any()

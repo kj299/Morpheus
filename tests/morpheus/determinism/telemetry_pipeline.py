@@ -42,8 +42,26 @@ Into that corpus are planted the things the layer 1 and layer 2 features exist t
   which is what R-D-L1-001 fires on, and beside it a **maintenance swap** whose serial changes with the link's
   drop recorded in `ifLastChange`, which it must not;
 - a **bypass**: an 802.1X success on a port that never started an exchange;
+- a **flapper**: a link that goes down and up between every pair of polls for the second half of the hour, which
+  R-D-L1-003 fires on and the one flap above must not;
+- a **failing cable**: a port whose CRC errors climb every poll for the last quarter of the hour, R-B-L1-005's case;
+- a **re-patch** and an **inline insertion**: two ports whose LLDP neighbour changes, the first to another of the
+  estate's switches and the second to a device the estate has never seen, which R-D-L1-006 reads, beside a switch
+  that comes back from its reboot with no neighbours yet, which it must not;
+- a **surge** and a **silence**: a port that starts carrying fifteen times what it ever has, and one that stops
+  carrying anything, which R-B-L1-007 reads in both directions;
+- a **second VLAN** whose cameras share one vendor until a single-board computer appears on it, which R-B-L2-006
+  reads, beside a third camera of the known vendor that it must not;
+- a **printer unplugged** and a **guest who left**: a MAC the next table walk no longer lists, closed as absent from
+  the snapshot, and one the switch's own notification says was removed, closed as an end somebody observed;
+- an 802.1X exchange that **took three attempts** and one that **took no time at all**, which R-B-L2-007 and
+  R-B-L2-008 read against the port's own exchanges;
 - and one thing that must **not** fire: a VRRP pair whose two MACs legitimately share one address, carried on the
   exclusion list, so the ARP rule's exclusion path is exercised rather than assumed.
+
+New plants draw their randomness from a second generator, `EXTRA_SEED`, so that adding one does not move a single
+value in the rows that were already here: the ARP and authentication streams, and the counts the documents quote
+from them, stay what they were.
 
 The pipeline is one per telemetry class, which is the deployment shape: each class arrives on its own topic and
 its stages require its own columns. They compose where the design says they must. Layer 2's binding stage emits
@@ -79,6 +97,7 @@ from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
 from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
 from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
 from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
+from morpheus.stages.telemetry.tc1_rate_stage import TC1RateStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
 from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
@@ -92,6 +111,8 @@ from morpheus.utils.determinism import canonicalize
 from morpheus.utils.lineage import event_uid
 
 CORPUS_SEED = 20260902
+EXTRA_SEED = 20261010
+"""The second generator, for every row and field added after the first corpus. See the module docstring."""
 
 PERIOD_SECONDS = 300
 LATENESS_SECONDS = 900
@@ -131,6 +152,33 @@ GATEWAY_IP = "10.0.0.1"
 VRRP_IP = "10.0.0.254"
 VRRP_MACS = ["00:00:5e:00:01:fe", "00:00:5e:00:01:ff"]
 """A first-hop redundancy pair. Two MACs claim one address by design, and the exclusion list says so."""
+
+IOT_VLAN = 20
+CAMERAS = {"00:40:8c:00:00:01": "Gi1/0/13", "00:40:8c:00:00:02": "Gi1/0/14"}
+"""The second VLAN's devices: two cameras of one vendor, the segment's whole population."""
+ROGUE_OUI_MAC = "b8:27:eb:00:00:01"
+ROGUE_OUI_PORT = "Gi1/0/15"
+ROGUE_OUI_AT_SECONDS = 2400
+"""A single-board computer plugged into the camera VLAN: a vendor the segment has never carried."""
+THIRD_CAMERA_MAC = "00:40:8c:00:00:03"
+THIRD_CAMERA_PORT = "Gi1/0/16"
+THIRD_CAMERA_AT_SECONDS = 2700
+"""Another camera of the known vendor: a new device on the VLAN, and not a new kind of one."""
+
+PRINTER_MAC = "aa:bb:cc:00:00:08"
+PRINTER_PORT = "Gi1/0/17"
+PRINTER_LAST_SEEN_SECONDS = 1200
+"""A printer unplugged between two table walks. The walk at 1500 no longer lists it, which is the only thing a MAC
+table says about a device that left."""
+
+GUEST_MAC = "aa:bb:cc:00:00:09"
+GUEST_PORT = "Gi1/0/18"
+GUEST_FROM_SECONDS = 600
+GUEST_LEAVES_AT_SECONDS = 1560
+"""A guest laptop, whose departure the switch reports itself: a MAC notification saying the address was removed."""
+
+MAC_ACTION_COLUMN = "mac_action"
+"""What a MAC table row says happened: null on a snapshot row, `removed` on the switch's own notification."""
 
 SINGLE_HOST_PORTS = {f"{SITE}:{SWITCH}:{port}" for port in PORTS}
 """The corpus's own port designations, standing in for the inventory-supplied list R-D-L2-001 reads."""
@@ -184,6 +232,49 @@ swap in the estate is not the rule the guide specifies.
 SWAPS = {XCVR_SWAP_PORT: XCVR_SWAP_AT_MINUTE, MAINTENANCE_PORT: MAINTENANCE_SWAP_AT_MINUTE}
 """The minute each replaced optic's new serial first appears, per port."""
 
+FLAPPER_PORT = "Gi1/0/7"
+FLAPPER_FROM_MINUTE = 30
+"""A link that goes down and comes back between every pair of polls from the half hour.
+
+The device records each drop in `ifLastChange` and the poller sees "up" either side, so every poll counts two
+transitions and the hour's count climbs by two a minute. The single flap on Gi1/0/1 is two transitions in the hour,
+and the reboot's are labelled as a reset: neither is instability."""
+
+ERROR_PORT = "Gi1/0/8"
+ERRORS_FROM_MINUTE = 45
+ERRORS_PER_MINUTE_STEP = 30
+"""A cable going bad: from minute forty-five the port's CRC errors climb by thirty more each minute than the last.
+Every port runs a few errors a minute, which is what the climb is measured against."""
+
+VOLUME_PORT = "Gi1/0/9"
+SILENT_PORT = "Gi1/0/10"
+VOLUME_FROM_MINUTE = 50
+SURGE_BITS_PER_SECOND = 900_000_000
+"""From minute fifty, `VOLUME_PORT` sends nine hundred megabits a second where it never sent more than sixty, and
+`SILENT_PORT`, which never went quiet, carries nothing at all with its link still up."""
+
+REPATCH_PORT = "Gi1/0/11"
+INLINE_PORT = "Gi1/0/12"
+REPATCH_AT_MINUTE = 35
+INLINE_AT_MINUTE = 38
+NEIGHBOURS = {REPATCH_PORT: ("dist-sw3", "Gi3/0/11"), INLINE_PORT: ("dist-sw3", "Gi3/0/12")}
+"""What is on the far end of the two uplinks that change. Each change takes the link down, as cabling does."""
+REPATCHED_TO = ("dist-sw4", "Gi4/0/11")
+INLINE_DEVICE = ("00:1b:21:7f:3a:01", "eth0")
+"""A re-patch moves one uplink to another of the estate's distribution switches; an inline insertion puts a device
+the estate has never seen between the access switch and its distribution switch, announcing itself by its own MAC
+as LLDP chassis IDs usually are."""
+
+REBOOT_PORTS = ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"]
+"""The rebooting switch's ports. Three, so the restart is three ports' flags and one device's event: the shape the
+'Device restart' search collapses."""
+
+LINK_SPEED_BPS = 10_000_000_000
+"""Every port's speed: the optics are 10GBASE-LR."""
+
+BASE_BITS_PER_SECOND = 40_000_000
+"""What an ordinary port carries in each direction, give or take a tenth."""
+
 OPTIC_TYPE = "10GBASE-LR"
 OPTIC_FLOOR_DBM = -14.4
 OPTIC_FLOORS = {OPTIC_TYPE: OPTIC_FLOOR_DBM}
@@ -205,6 +296,28 @@ degradation is the forecast's and the tap is the baseline's.
 BYPASS_AT_SECONDS = 1500
 BYPASS_PORT = "Gi1/0/2"
 BYPASS_MAC = "de:ad:be:ef:01:01"
+
+BENCH_PORTS = {"Gi1/0/19": "aa:bb:cc:00:01:01", "Gi1/0/20": "aa:bb:cc:00:01:02"}
+"""Two shared lab benches whose terminals reauthenticate every two minutes, which is what gives a port a distribution
+of its own exchanges inside an hour. The desk ports reauthenticate every fifteen minutes and stop before the hour
+ends, which the estate harness depends on: a sign-in after a desk's last exchange must resolve to no port. The
+benches' identities are in no directory, so they take nobody down the ladder."""
+BENCH_IDENTITIES = {"aa:bb:cc:00:01:01": "bench-01", "aa:bb:cc:00:01:02": "bench-02"}
+BENCH_REAUTH_SECONDS = 120
+BENCH_ELAPSED_SECONDS = {"Gi1/0/19": 3, "Gi1/0/20": 4}
+"""How long each bench's exchanges take, every time but the two below."""
+AUTH_BASELINE_MIN_SAMPLES = 20
+"""Prior exchanges a port needs before its distribution is published. Twenty, inside an hour; the stage's default is
+a hundred, and below a hundred the 99th percentile is the slowest exchange the port has had."""
+SLOW_AUTH_PORT = "Gi1/0/19"
+SLOW_AUTH_AT_SECONDS = 2700
+SLOW_AUTH_ATTEMPTS = 3
+"""On the first bench, the exchange at 2700 restarts twice, eight seconds apart, and succeeds nine seconds after
+the third attempt: three times the slowest exchange the port has had, and three attempts to get there."""
+FAST_AUTH_PORT = "Gi1/0/20"
+FAST_AUTH_AT_SECONDS = 2940
+"""On the second bench, the exchange at 2940 is accepted in the second it was requested, where every one before it
+took four seconds."""
 
 IDENTITIES = {
     MAC_A: "alice-ws",
@@ -284,9 +397,24 @@ SETTINGS = {
     "lateness_seconds": LATENESS_SECONDS,
     "baseline_min_buckets": BASELINE_MIN_BUCKETS,
     "optic_floors": OPTIC_FLOORS,
+    "auth_baseline_min_samples": AUTH_BASELINE_MIN_SAMPLES,
 }
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-D-L1-001", "R-P-L1-004", "R-B-L2-002", "R-D-L2-001", "R-D-L2-003", "R-D-L2-004", "R-D-L2-005")
+RULES = ("R-D-L1-001",
+         "R-D-L1-002",
+         "R-D-L1-003",
+         "R-P-L1-004",
+         "R-B-L1-005",
+         "R-D-L1-006",
+         "R-B-L1-007",
+         "R-B-L2-002",
+         "R-D-L2-001",
+         "R-D-L2-003",
+         "R-D-L2-004",
+         "R-D-L2-005",
+         "R-B-L2-006",
+         "R-B-L2-007",
+         "R-B-L2-008")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 
@@ -308,25 +436,44 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     requirement; the harness's permutation check is what scrambles them.
     """
     rng = random.Random(CORPUS_SEED)
+    extra = random.Random(EXTRA_SEED)
 
     return {
-        "tc1": _build_layer_1(rng),
-        "tc2_mac": _build_mac_snapshots(rng),
+        "tc1": _build_layer_1(rng, extra),
+        "tc2_mac": _build_mac_snapshots(rng, extra),
         "tc2_arp": _build_arp(rng),
-        "tc2_auth": _build_auth(rng),
+        "tc2_auth": _build_auth(rng, extra),
     }
 
 
-def _build_layer_1(rng: random.Random) -> pd.DataFrame:
-    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, a failing optic, an unpolled flap and two
-    optic swaps."""
-    devices = [(SWITCH, port) for port in PORTS] + [(SWITCH, MAINTENANCE_PORT), (REBOOTING_SWITCH, "Gi1/0/1")]
+def _octets_per_minute(extra: random.Random, bits_per_second: float) -> int:
+    """A minute of traffic at a rate, give or take a tenth, in octets."""
+    return int(bits_per_second * 60 / 8 * extra.uniform(0.9, 1.1))
+
+
+def _build_layer_1(rng: random.Random, extra: random.Random) -> pd.DataFrame:
+    """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, a failing optic, an unpolled flap, two optic
+    swaps, a flapping link, a failing cable, a re-patch, an inline insertion, a surge and a silence.
+
+    The ports and fields the first corpus had draw from `rng` exactly as they always did, so their values are
+    unchanged; everything added since draws from `extra`.
+    """
+    original = [(SWITCH, port) for port in PORTS] + [(SWITCH, MAINTENANCE_PORT), (REBOOTING_SWITCH, "Gi1/0/1")]
+    added = [(SWITCH, port) for port in (FLAPPER_PORT, ERROR_PORT, VOLUME_PORT, SILENT_PORT, REPATCH_PORT, INLINE_PORT)]
+    added += [(REBOOTING_SWITCH, port) for port in REBOOT_PORTS if (REBOOTING_SWITCH, port) not in original]
+    devices = sorted(original + added)
+    error_names = ("crc_errors", "symbol_errors", "input_discards", "output_discards")
     counters = {
         key: {
             "crc_errors": 100, "symbol_errors": 0, "input_discards": 5, "output_discards": 1
         }
         for key in devices
     }
+
+    for key in devices:
+        counters[key]["if_hc_in_octets"] = 10**12 + extra.randrange(10**9)
+        counters[key]["if_hc_out_octets"] = 10**12 + extra.randrange(10**9)
+
     boot_uptime_cs = 3600 * CS_PER_SECOND
     rows = []
     seq = 0
@@ -335,13 +482,32 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
         time_s = minute * 60
 
         for (device, port) in devices:
+            draw = rng if (device, port) in original else extra
             rebooted = device == REBOOTING_SWITCH and minute >= REBOOT_AT_MINUTE
 
             if (device == REBOOTING_SWITCH and minute == REBOOT_AT_MINUTE):
                 counters[(device, port)] = {name: 0 for name in counters[(device, port)]}
 
-            for name in counters[(device, port)]:
-                counters[(device, port)][name] += rng.choice([0, 0, 0, 1, 2])
+            for name in error_names:
+                counters[(device, port)][name] += draw.choice([0, 0, 0, 1, 2])
+
+            # The failing cable: thirty more CRC errors each minute than the minute before.
+            if (device == SWITCH and port == ERROR_PORT and minute >= ERRORS_FROM_MINUTE):
+                counters[(device, port)]["crc_errors"] += ERRORS_PER_MINUTE_STEP * (minute - ERRORS_FROM_MINUTE + 1)
+
+            # Traffic, in both directions. The surge sends, and the silent port's link stays up carrying nothing.
+            inbound = _octets_per_minute(extra, BASE_BITS_PER_SECOND)
+            outbound = _octets_per_minute(extra, BASE_BITS_PER_SECOND / 2)
+
+            if (device == SWITCH and port == VOLUME_PORT and minute >= VOLUME_FROM_MINUTE):
+                outbound = _octets_per_minute(extra, SURGE_BITS_PER_SECOND)
+
+            if (device == SWITCH and port == SILENT_PORT and minute >= VOLUME_FROM_MINUTE):
+                (inbound, outbound) = (0, 0)
+
+            if (minute > 0 and not (device == REBOOTING_SWITCH and minute == REBOOT_AT_MINUTE)):
+                counters[(device, port)]["if_hc_in_octets"] += inbound
+                counters[(device, port)]["if_hc_out_octets"] += outbound
 
             uptime_cs = (minute - REBOOT_AT_MINUTE) * 60 * CS_PER_SECOND + 30 * CS_PER_SECOND if rebooted else (
                 boot_uptime_cs + minute * 60 * CS_PER_SECOND)
@@ -353,6 +519,13 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
             elif (device == SWITCH and port == MAINTENANCE_PORT and minute >= MAINTENANCE_SWAP_AT_MINUTE):
                 # The link came back up with the new optic, twenty seconds before the poll that first saw it.
                 last_change_cs = MAINTENANCE_SWAP_AT_MINUTE * 60 * CS_PER_SECOND - 20 * CS_PER_SECOND
+            elif (device == SWITCH and port == FLAPPER_PORT and minute >= FLAPPER_FROM_MINUTE):
+                # Down and back up again in every polling gap: the last change is always twenty seconds ago.
+                last_change_cs = minute * 60 * CS_PER_SECOND - 20 * CS_PER_SECOND
+            elif (device == SWITCH and port == REPATCH_PORT and minute >= REPATCH_AT_MINUTE):
+                last_change_cs = REPATCH_AT_MINUTE * 60 * CS_PER_SECOND - 25 * CS_PER_SECOND
+            elif (device == SWITCH and port == INLINE_PORT and minute >= INLINE_AT_MINUTE):
+                last_change_cs = INLINE_AT_MINUTE * 60 * CS_PER_SECOND - 15 * CS_PER_SECOND
             elif (rebooted):
                 last_change_cs = 5 * CS_PER_SECOND
             else:
@@ -365,7 +538,7 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
             if (device == SWITCH and port in SWAPS and minute >= SWAPS[port]):
                 serial = f"{serial}-B"
 
-            rx_dbm = -7.0 + rng.uniform(-0.05, 0.05)
+            rx_dbm = -7.0 + draw.uniform(-0.05, 0.05)
 
             if (device == SWITCH and port == HUB_PORT and minute >= TAP_AT_MINUTE):
                 rx_dbm -= TAP_LOSS_DB
@@ -374,6 +547,21 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
             if (device == SWITCH and port == MAINTENANCE_PORT and minute < MAINTENANCE_SWAP_AT_MINUTE):
                 rx_dbm -= DEGRADATION_DB_PER_MINUTE * minute
 
+            # Who is on the other end. The two uplinks that change, change once each; a switch that has just come
+            # back from a reboot has not heard from its neighbours yet on its first poll.
+            (chassis, neighbour_port) = NEIGHBOURS.get(port, (f"nbr-{device}-{port}", "Gi0/1")) if device == SWITCH \
+                else (f"nbr-{device}-{port}", "Gi0/1")
+
+            if (device == SWITCH and port == REPATCH_PORT and minute >= REPATCH_AT_MINUTE):
+                (chassis, neighbour_port) = REPATCHED_TO
+
+            if (device == SWITCH and port == INLINE_PORT and minute >= INLINE_AT_MINUTE):
+                (chassis, neighbour_port) = INLINE_DEVICE
+
+            if (device == REBOOTING_SWITCH and minute == REBOOT_AT_MINUTE):
+                (chassis, neighbour_port) = (None, None)
+
+            tx_dbm = round(-2.0 + draw.uniform(-0.05, 0.05), 3)
             seq += 1
             rows.append({
                 "event_time": time_s * NS_PER_SECOND,
@@ -383,20 +571,40 @@ def _build_layer_1(rng: random.Random) -> pd.DataFrame:
                 "uptime": uptime_cs,
                 "if_last_change": last_change_cs,
                 "oper_status": "up",
-                "optical_tx_dbm": round(-2.0 + rng.uniform(-0.05, 0.05), 3),
+                "link_speed_bps": LINK_SPEED_BPS,
+                "optical_tx_dbm": tx_dbm,
                 "optical_rx_dbm": round(rx_dbm, 3),
                 "transceiver_serial": serial,
                 "transceiver_type": OPTIC_TYPE,
-                "lldp_neighbor_chassis_id": f"nbr-{device}-{port}",
+                "lldp_neighbor_chassis_id": chassis,
+                "lldp_neighbor_port_id": neighbour_port,
                 **counters[(device, port)],
-                **_envelope(rng, "snmp-poller", "TC-1/1.0.0", seq),
+                **_envelope(draw, "snmp-poller", "TC-1/1.0.0", seq),
             })
 
     return pd.DataFrame(rows)
 
 
-def _build_mac_snapshots(rng: random.Random) -> pd.DataFrame:
-    """A full MAC table snapshot every five minutes, every row stamped at the snapshot's instant."""
+def _mac_row(time_s: int, mac: str, switch: str, port: str, vlan: int, envelope: dict, action: str = None) -> dict:
+    return {
+        "event_time": time_s * NS_PER_SECOND,
+        "mac_address": mac,
+        "site_id": SITE,
+        "switch_id": switch,
+        "port_id": port,
+        "vlan_id": vlan,
+        MAC_ACTION_COLUMN: action,
+        **envelope,
+    }
+
+
+def _build_mac_snapshots(rng: random.Random, extra: random.Random) -> pd.DataFrame:
+    """A full MAC table snapshot every five minutes, every row stamped at the snapshot's instant, and between two of
+    them the switch's own notification that one address was removed.
+
+    The entries the first corpus had draw their envelopes from `rng` as they always did; the second VLAN, the
+    printer and the guest draw from `extra`.
+    """
     rows = []
     seq = 0
 
@@ -411,15 +619,27 @@ def _build_mac_snapshots(rng: random.Random) -> pd.DataFrame:
 
         for (mac, port) in entries:
             seq += 1
-            rows.append({
-                "event_time": time_s * NS_PER_SECOND,
-                "mac_address": mac,
-                "site_id": SITE,
-                "switch_id": SWITCH,
-                "port_id": port,
-                "vlan_id": VLAN,
-                **_envelope(rng, "mac-table", "TC-2/1.0.0", seq),
-            })
+            rows.append(_mac_row(time_s, mac, SWITCH, port, VLAN, _envelope(rng, "mac-table", "TC-2/1.0.0", seq)))
+
+        # The same walk of the same switch, reaching the entries planted since: the printer until it is unplugged,
+        # the guest while they are here, and the camera VLAN, whose vendor mix the single-board computer changes.
+        added = [(mac, port, IOT_VLAN) for (mac, port) in CAMERAS.items()]
+
+        if (time_s <= PRINTER_LAST_SEEN_SECONDS):
+            added.append((PRINTER_MAC, PRINTER_PORT, VLAN))
+
+        if (GUEST_FROM_SECONDS <= time_s < GUEST_LEAVES_AT_SECONDS):
+            added.append((GUEST_MAC, GUEST_PORT, VLAN))
+
+        if (time_s >= ROGUE_OUI_AT_SECONDS):
+            added.append((ROGUE_OUI_MAC, ROGUE_OUI_PORT, IOT_VLAN))
+
+        if (time_s >= THIRD_CAMERA_AT_SECONDS):
+            added.append((THIRD_CAMERA_MAC, THIRD_CAMERA_PORT, IOT_VLAN))
+
+        for (mac, port, vlan) in added:
+            seq += 1
+            rows.append(_mac_row(time_s, mac, SWITCH, port, vlan, _envelope(extra, "mac-table", "TC-2/1.0.0", seq)))
 
         # The poller reaches the peer switch a couple of seconds after the first, which is what makes the spoof
         # below `displaced` with a small gap rather than a `conflict`. Emitted here, inside the same snapshot, so
@@ -428,15 +648,25 @@ def _build_mac_snapshots(rng: random.Random) -> pd.DataFrame:
         for (mac, port) in ([(ROAM_MAC, PEER_PORTS[2] if time_s >= ROAM_AT_SECONDS else PEER_PORTS[1])] +
                             ([(MAC_B, PEER_PORTS[0])] if time_s == CROSS_SPOOF_AT_SECONDS else [])):
             seq += 1
-            rows.append({
-                "event_time": (time_s + SWEEP_OFFSET_SECONDS) * NS_PER_SECOND,
-                "mac_address": mac,
-                "site_id": SITE,
-                "switch_id": PEER_SWITCH,
-                "port_id": port,
-                "vlan_id": VLAN,
-                **_envelope(rng, "mac-table", "TC-2/1.0.0", seq),
-            })
+            rows.append(
+                _mac_row(time_s + SWEEP_OFFSET_SECONDS,
+                         mac,
+                         PEER_SWITCH,
+                         port,
+                         VLAN,
+                         _envelope(rng, "mac-table", "TC-2/1.0.0", seq)))
+
+        # The guest's laptop leaves between two walks, and the switch says so: a MAC notification of the removal.
+        if (time_s < GUEST_LEAVES_AT_SECONDS < time_s + PERIOD_SECONDS):
+            seq += 1
+            rows.append(
+                _mac_row(GUEST_LEAVES_AT_SECONDS,
+                         GUEST_MAC,
+                         SWITCH,
+                         GUEST_PORT,
+                         VLAN,
+                         _envelope(extra, "mac-table", "TC-2/1.0.0", seq),
+                         action="removed"))
 
     return pd.DataFrame(rows)
 
@@ -478,14 +708,17 @@ def _build_arp(rng: random.Random) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _build_auth(rng: random.Random) -> pd.DataFrame:
+def _build_auth(rng: random.Random, extra: random.Random) -> pd.DataFrame:
     """
     802.1X exchanges, every one naming the device being authorized.
 
-    Four shapes: the routine exchange on a single-host port, one authorization nothing preceded, a multi-domain
-    port carrying two supplicants whose outcomes interleave, and a bypass that lands while a legitimate exchange
-    on the same port is still open. The last two are the cases where timing an exchange per port rather than per
-    device is wrong in each direction -- a false positive on the phone, and a false negative on the rogue.
+    Five shapes: the routine exchange on a single-host port, one authorization nothing preceded, a multi-domain
+    port carrying two supplicants whose outcomes interleave, a bypass that lands while a legitimate exchange on
+    the same port is still open, and two benches reauthenticating every two minutes. The multi-domain port and the
+    bypass are the cases where timing an exchange per port rather than per device is wrong in each direction -- a
+    false positive on the phone, and a false negative on the rogue. The benches are the ones with enough exchanges
+    for a distribution: one bench's exchange takes three attempts and three times as long, and the other's no time
+    at all.
     """
     events: list[tuple[int, str, str, str]] = []
 
@@ -495,6 +728,26 @@ def _build_auth(rng: random.Random) -> pd.DataFrame:
         for time_s in range(60 + index * 7, CORPUS_SECONDS, 900):
             events.append((time_s, port, "started", supplicant))
             events.append((time_s + 3 + index, port, "success", supplicant))
+
+    # The benches, every two minutes from the first minute. Two of their exchanges are not routine.
+    for (port, supplicant) in BENCH_PORTS.items():
+        for time_s in range(60, CORPUS_SECONDS, BENCH_REAUTH_SECONDS):
+            if (port == SLOW_AUTH_PORT and time_s == SLOW_AUTH_AT_SECONDS):
+                # Two restarts eight seconds apart, then a success nine seconds after the third attempt.
+                for attempt in range(SLOW_AUTH_ATTEMPTS):
+                    events.append((time_s + 8 * attempt, port, "started", supplicant))
+
+                events.append((time_s + 8 * (SLOW_AUTH_ATTEMPTS - 1) + 9, port, "success", supplicant))
+                continue
+
+            if (port == FAST_AUTH_PORT and time_s == FAST_AUTH_AT_SECONDS):
+                # Accepted in the second it was requested.
+                events.append((time_s, port, "started", supplicant))
+                events.append((time_s, port, "success", supplicant))
+                continue
+
+            events.append((time_s, port, "started", supplicant))
+            events.append((time_s + BENCH_ELAPSED_SECONDS[port], port, "success", supplicant))
 
     # An authorization with nothing in front of it, on a port whose own exchanges are long finished.
     events.append((BYPASS_AT_SECONDS, BYPASS_PORT, "success", BYPASS_MAC))
@@ -524,9 +777,10 @@ def _build_auth(rng: random.Random) -> pd.DataFrame:
             # The identity half of the supplicant. R-D-L2-005 names it on the alert, and the stage prefers it to
             # the MAC when both are present, so a corpus without one leaves both the fallback and the alert's
             # identity column uncovered.
-            "dot1x_identity": IDENTITIES.get(supplicant, supplicant),
+            "dot1x_identity": IDENTITIES.get(supplicant, BENCH_IDENTITIES.get(supplicant, supplicant)),
             "dot1x_result": result,
-            **_envelope(rng, "radius", "TC-2/1.0.0", seq),
+            # The benches came later, and draw from the second generator so the rows before them keep theirs.
+            **_envelope(extra if supplicant in BENCH_IDENTITIES else rng, "radius", "TC-2/1.0.0", seq),
         })
 
     return pd.DataFrame(rows)
@@ -784,21 +1038,25 @@ def run_classes(config: Config,
 
     outputs = {}
 
-    # Layer 1: counters, optics, flaps, identifier changes.
-    outputs["tc1"] = _run_class(config,
-                                batches["tc1"],
-                                [
-                                    TC1NormalizeStage(config, uptime_column="uptime", uptime_unit="cs"),
-                                    TC1OpticalStage(config),
-                                    TC1ForecastStage(config, floors=OPTIC_FLOORS),
-                                    TC1FlapStage(config, last_change_column="if_last_change", last_change_unit="cs"),
-                                    TC1ChangeStage(config),
-                                ],
-                                impose_order,
-                                seal=False,
-                                chain=CHAIN_ROOTS["tc1"],
-                                envelope=CLASS_ENVELOPE["tc1"],
-                                telemetry_class="tc1")
+    # Layer 1: counters, the rates they become and the port's history of them, optics, flaps, identifier changes.
+    # The rate history is kept over the sealing period with the corpus's floor, as the layer 2 baseline is; the
+    # volume history is kept per hour of the day, which an hour-long corpus exercises without contradicting.
+    outputs["tc1"] = _run_class(
+        config,
+        batches["tc1"],
+        [
+            TC1NormalizeStage(config, uptime_column="uptime", uptime_unit="cs"),
+            TC1RateStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
+            TC1OpticalStage(config),
+            TC1ForecastStage(config, floors=OPTIC_FLOORS),
+            TC1FlapStage(config, last_change_column="if_last_change", last_change_unit="cs"),
+            TC1ChangeStage(config),
+        ],
+        impose_order,
+        seal=False,
+        chain=CHAIN_ROOTS["tc1"],
+        envelope=CLASS_ENVELOPE["tc1"],
+        telemetry_class="tc1")
 
     # The same layer 1 snapshots, closed into port bindings. This is the ladder's last rung: the table that takes
     # a switch port to the site, optic and neighbour it held at a given moment. The stage emits its own
@@ -813,26 +1071,35 @@ def run_classes(config: Config,
     port_bindings["row_key"] = port_bindings["binding_uid"]
     outputs["tc1_binding"] = port_bindings
 
-    # Layer 2, from the same snapshots: the cardinality features, each port's count against the peaks of its own
-    # earlier periods, and the closed bindings.
+    # Layer 2, from the same snapshots: the cardinality features, each port's count and each VLAN's vendor count
+    # against the peaks of their own earlier periods, and the closed bindings.
     outputs["tc2_mac"] = _run_class(
         config,
         batches["tc2_mac"],
         [
             TC2CardinalityStage(config),
             TC2BaselineStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
+            TC2BaselineStage(config,
+                             entity_column="vlan_key",
+                             value_column="ouis_per_vlan",
+                             bucket_seconds=PERIOD_SECONDS,
+                             min_buckets=BASELINE_MIN_BUCKETS),
         ],
         impose_order,
         seal=False,
         chain=CHAIN_ROOTS["tc2_mac"],
         envelope=CLASS_ENVELOPE["tc2_mac"],
         telemetry_class="tc2_mac")
-    bindings = _run_class(config,
-                          batches["tc2_mac"], [TC2BindingStage(config)],
-                          impose_order,
-                          seal=False,
-                          envelope=CLASS_ENVELOPE["tc2_binding"],
-                          telemetry_class="tc2_binding")
+    # The table walk is a snapshot of each switch, and the switch's own removal notice is a stop: both ends a
+    # source reports, beside the ones the closer infers.
+    bindings = _run_class(
+        config,
+        batches["tc2_mac"],
+        [TC2BindingStage(config, action_column=MAC_ACTION_COLUMN, snapshot_scope_columns=["site_id", "switch_id"])],
+        impose_order,
+        seal=False,
+        envelope=CLASS_ENVELOPE["tc2_binding"],
+        telemetry_class="tc2_binding")
 
     bindings["row_key"] = [
         event_uid("binding", *values)
@@ -863,7 +1130,8 @@ def run_classes(config: Config,
         telemetry_class="tc2_arp")
 
     outputs["tc2_auth"] = _run_class(config,
-                                     batches["tc2_auth"], [TC2AuthStage(config)],
+                                     batches["tc2_auth"],
+                                     [TC2AuthStage(config, baseline_min_samples=AUTH_BASELINE_MIN_SAMPLES)],
                                      impose_order,
                                      seal=False,
                                      chain=CHAIN_ROOTS["tc2_auth"],

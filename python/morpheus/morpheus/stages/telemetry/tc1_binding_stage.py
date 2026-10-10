@@ -23,10 +23,12 @@ that need the last hop.
 
 **The key is the port and the attributes are what is in it, which is the inverse of layer 2.** There the key is a
 MAC, the mobile thing, bound to a location; a sample whose location differs means the device moved. Here the port
-is fixed and the optic is what moves, so the port is the key and `transceiver_serial` and
-`lldp_neighbor_chassis_id` are the attributes. A sample whose attributes differ means somebody changed the optic or
-repatched the far end. Getting this backwards produces a table that answers "where is this transceiver", which is
-not the question the ladder asks.
+is fixed and the optic is what moves, so the port is the key and `transceiver_serial`, `lldp_neighbor_chassis_id`
+and `lldp_neighbor_port_id` are the attributes. A sample whose attributes differ means somebody changed the optic or
+repatched the far end, whether to another device or to another port on the same one. Getting this backwards produces
+a table that answers "where is this transceiver", which is not the question the ladder asks. Every binding also
+carries `link_key`, the port and the neighbour port it was cabled to, named as `entity_key.compose_link_key` names
+a link, which is what the adjacency lookup is keyed on.
 
 **The idle timeout is days rather than minutes, and that is a decision rather than a copied default.**
 `TC2BindingStage` ages a binding out after thirty minutes because a MAC that has gone quiet has left, and switch
@@ -65,16 +67,18 @@ from morpheus.utils.binding_closer import NS_PER_SECOND
 from morpheus.utils.binding_closer import BindingCloser
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_int_column
+from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import compose_link_key
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import EventClock
 from morpheus.utils.lineage import event_uid
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ATTRIBUTE_COLUMNS = ["transceiver_serial", "lldp_neighbor_chassis_id"]
-"""What is bound to a port: the optic in it and the neighbor on the other end.
+DEFAULT_ATTRIBUTE_COLUMNS = ["transceiver_serial", "lldp_neighbor_chassis_id", "lldp_neighbor_port_id"]
+"""What is bound to a port: the optic in it and the neighbor port on the other end.
 
 Both are what the `binding_l1` lookup returns, and both are things an estate changes deliberately. Optical power
 and error counters are deliberately *not* here: they vary continuously, and a binding that split whenever a
@@ -87,6 +91,11 @@ KEY_ATTRIBUTES = ("site_id", "device_id", "port_id")
 The string is identical to the one `TC1NormalizeStage` emits and to the `port_key` `TC2BindingStage` carries on a
 closed binding, which is what makes the ladder's first arrow a join rather than a reconstruction.
 """
+
+NEIGHBOR_COLUMNS = ("lldp_neighbor_chassis_id", "lldp_neighbor_port_id")
+"""The attributes a link key is named from, with the port itself. Both must be bound for a binding to carry one."""
+
+LINK_KEY_COLUMN = "link_key"
 
 SWITCH_COLUMN = "switch_id"
 """Emitted alongside `device_id`, carrying the same value.
@@ -129,9 +138,10 @@ class TC1BindingStage(GpuAndCpuMixin, SinglePortStage):
         Unit for numeric timestamps in `time_column`. Ignored for datetime columns.
     attribute_columns : list of str, optional
         Columns making up what is bound to the port. Defaults to `["transceiver_serial",
-        "lldp_neighbor_chassis_id"]`. A sample whose attributes differ from the open binding's closes it and opens
-        a new one; one whose attributes match extends it. Columns outside this list are ignored, which is what
-        keeps a moving optical power reading from splitting a binding every poll.
+        "lldp_neighbor_chassis_id", "lldp_neighbor_port_id"]`. A sample whose attributes differ from the open
+        binding's closes it and opens a new one; one whose attributes match extends it. Columns outside this list
+        are ignored, which is what keeps a moving optical power reading from splitting a binding every poll. Where
+        both neighbour columns are among them each binding also carries `link_key`; otherwise it is null.
     max_clock_skew_seconds : int, default = 604800
         How far ahead of the stream's own progress a row's event time may be before it is refused. Expiry runs on
         event time, so a device whose clock is wrong by years would otherwise drive the horizon past every open
@@ -188,6 +198,7 @@ class TC1BindingStage(GpuAndCpuMixin, SinglePortStage):
                                      idle_timeout_ns=idle_timeout_seconds * NS_PER_SECOND)
 
         self._needed_columns[KEY_COLUMN] = TypeId.STRING
+        self._needed_columns[LINK_KEY_COLUMN] = TypeId.STRING
         self._needed_columns[UID_COLUMN] = TypeId.STRING
         self._needed_columns[BIND_START_COLUMN] = TypeId.INT64
         self._needed_columns[BIND_END_COLUMN] = TypeId.INT64
@@ -275,6 +286,17 @@ class TC1BindingStage(GpuAndCpuMixin, SinglePortStage):
 
         return columns
 
+    def _link_keys(self, records: list) -> list:
+        """The link each port was cabled into while its binding held, so a re-patch is a new link as well as a new
+        binding. Null where the neighbour is not part of what is bound, or was not reported."""
+        if (not all(name in self._attribute_columns for name in NEIGHBOR_COLUMNS)):
+            return [None] * len(records)
+
+        return [
+            compose_link_key(record.key, *[record.attributes.get(name) for name in NEIGHBOR_COLUMNS])
+            for record in records
+        ]
+
     def _emit(self, closed: list, opened: list = ()) -> list:
         """Wrap closed and provisional bindings in a frame, or nothing when there are none."""
         opened = list(opened)
@@ -292,6 +314,8 @@ class TC1BindingStage(GpuAndCpuMixin, SinglePortStage):
         # column of Python `None` widens an integer column to float in one mode and not the other.
         assign_nullable_int_column(df,
                                    BIND_END_COLUMN, [record.bind_end_ns for record in closed] + [None] * len(opened))
+        # Assigned like the end, for the same reason: a column that can be all null has to be typed by the helper.
+        assign_str_column(df, LINK_KEY_COLUMN, self._link_keys(list(closed) + opened))
 
         return [MessageMeta(df)]
 

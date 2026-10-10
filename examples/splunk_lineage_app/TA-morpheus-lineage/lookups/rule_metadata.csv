@@ -1,5 +1,10 @@
 rule_id,saved_search,suppress_fields,suppress_period,hysteresis
+R-B-L1-005,R-B-L1-005 - Error rate step,entity_key,1h,none
+R-B-L1-007,R-B-L1-007 - Interface volume departure,entity_key,1h,none
 R-B-L2-002,R-B-L2-002 - Port-to-MAC binding novelty,port_key,1h,none
+R-B-L2-006,R-B-L2-006 - New vendor on a VLAN,vlan_key,1h,none
+R-B-L2-007,R-B-L2-007 - Slow 802.1X authorization,event_uid,1h,none
+R-B-L2-008,R-B-L2-008 - Instant 802.1X authorization,event_uid,1h,none
 R-B-L3-001,R-B-L3-001 - Fan-out expansion,src_ip,1h,none
 R-B-L3-002,R-B-L3-002 - Beaconing,flow_pair_key,1h,none
 R-B-L3-004,R-B-L3-004 - TTL fingerprint shift,src_ip,1h,none
@@ -19,6 +24,9 @@ R-C-002,R-C-002 - TLS anomaly precedes beaconing,"src_ip,dst_ip",3h,none
 R-C-004,R-C-004 - Staged exfiltration,"user_principal,src_ip",12h,none
 R-C-005,R-C-005 - Credential replay across the stack,"user_principal,event_uid",24h,none
 R-D-L1-001,R-D-L1-001 - Transceiver substitution,"entity_key,transceiver_serial",1h,none
+R-D-L1-002,R-D-L1-002 - Optical tap step,entity_key,1h,none
+R-D-L1-003,R-D-L1-003 - Link flap instability,entity_key,1h,none
+R-D-L1-006,R-D-L1-006 - LLDP neighbor change,"entity_key,link_key",1h,none
 R-D-L2-001,R-D-L2-001 - MAC address count exceeded on an access port,"port_key,mac_address",1h,none
 R-D-L2-003,R-D-L2-003 - ARP anomaly,arp_sender_ip,1h,none
 R-D-L2-004,R-D-L2-004 - MAC in two places at once,"mac_address,bind_start",1h,none

@@ -37,11 +37,23 @@ from morpheus.utils.counter_delta import CounterTracker
 from morpheus.utils.counter_delta import TIMETICKS_CEILING_NS
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import compose_link_key
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_COUNTER_COLUMNS = ["crc_errors", "symbol_errors", "input_discards", "output_discards"]
 """Counters the TC-1 telemetry class requires as deltas."""
+
+DEFAULT_OCTET_COLUMNS = ["if_hc_in_octets", "if_hc_out_octets"]
+"""The 64-bit traffic counters, `ifHCInOctets` and `ifHCOutOctets`, differenced when the collector reports them.
+
+Optional rather than required, unlike the error counters: a copper access port behind a poller that walks only the
+error table still has a key, an optic and a flap count worth scoring, and refusing the whole row because it carries no
+traffic counter would cost all of that. Absent, their deltas are null. Always 64-bit: the 32-bit `ifInOctets` wraps in
+under four seconds at ten gigabits, faster than any poller, so a delta over it would be a guess."""
+
+LINK_KEY_COLUMN = "link_key"
+"""The port and the LLDP neighbour on the far end of it, as `entity_key.compose_link_key` names a link."""
 
 ENTITY_KEY_SEPARATOR = KEY_SEPARATOR
 """Separator for the `site_id:device_id:port_id` entity key. Shared with the layer 2 stages, whose `port_key` is
@@ -66,7 +78,8 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     no delta rather than a guess, because both candidate answers would be fabrications that read like measurements.
 
     Each row also gains `entity_key`, the `site_id:device_id:port_id` identity that the per-port models key on and
-    that anchors the bottom of the lineage ladder.
+    that anchors the bottom of the lineage ladder, and `link_key`, the port and the LLDP neighbour on the far end of
+    it, which is what the adjacency lookup is keyed on and what changes when somebody re-patches the port.
 
     This stage is stateful and must run single-engine, which is the Morpheus default. For parallelism, shard by
     device upstream and give each shard its own instance, which is determinism control 4. Rows are processed in the
@@ -105,6 +118,14 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Suffix for the emitted delta columns.
     entity_key_column : str, default = "entity_key"
         Column to write the composite entity identity to.
+    octet_columns : list of str, optional
+        The 64-bit traffic counters, differenced like the others when present and given null deltas when not.
+        Defaults to `["if_hc_in_octets", "if_hc_out_octets"]`.
+    neighbor_chassis_column : str, default = "lldp_neighbor_chassis_id"
+        Column holding the LLDP neighbour's chassis identifier.
+    neighbor_port_column : str, default = "lldp_neighbor_port_id"
+        Column holding the LLDP neighbour's port identifier. With the chassis and the port's own key it names the
+        link, written to `link_key`; a row without either neighbour column carries a null link.
     """
 
     def __init__(self,
@@ -119,12 +140,16 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  uptime_column: str = None,
                  uptime_unit: str = "s",
                  delta_suffix: str = "_delta",
-                 entity_key_column: str = "entity_key"):
+                 entity_key_column: str = "entity_key",
+                 octet_columns: list[str] = None,
+                 neighbor_chassis_column: str = "lldp_neighbor_chassis_id",
+                 neighbor_port_column: str = "lldp_neighbor_port_id"):
         super().__init__(c)
 
         # An empty list is a configuration error, not a request for the defaults, so `None` is what selects them.
         counter_columns = list(DEFAULT_COUNTER_COLUMNS) if counter_columns is None else list(counter_columns)
         counter32_columns = [] if counter32_columns is None else list(counter32_columns)
+        octet_columns = list(DEFAULT_OCTET_COLUMNS) if octet_columns is None else list(octet_columns)
 
         if (len(counter_columns) == 0):
             raise ValueError("counter_columns must contain at least one counter")
@@ -137,10 +162,17 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         if (len(unknown) > 0):
             raise ValueError(f"counter32_columns names {unknown}, which are not in counter_columns")
 
+        overlap = [name for name in octet_columns if name in counter_columns]
+
+        if (len(overlap) > 0):
+            raise ValueError(f"octet_columns names {overlap}, which are already in counter_columns")
+
         self._key_columns = [site_column, device_column, port_column]
         self._time_column = time_column
         self._time_unit = time_unit
         self._counter_columns = counter_columns
+        self._octet_columns = octet_columns
+        self._neighbor_columns = (neighbor_chassis_column, neighbor_port_column)
         self._uptime_column = uptime_column
         self._uptime_unit = uptime_unit
         self._delta_suffix = delta_suffix
@@ -151,18 +183,19 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         # been up longer than the counter can express, from a genuine restart. Without it a rollover reads as a
         # reboot and the port's whole accumulated error total is emitted as one interval's delta.
         self._tracker = CounterTracker(
-            counter_names=counter_columns,
+            counter_names=counter_columns + octet_columns,
             counter_bits={name: 32 if name in counter32_columns else 64
-                          for name in counter_columns},
+                          for name in counter_columns + octet_columns},
             uptime_ceiling_ns=TIMETICKS_CEILING_NS if uptime_unit == "cs" else None)
 
         self._needed_columns[entity_key_column] = TypeId.STRING
+        self._needed_columns[LINK_KEY_COLUMN] = TypeId.STRING
         self._needed_columns["interval_seconds"] = TypeId.FLOAT64
 
         for flag in ("counter_reset", "counter_wrapped", "sample_out_of_order"):
             self._needed_columns[flag] = TypeId.BOOL8
 
-        for name in counter_columns:
+        for name in counter_columns + octet_columns:
             self._needed_columns[f"{name}{delta_suffix}"] = TypeId.INT64
 
         # Mark this stage to log timestamps if requested
@@ -234,14 +267,27 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             entity_keys = [compose_key(row) for row in zip(*key_parts)]
 
             raw_times = to_host_list(df, self._time_column)
-            counters = {name: to_host_list(df, name) for name in self._counter_columns}
+            # The octet counters are read where the collector sent them and are absent otherwise, which the tracker
+            # turns into a null delta for that counter alone.
+            measured = self._counter_columns + [name for name in self._octet_columns if name in df.columns]
+            counters = {name: to_host_list(df, name) for name in measured}
+            differenced = self._counter_columns + self._octet_columns
+
+            if (all(name in df.columns for name in self._neighbor_columns)):
+                neighbours = zip(*[to_host_list(df, name) for name in self._neighbor_columns])
+                link_keys = [
+                    compose_link_key(entity_key, chassis, port)
+                    for (entity_key, (chassis, port)) in zip(entity_keys, neighbours)
+                ]
+            else:
+                link_keys = [None] * len(entity_keys)
 
             if (self._uptime_column is not None and self._uptime_column in df.columns):
                 uptimes = [self._uptime_ns(value) for value in to_host_list(df, self._uptime_column)]
             else:
                 uptimes = [None] * len(entity_keys)
 
-            deltas: dict[str, list] = {name: [] for name in self._counter_columns}
+            deltas: dict[str, list] = {name: [] for name in differenced}
             intervals: list[typing.Optional[float]] = []
             flags: dict[str, list[bool]] = {"counter_reset": [], "counter_wrapped": [], "sample_out_of_order": []}
             unordered = 0
@@ -251,7 +297,7 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 if (entity_key is None):
                     # No identity, so no previous sample to difference against. The row passes through with the
                     # deltas null rather than being attributed to a fabricated port.
-                    for name in self._counter_columns:
+                    for name in differenced:
                         deltas[name].append(None)
 
                     intervals.append(None)
@@ -267,7 +313,7 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     event_time_ns = None
 
                 if (event_time_ns is None):
-                    for name in self._counter_columns:
+                    for name in differenced:
                         deltas[name].append(None)
 
                     intervals.append(None)
@@ -278,13 +324,12 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     continue
 
                 result = self._tracker.observe(entity_key,
-                                               event_time_ns,
-                                               {name: counters[name][position]
-                                                for name in self._counter_columns},
+                                               event_time_ns, {name: counters[name][position]
+                                                               for name in measured},
                                                uptime_ns=uptimes[position])
 
-                for name in self._counter_columns:
-                    deltas[name].append(result.deltas[name])
+                for name in differenced:
+                    deltas[name].append(result.deltas.get(name))
 
                 intervals.append(None if result.interval_ns is None else result.interval_ns / NS_PER_SECOND)
                 flags["counter_reset"].append(result.counter_reset)
@@ -293,8 +338,9 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 unordered += int(result.out_of_order)
 
             assign_str_column(df, self._entity_key_column, entity_keys)
+            assign_str_column(df, LINK_KEY_COLUMN, link_keys)
 
-            for name in self._counter_columns:
+            for name in differenced:
                 assign_nullable_int_column(df, f"{name}{self._delta_suffix}", deltas[name])
 
             assign_nullable_float_column(df, "interval_seconds", intervals)

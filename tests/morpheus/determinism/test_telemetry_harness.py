@@ -424,7 +424,9 @@ def test_the_reboot_is_a_reset_not_a_wrap(result: pd.DataFrame):
     assert (at_reboot["counter_wrapped"] == False).all()  # noqa: E712  pylint: disable=singleton-comparison
     # The interval is capped at the uptime, thirty seconds, not the sixty-second polling gap.
     assert at_reboot["interval_seconds"].iloc[0] == pytest.approx(30.0)
-    assert (rebooted["counter_reset"] == True).sum() == 1  # noqa: E712  pylint: disable=singleton-comparison
+    # Once on each of the switch's ports, which is what the restart report collapses to one row.
+    assert (rebooted["counter_reset"] == True).sum() == len(tp.REBOOT_PORTS)  # noqa: E712  pylint: disable=singleton-comparison
+    assert set(at_reboot["port_id"]) == set(tp.REBOOT_PORTS)
     assert (at_reboot["link_flap_device_reset"] == True).all()  # noqa: E712  pylint: disable=singleton-comparison
 
 
@@ -642,7 +644,7 @@ def test_a_shared_port_does_not_report_its_own_devices_as_bypasses(result: pd.Da
 def test_nothing_else_fired(result: pd.DataFrame):
     # Precision on the planted corpus: the anomalies above are the only ones.
     layer_1 = _rows(result, "tc1")
-    assert (layer_1["counter_reset"] == True).sum() == 1  # noqa: E712  pylint: disable=singleton-comparison
+    assert (layer_1["counter_reset"] == True).sum() == len(tp.REBOOT_PORTS)  # noqa: E712  pylint: disable=singleton-comparison
 
     # A tap is a persistent step, so the deviation persists until the baseline rolls over: every sample at or after
     # the tap, on the tapped port, and nowhere else.
@@ -657,14 +659,16 @@ def test_nothing_else_fired(result: pd.DataFrame):
     assert projected["event_time"].max() < tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS
 
     # Two serials change in the hour, one on each replaced optic's port, and the link transitions nobody polled
-    # are the maintenance swap's two and the planted flap's two. The reboot's transitions are unpolled too, and
-    # labelled as a device reset, which is what lets a planned reboot be excluded by rule; they are set aside here.
+    # are the maintenance swap's, the planted flap's, the re-patch's and the inline insertion's, once each, and the
+    # flapper's on every poll from the half hour. The reboot's transitions are unpolled too, and labelled as a
+    # device reset, which is what lets a planned reboot be excluded by rule; they are set aside here.
     changed = layer_1[layer_1["transceiver_serial_changed"] == True]  # noqa: E712  pylint: disable=singleton-comparison
     assert sorted(changed["port_id"]) == sorted(tp.SWAPS)
     unpolled = layer_1[(layer_1["link_flap_unpolled"] == True)  # noqa: E712  pylint: disable=singleton-comparison
                        & (layer_1["link_flap_device_reset"] == False)]  # noqa: E712  pylint: disable=singleton-comparison
-    assert sorted(unpolled["entity_key"]) == sorted(
-        [f"{tp.SITE}:{tp.SWITCH}:Gi1/0/1", f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"])
+    once = unpolled[unpolled["port_id"] != tp.FLAPPER_PORT]
+    assert sorted(once["port_id"]) == sorted(["Gi1/0/1", tp.MAINTENANCE_PORT, tp.REPATCH_PORT, tp.INLINE_PORT])
+    assert (unpolled["port_id"] == tp.FLAPPER_PORT).sum() == tp.CORPUS_SECONDS // 60 - tp.FLAPPER_FROM_MINUTE + 1
 
     bindings = _rows(result, "tc2_binding")
     assert (bindings["bind_end_reason"] == CONFLICT).sum() == 1
@@ -691,3 +695,179 @@ def test_nothing_else_fired(result: pd.DataFrame):
     # not a detection.
     assert set(excluded["arp_sender_ip"]) == {tp.VRRP_IP}
     assert len(excluded) > 0
+
+
+# --- What step 10 planted: the port, the link, the VLAN and the exchange as things with a behaviour ------------------
+
+
+def _port(result: pd.DataFrame, port: str, device: str = tp.SWITCH) -> pd.DataFrame:
+    layer_1 = _rows(result, "tc1")
+
+    return layer_1[layer_1["entity_key"] == f"{tp.SITE}:{device}:{port}"].sort_values("event_time")
+
+
+def _is(frame: pd.DataFrame, column: str) -> pd.Series:
+    return frame[column].astype(str).str.lower() == "true"
+
+
+@pytest.mark.cpu_mode
+def test_the_flapper_climbs_past_instability_and_nothing_else_does(result: pd.DataFrame):
+    # Two transitions a poll from the half hour, so the hour's count passes ten on the fifth flapping poll. The one
+    # flap on Gi1/0/1 is two transitions in the hour and the reboot's are a reset: neither is instability.
+    flapper = _port(result, tp.FLAPPER_PORT)
+    flapping = flapper[flapper["event_time"] >= tp.FLAPPER_FROM_MINUTE * 60 * NS]
+
+    assert (flapping["link_flaps"] == 2).all()
+    assert list(flapping["link_flaps_in_window"])[:5] == [2, 4, 6, 8, 10]
+
+    layer_1 = _rows(result, "tc1")
+    elsewhere = layer_1[(layer_1["port_id"] != tp.FLAPPER_PORT) | (layer_1["device_id"] != tp.SWITCH)]
+    assert elsewhere["link_flaps_in_window"].max() == 2
+
+
+@pytest.mark.cpu_mode
+def test_a_restart_is_one_device_reporting_on_every_port(result: pd.DataFrame):
+    layer_1 = _rows(result, "tc1")
+    restarted = layer_1[_is(layer_1, "counter_reset") | _is(layer_1, "link_flap_device_reset")]
+
+    # Three ports' flags, one device, one window, one poll: one row of the 'Device restart' report.
+    assert set(restarted["device_id"]) == {tp.REBOOTING_SWITCH}
+    assert set(restarted["port_id"]) == set(tp.REBOOT_PORTS)
+    assert restarted["window_id"].nunique() == 1
+    assert set(restarted["event_time"]) == {tp.REBOOT_AT_MINUTE * 60 * NS}
+
+
+@pytest.mark.cpu_mode
+def test_the_failing_cable_runs_errors_its_port_never_has(result: pd.DataFrame):
+    cable = _port(result, tp.ERROR_PORT)
+    climbing = cable[cable["event_time"] >= tp.ERRORS_FROM_MINUTE * 60 * NS]
+
+    assert (climbing["error_rate_baseline_mature"] == True).all()  # noqa: E712  pylint: disable=singleton-comparison
+    assert climbing.iloc[0]["error_rate_step"] > 0.4
+    # Measured against the port's own five-minute peaks, which the climb itself joins as each period closes, so
+    # the step is what the cable has added since rather than its whole rate.
+    assert (climbing["error_rate_step"] > 0.1).all()
+
+    # A few errors a minute everywhere else, never more than a fraction above the port's own record; and the
+    # restarted ports carry no rate on the poll whose delta covers the uptime rather than a minute.
+    layer_1 = _rows(result, "tc1")
+    others = layer_1[layer_1["entity_key"] != f"{tp.SITE}:{tp.SWITCH}:{tp.ERROR_PORT}"]
+    assert others["error_rate_step"].max() < 0.1
+    assert layer_1[_is(layer_1, "counter_reset")]["error_rate"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_the_repatch_and_the_insertion_are_neighbours_the_port_never_had(result: pd.DataFrame):
+    layer_1 = _rows(result, "tc1")
+    new = layer_1[_is(layer_1, "lldp_neighbor_chassis_id_changed") & _is(layer_1, "lldp_neighbor_chassis_id_first_seen")
+                  & layer_1["lldp_neighbor_chassis_id"].notna()]
+
+    assert sorted(zip(new["port_id"], new["lldp_neighbor_chassis_id"])) == [(tp.REPATCH_PORT, tp.REPATCHED_TO[0]),
+                                                                            (tp.INLINE_PORT, tp.INLINE_DEVICE[0])]
+    # Cabling is moved with the link down, and the device records it.
+    assert (new["link_flaps"] == 2).all()
+
+    # The restarted switch reports no neighbours on its first poll and its old ones on the next: two changes on
+    # each port. The empty one is a value the port has not reported before, which is why the rule asks for a
+    # neighbour that is there; the old one coming back is not new.
+    restarted = layer_1[layer_1["device_id"] == tp.REBOOTING_SWITCH]
+    changes = restarted[_is(restarted, "lldp_neighbor_chassis_id_changed")]
+    assert len(changes) == 2 * len(tp.REBOOT_PORTS)
+    assert not (_is(changes, "lldp_neighbor_chassis_id_first_seen") & changes["lldp_neighbor_chassis_id"].notna()).any()
+
+
+@pytest.mark.cpu_mode
+def test_every_link_is_named_by_its_port_and_its_neighbour(result: pd.DataFrame):
+    repatched = _port(result, tp.REPATCH_PORT)
+    port = f"{tp.SITE}:{tp.SWITCH}:{tp.REPATCH_PORT}"
+
+    assert list(dict.fromkeys(repatched["link_key"])) == [
+        "|".join(sorted([port, ":".join(tp.NEIGHBOURS[tp.REPATCH_PORT])])),
+        "|".join(sorted([port, ":".join(tp.REPATCHED_TO)])),
+    ]
+
+    # A switch that has not relearned its neighbours carries no link, rather than a link to nobody in particular.
+    layer_1 = _rows(result, "tc1")
+    assert set(layer_1[layer_1["link_key"].isna()]["device_id"]) == {tp.REBOOTING_SWITCH}
+
+    # The port bindings carry the link they were cabled into, so a re-patch is a new interval with a new link.
+    bindings = _rows(result, "tc1_binding")
+    on_port = bindings[bindings["entity_key"] == port].sort_values("bind_start")
+    assert list(on_port["link_key"]) == list(dict.fromkeys(repatched["link_key"]))
+    assert on_port["bind_end_reason"].iloc[0] == "displaced"
+
+
+@pytest.mark.cpu_mode
+def test_the_surge_and_the_silence_depart_from_their_ports_history(result: pd.DataFrame):
+    since = tp.VOLUME_FROM_MINUTE * 60 * NS
+    surge = _port(result, tp.VOLUME_PORT)
+    silent = _port(result, tp.SILENT_PORT)
+    first_surge = surge[surge["event_time"] == since].iloc[0]
+    first_silence = silent[silent["event_time"] == since].iloc[0]
+
+    assert first_surge["bits_per_second"] > 10 * first_surge["bits_per_second_baseline_max"]
+    # The frame is canonicalized to four decimal places, so the comparison is too.
+    assert first_surge["utilization"] == pytest.approx(first_surge["bits_out_per_second"] / tp.LINK_SPEED_BPS, abs=1e-4)
+    assert first_silence["bits_per_second"] == 0.0
+    assert first_silence["bits_per_second_baseline_min"] > 0
+
+    # Every other port carries what it always has, a tenth either way.
+    layer_1 = _rows(result, "tc1")
+    others = layer_1[~layer_1["port_id"].isin([tp.VOLUME_PORT, tp.SILENT_PORT])
+                     & (layer_1["bits_per_second_baseline_mature"] == True)]  # noqa: E712  pylint: disable=singleton-comparison
+    assert (others["bits_per_second"] < 2 * others["bits_per_second_baseline_max"]).all()
+    assert (others["bits_per_second"] > 0.1 * others["bits_per_second_baseline_min"]).all()
+
+
+@pytest.mark.cpu_mode
+def test_a_new_vendor_on_a_vlan_is_a_step_and_another_camera_is_not(result: pd.DataFrame):
+    macs = _rows(result, "tc2_mac")
+    stepped = macs[_is(macs, "ouis_per_vlan_first_in_window") & (macs["ouis_per_vlan_step"].fillna(0) > 0)]
+
+    # The single-board computer on the camera VLAN, and the hub's own vendor on the office VLAN.
+    assert sorted(zip(stepped["vlan_key"], stepped["mac_address"])) == [(f"{tp.SITE}:{tp.VLAN}", tp.HUB_MACS[0]),
+                                                                        (f"{tp.SITE}:{tp.IOT_VLAN}", tp.ROGUE_OUI_MAC)]
+
+    third = macs[macs["mac_address"] == tp.THIRD_CAMERA_MAC].iloc[0]
+    assert third["ouis_per_vlan_step"] == 0
+    assert third["ouis_per_vlan_first_in_window"] == False  # noqa: E712  pylint: disable=singleton-comparison
+
+
+@pytest.mark.cpu_mode
+def test_the_slow_and_the_instant_exchange_are_read_against_their_ports(result: pd.DataFrame):
+    auth = _rows(result, "tc2_auth")
+    timed = auth[auth["auth_elapsed_ratio"].notna()]
+
+    slow = timed[timed["auth_attempts"] >= tp.SLOW_AUTH_ATTEMPTS].iloc[0]
+    assert slow["auth_port_key"] == f"{tp.SITE}:{tp.SWITCH}:{tp.SLOW_AUTH_PORT}"
+    assert slow["auth_elapsed_seconds"] == 9.0
+    assert slow["auth_elapsed_p99"] == 3.0
+    assert slow["auth_elapsed_samples"] > tp.AUTH_BASELINE_MIN_SAMPLES
+
+    instant = timed[timed["auth_elapsed_ratio"] == 0.0].iloc[0]
+    assert instant["auth_port_key"] == f"{tp.SITE}:{tp.SWITCH}:{tp.FAST_AUTH_PORT}"
+    assert instant["event_time"] == tp.FAST_AUTH_AT_SECONDS * NS
+
+    # Every other timed exchange takes what its port's exchanges take. After the slow exchange it is the first
+    # bench's slowest, so that bench's own three seconds are a third of it; the desk ports, reauthenticating every
+    # fifteen minutes, never have the twenty prior exchanges a distribution needs inside the hour.
+    rest = timed.drop([slow.name, instant.name])
+    assert set(rest["auth_elapsed_ratio"]) <= {1.0, round(1 / 3, 4)}
+    assert set(rest["auth_port_key"]) == {f"{tp.SITE}:{tp.SWITCH}:{port}" for port in tp.BENCH_PORTS}
+
+
+@pytest.mark.cpu_mode
+def test_a_binding_ends_where_its_source_says_it_did(result: pd.DataFrame):
+    bindings = _rows(result, "tc2_binding")
+    printer = bindings[bindings["mac_address"] == tp.PRINTER_MAC].iloc[0]
+    guest = bindings[bindings["mac_address"] == tp.GUEST_MAC].iloc[0]
+
+    # The table walk at 1500 no longer listed the printer, so it left after the walk at 1200 that last did.
+    assert printer["bind_end_reason"] == "snapshot_absent"
+    assert printer["bind_end"] == tp.PRINTER_LAST_SEEN_SECONDS * NS + 1
+    assert printer["bind_end_observed"] == False  # noqa: E712  pylint: disable=singleton-comparison
+
+    # The switch said the guest's address was removed, and when: the one end in the corpus somebody observed.
+    assert guest["bind_end_reason"] == "explicit"
+    assert guest["bind_end"] == tp.GUEST_LEAVES_AT_SECONDS * NS
+    assert (bindings["bind_end_observed"] == True).sum() == 1  # noqa: E712  pylint: disable=singleton-comparison

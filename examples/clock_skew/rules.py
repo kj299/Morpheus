@@ -124,8 +124,20 @@ def number(frame: pd.DataFrame, column: str) -> pd.Series:
 
 SUBSTITUTION = "R-D-L1-001 - Transceiver substitution"
 FORECAST = "R-P-L1-004 - Optical degradation forecast"
+TAP = "R-D-L1-002 - Optical tap step"
+FLAP = "R-D-L1-003 - Link flap instability"
+ERRORS = "R-B-L1-005 - Error rate step"
+NEIGHBOR = "R-D-L1-006 - LLDP neighbor change"
+VOLUME = "R-B-L1-007 - Interface volume departure"
 SUBSTITUTION_LINK_FLAPS = threshold(SUBSTITUTION, r"link_flaps\s*=\s*([\d.]+)")
 FORECAST_DAYS = threshold(FORECAST, r"optical_rx_dbm_days_to_floor\s*<=\s*([\d.]+)")
+TAP_RX_DROP_DB = threshold(TAP, r"optical_rx_dbm_deviation\s*<=\s*(-[\d.]+)")
+TAP_SAMPLES = threshold(TAP, r"optical_rx_dbm_baseline_samples\s*>=\s*([\d.]+)")
+TAP_TX_STEADY_DB = threshold(TAP, r"abs\(optical_tx_dbm_deviation\)\s*<\s*([\d.]+)")
+FLAP_TRANSITIONS = threshold(FLAP, r"link_flaps_in_window\s*>=\s*([\d.]+)")
+ERRORS_STEP = threshold(ERRORS, r"error_rate_step\s*>\s*([\d.]+)")
+SURGE_FACTOR = threshold(VOLUME, r"surge_factor\s*=\s*([\d.]+)")
+SILENCE_FACTOR = threshold(VOLUME, r"silence_factor\s*=\s*([\d.]+)")
 
 
 def layer_1_decisions(result: pd.DataFrame) -> dict:
@@ -137,6 +149,20 @@ def layer_1_decisions(result: pd.DataFrame) -> dict:
 
     R-P-L1-004: `optical_rx_dbm_forecast_status="projected" optical_rx_dbm_days_to_floor<=14 | stats ... BY
     entity_key`.
+
+    R-D-L1-002: a received-power drop of a decibel against a baseline of ten samples, on a port whose optic was not
+    changed and whose transmit power held within half a decibel, `stats ... BY entity_key`.
+
+    R-D-L1-003: `link_flaps_in_window>=10 link_flap_device_reset=false | stats ... BY entity_key`.
+
+    R-B-L1-005: `error_rate_baseline_mature=true error_rate_step>0.1 | stats ... BY entity_key`.
+
+    R-D-L1-006: a neighbour chassis the port has not had before, and not the null a restart reports, one notable
+    per poll keyed on the port and the new chassis. The previous chassis, like R-D-L1-001's previous serial, is
+    taken over the whole hour.
+
+    R-B-L1-007: traffic above twice the port's own hourly peak, or below a tenth of a trough that was not zero,
+    on a mature baseline, `stats ... BY entity_key`. The direction is a `values()` beside the key, not part of it.
     """
     polls = rows(result, "tc1").sort_values(["entity_key", "event_time"], kind="stable")
     polls = polls.assign(previous_serial=polls.groupby("entity_key")["transceiver_serial"].shift(1))
@@ -146,9 +172,37 @@ def layer_1_decisions(result: pd.DataFrame) -> dict:
     projected = polls[(polls["optical_rx_dbm_forecast_status"] == "projected")
                       & (number(polls, "optical_rx_dbm_days_to_floor") <= FORECAST_DAYS)]
 
+    requires(TAP, r"NOT transceiver_serial_changed=true")
+    tapped = polls[(number(polls, "optical_rx_dbm_deviation") <= TAP_RX_DROP_DB)
+                   & (number(polls, "optical_rx_dbm_baseline_samples") >= TAP_SAMPLES)
+                   & ~true(polls, "transceiver_serial_changed")
+                   & (number(polls, "optical_tx_dbm_deviation").abs() < TAP_TX_STEADY_DB)]
+
+    requires(FLAP, r"link_flap_device_reset=false")
+    flapping = polls[(number(polls, "link_flaps_in_window") >= FLAP_TRANSITIONS)
+                     & false(polls, "link_flap_device_reset")]
+
+    requires(ERRORS, r"error_rate_baseline_mature=true")
+    erring = polls[true(polls, "error_rate_baseline_mature") & (number(polls, "error_rate_step") > ERRORS_STEP)]
+
+    requires(NEIGHBOR, r'lldp_neighbor_chassis_id_first_seen="true" AND isnotnull\(lldp_neighbor_chassis_id\)')
+    moved = polls[true(polls, "lldp_neighbor_chassis_id_changed") & true(polls, "lldp_neighbor_chassis_id_first_seen")
+                  & polls["lldp_neighbor_chassis_id"].notna()]
+
+    requires(VOLUME, r"bits_per_second_baseline_min > 0")
+    traffic = number(polls, "bits_per_second")
+    (peak, trough) = (number(polls, "bits_per_second_baseline_max"), number(polls, "bits_per_second_baseline_min"))
+    departed = polls[true(polls, "bits_per_second_baseline_mature")
+                     & ((traffic > SURGE_FACTOR * peak) | ((trough > 0) & (traffic < SILENCE_FACTOR * trough)))]
+
     return {
         "R-D-L1-001": keys(substituted, ["entity_key", "previous_serial", "transceiver_serial"]),
         "R-P-L1-004": keys(projected, ["entity_key"]),
+        "R-D-L1-002": keys(tapped, ["entity_key"]),
+        "R-D-L1-003": keys(flapping, ["entity_key"]),
+        "R-B-L1-005": keys(erring, ["entity_key"]),
+        "R-D-L1-006": keys(moved, ["entity_key", "lldp_neighbor_chassis_id"]),
+        "R-B-L1-007": keys(departed, ["entity_key"]),
     }
 
 
@@ -156,13 +210,24 @@ def layer_1_decisions(result: pd.DataFrame) -> dict:
 
 NOVELTY = "R-B-L2-002 - Port-to-MAC binding novelty"
 NOVELTY_STEP = threshold(NOVELTY, r"macs_per_port_step\s*>\s*([\d.]+)")
+VENDOR = "R-B-L2-006 - New vendor on a VLAN"
+SLOW = "R-B-L2-007 - Slow 802.1X authorization"
+INSTANT = "R-B-L2-008 - Instant 802.1X authorization"
+VENDOR_STEP = threshold(VENDOR, r"ouis_per_vlan_step\s*>\s*([\d.]+)")
+SLOW_RATIO = threshold(SLOW, r"auth_elapsed_ratio\s*>=\s*([\d.]+)")
+SLOW_ATTEMPTS = threshold(SLOW, r"auth_attempts\s*>=\s*([\d.]+)")
+INSTANT_RATIO = threshold(INSTANT, r"auth_elapsed_ratio\s*<=\s*([\d.]+)")
 SPOOF_GAP_NS = int(threshold("R-D-L2-004 - MAC in two places at once", r"gap_threshold\s*=\s*(\d+)"))
 
 
 def layer_2_decisions(result: pd.DataFrame, single_host_ports: set) -> dict:
     """
-    The five layer 2 detections. R-D-L2-001 joins `port_designations`, which ships header-only, so the designated
-    ports are the corpus's; R-B-L2-002 finds the same ports without a designation list.
+    The eight layer 2 detections. R-D-L2-001 joins `port_designations`, which ships header-only, so the designated
+    ports are the corpus's; R-B-L2-002 finds the same ports without a designation list, and reads that lookup only
+    to leave trunks and LAG members out, of which the shipped one names none.
+
+    R-B-L2-006 is keyed on the VLAN, `stats ... BY vlan_key`; the two 802.1X timing rules are one notable per
+    exchange, keyed like R-D-L2-005 on the port and the supplicant.
     """
     from morpheus.utils.binding_closer import CONFLICT  # pylint: disable=import-outside-toplevel
     from morpheus.utils.binding_closer import DISPLACED  # pylint: disable=import-outside-toplevel
@@ -182,12 +247,23 @@ def layer_2_decisions(result: pd.DataFrame, single_host_ports: set) -> dict:
     auth = rows(result, "tc2_auth")
     unpaired = auth[true(auth, "auth_unpaired")]
 
+    requires(VENDOR, r"ouis_per_vlan_first_in_window=true ouis_per_vlan_baseline_mature=true")
+    vendor = macs[true(macs, "ouis_per_vlan_first_in_window") & true(macs, "ouis_per_vlan_baseline_mature")
+                  & (number(macs, "ouis_per_vlan_step") > VENDOR_STEP)]
+
+    ratio = number(auth, "auth_elapsed_ratio")
+    slow = auth[(ratio >= SLOW_RATIO) & (number(auth, "auth_attempts") >= SLOW_ATTEMPTS)]
+    instant = auth[ratio <= INSTANT_RATIO]
+
     return {
         "R-D-L2-001": keys(too_many, ["port_key", "mac_address"]),
         "R-B-L2-002": keys(stepped, ["port_key"]),
         "R-D-L2-003": keys(contested, ["arp_sender_ip", "arp_sender_mac"]),
         "R-D-L2-004": keys(spoofs, ["mac_address", "port_key"]),
         "R-D-L2-005": keys(unpaired, ["auth_port_key", "mac_address"]),
+        "R-B-L2-006": keys(vendor, ["vlan_key"]),
+        "R-B-L2-007": keys(slow, ["auth_port_key", "mac_address"]),
+        "R-B-L2-008": keys(instant, ["auth_port_key", "mac_address"]),
     }
 
 

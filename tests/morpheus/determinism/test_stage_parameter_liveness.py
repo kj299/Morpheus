@@ -63,6 +63,7 @@ from morpheus.stages.telemetry.tc1_feature_stage import TC1FeatureStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
 from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
 from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
+from morpheus.stages.telemetry.tc1_rate_stage import TC1RateStage
 from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
 from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
 from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
@@ -227,6 +228,33 @@ def counters() -> dict:
         "symbol_errors": [0, 0, 0, 3],
         "input_discards": [5, 5, 0, 0],
         "output_discards": [1, 1, 0, 0],
+        "if_hc_in_octets": [10**12, 10**12 + 750_000, 40, 750_040],
+        "if_hc_out_octets": [10**12, 10**12 + 375_000, 20, 375_020],
+        "lldp_neighbor_chassis_id": ["sw3", "sw3", None, "sw3"],
+        "lldp_neighbor_port_id": ["Gi3/0/1"] * 4,
+    }
+
+
+def rated_polls() -> dict:
+    """One port's polls as the normalize stage leaves them: two a period for twelve ten-minute periods, across two
+    hours, with an early peak a capped history forgets, a reset, and a climb and a surge at the end."""
+    count = 24
+    crc = [9, 9] + [1] * 18 + [30, 30, 60, 60]
+    octets_in = [7_500_000, 7_500_000] + [750_000] * 10 + [1_500_000] * 8 + [7_500_000] * 4
+
+    return {
+        "entity_key": ["hq:sw1:Gi1/0/1"] * count,
+        "event_time": [(index // 2) * 10 * MINUTE + (index % 2) * MINUTE for index in range(count)],
+        "interval_seconds": [60.0] * count,
+        "counter_reset": [False] * 5 + [True] + [False] * (count - 6),
+        "sample_out_of_order": [False] * count,
+        "crc_errors_delta": crc,
+        "symbol_errors_delta": [1] * count,
+        "input_discards_delta": [2] * count,
+        "output_discards_delta": [1] * count,
+        "if_hc_in_octets_delta": octets_in,
+        "if_hc_out_octets_delta": [375_000] * count,
+        "link_speed_bps": [10_000_000_000] * count,
     }
 
 
@@ -310,6 +338,7 @@ def port_inventory() -> dict:
         "event_time": [index * MINUTE for index in range(len(serials))],
         "transceiver_serial": serials,
         "lldp_neighbor_chassis_id": neighbors,
+        "lldp_neighbor_port_id": ["Te0/1"] * len(serials),
     }
 
 
@@ -771,6 +800,51 @@ def auth() -> dict:
     }
 
 
+def timed_exchanges() -> dict:
+    """One port's exchanges ten minutes apart, three seconds each and then nine: a distribution to measure against
+    only for a stage that keeps enough of them, for long enough."""
+    results = []
+    times = []
+
+    for (index, seconds) in enumerate([3, 3, 3, 9]):
+        results += ["started", "success"]
+        times += [index * 10 * MINUTE, index * 10 * MINUTE + seconds * SECOND]
+
+    return {
+        "site_id": ["hq"] * len(results),
+        "switch_id": ["sw1"] * len(results),
+        "port_id": ["Gi1/0/1"] * len(results),
+        "mac_address": ["aa:00:00:00:00:01"] * len(results),
+        "dot1x_result": results,
+        "event_time": times,
+    }
+
+
+def mac_events() -> dict:
+    """A MAC seen twice, then the switch's notice that it was removed, then seen again."""
+    payload = macs()
+    payload["mac_action"] = [None, None, None, "removed"]
+    payload["port_id"] = ["Gi1/0/1"] * 4
+    payload["mac_address"] = ["aa:00:00:00:00:01"] * 4
+
+    return payload
+
+
+def mac_snapshots() -> dict:
+    """Two walks of one switch's table five minutes apart, then a third: the second no longer lists one address."""
+    addresses = ["aa:00:00:00:00:01", "aa:00:00:00:00:02", "aa:00:00:00:00:01", "aa:00:00:00:00:01"]
+    times = [0, 0, 5 * MINUTE, 10 * MINUTE]
+
+    return {
+        "mac_address": addresses,
+        "event_time": times,
+        "site_id": ["hq"] * len(addresses),
+        "switch_id": ["sw1"] * len(addresses),
+        "port_id": ["Gi1/0/1", "Gi1/0/2", "Gi1/0/1", "Gi1/0/1"],
+        "vlan_id": [10] * len(addresses),
+    }
+
+
 def flows() -> dict:
     return {
         "src_ip": ["10.0.0.1", "10.0.0.1", "not-an-address"],
@@ -819,6 +893,17 @@ def wire() -> dict:
         "arp_sender_ip_excluded": [False, False],
         "auth_unpaired": [False, True],
         "auth_port_key": ["hq:sw1:Gi1/0/1"] * 2,
+        "vlan_key": ["hq:10"] * 2,
+        "ouis_per_vlan": [1, 2],
+        "ouis_per_vlan_first_in_window": [True, True],
+        "ouis_per_vlan_step": [None, 1],
+        "ouis_per_vlan_baseline_max": [None, 1],
+        "ouis_per_vlan_baseline_mature": [False, True],
+        "auth_attempts": [1, 0],
+        "auth_elapsed_seconds": [3.0, None],
+        "auth_elapsed_p99": [None, None],
+        "auth_elapsed_ratio": [None, None],
+        "auth_elapsed_samples": [1, None],
         "resolution_method": ["exact", "unresolved"],
         "bind_start": [1788114000123456789, 1788114060123456789],
         "mac_address": ["aa:00:00:00:00:01", "aa:00:00:00:00:02"],
@@ -1016,6 +1101,37 @@ REGISTRY: dict = {
                 Knob("uptime_unit", DIFFERS, benign="cs", extreme="s"),
                 Knob("delta_suffix", DIFFERS, benign="_delta", extreme="_change"),
                 Knob("entity_key_column", DIFFERS, benign="entity_key", extreme="subject_key"),
+                Knob("octet_columns",
+                     DIFFERS,
+                     benign=["if_hc_in_octets", "if_hc_out_octets"],
+                     extreme=["if_hc_in_octets"]),
+                Knob("neighbor_chassis_column", INPUT_COLUMN, benign="lldp_neighbor_chassis_id"),
+                Knob("neighbor_port_column", INPUT_COLUMN, benign="lldp_neighbor_port_id"),
+            ),
+        ),
+    "TC1RateStage":
+        Scenario(
+            stage=TC1RateStage,
+            frame=rated_polls,
+            base={"min_buckets": 2},
+            knobs=(
+                Knob("entity_key_column", INPUT_COLUMN, benign="entity_key"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("delta_suffix", DIFFERS, benign="_delta", extreme="_change"),
+                Knob("error_columns", DIFFERS, benign=["crc_errors", "symbol_errors"], extreme=["crc_errors"]),
+                Knob("discard_columns",
+                     DIFFERS,
+                     benign=["input_discards", "output_discards"],
+                     extreme=["input_discards"]),
+                Knob("in_octets_column", DIFFERS, benign="if_hc_in_octets", extreme="if_hc_out_octets"),
+                Knob("out_octets_column", DIFFERS, benign="if_hc_out_octets", extreme="if_hc_in_octets"),
+                Knob("link_speed_column", INPUT_COLUMN, benign="link_speed_bps"),
+                Knob("volume_seasonality", DIFFERS, benign="none", extreme="hour_of_day"),
+                Knob("bucket_seconds", DIFFERS, benign=300, extreme=60),
+                Knob("window_seconds", DIFFERS, benign=14 * 24 * 3600, extreme=600),
+                Knob("min_buckets", DIFFERS, benign=2, extreme=100),
+                Knob("max_buckets", DIFFERS, benign=4096, extreme=2),
             ),
         ),
     "TC1OpticalStage":
@@ -1197,6 +1313,13 @@ REGISTRY: dict = {
                 Knob("supplicant_columns", DIFFERS, benign=["mac_address"], extreme=[]),
                 Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("timeout_seconds", DIFFERS, benign=3600, extreme=1),
+                Knob("baseline_min_samples", DIFFERS, benign=100, extreme=1, frame=timed_exchanges),
+                Knob("baseline_window_seconds",
+                     DIFFERS,
+                     benign=3600,
+                     extreme=60,
+                     also={"baseline_min_samples": 1},
+                     frame=timed_exchanges),
             ),
         ),
     "TC1BindingStage":
@@ -1232,6 +1355,18 @@ REGISTRY: dict = {
                 Knob("idle_timeout_seconds", DIFFERS, benign=86400, extreme=60),
                 Knob("emit_open_on_complete", DIFFERS, benign=False, extreme=True),
                 Knob("emit_open_bindings", DIFFERS, benign=False, extreme=True),
+                Knob("action_column", DIFFERS, benign=None, extreme="mac_action", frame=mac_events),
+                Knob("stop_values",
+                     DIFFERS,
+                     benign=["removed"],
+                     extreme=["stop"],
+                     also={"action_column": "mac_action"},
+                     frame=mac_events),
+                Knob("snapshot_scope_columns",
+                     DIFFERS,
+                     benign=None,
+                     extreme=["site_id", "switch_id"],
+                     frame=mac_snapshots),
             ),
         ),
     "TC5ScoreStage":

@@ -53,6 +53,9 @@ COUNTS = (MACS_PER_PORT, PORTS_PER_MAC, OUIS_PER_VLAN)
 PORT_KEY_SEPARATOR = KEY_SEPARATOR
 """Separator for the `site_id:switch_id:port_id` key the per-port counts group on."""
 
+VLAN_KEY = "vlan_key"
+"""The VLAN as the per-VLAN count groups on it: `site_id:vlan_id`, or the VLAN alone without a site column."""
+
 
 @register_stage("tc2-cardinality")
 class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
@@ -68,7 +71,8 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
       between them over time it is a device being carried around, benign in an office and much less so in a
       datacentre.
     - **`ouis_per_vlan`** — an OUI a VLAN has not carried before is an unmanaged device class appearing on a
-      segment that was meant to be homogeneous.
+      segment that was meant to be homogeneous. The VLAN is counted per site, as `vlan_key`, `site_id:vlan_id`:
+      VLAN numbers are local, and VLAN 10 at two sites is two segments whose devices have nothing in common.
 
     Each count comes with a `<name>_first_in_window` flag saying whether this particular value was absent from the
     window before this sample, which is what turns a count into an event, and a `<name>_saturated` flag saying
@@ -149,6 +153,7 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             self._needed_columns[f"{name}_saturated"] = TypeId.BOOL8
 
         self._needed_columns["port_key"] = TypeId.STRING
+        self._needed_columns[VLAN_KEY] = TypeId.STRING
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -245,6 +250,7 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             ouis = to_host_list(df, self._oui_column) if self._oui_column in df.columns else [None] * len(macs)
 
             port_keys: list = []
+            vlan_keys: list = []
             counts: dict[str, list] = {name: [] for name in COUNTS}
             first: dict[str, list] = {name: [] for name in COUNTS}
             saturated: dict[str, list] = {name: [] for name in COUNTS}
@@ -262,6 +268,8 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                                                                                     ports[position])
                 port_key = compose_key(location)
                 port_keys.append(port_key)
+                vlan_key = compose_key((sites[position], vlans[position]) if has_site else (vlans[position], ))
+                vlan_keys.append(vlan_key)
 
                 try:
                     event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
@@ -280,7 +288,7 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 observations = {
                     MACS_PER_PORT: (port_key, mac),
                     PORTS_PER_MAC: (mac, port_key),
-                    OUIS_PER_VLAN: (self._text(vlans[position]), self._oui(ouis[position], mac)),
+                    OUIS_PER_VLAN: (vlan_key, self._oui(ouis[position], mac)),
                 }
 
                 out_of_order = False
@@ -307,6 +315,7 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 keyless += int(row_keyless)
 
             assign_str_column(df, "port_key", port_keys)
+            assign_str_column(df, VLAN_KEY, vlan_keys)
 
             for name in COUNTS:
                 assign_nullable_int_column(df, name, counts[name])

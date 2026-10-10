@@ -29,17 +29,24 @@ gained a learned model of their own, returned what was then written for all fort
 R-B-L5-002 return their first rows, 42 and 28, and the detections wrote 166 risk records. It is kept in
 `search_head_runs/`.
 
-`search_head_results.json` holds the sixth, made on 2026-10-10 on the same install over the events step 9
-regenerated, when layer 3 gained a fortnight of ordinary history and each host a baseline of its own, and the app
-four more searches. It returned what is written for all fifty-two: R-B-L3-006, R-B-L3-007 and R-D-L3-008 return
-their one row each, the connection evidence report its one connection, and the detections now write 198 risk
-records, so the run checks that the index holds exactly those rows -- 198 -- before the searches that read them
-run. The fifteen three-layer chains carry the same risk as before. A run an hour earlier, over the first draft of
-step 9's events, returned eight beaconing pairs where six were written: the new corpus's port sweep and a
-conferencing client's media streams had been planted on a metronome, so R-B-L3-002 read both as beacons, and the
-package's own derivation found the same two. They now keep the uneven pace real ones do, that run is not kept, and
-the run above is of the corrected events. The five earlier runs differ from what is written now in exactly the
-searches the models and the host baselines changed, and the test names them.
+The sixth, made on 2026-10-10 on the same install over the events step 9 regenerated, when layer 3 gained a
+fortnight of ordinary history and each host a baseline of its own, and the app four more searches, returned what
+was then written for all fifty-two, with 198 risk records. A run an hour before it, over the first draft of step
+9's events, returned eight beaconing pairs where six were written: the new corpus's port sweep and a conferencing
+client's media streams had been planted on a metronome, so R-B-L3-002 read both as beacons, and the package's own
+derivation found the same two. They now keep the uneven pace real ones do, and that run is not kept. The sixth is
+kept in `search_head_runs/`.
+
+`search_head_results.json` holds the seventh, made later on 2026-10-10 on the same install over the events step 10
+regenerated, when the estate gained the network objects' plants -- a tap, a flapping link, a restarted switch, a
+climbing error count, a re-patch and an inserted device, a surge and a silence, a camera VLAN, two lab benches
+timing their 802.1X exchanges -- and the app ten more searches. It returned what is written for all sixty-two,
+over 10,285 indexed events: each of the ten returns what its plant leaves for it, and the detections now write 209
+risk records, so the run checks that the index holds exactly those rows -- 209 -- before the searches that read
+them run. One of the fifteen
+three-layer chains now carries 50, from the tap on its port, beside the one at 55; neither reaches 60. The six
+earlier runs differ from what is written now in exactly the searches the models, the host baselines and step 10's
+corpus changed, and the test names them.
 
 ## Running it
 
@@ -52,7 +59,7 @@ SPLUNK_PASSWORD='choose-one' examples/splunk_lineage_app/validate/run_search_hea
 
 It starts the container, waits for it to report healthy, and runs [`run_search_head.py`](./run_search_head.py)
 inside it under Splunk's own interpreter. That indexes every file in `sample_events/`, makes the two checks
-below, dispatches all fifty-two searches in the order this document prescribes, and writes
+below, dispatches all sixty-two searches in the order this document prescribes, and writes
 `search_head_results.json` beside this file: the Splunk version, the date, what was indexed, a row count per
 search, how many risk records the detections wrote and the index holds, and the risk on every chain that spans
 three layers. Commit it; `tests/morpheus/determinism/test_search_head_run.py` compares it with
@@ -98,9 +105,10 @@ These are the failures this app has actually had, and both are invisible in a se
    The events are historical, so the drift should be large and negative. A drift near zero means `TIME_PREFIX`
    matched nothing and every windowed rule has quietly become a rule about when the data was loaded.
 2. **`binding_table` must be present on bucketed rows.** Run
-   `index=behavior_bindings sourcetype=binding:bucketed | stats count BY binding_table`. One row, `dhcp_lease`,
-   80 events. An empty result means the refresh search selects on a field the producer stopped writing, and the
-   lookup silently stops being refreshed.
+   `index=behavior_bindings sourcetype=binding:bucketed | stats count BY binding_table`. Two rows here,
+   `mac_table` with 124 events and `port_inventory` with 7, and no `dhcp_lease`, because this corpus has no DHCP
+   source; the run records the same two. An empty result means the refresh search selects on a field the producer
+   stopped writing, and the lookup silently stops being refreshed.
 
 ## What each search should return
 
@@ -111,11 +119,21 @@ should return nothing:
 |---|---|---|
 | R-D-L1-001, transceiver substitution | **1** | One port: `hq:sw1:Gi1/0/2`'s serial changed on a poll the flap count says the link never moved for. The other optic replaced this hour, on `Gi1/0/6`, is quiet because the device recorded the link dropping between the two polls, which is what a swap does. |
 | R-P-L1-004, optical degradation forecast | **1** | One port, the failing optic on `Gi1/0/6`: the line through its readings gives it hours, and the search's one row per port carries the shortest time to the floor. The tap's step, the steady ports' jitter and the replacement optic project nothing. |
-| R-D-L2-001, MAC count on an access port | **0** | Correct. Joins `port_designations`, which ships header-only; 11 candidate rows are waiting behind it. |
-| R-B-L2-002, port-to-MAC binding novelty | **2** | The hub port, four above the one address it carried in every earlier snapshot, and the spoofed port, one above its own record: the two ports R-D-L2-001 would name, found without its designation list. Once each, because the next snapshot's baseline has absorbed the step. |
+| R-D-L1-002, optical tap step | **1** | One port, `Gi1/0/3`, which loses three decibels of receive light at minute forty while its transmit level holds: twenty-one polls a decibel or more under the port's own median, one notable. The failing optic slides with its own median and never reads more than 0.867 dB under it, which makes it R-P-L1-004's; the two replaced optics change serial and are excluded on that poll. |
+| R-D-L1-003, link flap instability | **1** | One port, `Gi1/0/7`, down and back in every polling gap from the half hour: ten transitions in its hour on the fifth flapping poll. The single flap, the swap, the re-patch and the insertion are two transitions each, and the restarted switch's are labelled a device reset and excluded. |
+| Device restart | **1** | One row: `sw2` restarts at minute thirty and its first poll back reports a counter reset and a device reset on each of its three ports -- three flags, one device. An operational report, so it writes no risk. |
+| R-B-L1-005, error rate step | **1** | One port, `Gi1/0/8`, whose CRC errors climb by thirty more each minute from minute forty-five: sixteen polls more than 0.1 errors a second above the highest five-minute peak of its own history. Every other port stays within 0.0167 of its record. |
+| R-D-L1-006, LLDP neighbor change | **2** | The re-patched port, `Gi1/0/11`, from `dist-sw3` to `dist-sw4`, and `Gi1/0/12`, which reports a neighbour the estate has never seen: a device inserted in the path. The restarted switch's ports report no neighbour for one poll and then their old one, which is no neighbour they have not had. |
+| R-B-L1-007, interface volume departure | **2** | `Gi1/0/9` sends nine hundred megabits a second where it never carried more than about sixty, and `Gi1/0/10` carries nothing with its link up, each for the five polls until the next period joins the history. Every other port carries what it always has. |
+| Topology, LLDP adjacency | **15** | One link per polled port, thirteen, and one more on each of the two ports whose neighbour changed. A port with no neighbour on a poll writes no link rather than a link to nobody, and a second run writes the same fifteen. A lookup refresh, not a detection. |
+| R-D-L2-001, MAC count on an access port | **0** | Correct. Joins `port_designations`, which ships header-only; 17 candidate rows are waiting behind it. |
+| R-B-L2-002, port-to-MAC binding novelty | **2** | The hub port, four above the one address it carried in every earlier snapshot, and the spoofed port, one above its own record: the two ports R-D-L2-001 would name, found without its designation list, which this rule reads only to leave trunks and LAG members out. Once each, because the next snapshot's baseline has absorbed the step. |
 | R-D-L2-003, ARP anomaly | **1** | 24 contested observations aggregate to one notable on `10.0.0.1`. |
 | R-D-L2-004, MAC in two places | **2** | A conflict at zero gap and a displacement at two seconds. The roaming device, displaced a full poll cadence later, is deliberately outside the threshold. |
 | R-D-L2-005, authorization without authentication | **2** | One bypass on a quiet port, one that arrived while a legitimate exchange was open. |
+| R-B-L2-006, new vendor on a VLAN | **2** | The camera VLAN, `hq:20`, when a single-board computer appears on it, and `hq:10`, when the hub's MACs arrive. Keyed on site and VLAN, so the same VLAN number at another site is another segment. The third camera, of the vendor the camera VLAN already carries, does not step. |
+| R-B-L2-007, slow 802.1X authorization | **1** | The first lab bench's exchange at minute forty-five: three attempts, and nine seconds after the last, three times the slowest of its port's prior exchanges. The desk ports reauthenticate every fifteen minutes and never have the twenty prior exchanges a distribution needs inside the hour. |
+| R-B-L2-008, instant 802.1X authorization | **1** | The second lab bench's exchange accepted in the second it was requested, where each before it took four. The two bypasses carry no elapsed time at all, which is R-D-L2-005's signal. |
 | R-B-L3-001, fan-out expansion | **1** | One notable, for the scanner, measured against its own fortnight: it reached three servers an hour for fourteen days and eighty addresses in its last scored hour. The DHCP server's Monday checks reach sixty, which the literal this rule shipped with fired on, and its own Mondays reach sixty-four, so it is no step; the browser reaches as many addresses and none of them inside the estate. |
 | R-B-L3-002, beaconing | **6** | One notable from the layer 3 corpus, for the pair on a five-minute timer; the worker making plenty of flows to one file server at ragged intervals does not appear. Five more are R-C-002's hosts in the campaign corpus, each on a sixty-second timer -- the rule reports all five on their regularity alone. |
 | R-D-L3-003, reserved-range egress | **1** | One flow, to `240.0.0.1`. What the number really asserts is that the other 1,183 flows are classified correctly. |
@@ -151,18 +169,18 @@ should return nothing:
 | R-C-004, staged exfiltration | **1** | One chain: a bulk export, twenty-five minutes later a fifty-times breach from the address the exporter's open session held, and twenty minutes after that a connection to a destination whose issuer nobody in the estate had seen. Four actors each do all three with one relation broken and are quiet: another principal's address, a breach after logging off, the corporate issuer, and the export last rather than first. |
 | R-C-002, TLS before beaconing | **1** | One chain, and the first this rule has ever returned: it now reads the scored events rather than the two detections' notables. A settled host presents a new stack to a destination and fourteen minutes later its beacon there matures. Four hosts do both halves with one condition broken and are quiet: a beacon already running an hour before, a beacon to another address, a beacon maturing after sixty-seven minutes, and a host with five handshakes behind it. |
 | R-C-005, credential replay across the stack | **1** | One principal at two switch ports 534 km apart twenty minutes apart: the leases name the workstations behind both sign-in addresses, and the MAC bindings closed from the two sites' switches put them at headquarters and in Edinburgh. Five others are one step short and quiet -- two ports at the same site, the same journey in three hours, an address no lease names, a lease that had ended an hour before, and a refused second attempt. Nothing here rests on geolocation: both ends of the journey are ports. |
-| Behavior summary, per-layer scores | **5173** | One row per five-minute bin, layer, entity and lineage over the 9380 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5's scored week, because only `TC5ScoreStage` produces `max_abs_z` and it does not score the fortnight the models were trained on. |
-| Chain assembly, cross-layer risk | **0** | Correct, and now because the risk is written and is not enough. Every detection collects its rows into `behavior_risk` and this search sums them per lineage, once each. 15 of the 3994 chains span three layers -- a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there -- and one detection accuses any of them: R-D-L2-003, at 55, under the 60 the search needs. The other 14 carry none; the run records both totals. `methods` reads every hop the resolver ladder took, so the 15 name `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. |
+| Behavior summary, per-layer scores | **5345** | One row per five-minute bin, layer, entity and lineage over the 10035 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5's scored week, because only `TC5ScoreStage` produces `max_abs_z` and it does not score the fortnight the models were trained on. |
+| Chain assembly, cross-layer risk | **0** | Correct, and now because the risk is written and is not enough. Every detection collects its rows into `behavior_risk` and this search sums them per lineage, once each. 15 of the 4166 chains span three layers -- a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there -- and two detections accuse one each: R-D-L2-003 at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, both under the 60 the search needs. The other 13 carry none; the run records all three totals. `methods` reads every hop the resolver ladder took, so the 15 name `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. |
 | Binding lookup, L2/L3 refresh | **0** | Correct, and it always was. The search selects `binding_table=dhcp_lease`; this corpus has no DHCP source, and the 80 bucketed rows it used to be credited with are a MAC table under a different name. |
-| Binding lookup, L1 refresh | **7** | Seven port intervals across five ports: three stable, two on each of the two ports whose optics are swapped. The lookup keys on port and switch with no bucket, so a swapped port's two collapse to one row and the later optic wins -- it answers what is in a port now, not what was in it then. |
-| Binding lookup, L1 history refresh | **2** | Two rows, and two rows is the point. Only the ports whose optics were replaced have a superseded interval; the other three are described for all time by the current-state row and cost the history nothing. |
+| Binding lookup, L1 refresh | **23** | Twenty-three port intervals across thirteen ports: eight that never changed, two on each of the two ports whose optics are swapped and on the re-patched and inserted-into ports, and three on each of the restarted switch's ports, whose neighbour was unknown for one poll. The lookup keys on port and switch with no bucket, so a port's intervals collapse to one row and the latest wins -- it answers what is in a port now, not what was in it then. |
+| Binding lookup, L1 history refresh | **7** | Seven rows, one per port whose binding was ever superseded: the two re-fitted optics, the re-patch, the insertion, and the restarted switch's three ports. The six that never changed are described for all time by the current-state row and cost the history nothing. The restart is a cost the history pays, recorded rather than hidden: the binding stage cannot tell a neighbour not yet relearned from a cable pulled. |
 | Binding lookup, L1 history expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
 | Principal watchlist, expiry | **2** | The runner dates the events so the newest lands three to ten days before the run. R-P-L7-006's two entries are stamped with their principals' latest events, which are the newest in the corpus, so they are still inside their thirty days; R-P-L5-006's six are stamped thirty-two days earlier and are dropped. It was written as 0 until the first search-head run showed that only the undated 1970 events expire everything. Run it last: run before R-B-L7-002, it empties the list that search reads. |
 | Binding lookup, L2/L3 expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
 | Binding health, unresolved rate | **1** | The ARP stream, the one class whose records carry a resolution outcome: 180 unresolved of 1,220 (0.148), under the 0.2 that marks a class degraded. It read five while the wire sent null fields: four classes carry `resolution_method` with no value, `resolution_method=*` matched the nulls, and the search reported them as resolving with nothing unresolved. An operational metric; the value matters, not whether it fired. |
 | R-P-L5-006, drift trajectory | **6** | Two principals, neither of them behaviour, explained in `expected_results.json`: the two whose week repeats their fortnight climb on its last three days by hundredths a day, as the cadence features keep moving after their models were trained, and the rule measures that against a day-to-day spread that is nearly zero. The principals whose week does depart all cross the mean ceiling and leave. Watchlist, never a page: every firing is written to `principal_watchlist`. |
 
-**Five of the fifty-two should return nothing.** That is the point of writing them down. An empty result is
+**Five of the sixty-two should return nothing.** That is the point of writing them down. An empty result is
 this app's characteristic failure, and without a list saying which emptiness is correct, a deployment cannot
 tell a rule that is working from a rule that is broken. The ratio has moved both ways, which is what makes it
 worth stating: it improved as layers 3, 4, 5, 6 and 7 gained producers, and went the other way when the L2/L3 refresh

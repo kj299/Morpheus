@@ -49,7 +49,7 @@ for row.
 
 ## The result
 
-All forty-one shipped detections are swept, each over the pipeline that feeds it, through
+All forty-nine shipped detections are swept, each over the pipeline that feeds it, through
 [`rules.py`](./rules.py), which reduces every rule to what it accuses and reads every threshold, join tolerance
 and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hundred, one second, ten, thirty and
 sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
@@ -73,12 +73,20 @@ under two names, and the sweep gives each reported name a clock of its own, so i
 are seven hosts; R-B-L7-004 is unchanged to a minute all the same. Every chain breaks at the second it broke at
 before, by accusing a control, and loses its attacker at the second it did before.
 
-What a sweep can say depends on the clocks in the corpus, and the forty-one fall into three groups that must
+It was run again later on 2026-10-10 after step 10 (#61) gave the port, the link, the VLAN and the 802.1X exchange
+behaviour of their own and added eight rules over them: five at layer 1 and three at layer 2. Their inputs come
+through the estate's collectors and switches like the other layer 1 and 2 rules', so they join the measured group,
+and each decides on the estate with no skew exactly what the harness plants for it: one port each for the tap, the
+flapping link and the error climb, the re-patch and the insertion, the surge and the silence, the two VLANs, and
+one bench exchange each for the two timing rules. All eight are unchanged to a minute on collector clocks and on
+switch clocks, and nothing else moved.
+
+What a sweep can say depends on the clocks in the corpus, and the forty-nine fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
-| Inputs on clocks that disagree | 12 | A tolerance, or the spread at which the rule changes |
+| Inputs on clocks that disagree | 20 | A tolerance, or the spread at which the rule changes |
 | Inputs on one clock, in a corpus with several | 11 | Boundary sensitivity under a uniform shift, not a tolerance |
 | Corpus with one clock | 18 | Nothing; reported as not measured |
 
@@ -88,7 +96,7 @@ its own process starts:
 
 | Rule | Breaking spread |
 | --- | --- |
-| R-D-L1-001, R-P-L1-004, R-D-L2-001, R-B-L2-002, R-D-L2-003, R-D-L2-005 | unchanged to 60s on collectors and on switches |
+| R-D-L1-001, 002, 003 and 006, R-B-L1-005 and 007, R-P-L1-004, R-D-L2-001, 003 and 005, R-B-L2-002, 006, 007 and 008 | unchanged to 60s on collectors and on switches |
 | **R-D-L2-004, MAC in two places** | unchanged to 60s on collectors; **changes at 60s on switches** |
 | R-B-L7-004, process ancestry novelty | unchanged to 60s on host clocks |
 | **R-C-001, lateral movement chain** | **960s**, gaining a control |

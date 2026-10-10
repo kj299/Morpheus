@@ -368,3 +368,21 @@ def test_the_stage_renders_keys_by_the_shared_rule_not_its_own():
 
     for missing in (None, float("nan"), ""):
         assert TC2CardinalityStage._text(missing) is normalize_text(missing) is None
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_one_vlan_number_at_two_sites_is_two_segments(config: Config):
+    # VLAN numbers are local. A phone vendor on VLAN 10 at one site says nothing about VLAN 10 at another, and
+    # pooled the second site's first phone would read as a vendor its segment already carries.
+    payload = frame(["00:11:22:33:44:55", "00:11:22:00:00:01"], ports=["Gi1/0/1", "Gi1/0/2"], vlans=[10, 10])
+    payload["site_id"] = ["hq", "branch"]
+
+    meta = run(config, payload)
+
+    assert _as_list(meta, "vlan_key") == ["hq:10", "branch:10"]
+    assert _as_list(meta, "ouis_per_vlan") == [1, 1]
+    assert _as_list(meta, "ouis_per_vlan_first_in_window") == [True, True]
+
+
+def test_needed_columns_name_the_vlan_key(config: Config):
+    assert TC2CardinalityStage(config).get_needed_columns()["vlan_key"] == TypeId.STRING
