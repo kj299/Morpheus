@@ -1,0 +1,546 @@
+{
+ "at": "2026-10-10T00:59:55.821015+00:00",
+ "corpus": {
+  "fortnight_rows": 230,
+  "principals": [
+   "alice@example.com",
+   "bob@example.com",
+   "carol@example.com",
+   "dave@example.com",
+   "erin@example.com",
+   "grace@example.com",
+   "svc-batch@example.com"
+  ],
+  "week_rows": 155
+ },
+ "dfp": {
+  "batch_split": {
+   "by_day": {
+    "batches": 7,
+    "events_scored": 155,
+    "most_emissions_of_one_event": 2,
+    "rows_emitted": 194
+   },
+   "by_event": {
+    "batches": 155,
+    "events_scored": 155,
+    "most_emissions_of_one_event": 15,
+    "rows_emitted": 807
+   },
+   "events_in_scored_week": 155,
+   "events_scored_by_every_batching": 155,
+   "events_whose_last_score_differs_across_batchings": 1,
+   "largest_last_score_difference": 0.0001,
+   "whole": {
+    "batches": 1,
+    "events_scored": 155,
+    "most_emissions_of_one_event": 1,
+    "rows_emitted": 155
+   }
+  },
+  "cpu_pipeline": {
+   "declared_modes": [
+    "GPU"
+   ],
+   "error": "RuntimeError: Unsupported execution mode ExecutionMode.CPU for stage dfp-split-users, supported exexution modes are ExecutionMode.GPU",
+   "refused": true
+  },
+  "event_time": {
+   "first_run_event_time": [
+    "2026-10-10T01:00:20Z"
+   ],
+   "identical_across_runs": false,
+   "input_event_time": [
+    "1970-01-19 10:00:00",
+    "1970-01-19 10:10:00"
+   ],
+   "second_run_event_time": [
+    "2026-10-10T01:00:21Z"
+   ]
+  },
+  "imports": {
+   "dfp_inference_stage": {
+    "error": "rmm._cuda.gpu.CUDARuntimeError: cudaErrorInsufficientDriver: CUDA driver version is insufficient for CUDA runtime version",
+    "ok": false
+   },
+   "dfp_rolling_window_stage": {
+    "error": "rmm._cuda.gpu.CUDARuntimeError: cudaErrorInsufficientDriver: CUDA driver version is insufficient for CUDA runtime version",
+    "ok": false
+   },
+   "dfp_split_users_stage": {
+    "error": "rmm._cuda.gpu.CUDARuntimeError: cudaErrorInsufficientDriver: CUDA driver version is insufficient for CUDA runtime version",
+    "ok": false
+   },
+   "dfp_training": {
+    "error": "rmm._cuda.gpu.CUDARuntimeError: cudaErrorInsufficientDriver: CUDA driver version is insufficient for CUDA runtime version",
+    "ok": false
+   }
+  },
+  "late_row": {
+   "events": 30,
+   "principal": "erin@example.com",
+   "raised": "RuntimeError: Invalid rolling window for user erin@example.com"
+  },
+  "latest_version_and_cache": {
+   "after_retraining_new_stage": {
+    "mean_abs_z": [
+     1.402,
+     1.0788,
+     1.0177,
+     0.3339
+    ],
+    "model_version": [
+     "dfp-alice@example_dot_com:2"
+    ]
+   },
+   "after_retraining_same_stage": {
+    "mean_abs_z": [
+     1.6076,
+     1.2952,
+     0.2008,
+     0.8126
+    ],
+    "model_version": [
+     "dfp-alice@example_dot_com:1"
+    ]
+   },
+   "before_retraining": {
+    "mean_abs_z": [
+     1.6076,
+     1.2952,
+     0.2008,
+     0.8126
+    ],
+    "model_version": [
+     "dfp-alice@example_dot_com:1"
+    ]
+   },
+   "cache_timeout_sec": 600,
+   "manifest_or_pin_parameter": false,
+   "principal": "alice@example.com",
+   "rows": 4
+  },
+  "naming": {
+   "output_columns_naming_a_fallback": [],
+   "principals": 7,
+   "principals_scored_by_own_model": 0,
+   "principals_with_a_registered_model": 5,
+   "reader_looks_up": "dfp-alice@example.com",
+   "registered": [
+    "dfp-alice@example_dot_com",
+    "dfp-bob@example_dot_com",
+    "dfp-carol@example_dot_com",
+    "dfp-dave@example_dot_com",
+    "dfp-erin@example_dot_com",
+    "dfp-generic_user"
+   ],
+   "versions_scored_with": {
+    "dfp-generic_user:1": 155
+   }
+  },
+  "registered_when_repaired": {
+   "dfp-alice@example_dot_com": 1,
+   "dfp-bob@example_dot_com": 1,
+   "dfp-carol@example_dot_com": 1,
+   "dfp-dave@example_dot_com": 1,
+   "dfp-erin@example_dot_com": 1,
+   "dfp-generic_user": 1
+  },
+  "training_double_run": {
+   "principal": "alice@example.com",
+   "rows": 40,
+   "seeded_digests": [
+    "a88695087c5c43bd",
+    "a88695087c5c43bd"
+   ],
+   "seeded_identical": true,
+   "unseeded_digests": [
+    "1e461931d43d6e63",
+    "0aa6e6376e3fc711"
+   ],
+   "unseeded_identical": false
+  },
+  "with_serialization_repair": {
+   "models_registered": 6,
+   "rows_scored": 0
+  },
+  "writer_as_shipped": {
+   "models_registered": 0,
+   "windows_trained": 6
+  }
+ },
+ "drift": {
+  "execution_modes": "GPU only",
+  "first_point": {
+   "1024": 0.7506,
+   "32": 0.7381
+  },
+  "on_the_fork_rows": "AttributeError: 'NoneType' object has no attribute 'get_tensor'",
+  "points_logged": {
+   "1024": 1,
+   "32": 5
+  },
+  "reports_model_version": false,
+  "rows": 155,
+  "writes_to_the_row": false
+ },
+ "environment": {
+  "cuda_device": false,
+  "mlflow": "3.16.0",
+  "pandas": "2.2.2",
+  "shims": [
+   "cudf -> pandas: no CUDA driver; the DFP stages' own methods are called off-pipeline",
+   "cupy -> numpy: no CUDA device; the arithmetic is the stages' own, with `choose` and `.get()` given CuPy's semantics"
+  ],
+  "torch": "2.4.0+cpu"
+ },
+ "sources": {
+  "azure": {
+   "columns_after_stage": 66,
+   "columns_derived": [
+    "appincrement",
+    "day",
+    "locincrement",
+    "logcount",
+    "time"
+   ],
+   "counters": {
+    "appincrement": {
+     "users": 20,
+     "users_whose_count_resets": 18
+    },
+    "locincrement": {
+     "users": 20,
+     "users_whose_count_resets": 14
+    },
+    "logcount": {
+     "users": 20,
+     "users_whose_count_resets": 19
+    }
+   },
+   "derive_as_shipped": "KeyError: \"None of [Index(['locationcity', 'locationstate', 'locationcountryOrRegion'], dtype='object')] are in the [columns]\"",
+   "envelope_present": [],
+   "execution_modes": "GpuAndCpuMixin",
+   "fork_inputs": 15,
+   "fork_inputs_present": 15,
+   "mapping": {
+    "app": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "appDisplayName"
+    },
+    "auth_result": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "statuserrorCode"
+    },
+    "device_id": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "deviceDetaildeviceId"
+    },
+    "event_time": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "createdDateTime"
+    },
+    "mfa_result": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "authenticationDetails"
+    },
+    "mfa_used": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "authenticationRequirement"
+    },
+    "source_asn": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "autonomousSystemNumber"
+    },
+    "source_city": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "locationcity"
+    },
+    "source_country": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "locationcountryOrRegion"
+    },
+    "source_ip": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "ipAddress"
+    },
+    "source_latitude": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "locationgeoCoordinateslatitude"
+    },
+    "source_longitude": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "locationgeoCoordinateslongitude"
+    },
+    "source_region": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "locationstate"
+    },
+    "token_type": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "incomingTokenType"
+    },
+    "user_principal": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "userPrincipalName"
+    }
+   },
+   "renaming_as_shipped": {
+    "columns_renamed": 0,
+    "columns_with_separators": 15
+   },
+   "rows": 3239,
+   "sample": [
+    "models/datasets/training-data/azure/azure-ad-logs-sample-training-data.json"
+   ],
+   "users": 20
+  },
+  "cloudtrail": {
+   "columns_after_stage": 18,
+   "columns_derived": [],
+   "counters": {},
+   "envelope_present": [],
+   "execution_modes": "GpuAndCpuMixin",
+   "fork_inputs": 15,
+   "fork_inputs_present": 5,
+   "mapping": {
+    "app": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "eventSource"
+    },
+    "auth_result": {
+     "filled": 0.415,
+     "measured": true,
+     "present": true,
+     "source": "errorCode"
+    },
+    "device_id": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": null
+    },
+    "event_time": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "eventTime"
+    },
+    "mfa_result": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": null
+    },
+    "mfa_used": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": "additionalEventDataMFAUsed"
+    },
+    "source_asn": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": null
+    },
+    "source_city": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": null
+    },
+    "source_country": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": null
+    },
+    "source_ip": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "sourceIPAddress"
+    },
+    "source_latitude": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": null
+    },
+    "source_longitude": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": null
+    },
+    "source_region": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": null
+    },
+    "token_type": {
+     "filled": 0.0,
+     "measured": true,
+     "present": false,
+     "source": null
+    },
+    "user_principal": {
+     "filled": 1.0,
+     "measured": true,
+     "present": true,
+     "source": "userIdentitysessionContextsessionIssueruserName"
+    }
+   },
+   "rows": 1700,
+   "sample": [
+    "models/datasets/training-data/cloudtrail/hammah-user123-training-part2.json",
+    "models/datasets/training-data/cloudtrail/hammah-role-g-training-part1.json"
+   ],
+   "users": 2
+  },
+  "duo": {
+   "envelope_present": [],
+   "execution_modes": "GpuAndCpuMixin",
+   "mapping": {
+    "app": {
+     "measured": false,
+     "source": "applicationname"
+    },
+    "auth_result": {
+     "measured": false,
+     "source": "result"
+    },
+    "device_id": {
+     "measured": false,
+     "source": "authdevicename"
+    },
+    "event_time": {
+     "measured": false,
+     "source": "isotimestamp"
+    },
+    "mfa_result": {
+     "measured": false,
+     "source": "result"
+    },
+    "mfa_used": {
+     "measured": false,
+     "source": "factor"
+    },
+    "source_asn": {
+     "measured": false,
+     "source": null
+    },
+    "source_city": {
+     "measured": false,
+     "source": "accessdevicelocationcity"
+    },
+    "source_country": {
+     "measured": false,
+     "source": "accessdevicelocationcountry"
+    },
+    "source_ip": {
+     "measured": false,
+     "source": "accessdeviceip"
+    },
+    "source_latitude": {
+     "measured": false,
+     "source": null
+    },
+    "source_longitude": {
+     "measured": false,
+     "source": null
+    },
+    "source_region": {
+     "measured": false,
+     "source": "accessdevicelocationstate"
+    },
+    "token_type": {
+     "measured": false,
+     "source": null
+    },
+    "user_principal": {
+     "measured": false,
+     "source": "username"
+    }
+   },
+   "sample": "none in the tree"
+  }
+ },
+ "timeseries": {
+  "as_shipped": {
+   "anomaly_found_in_the_released_message": 0,
+   "calculations": 0,
+   "flagged": 0,
+   "largest_possible_zscore": 4.899,
+   "longest_hold_in_polls": 0,
+   "polls": 61,
+   "released_at_the_end": 0,
+   "released_before_the_end": 61,
+   "window_bins": 25
+  },
+  "burst": {
+   "anomaly_found_in_the_released_message": 29,
+   "calculations": 91,
+   "flagged": 0,
+   "largest_possible_zscore": 8.944,
+   "longest_hold_in_polls": 1,
+   "polls": 91,
+   "released_at_the_end": 1,
+   "released_before_the_end": 90,
+   "window_bins": 81
+  },
+  "burst_detections_identical_whatever_the_values": true,
+  "execution_modes": "GPU only",
+  "reads": [
+   "the timestamp column"
+  ],
+  "receive_level_falls_by_db": 1.799,
+  "scaled_to_the_hour": {
+   "anomaly_found_in_the_released_message": 0,
+   "calculations": 61,
+   "flagged": 0,
+   "largest_possible_zscore": 4.899,
+   "longest_hold_in_polls": 1,
+   "polls": 61,
+   "released_at_the_end": 1,
+   "released_before_the_end": 60,
+   "window_bins": 25
+  },
+  "series": "sw1 Gi1/0/6 optical_rx_dbm, one poll a minute",
+  "zscore_threshold": 8.0
+ }
+}
