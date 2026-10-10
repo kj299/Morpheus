@@ -185,7 +185,8 @@ _LOCATES = (
     "source_longitude",
     "source_region",
     "switch_id",
-    "user_location",
+    "user_location",  # The port and the neighbour port it is cabled to, at layer 1.
+    "link_key",
 )
 
 _PROFILES = (
@@ -388,6 +389,20 @@ _PROFILES = (
     "srcs_per_dst_baseline_max",
     "byte_asymmetry_step",
     "byte_asymmetry_baseline_max",
+    # How much a port carries, which on an access port is how much whoever sits at it sends and receives, and an
+    # 802.1X exchange against its port's.
+    "if_hc_in_octets",
+    "if_hc_out_octets",
+    "if_hc_in_octets_delta",
+    "if_hc_out_octets_delta",
+    "bits_in_per_second",
+    "bits_out_per_second",
+    "bits_per_second",
+    "bits_per_second_baseline_max",
+    "bits_per_second_baseline_min",
+    "bits_per_second_step",
+    "utilization",
+    "auth_elapsed_ratio",
 )
 
 _PSEUDONYMS = (
@@ -613,6 +628,26 @@ _OPERATIONAL = (
     "srcs_per_dst_baseline_mature",
     "byte_asymmetry_baseline_buckets",
     "byte_asymmetry_baseline_mature",
+    # A port's error rates, speed, neighbour port and history depth, a VLAN's vendor history, an 802.1X port's own
+    # distribution, and what a MAC table row says happened.
+    "error_rate",
+    "error_rate_baseline_max",
+    "error_rate_baseline_buckets",
+    "error_rate_baseline_mature",
+    "error_rate_step",
+    "discard_rate",
+    "link_speed_bps",
+    "lldp_neighbor_port_id",
+    "bits_per_second_baseline_buckets",
+    "bits_per_second_baseline_mature",
+    "vlan_key",
+    "ouis_per_vlan_baseline_max",
+    "ouis_per_vlan_baseline_buckets",
+    "ouis_per_vlan_baseline_mature",
+    "ouis_per_vlan_step",
+    "auth_elapsed_p99",
+    "auth_elapsed_samples",
+    "mac_action",
 )
 
 COLUMNS: dict[str, str] = {}

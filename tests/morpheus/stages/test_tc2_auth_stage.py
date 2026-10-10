@@ -425,3 +425,69 @@ def test_one_row_from_a_broken_clock_does_not_abandon_every_pending_exchange(con
 
     assert _as_list(meta, "auth_unpaired") == [False]
     assert _as_list(meta, "auth_elapsed_seconds") == [2.0]
+
+
+def _exchanges(durations: list, attempts: list = None) -> dict:
+    """One exchange a minute on one port, each `(seconds to authorize)`, with retries where asked."""
+    results = []
+    times = []
+
+    for (index, seconds) in enumerate(durations):
+        start = index * 60
+        retries = 1 if attempts is None else attempts[index]
+
+        for attempt in range(retries):
+            results.append("started")
+            times.append((start + attempt) * NS_PER_SECOND)
+
+        results.append("success")
+        times.append((start + retries - 1 + seconds) * NS_PER_SECOND)
+
+    return frame(results, times=times)
+
+
+def test_needed_columns_include_the_ports_distribution(config: Config):
+    needed = TC2AuthStage(config).get_needed_columns()
+
+    assert needed["auth_elapsed_p99"] == TypeId.FLOAT64
+    assert needed["auth_elapsed_ratio"] == TypeId.FLOAT64
+    assert needed["auth_elapsed_samples"] == TypeId.INT64
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_exchange_is_measured_against_the_ports_own_prior_exchanges(config: Config):
+    # Five ordinary three-second exchanges, then a nine-second one after three attempts, then one that took none.
+    meta = run(config, _exchanges([3, 3, 3, 3, 3, 9, 0], attempts=[1, 1, 1, 1, 1, 3, 1]), baseline_min_samples=5)
+    outcomes = [index for (index, result) in enumerate(_as_list(meta, "dot1x_result")) if result == "success"]
+
+    p99 = [_as_list(meta, "auth_elapsed_p99")[index] for index in outcomes]
+    ratio = [_as_list(meta, "auth_elapsed_ratio")[index] for index in outcomes]
+
+    # Below a hundred exchanges the 99th percentile by nearest rank is the slowest one, so once measured the slow
+    # exchange is the port's reference; the instant one is a small fraction of either.
+    assert p99 == [None] * 5 + [3.0, 9.0]
+    assert ratio == [None] * 5 + [3.0, 0.0]
+    assert [_as_list(meta, "auth_attempts")[index] for index in outcomes][5] == 3
+    assert [_as_list(meta, "auth_elapsed_samples")[index] for index in outcomes] == [1, 2, 3, 4, 5, 6, 7]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_unpaired_authorization_has_no_place_in_the_distribution(config: Config):
+    payload = _exchanges([3, 3, 3])
+    payload["dot1x_result"].append("success")
+    payload["event_time"].append(600 * NS_PER_SECOND)
+    for column in ("site_id", "switch_id", "port_id"):
+        payload[column].append(payload[column][0])
+
+    meta = run(config, payload, baseline_min_samples=2)
+
+    assert _as_list(meta, "auth_unpaired")[-1] is True
+    assert _as_list(meta, "auth_elapsed_ratio")[-1] is None
+    assert _as_list(meta, "auth_elapsed_samples")[-1] is None
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_port_with_too_few_exchanges_has_no_distribution(config: Config):
+    meta = run(config, _exchanges([3, 3, 30]))
+
+    assert set(_as_list(meta, "auth_elapsed_p99")) == {None}

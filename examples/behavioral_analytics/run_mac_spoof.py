@@ -27,9 +27,9 @@ applying the shipped `props.conf`'s own regex and format to the raw bytes, and a
 the parsed JSON rather than to a frame.
 
 R-D-L2-004 is the rule this can be done for. It needs one collector and nothing else: no `port_designations`
-lookup, no exclusion list, no TC-0 context store. Several of the forty-one shipped detections need something an
+lookup, no exclusion list, no TC-0 context store. Several of the forty-nine shipped detections need something an
 estate has to supply first, and the rest have not been run this way yet, which is why proving one end to end is
-worth more than gesturing at forty-one.
+worth more than gesturing at forty-nine.
 
     python examples/behavioral_analytics/run_mac_spoof.py
 

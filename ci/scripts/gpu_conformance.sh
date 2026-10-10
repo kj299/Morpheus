@@ -88,6 +88,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc1_forecast_stage.py
     tests/morpheus/stages/test_tc1_normalize_stage.py
     tests/morpheus/stages/test_tc1_optical_stage.py
+    tests/morpheus/stages/test_tc1_rate_stage.py
     tests/morpheus/stages/test_tc2_arp_stage.py
     tests/morpheus/stages/test_tc2_auth_stage.py
     tests/morpheus/stages/test_tc2_baseline_stage.py

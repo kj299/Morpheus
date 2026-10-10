@@ -110,7 +110,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 52
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 62
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
@@ -126,7 +126,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     # the trajectory rule reads it.
     writers = [name for name in names if runner.writes_risk(name)]
 
-    assert len(writers) == 41
+    assert len(writers) == 49
     assert max(position[name] for name in writers) < position[runner.CHAIN]
     assert position[runner.SUMMARY] < position[runner.TRAJECTORY] < position[runner.CHAIN]
     assert min(position[name] for name in expiries) > max(position[name] for name in names if name not in expiries)
@@ -229,6 +229,18 @@ reads as rises; the campaign gained a principal whose novel process lands on a w
 both. The four searches step 9 added are absent from the earlier runs and are not compared.
 """
 
+BEFORE_THE_NETWORK_OBJECTS = {
+    "Binding lookup - L1 refresh": 7,
+    "Binding lookup - L1 history refresh": 2,
+    "Behavior summary - per-layer scores": 5173,
+}
+"""What every run before step 10's network-object detections found where its corpus changed the answer.
+
+The layer 1 corpus gained the re-patched, inserted and restarted ports, whose bindings the two refreshes now carry,
+and the polls, exchanges and MAC rows step 10 planted, which the summary groups. The ten searches step 10 added are
+absent from the earlier runs and are not compared.
+"""
+
 FIRST_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-05T0114Z.json")
 """The first search-head run, kept because it is the evidence for the two changes it caused."""
 
@@ -257,6 +269,7 @@ def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it
     }
 
     assert differing == {
+        **BEFORE_THE_NETWORK_OBJECTS,
         **BEFORE_THE_HOST_BASELINES,
         **BEFORE_THE_MODELS,
         "R-B-L2-002 - Port-to-MAC binding novelty": 6,
@@ -290,7 +303,12 @@ def test_the_second_run_differed_from_what_is_written_only_where_the_trajectory_
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**BEFORE_THE_HOST_BASELINES, **BEFORE_THE_MODELS, "R-P-L3-005 - Fan-out trajectory": 0}
+    assert differing == {
+        **BEFORE_THE_NETWORK_OBJECTS,
+        **BEFORE_THE_HOST_BASELINES,
+        **BEFORE_THE_MODELS,
+        "R-P-L3-005 - Fan-out trajectory": 0,
+    }
     assert "risk_records" not in run["checks"], "the write path did not exist when this run was made"
 
 
@@ -343,7 +361,7 @@ def test_the_fourth_run_differs_from_what_is_written_only_where_the_learned_mode
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**BEFORE_THE_HOST_BASELINES, **BEFORE_THE_MODELS}
+    assert differing == {**BEFORE_THE_NETWORK_OBJECTS, **BEFORE_THE_HOST_BASELINES, **BEFORE_THE_MODELS}
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 94
 
 
@@ -365,5 +383,29 @@ def test_the_fifth_run_differs_from_what_is_written_only_where_the_host_baseline
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_HOST_BASELINES
+    assert differing == {**BEFORE_THE_NETWORK_OBJECTS, **BEFORE_THE_HOST_BASELINES}
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 166
+
+
+SIXTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-10T0315Z.json")
+"""The run over step 9's events, which matched every expectation then written."""
+
+
+def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objects_arrived():
+    # Made on 2026-10-10 with step 9's host baselines: all fifty-two then matched, with 198 risk records. Against
+    # step 10's events it differs in exactly the two binding refreshes and the summary, and has none of the ten
+    # searches step 10 added.
+    with open(SIXTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_NETWORK_OBJECTS
+    assert len(run["searches"]) == 52 and len(expected) == 62
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198

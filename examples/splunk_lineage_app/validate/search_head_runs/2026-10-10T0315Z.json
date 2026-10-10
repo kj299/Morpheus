@@ -1,20 +1,20 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-10T04:51:40.657583+00:00",
+  "at": "2026-10-10T03:15:23.251889+00:00",
   "timestamp_shift_weeks": 2953,
   "dispatch_window": {
     "earliest": 1785888000,
-    "latest": 1791611418
+    "latest": 1791605638
   },
   "indexed": {
-    "binding:bucketed": 131,
-    "binding:l1": 23,
-    "binding:l2": 19,
+    "binding:bucketed": 82,
+    "binding:l1": 7,
+    "binding:l2": 13,
     "context:asset": 7,
     "context:identity": 23,
     "morpheus:edge": 47,
-    "morpheus:score:l1": 793,
-    "morpheus:score:l2": 1501,
+    "morpheus:score:l1": 305,
+    "morpheus:score:l2": 1334,
     "morpheus:score:l3": 1525,
     "morpheus:score:l4": 987,
     "morpheus:score:l5": 661,
@@ -22,14 +22,14 @@
     "morpheus:score:l7": 4272
   },
   "expected_indexed": {
-    "binding:bucketed": 131,
-    "binding:l1": 23,
-    "binding:l2": 19,
+    "binding:bucketed": 82,
+    "binding:l1": 7,
+    "binding:l2": 13,
     "context:asset": 7,
     "context:identity": 23,
     "morpheus:edge": 47,
-    "morpheus:score:l1": 793,
-    "morpheus:score:l2": 1501,
+    "morpheus:score:l1": 305,
+    "morpheus:score:l2": 1334,
     "morpheus:score:l3": 1525,
     "morpheus:score:l4": 987,
     "morpheus:score:l5": 661,
@@ -40,18 +40,18 @@
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-5629823.000000",
-        "min_drift": "-5633425.000000"
+        "max_drift": "-5624041.000000",
+        "min_drift": "-5627643.000000"
       }
     ],
     "binding_tables": [
       {
         "binding_table": "mac_table",
-        "count": "124"
+        "count": "80"
       },
       {
         "binding_table": "port_inventory",
-        "count": "7"
+        "count": "2"
       }
     ],
     "principal_watchlist": [
@@ -69,11 +69,7 @@
     "three_layer_chain_risk": [
       {
         "total_risk": "0",
-        "count": "13"
-      },
-      {
-        "total_risk": "50",
-        "count": "1"
+        "count": "14"
       },
       {
         "total_risk": "55",
@@ -81,32 +77,12 @@
       }
     ],
     "risk_records": {
-      "written": 209,
-      "indexed": 209,
+      "written": 198,
+      "indexed": 198,
       "by_rule": [
-        {
-          "rule_id": "R-B-L1-005",
-          "count": "1"
-        },
-        {
-          "rule_id": "R-B-L1-007",
-          "count": "2"
-        },
         {
           "rule_id": "R-B-L2-002",
           "count": "2"
-        },
-        {
-          "rule_id": "R-B-L2-006",
-          "count": "2"
-        },
-        {
-          "rule_id": "R-B-L2-007",
-          "count": "1"
-        },
-        {
-          "rule_id": "R-B-L2-008",
-          "count": "1"
         },
         {
           "rule_id": "R-B-L3-001",
@@ -183,18 +159,6 @@
         {
           "rule_id": "R-D-L1-001",
           "count": "1"
-        },
-        {
-          "rule_id": "R-D-L1-002",
-          "count": "1"
-        },
-        {
-          "rule_id": "R-D-L1-003",
-          "count": "1"
-        },
-        {
-          "rule_id": "R-D-L1-006",
-          "count": "2"
         },
         {
           "rule_id": "R-D-L2-003",
@@ -285,19 +249,12 @@
     "Binding lookup - L1 history refresh",
     "R-P-L5-006 - Drift trajectory",
     "R-P-L7-006 - Access breadth trajectory",
-    "Topology - LLDP adjacency",
     "R-C-002 - TLS anomaly precedes beaconing",
     "R-C-001 - Lateral movement chain",
     "R-C-004 - Staged exfiltration",
     "R-C-005 - Credential replay across the stack",
     "R-D-L1-001 - Transceiver substitution",
     "R-P-L1-004 - Optical degradation forecast",
-    "R-D-L1-002 - Optical tap step",
-    "R-D-L1-003 - Link flap instability",
-    "Device restart",
-    "R-B-L1-005 - Error rate step",
-    "R-D-L1-006 - LLDP neighbor change",
-    "R-B-L1-007 - Interface volume departure",
     "R-D-L2-004 - MAC in two places at once",
     "R-D-L2-005 - Authorization without authentication",
     "Connection evidence - layers 3, 4 and 6",
@@ -324,9 +281,6 @@
     "R-D-L2-001 - MAC address count exceeded on an access port",
     "R-B-L2-002 - Port-to-MAC binding novelty",
     "R-D-L2-003 - ARP anomaly",
-    "R-B-L2-006 - New vendor on a VLAN",
-    "R-B-L2-007 - Slow 802.1X authorization",
-    "R-B-L2-008 - Instant 802.1X authorization",
     "Binding health - unresolved rate",
     "R-D-L5-003 - Impossible travel",
     "R-D-L5-004 - Multi-factor fatigue",
@@ -350,11 +304,11 @@
     },
     "Binding lookup - L1 refresh": {
       "phase": "refresh",
-      "rows": 23
+      "rows": 7
     },
     "Binding lookup - L1 history refresh": {
       "phase": "refresh",
-      "rows": 7
+      "rows": 2
     },
     "R-P-L5-006 - Drift trajectory": {
       "phase": "predictive",
@@ -363,10 +317,6 @@
     "R-P-L7-006 - Access breadth trajectory": {
       "phase": "predictive",
       "rows": 2
-    },
-    "Topology - LLDP adjacency": {
-      "phase": "search",
-      "rows": 15
     },
     "R-C-002 - TLS anomaly precedes beaconing": {
       "phase": "search",
@@ -391,30 +341,6 @@
     "R-P-L1-004 - Optical degradation forecast": {
       "phase": "search",
       "rows": 1
-    },
-    "R-D-L1-002 - Optical tap step": {
-      "phase": "search",
-      "rows": 1
-    },
-    "R-D-L1-003 - Link flap instability": {
-      "phase": "search",
-      "rows": 1
-    },
-    "Device restart": {
-      "phase": "search",
-      "rows": 1
-    },
-    "R-B-L1-005 - Error rate step": {
-      "phase": "search",
-      "rows": 1
-    },
-    "R-D-L1-006 - LLDP neighbor change": {
-      "phase": "search",
-      "rows": 2
-    },
-    "R-B-L1-007 - Interface volume departure": {
-      "phase": "search",
-      "rows": 2
     },
     "R-D-L2-004 - MAC in two places at once": {
       "phase": "search",
@@ -520,18 +446,6 @@
       "phase": "search",
       "rows": 1
     },
-    "R-B-L2-006 - New vendor on a VLAN": {
-      "phase": "search",
-      "rows": 2
-    },
-    "R-B-L2-007 - Slow 802.1X authorization": {
-      "phase": "search",
-      "rows": 1
-    },
-    "R-B-L2-008 - Instant 802.1X authorization": {
-      "phase": "search",
-      "rows": 1
-    },
     "Binding health - unresolved rate": {
       "phase": "search",
       "rows": 1
@@ -570,7 +484,7 @@
     },
     "Behavior summary - per-layer scores": {
       "phase": "summary",
-      "rows": 5345
+      "rows": 5173
     },
     "R-P-L3-005 - Fan-out trajectory": {
       "phase": "trajectory",

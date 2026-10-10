@@ -29,8 +29,10 @@ import collections
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
+import typing
 
 import pandas as pd
 import pytest
@@ -59,7 +61,6 @@ import telemetry_pipeline as tp  # noqa: E402
 def _stanza_search(name: str) -> str:
     """One saved search's SPL, with its continuation lines folded."""
     import configparser  # pylint: disable=import-outside-toplevel
-    import re  # pylint: disable=import-outside-toplevel
 
     with open(SAVEDSEARCHES, encoding="utf-8") as handle:
         folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
@@ -78,7 +79,6 @@ def threshold(stanza: str, pattern: str) -> float:
     the package's expectations went stale. `pattern` names the eval variable or the comparison, with one group
     around the number.
     """
-    import re  # pylint: disable=import-outside-toplevel
 
     match = re.search(pattern, _stanza_search(stanza))
 
@@ -103,6 +103,24 @@ LOCATION_LOSS_THRESHOLD = threshold("R-B-L5-002 - Location novelty anomaly", r"l
 DURATION_RATIO_THRESHOLD = threshold("R-B-L5-005 - Session duration anomaly", r"ratio_threshold\s*=\s*([\d.]+)")
 FORECAST_DAYS_THRESHOLD = threshold("R-P-L1-004 - Optical degradation forecast",
                                     r"optical_rx_dbm_days_to_floor\s*<=\s*([\d.]+)")
+TAP = "R-D-L1-002 - Optical tap step"
+FLAP = "R-D-L1-003 - Link flap instability"
+ERRORS = "R-B-L1-005 - Error rate step"
+NEIGHBOR = "R-D-L1-006 - LLDP neighbor change"
+VOLUME = "R-B-L1-007 - Interface volume departure"
+VENDOR = "R-B-L2-006 - New vendor on a VLAN"
+SLOW = "R-B-L2-007 - Slow 802.1X authorization"
+INSTANT = "R-B-L2-008 - Instant 802.1X authorization"
+TAP_DEVIATION = threshold(TAP, r"optical_rx_dbm_deviation\s*<=\s*(-?[\d.]+)")
+TAP_SAMPLES = threshold(TAP, r"optical_rx_dbm_baseline_samples\s*>=\s*([\d.]+)")
+TAP_TRANSMIT = threshold(TAP, r"abs\(optical_tx_dbm_deviation\)\s*<\s*([\d.]+)")
+FLAP_TRANSITIONS = threshold(FLAP, r"link_flaps_in_window\s*>=\s*([\d.]+)")
+ERROR_STEP = threshold(ERRORS, r"error_rate_step\s*>\s*([\d.]+)")
+SURGE_FACTOR = threshold(VOLUME, r"surge_factor\s*=\s*([\d.]+)")
+SILENCE_FACTOR = threshold(VOLUME, r"silence_factor\s*=\s*([\d.]+)")
+SLOW_RATIO = threshold(SLOW, r"auth_elapsed_ratio\s*>=\s*([\d.]+)")
+SLOW_ATTEMPTS = threshold(SLOW, r"auth_attempts\s*>=\s*([\d.]+)")
+INSTANT_RATIO = threshold(INSTANT, r"auth_elapsed_ratio\s*<=\s*([\d.]+)")
 """The thresholds the saved searches state, read from the stanzas rather than repeated here."""
 
 
@@ -124,7 +142,6 @@ def sessions_fixture() -> pd.DataFrame:
 
 def _searches() -> set:
     import configparser
-    import re
 
     with open(SAVEDSEARCHES, encoding="utf-8") as handle:
         folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
@@ -137,7 +154,6 @@ def _searches() -> set:
 
 def _search_text(name: str) -> str:
     import configparser
-    import re
 
     with open(SAVEDSEARCHES, encoding="utf-8") as handle:
         folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
@@ -380,7 +396,6 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
     # search reads that lookup by the field the writers key it on. The entries R-P-L5-006 writes are recomputed;
     # VALIDATION.md states the count a search head should hold, and it is checked against that here.
     import configparser  # pylint: disable=import-outside-toplevel
-    import re  # pylint: disable=import-outside-toplevel
 
     transforms = configparser.ConfigParser(interpolation=None, strict=False)
     transforms.read(os.path.join(os.path.dirname(SAVEDSEARCHES), "transforms.conf"))
@@ -933,7 +948,6 @@ def test_the_fan_out_trajectory_returns_exactly_what_is_written(expected: dict):
     # read the value two rows back as `last(previous_destinations)` inside the same streamstats that created
     # `previous_destinations`, which Splunk evaluates as null on every row. The search now takes two passes, and
     # the runner dispatches it after the summary is searchable.
-    import re  # pylint: disable=import-outside-toplevel
 
     search = _search_text("R-P-L3-005 - Fan-out trajectory")
     passes = re.findall(r"streamstats current=f last\((\w+)\) AS (\w+) BY entity_key", search)
@@ -959,7 +973,6 @@ def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(
     # risk sum that is written and is too small. Every detection collects its rows into `behavior_risk`; the one
     # detection that accuses a lineage spanning three layers is the ARP anomaly, at 55, under the 60 the search
     # needs. Both halves are asserted from the events, and the search-head run records the per-chain totals.
-    import re  # pylint: disable=import-outside-toplevel
 
     entry = expected["searches"]["Chain assembly - cross-layer risk"]
     chain = _search_text("Chain assembly - cross-layer risk")
@@ -994,18 +1007,22 @@ def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(
          for lineage in three_layer
          for method in methods[lineage]})
 
-    # R-D-L2-003 as the search states it: claimed by more than one MAC, not excluded, grouped by the address, its
-    # risk record naming every lineage the group's events were on.
-    arp = re.search(r'rule_id = "R-D-L2-003", risk_score = (\d+)', _search_text("R-D-L2-003 - ARP anomaly"))
-    accused = set()
+    # Every layer 1 and 2 detection's risk records, as the stanzas state them: a record adds its score once to each
+    # lineage it names, which for a rule that groups is every lineage its group's rows were on. These are the
+    # detections whose records can land on a chain spanning three layers, since those chains are the estate's.
+    risk = collections.Counter()
 
-    for event in events:
-        if (event.get("macs_claiming_sender_ip", 0) > 1 and event.get("arp_sender_ip_excluded") is False):
-            accused.add(event["lineage_id"])
+    for rule in LAYER_1_AND_2:
+        score = _risk_score(rule)
 
-    assert len(accused & three_layer) == 1
-    assert float(arp.group(1)) < risk_threshold
-    assert entry["three_layer_chain_risk"] == {"0": len(three_layer) - 1, arp.group(1): 1}
+        for rows in _notables(rule):
+            for lineage in {row["lineage_id"] for row in rows if row.get("lineage_id") is not None}:
+                risk[lineage] += score
+
+    totals = collections.Counter(str(int(risk.get(lineage, 0))) for lineage in three_layer)
+
+    assert max(risk.get(lineage, 0) for lineage in three_layer) < risk_threshold
+    assert entry["three_layer_chain_risk"] == dict(sorted(totals.items(), key=lambda item: int(item[0])))
     assert entry["expected_rows"] == 0 and entry["expected_empty"] is True
 
 
@@ -1015,7 +1032,6 @@ def test_the_validation_document_says_the_same_thing_the_expectation_file_does(e
     # repository -- and it drifted here: the summary table went a whole increment without the layer 3 searches
     # in it, still saying "four of the fourteen" over a row count from two increments earlier. Every number in
     # that table now comes from the same file these assertions do.
-    import re  # pylint: disable=import-outside-toplevel
 
     with open(VALIDATION, encoding="utf-8") as handle:
         document = handle.read()
@@ -1099,7 +1115,20 @@ NUMBER_WORDS = {
     "forty-six": 46,
     "forty-seven": 47,
     "forty-eight": 48,
+    "forty-nine": 49,
+    "fifty": 50,
+    "fifty-one": 51,
     "fifty-two": 52,
+    "fifty-three": 53,
+    "fifty-four": 54,
+    "fifty-five": 55,
+    "fifty-six": 56,
+    "fifty-seven": 57,
+    "fifty-eight": 58,
+    "fifty-nine": 59,
+    "sixty": 60,
+    "sixty-one": 61,
+    "sixty-two": 62,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -1145,6 +1174,8 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # Five after the learned models, and the two that left were waiting for exactly that: R-B-L5-001 and R-B-L5-002
     # read only rows a principal's own model scored, and each principal now has one, trained on a fortnight the
     # scored week follows.
+    #
+    # Five of sixty-two after step 10, whose ten searches each arrived with something planted for it to find.
     assert len(empty) == 5
 
     for (name, entry) in empty.items():
@@ -1152,7 +1183,13 @@ def test_every_expected_empty_search_says_why(expected: dict):
         assert len(entry["why"]) > 60, f"{name}: an expected-empty search needs a reason, not a shrug"
 
 
-def test_the_port_history_holds_the_optics_that_were_replaced_and_nothing_else(telemetry: pd.DataFrame):
+SUPERSEDED_PORTS = sorted([(tp.SWITCH, port) for port in list(tp.SWAPS) + [tp.REPATCH_PORT, tp.INLINE_PORT]] +
+                          [(tp.REBOOTING_SWITCH, port) for port in tp.REBOOT_PORTS])
+"""The ports whose bindings something superseded: two optics replaced, a re-patch, an insertion, and the restarted
+switch's ports, whose neighbour was unknown for the first poll after it came back."""
+
+
+def test_the_port_history_holds_what_was_superseded_and_nothing_else(telemetry: pd.DataFrame):
     # The layer 1 lookup used to answer every question in the present tense: keyed on the port alone, a port whose
     # optic is replaced collapses to one row and an investigation into last Tuesday gets Wednesday's optic. The
     # history lookup is the other tense, and its value is as much in what it leaves out as in what it holds.
@@ -1160,10 +1197,11 @@ def test_the_port_history_holds_the_optics_that_were_replaced_and_nothing_else(t
 
     superseded = ports.superseded()
 
-    # One interval on each of the two ports anybody touched. The other four ports are described for all time by
-    # the row the current-state lookup holds, and cost the history collection nothing.
-    assert superseded.size == len(tp.SWAPS)
-    assert superseded.key_count == len(tp.SWAPS)
+    # One interval on each port somebody re-cabled or re-fitted, and two on each port of the restarted switch: its
+    # old neighbour, then one poll of none. The ports nobody touched are described for all time by the row the
+    # current-state lookup holds, and cost the history collection nothing.
+    assert superseded.key_count == len(SUPERSEDED_PORTS)
+    assert superseded.size == len(tp.SWAPS) + 2 + 2 * len(tp.REBOOT_PORTS)
 
     last = tp.CORPUS_SECONDS * tp.NS_PER_SECOND - 1
     optic = tp.PORT_INVENTORY_COLUMNS.index("transceiver_serial")
@@ -1178,20 +1216,22 @@ def test_the_port_history_holds_the_optics_that_were_replaced_and_nothing_else(t
         assert ports.resolve(swapped, last).values[optic] == f"XCVR-{tp.SWITCH}-{port_id}-B"
 
 
-def test_the_history_the_app_receives_is_one_day_bucket_per_replaced_port():
+def test_the_history_the_app_receives_is_one_day_bucket_per_superseded_port():
     # What the search head is actually fed, rather than what the pipeline could produce. The rows ride the shared
     # bucketed sourcetype and the refresh tells them apart by `binding_table`, so a rename upstream would leave
     # the L1 history refresh reading the layer 2 bindings, which carry neither a port nor an optic.
     with open(os.path.join(EVENTS, "binding_bucketed.jsonlines"), encoding="utf-8") as handle:
         rows = [json.loads(line) for line in handle]
 
-    history = sorted((row for row in rows if row["binding_table"] == "port_inventory"), key=lambda row: row["port_id"])
+    history = sorted((row for row in rows if row["binding_table"] == "port_inventory"),
+                     key=lambda row: (row["switch_id"], row["port_id"]))
 
-    assert [row["port_id"] for row in history] == sorted(tp.SWAPS)
+    # One row per port and day, so the restarted switch's two short intervals per port share their port's row.
+    assert [(row["switch_id"], row["port_id"]) for row in history] == SUPERSEDED_PORTS
 
     for row in history:
-        assert row["switch_id"] == tp.SWITCH
-        assert row["transceiver_serial"] == f"XCVR-{tp.SWITCH}-{row['port_id']}"
+        # Every superseded interval held the port's first optic: only the two swaps changed one.
+        assert row["transceiver_serial"] == f"XCVR-{row['switch_id']}-{row['port_id']}"
 
         # The cost of the approximation, stated rather than discovered. The corpus is one hour and the bucket is
         # a day, so both of a port's intervals fall in bucket zero and every instant in it resolves to the earlier
@@ -1206,7 +1246,10 @@ def test_the_history_the_app_receives_is_one_day_bucket_per_replaced_port():
         intervals = [json.loads(line) for line in handle]
 
     for port_id in tp.SWAPS:
-        on_swapped = [row["transceiver_serial"] for row in intervals if row["port_id"] == port_id]
+        on_swapped = [
+            row["transceiver_serial"] for row in intervals
+            if row["switch_id"] == tp.SWITCH and row["port_id"] == port_id
+        ]
 
         assert sorted(on_swapped) == [f"XCVR-{tp.SWITCH}-{port_id}", f"XCVR-{tp.SWITCH}-{port_id}-B"]
 
@@ -1386,3 +1429,173 @@ def test_the_documents_quote_the_risk_records_the_detections_write(expected: dic
     with open(guide, encoding="utf-8") as handle:
         assert f"holds {total} risk records for the {total} rows the detections returned" in " ".join(
             handle.read().split())
+
+
+# --- Layers 1 and 2, as the search head holds them ---------------------------------------------------------------
+
+
+def _number(event: dict, field: str):
+    value = event.get(field)
+
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _over(event: dict, field: str, bound: float) -> bool:
+    value = _number(event, field)
+
+    return value is not None and value > bound
+
+
+def _at_least(event: dict, field: str, bound: float) -> bool:
+    value = _number(event, field)
+
+    return value is not None and value >= bound
+
+
+def _at_most(event: dict, field: str, bound: float) -> bool:
+    value = _number(event, field)
+
+    return value is not None and value <= bound
+
+
+def _departed(event: dict) -> typing.Optional[str]:
+    """R-B-L1-007's `where` and its `direction`, or `None` where the poll did not depart."""
+    (now, peak, trough) = (_number(event, name) for name in ("bits_per_second", "bits_per_second_baseline_max",
+                                                             "bits_per_second_baseline_min"))
+
+    if (event.get("bits_per_second_baseline_mature") is not True or now is None or peak is None):
+        return None
+
+    if (now > SURGE_FACTOR * peak):
+        return "surge"
+
+    if (trough is not None and trough > 0 and now < SILENCE_FACTOR * trough):
+        return "silence"
+
+    return None
+
+
+LAYER_1_AND_2 = {
+    # rule id: (sourcetype file, the base search and `where` as a predicate, the `stats BY` field or None for a
+    # rule that writes one risk record per row).
+    "R-D-L1-001": ("morpheus_score_l1.jsonlines", lambda e: e.get("transceiver_serial_changed") is True and _number(
+        e, "link_flaps") == 0 and e.get("oper_status") != "down",
+                   None),
+    "R-D-L1-002": ("morpheus_score_l1.jsonlines", lambda e: _at_most(e, "optical_rx_dbm_deviation", TAP_DEVIATION) and
+                   _at_least(e, "optical_rx_dbm_baseline_samples", TAP_SAMPLES) and e.get("transceiver_serial_changed")
+                   is not True and abs(_number(e, "optical_tx_dbm_deviation") or 0.0) < TAP_TRANSMIT,
+                   "entity_key"),
+    "R-D-L1-003":
+        ("morpheus_score_l1.jsonlines",
+         lambda e: _at_least(e, "link_flaps_in_window", FLAP_TRANSITIONS) and e.get("link_flap_device_reset") is False,
+         "entity_key"),
+    "R-P-L1-004": ("morpheus_score_l1.jsonlines", lambda e: e.get("optical_rx_dbm_forecast_status") == "projected" and
+                   _at_most(e, "optical_rx_dbm_days_to_floor", FORECAST_DAYS_THRESHOLD),
+                   "entity_key"),
+    "R-B-L1-005": ("morpheus_score_l1.jsonlines",
+                   lambda e: e.get("error_rate_baseline_mature") is True and _over(e, "error_rate_step", ERROR_STEP),
+                   "entity_key"),
+    "R-D-L1-006": ("morpheus_score_l1.jsonlines", lambda e: e.get("lldp_neighbor_chassis_id_changed") is True and e.get(
+        "lldp_neighbor_chassis_id_first_seen") is True and e.get("lldp_neighbor_chassis_id") is not None,
+                   None),
+    "R-B-L1-007": ("morpheus_score_l1.jsonlines", lambda e: _departed(e) is not None, "entity_key"),
+    "R-B-L2-002": ("morpheus_score_l2.jsonlines",
+                   lambda e: e.get("macs_per_port_first_in_window") is True and _over(e, "macs_per_port_step", 0),
+                   "port_key"),
+    "R-D-L2-003": ("morpheus_score_l2.jsonlines",
+                   lambda e: _over(e, "macs_claiming_sender_ip", 1) and e.get("arp_sender_ip_excluded") is False,
+                   "arp_sender_ip"),
+    "R-D-L2-005": ("morpheus_score_l2.jsonlines", lambda e: e.get("auth_unpaired") is True, None),
+    "R-B-L2-006": ("morpheus_score_l2.jsonlines", lambda e: e.get("ouis_per_vlan_first_in_window") is True and e.get(
+        "ouis_per_vlan_baseline_mature") is True and _over(e, "ouis_per_vlan_step", 0),
+                   "vlan_key"),
+    "R-B-L2-007":
+        ("morpheus_score_l2.jsonlines",
+         lambda e: _at_least(e, "auth_elapsed_ratio", SLOW_RATIO) and _at_least(e, "auth_attempts", SLOW_ATTEMPTS),
+         None),
+    "R-B-L2-008": ("morpheus_score_l2.jsonlines", lambda e: _at_most(e, "auth_elapsed_ratio", INSTANT_RATIO), None),
+}
+"""Every layer 1 and 2 detection whose risk records name a lineage, as its stanza states it. R-D-L2-004 reads the
+binding records, which carry none, and R-D-L2-001's lookup ships empty."""
+
+
+def _notables(rule_id: str) -> list:
+    """One entry per risk record the rule writes over the sample events: the rows behind it."""
+    (source, predicate, group) = LAYER_1_AND_2[rule_id]
+    rows = [event for event in _events_of(source) if predicate(event)]
+
+    if (group is None):
+        return [[row] for row in rows]
+
+    grouped = collections.defaultdict(list)
+
+    for row in rows:
+        grouped[row[group]].append(row)
+
+    return [grouped[key] for key in sorted(grouped)]
+
+
+def _risk_score(rule_id: str) -> float:
+    stanza = next(name for name in _searches() if name.startswith(rule_id + " "))
+
+    return float(re.search(r'rule_id = "' + rule_id + r'", risk_score = (\d+)', _search_text(stanza)).group(1))
+
+
+def test_the_new_layer_1_detections_return_exactly_what_is_written(expected: dict):
+    searches = expected["searches"]
+
+    for (rule, key) in (("R-D-L1-002", TAP), ("R-D-L1-003", FLAP), ("R-B-L1-005", ERRORS), ("R-B-L1-007", VOLUME)):
+        notables = _notables(rule)
+
+        assert searches[key]["expected_rows"] == len(notables), key
+        assert searches[key]["contributing_rows"] == sum(len(rows) for rows in notables), key
+        assert [row["entity_key"] for row in searches[key]["key_values"]] == [rows[0]["entity_key"]
+                                                                             for rows in notables], key
+
+    directions = [row["direction"] for row in searches[VOLUME]["key_values"]]
+    assert directions == [sorted({_departed(row) for row in rows})[0] for rows in _notables("R-B-L1-007")]
+
+    neighbors = _notables("R-D-L1-006")
+    assert searches[NEIGHBOR]["expected_rows"] == len(neighbors)
+    assert sorted((row["entity_key"], row["lldp_neighbor_chassis_id"]) for row in searches[NEIGHBOR]["key_values"]) \
+        == sorted((rows[0]["entity_key"], rows[0]["lldp_neighbor_chassis_id"]) for rows in neighbors)
+
+
+def test_the_restart_report_is_one_row_per_device_and_window(expected: dict):
+    reported = [
+        event for event in _events_of("morpheus_score_l1.jsonlines")
+        if event.get("counter_reset") is True or event.get("link_flap_device_reset") is True
+    ]
+    devices = collections.defaultdict(set)
+
+    for event in reported:
+        devices[(event["site_id"], event["device_id"], event["window_id"])].add(event["entity_key"])
+
+    entry = expected["searches"]["Device restart"]
+
+    assert entry["expected_rows"] == len(devices)
+    assert [(row["site_id"], row["device_id"], row["ports_reporting"]) for row in entry["key_values"]
+            ] == [(site, device, len(ports)) for ((site, device, _), ports) in sorted(devices.items())]
+
+
+def test_the_adjacency_lookup_holds_one_row_per_link(expected: dict):
+    links = {event["link_key"] for event in _events_of("morpheus_score_l1.jsonlines") if event.get("link_key")}
+
+    assert expected["searches"]["Topology - LLDP adjacency"]["expected_rows"] == len(links)
+
+
+def test_the_new_layer_2_detections_return_exactly_what_is_written(expected: dict):
+    searches = expected["searches"]
+    vendors = _notables("R-B-L2-006")
+
+    assert searches[VENDOR]["expected_rows"] == len(vendors)
+    assert [(row["vlan_key"], row["new_ouis"]) for row in searches[VENDOR]["key_values"]
+            ] == [(rows[0]["vlan_key"], rows[0]["mac_address"][:8]) for rows in vendors]
+
+    for (rule, key) in (("R-B-L2-007", SLOW), ("R-B-L2-008", INSTANT)):
+        notables = _notables(rule)
+
+        assert searches[key]["expected_rows"] == len(notables), key
+        assert [(row["auth_port_key"], row["dot1x_identity"]) for row in searches[key]["key_values"]] == [
+            (rows[0]["auth_port_key"], rows[0]["dot1x_identity"]) for rows in notables
+        ], key

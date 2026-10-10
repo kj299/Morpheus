@@ -20,6 +20,7 @@ import pytest
 
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import compose_link_key
 from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
 
@@ -142,3 +143,16 @@ def test_an_address_is_never_stripped_and_a_v6_address_folds_to_its_canonical_ca
 @pytest.mark.parametrize("missing", [None, np.nan, pd.NA, "", "   ", "."])
 def test_a_missing_host_name_is_none(missing):
     assert normalize_hostname(missing) is None
+
+
+def test_a_link_is_named_by_both_its_ends_in_one_order():
+    assert compose_link_key("hq:sw1:Gi1/0/11", "sw3", "Gi3/0/11") == "hq:sw1:Gi1/0/11|sw3:Gi3/0/11"
+    # Sorted, so the same two ends name one link whichever is called near.
+    assert compose_link_key("b:x", "a", "y") == "a:y|b:x"
+
+
+@pytest.mark.parametrize("missing",
+                         [(None, "sw3", "Gi3/0/1"), ("hq:sw1:Gi1/0/1", None, "Gi3/0/1"), ("hq:sw1:Gi1/0/1", "sw3", ""),
+                          ("hq:sw1:Gi1/0/1", "sw3", float("nan"))])
+def test_a_link_with_a_missing_end_is_none(missing):
+    assert compose_link_key(*missing) is None

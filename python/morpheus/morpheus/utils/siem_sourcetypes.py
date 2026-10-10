@@ -122,11 +122,16 @@ PRODUCED: dict = {
             name="morpheus:score:l1",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-1 stages (normalize, optical, forecast, flap, change) behind WindowSealStage; the `tc1` "
-            "class of `tests/morpheus/determinism/telemetry_pipeline.py`.",
+            producer="The TC-1 stages (normalize, rate, optical, forecast, flap, change) behind WindowSealStage; the "
+            "`tc1` class of `tests/morpheus/determinism/telemetry_pipeline.py`.",
             # R-D-L1-001 reads the serial change, the flap count and the collector's own `oper_status`, carried
             # through rather than derived: a serial that changed on a poll the flap count says the link never moved
-            # for. R-P-L1-004 reads the forecast status and the days the fitted trend gives the optic.
+            # for. R-P-L1-004 reads the forecast status and the days the fitted trend gives the optic. R-D-L1-002
+            # reads the optical deviations from the port's own median, R-D-L1-003 the hour's flap count and the
+            # restart label it excludes, which with the counter reset is what the Device restart report collapses,
+            # R-B-L1-005 the error rate against its history, R-D-L1-006 the neighbour change, and R-B-L1-007 the
+            # traffic against its peak and its trough. The deltas and the interval they cover are here because every
+            # rate is one divided by the other, and the link key because the adjacency lookup is keyed on it.
             required_columns=("event_uid",
                               "entity_key",
                               "lineage_id",
@@ -145,6 +150,36 @@ PRODUCED: dict = {
                               "optical_rx_dbm_floor_dbm",
                               "optical_rx_dbm_trend_db_per_day",
                               "optical_rx_dbm_trend_samples",
+                              "optical_rx_dbm",
+                              "optical_rx_dbm_baseline",
+                              "optical_rx_dbm_baseline_samples",
+                              "optical_rx_dbm_deviation",
+                              "optical_tx_dbm_deviation",
+                              "link_flaps_in_window",
+                              "link_flap_device_reset",
+                              "counter_reset",
+                              "interval_seconds",
+                              "crc_errors_delta",
+                              "symbol_errors_delta",
+                              "input_discards_delta",
+                              "output_discards_delta",
+                              "if_hc_in_octets_delta",
+                              "if_hc_out_octets_delta",
+                              "error_rate",
+                              "error_rate_baseline_max",
+                              "error_rate_baseline_mature",
+                              "error_rate_step",
+                              "discard_rate",
+                              "bits_per_second",
+                              "bits_per_second_baseline_max",
+                              "bits_per_second_baseline_min",
+                              "bits_per_second_baseline_mature",
+                              "utilization",
+                              "lldp_neighbor_chassis_id",
+                              "lldp_neighbor_chassis_id_changed",
+                              "lldp_neighbor_chassis_id_first_seen",
+                              "lldp_neighbor_port_id",
+                              "link_key",
                               "resolution_method",
                               "chain_anchor_source"),
         ),
@@ -360,7 +395,8 @@ PRODUCED: dict = {
             producer="The TC-2 stages (cardinality, baseline, ARP, auth) behind WindowSealStage; the `tc2_mac`, "
             "`tc2_arp` and `tc2_auth` classes of `tests/morpheus/determinism/telemetry_pipeline.py`.",
             # R-D-L2-001, R-D-L2-003 and R-D-L2-005 read these off this sourcetype, and R-B-L2-002 reads the step
-            # and the baseline it is a step above.
+            # and the baseline it is a step above. R-B-L2-006 reads the per-VLAN vendor count, keyed per site, and
+            # its history; R-B-L2-007 and R-B-L2-008 read each exchange against the port's own distribution.
             required_columns=("event_uid",
                               "port_key",
                               "lineage_id",
@@ -378,6 +414,17 @@ PRODUCED: dict = {
                               "arp_sender_ip_excluded",
                               "auth_unpaired",
                               "auth_port_key",
+                              "vlan_key",
+                              "ouis_per_vlan",
+                              "ouis_per_vlan_first_in_window",
+                              "ouis_per_vlan_step",
+                              "ouis_per_vlan_baseline_max",
+                              "ouis_per_vlan_baseline_mature",
+                              "auth_attempts",
+                              "auth_elapsed_seconds",
+                              "auth_elapsed_p99",
+                              "auth_elapsed_ratio",
+                              "auth_elapsed_samples",
                               "resolution_method"),
         ),
     "morpheus:score:l5":

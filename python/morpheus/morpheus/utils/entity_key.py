@@ -168,3 +168,38 @@ def compose_key(parts: typing.Sequence[typing.Any]) -> typing.Optional[str]:
         return None
 
     return KEY_SEPARATOR.join(normalized)
+
+
+LINK_SEPARATOR = "|"
+"""Joins the two ends of a link key. Not `KEY_SEPARATOR`, which already joins the parts inside each end."""
+
+
+def compose_link_key(near_key: typing.Any, far_chassis: typing.Any, far_port: typing.Any) -> typing.Optional[str]:
+    """
+    Name a link by its two ends: the port it was seen from, and the LLDP neighbour on the other end of it.
+
+    The ends are sorted rather than kept near-then-far, so a link has one name whichever end describes it, wherever
+    the far end's LLDP identity and the near end's key are the same strings; where they are not, which is the usual
+    case, each end of a link carries a key of its own and the adjacency lookup holds both. A missing part on either
+    end yields `None`, for the reason `compose_key` gives: a link to nobody in particular is not a link.
+
+    Parameters
+    ----------
+    near_key : str
+        The near port's own key, `site_id:device_id:port_id` as `compose_key` builds it.
+    far_chassis : str
+        The neighbour's LLDP chassis identifier.
+    far_port : str
+        The neighbour's LLDP port identifier.
+
+    Returns
+    -------
+    str or None
+    """
+    near = normalize_text(near_key)
+    far = compose_key([far_chassis, far_port])
+
+    if (near is None or far is None):
+        return None
+
+    return LINK_SEPARATOR.join(sorted([near, far]))

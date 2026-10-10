@@ -98,10 +98,13 @@ def test_each_expiry_job_uses_the_width_of_the_lookup_it_trims():
         "binding_l1_history": DEFAULT_L1_BUCKET_SECONDS,
     }
 
+    # The trim may not reach past another `inputlookup`: the adjacency refresh reads its own lookup to merge and
+    # trims nothing, and a lazy match from there would name it after the next expiry job's width.
     trimmed = dict(
-        re.findall(r"inputlookup\s+(\S+).*?floor\(\(now\(\)\s*-\s*\d+\)\s*/\s*(\d+)\)",
-                   read_text(SAVEDSEARCHES_PATH),
-                   re.DOTALL))
+        re.findall(
+            r"inputlookup\s+(?:\w+=\S+\s+)*(\S+)(?:(?!inputlookup).)*?floor\(\(now\(\)\s*-\s*\d+\)\s*/\s*(\d+)\)",
+            read_text(SAVEDSEARCHES_PATH),
+            re.DOTALL))
 
     assert {name: int(bucket) for (name, bucket) in trimmed.items()} == expected
 
@@ -197,6 +200,16 @@ def test_the_app_readme_states_the_number_of_searches_it_ships():
         "fifty": 50,
         "fifty-one": 51,
         "fifty-two": 52,
+        "fifty-three": 53,
+        "fifty-four": 54,
+        "fifty-five": 55,
+        "fifty-six": 56,
+        "fifty-seven": 57,
+        "fifty-eight": 58,
+        "fifty-nine": 59,
+        "sixty": 60,
+        "sixty-one": 61,
+        "sixty-two": 62,
     }
 
     assert words.get(match.group(1).lower()) == shipped, (
@@ -301,7 +314,7 @@ def test_every_detection_writes_its_rows_to_the_risk_index():
     # searches summed a risk_score nothing stored. Every detection now ends by collecting what it returned.
     detections = _detections()
 
-    assert len(detections) == 41
+    assert len(detections) == 49
     assert read_text(SAVEDSEARCHES_PATH).count("| collect index=behavior_risk") == len(detections)
 
     for (name, stanza) in detections.items():

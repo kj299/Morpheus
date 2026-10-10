@@ -32,10 +32,10 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | --- | --- | --- |
 | `default/indexes.conf` | Indexers | `behavior_events`, `behavior_lineage`, `behavior_bindings`, `behavior_context`, `behavior_summary`, `behavior_risk`, with deliberately asymmetric retention, and a statement of what each one holds about a person beside the period it holds it for |
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored on a field the record carries -- `event_time` for scores and edges, an interval bound for bindings, `valid_from` for context |
-| `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, the bucketed L1 history beside them, and the principal watchlist the predictive rules write, with accelerated fields |
-| `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1`, `binding_l1_history` and `principal_watchlist` lookups, and `rule_metadata` |
-| `default/savedsearches.conf` | Search heads | Fifty-two searches: lookup refresh and expiry jobs, including the principal watchlist's, the 5-minute summary rollup, chain assembly, the connection evidence report joining layers 3, 4 and 6 on `community_id`, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the two layer 1 detections R-D-L1-001 and the predictive R-P-L1-004, the five layer 2 detections R-B-L2-002 and R-D-L2-001, 003, 004 and 005, the eight layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004, the predictive R-P-L3-005, and the host-baseline rules R-B-L3-006, R-B-L3-007 and R-D-L3-008, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the five deterministic layer 5 detections R-D-L5-003, R-D-L5-004, R-D-L5-007, R-D-L5-008 and R-D-L5-009, the two layer 5 model rules R-B-L5-001 and R-B-L5-002, gated on a principal's own model and empty until one is pinned, the layer 5 session duration rule R-B-L5-005, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric. Every detection ends by collecting its rows into `behavior_risk`, which Chain assembly sums, and is a per-result alert suppressed on its stated deduplication key for its dispatch window |
-| `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
+| `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, the bucketed L1 history beside them, the LLDP adjacency the topology search writes, and the principal watchlist the predictive rules write, with accelerated fields |
+| `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1`, `binding_l1_history`, `lldp_adjacency` and `principal_watchlist` lookups, and `rule_metadata` |
+| `default/savedsearches.conf` | Search heads | Sixty-two searches: lookup refresh and expiry jobs, including the principal watchlist's and the LLDP adjacency refresh, the 5-minute summary rollup, chain assembly, the connection evidence report joining layers 3, 4 and 6 on `community_id`, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the seven layer 1 detections R-D-L1-001, 002, 003 and 006, R-B-L1-005 and 007 and the predictive R-P-L1-004, the device restart report, the eight layer 2 detections R-B-L2-002, 006, 007 and 008 and R-D-L2-001, 003, 004 and 005, the eight layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004, the predictive R-P-L3-005, and the host-baseline rules R-B-L3-006, R-B-L3-007 and R-D-L3-008, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the five deterministic layer 5 detections R-D-L5-003, R-D-L5-004, R-D-L5-007, R-D-L5-008 and R-D-L5-009, the two layer 5 model rules R-B-L5-001 and R-B-L5-002, gated on a principal's own model and empty until one is pinned, the layer 5 session duration rule R-B-L5-005, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric. Every detection ends by collecting its rows into `behavior_risk`, which Chain assembly sums, and is a per-result alert suppressed on its stated deduplication key for its dispatch window |
+| `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads, and R-B-L2-002 reads to leave `trunk` and `lag-member` ports out: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
 | `lookups/rule_metadata.csv` | Search heads | One row per detection: `rule_id,saved_search,suppress_fields,suppress_period,hysteresis`. The stanzas' `alert.suppress.*` keys are held to it by a test; `hysteresis` is `none` for every rule until a model scores near a threshold |
 | `lookups/scanner_allowlist.csv` | Search heads | The estate's own scanners, which R-B-L3-001 excludes: `src_ip,allowed,owner,note`. Ships header-only; until it is populated the rule fires on every scanner, authorized ones included |
 
@@ -98,6 +98,8 @@ side alone breaks the joins silently.
    search reads the mark. The two fail in opposite directions until their lists exist: R-D-L2-001 matches
    nothing, and R-D-L2-003 matches every redundancy gateway once per window. Both are unusable
    without the list, which is the guide's own statement, but only one of them is quiet about it.
+   R-B-L2-002 reads the same designation list the other way, to leave out the ports marked `trunk` or
+   `lag-member`, whose MAC counts move with whatever is downstream; without the list it measures every port.
 6. **The name of the binding source, on bucketed rows.** `Binding lookup - L2/L3 refresh` selects
    `binding_table=dhcp_lease`, because several binding sources land on the one `binding:bucketed`
    sourcetype and a refresh that cannot tell them apart builds the wrong lookup. The producer supplies it:
@@ -108,7 +110,8 @@ side alone breaks the joins silently.
    IP-to-MAC lease out of a port history.
 7. **Which layer 1 lookup a search reaches for.** `binding_l1` answers what is in a port *now*;
    `binding_l1_history` answers what was in it on a given day, and holds a row only for a port whose
-   optic has been replaced. A walk that needs a historical answer consults the history first and falls
+   binding has been superseded -- its optic replaced or its LLDP neighbour changed, which includes the poll a
+   restarted switch reports no neighbour. A walk that needs a historical answer consults the history first and falls
    back to the current row on a miss, which is correct because a port that never changed is described
    for all time by the row the current lookup holds. Reaching for `binding_l1` alone is the silent
    failure: an investigation into last Tuesday resolves that port to the optic installed on Wednesday,
@@ -195,7 +198,7 @@ Three levels, strongest last:
 2. **Live load.** The app was installed into a fresh Splunk Enterprise 10.2 instance: `btool check`
    reports no errors, all five indexes are created, all seven scheduled searches that existed at the
    time register, and every one of them executes without a parse error against empty indexes. The app
-   ships fifty-two searches now; the forty-five added since have not been through this step.
+   ships sixty-two searches now; the fifty-five added since have not been through this step.
 3. **Functional.** With synthetic JSON telemetry seeded into the indexes and bindings written to the
    KV Store: timestamps anchor to `event_time` as the props intend, the identifier ladder resolves an
    IP through both lookups to a physical port and site, the chain assembly search emits the seeded
@@ -211,19 +214,19 @@ detections `R-D-L2-001`, `R-D-L2-003`, `R-D-L2-004`, `R-D-L2-005` and, later, `R
 predictive watchlist `R-P-L5-006`, then the `morpheus:score:l3` sourcetype with five layer 3 detections and,
 later, three more (`R-B-L3-006`, `R-B-L3-007` and `R-D-L3-008`),
 then `morpheus:score:l4` with three more, `morpheus:score:l6` with five, `morpheus:score:l7` with five, the chained `R-C-001`, `R-C-004`
-and `R-C-005`, with `R-C-002` as rewritten, the layer 1 detections `R-D-L1-001` and `R-P-L1-004`, and the layer 5 baseline searches `R-D-L5-007`, `R-D-L5-008` and `R-D-L5-009` with the gated `R-B-L5-001` and `R-B-L5-002` and the session duration rule `R-B-L5-005`, together with the `principal_watchlist` lookup and its expiry job. That is all forty-one detection searches this app ships, so the live
+and `R-C-005`, with `R-C-002` as rewritten, the layer 1 detections `R-D-L1-001` and `R-P-L1-004`, and the layer 5 baseline searches `R-D-L5-007`, `R-D-L5-008` and `R-D-L5-009` with the gated `R-B-L5-001` and `R-B-L5-002` and the session duration rule `R-B-L5-005`, together with the `principal_watchlist` lookup and its expiry job, and then the network-object detections: `R-D-L1-002`, `R-D-L1-003`, `R-B-L1-005`, `R-D-L1-006` and `R-B-L1-007` at layer 1, `R-B-L2-006`, `R-B-L2-007` and `R-B-L2-008` at layer 2, with the device restart report and the `lldp_adjacency` lookup. That is all forty-nine detection searches this app ships, so the live
 pass above covers the app's oldest part and none of its detections as they now stand; the search-head run
 described below has since run all of them. Their SPL follows
 the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
 Python over the determinism harnesses' planted corpora (`tests/morpheus/determinism/test_first_detections.py` for
-the layer 1, 2 and 5 rules, and the network, transport, presentation, application, SaaS, endpoint and campaign
+the first layer 1, 2 and 5 rules, `test_telemetry_harness.py` for the network-object rules, and the network, transport, presentation, application, SaaS, endpoint and campaign
 harnesses beside it for the rest),
 where each fires on exactly the planted cases and nothing else -- twice for `R-D-L2-004`, which the corpus
 plants both a simultaneous and a cross-switch spoof for, alongside a legitimate move it must not fire on. That is evidence the columns and conditions are right; it is not evidence
 the stanzas parse on a search head. Run `btool savedsearches list` after installing.
 
 The run that would settle that is packaged: `validate/run_search_head.sh` starts the validation container, indexes
-the sample events, dispatches all fifty-two searches in the order `validate/VALIDATION.md` prescribes, and writes
+the sample events, dispatches all sixty-two searches in the order `validate/VALIDATION.md` prescribes, and writes
 `validate/search_head_results.json`, which `tests/morpheus/determinism/test_search_head_run.py` compares with
 `expected_results.json`. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:
 every one of the forty-eight searches ran without error over the pipeline's own events, and forty-six returned
@@ -243,9 +246,11 @@ principal gained a learned model of their own: it indexed all 8,680 events, retu
 all forty-eight -- R-B-L5-001 and R-B-L5-002 their first rows, 42 and 28 -- and held the 166 risk records the
 detections returned. A sixth, on 2026-10-10 on the same install, ran over the events step 9 regenerated when layer 3
 gained a fortnight of history and each host a baseline: it indexed all 9,559 events, returned what is written for
-all fifty-two -- the three new layer 3 detections and the connection evidence report one row each -- held the 198
-risk records the detections returned, and is `validate/search_head_results.json`; the earlier five are kept beside
-it.
+all fifty-two -- the three new layer 3 detections and the connection evidence report one row each -- and held the 198
+risk records the detections returned. A seventh, later the same day on the same install, ran over the events step
+10 regenerated when the estate gained its network-object plants: it indexed all 10,285 events, returned what is
+written for all sixty-two -- each of the ten new searches what its plant leaves for it -- held the 209 risk records
+the detections returned, and is `validate/search_head_results.json`; the earlier six are kept beside it.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

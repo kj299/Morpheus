@@ -329,3 +329,68 @@ def test_a_missing_key_part_yields_a_null_key_not_the_string_none(config: Config
     # sighting of its own key, so it carries no delta either, and the third differences against the second.
     assert _as_list(meta, "crc_errors_delta")[0] is None
     assert _as_list(meta, "sample_out_of_order")[0] is False
+
+
+def test_needed_columns_include_the_traffic_counters_and_the_link(config: Config):
+    needed = make_stage(config).get_needed_columns()
+
+    assert needed["if_hc_in_octets_delta"] == TypeId.INT64
+    assert needed["if_hc_out_octets_delta"] == TypeId.INT64
+    assert needed["link_key"] == TypeId.STRING
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_traffic_counters_are_differenced_where_the_collector_sends_them(config: Config):
+    df_class = get_df_class(config.execution_mode)
+    # A 64-bit counter well past the 32-bit ceiling: declaring it 32-bit would turn this into a wrap.
+    start = 5 * COUNTER32_CEILING
+    meta = MessageMeta(
+        df_class({
+            **SAMPLES, "if_hc_in_octets": [start, start + 750, 40], "if_hc_out_octets": [10, 20, 0]
+        }))
+
+    make_stage(config).on_data(meta)
+
+    assert _as_list(meta, "if_hc_in_octets_delta") == [None, 750, 40]
+    assert _as_list(meta, "if_hc_out_octets_delta") == [None, 10, 0]
+    assert _as_list(meta, "counter_wrapped") == [False, False, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_port_without_traffic_counters_still_scores_and_says_nothing_about_traffic(config: Config, samples_df):
+    meta = MessageMeta(samples_df)
+
+    make_stage(config).on_data(meta)
+
+    assert _as_list(meta, "crc_errors_delta") == [None, 42, 7]
+    assert _as_list(meta, "if_hc_in_octets_delta") == [None, None, None]
+
+
+def test_a_traffic_counter_cannot_also_be_an_error_counter(config: Config):
+    with pytest.raises(ValueError, match="already in counter_columns"):
+        make_stage(config, counter_columns=["crc_errors", "if_hc_in_octets"])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_link_is_the_port_and_its_neighbour(config: Config):
+    df_class = get_df_class(config.execution_mode)
+    meta = MessageMeta(
+        df_class({
+            **SAMPLES,
+            "lldp_neighbor_chassis_id": ["sw3", "sw3", None],
+            "lldp_neighbor_port_id": ["Gi3/0/1", "Gi3/0/1", "Gi3/0/1"],
+        }))
+
+    make_stage(config).on_data(meta)
+
+    # A neighbour the switch has not relearned since it came back is not a link to nobody in particular.
+    assert _as_list(meta, "link_key") == ["hq:sw1:Gi1/0/1|sw3:Gi3/0/1", "hq:sw1:Gi1/0/1|sw3:Gi3/0/1", None]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_collector_without_lldp_carries_no_link(config: Config, samples_df):
+    meta = MessageMeta(samples_df)
+
+    make_stage(config).on_data(meta)
+
+    assert _as_list(meta, "link_key") == [None, None, None]

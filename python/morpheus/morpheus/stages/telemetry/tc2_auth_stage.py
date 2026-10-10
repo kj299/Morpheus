@@ -40,6 +40,7 @@ from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import EventClock
 from morpheus.utils.session_timer import NS_PER_SECOND
 from morpheus.utils.session_timer import SessionTimer
+from morpheus.utils.transfer_envelope import TransferEnvelopeTracker
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,19 @@ ELAPSED_COLUMN = "auth_elapsed_seconds"
 ATTEMPTS_COLUMN = "auth_attempts"
 UNPAIRED_COLUMN = "auth_unpaired"
 PORT_KEY_COLUMN = "auth_port_key"
+P99_COLUMN = "auth_elapsed_p99"
+RATIO_COLUMN = "auth_elapsed_ratio"
+SAMPLES_COLUMN = "auth_elapsed_samples"
+
+BASELINE_QUANTILE = 0.99
+"""The quantile of the port's own prior exchanges each one is measured against, which the column name states."""
+
+DEFAULT_BASELINE_WINDOW_SECONDS = 30 * 24 * 3600
+"""How far back the port's exchanges reach. Thirty days."""
+
+DEFAULT_BASELINE_MIN_SAMPLES = 100
+"""Prior exchanges a port needs before its distribution is published. A hundred, where a 99th percentile by nearest
+rank stops being the slowest exchange ever seen; see `morpheus.utils.transfer_envelope`."""
 
 
 @register_stage("tc2-auth", ignore_args=["pending_values"])
@@ -77,6 +91,15 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
     `auth_attempts` travels with the timing, because a success after three retries is not the same as a first-time
     one and the elapsed time from the last attempt alone would hide the two before it.
+
+    **Each timed exchange is measured against the port's own distribution.** `auth_elapsed_p99` is the 99th
+    percentile, by nearest rank, of the port's prior exchanges over the last thirty days, `auth_elapsed_ratio` this
+    exchange against it, and `auth_elapsed_samples` how many exchanges that distribution holds. The port rather
+    than the supplicant, because what the distribution describes is the port's path to its RADIUS server, which
+    every device on the port shares; a supplicant reauthenticating every hour would otherwise take a month to have a
+    distribution at all. Both tails read the same column: a slow exchange is several times the port's p99, and a
+    replayed or cached success is a small fraction of it. A port with fewer than `baseline_min_samples` prior
+    exchanges has no published distribution, and neither tail can be read on it.
 
     Rows are classified by `result_column`: a value listed in `pending_values`, or a null, starts the clock, and
     anything else stops it. That matches how the common sources report, with a RADIUS Access-Request or an EAPOL
@@ -130,6 +153,11 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     timeout_seconds : int, default = 300
         Silence after which a pending exchange is abandoned, so a port whose result never arrived does not hold
         state forever and its next outcome is correctly reported as unpaired.
+    baseline_window_seconds : int, default = 2592000
+        How far back a port's prior exchanges reach for its distribution. Thirty days.
+    baseline_min_samples : int, default = 100
+        Prior exchanges a port needs before its distribution is published. Below a hundred the 99th percentile is
+        the slowest exchange ever seen, and an estate setting this lower should read the ratio that way.
     """
 
     def __init__(self,
@@ -143,7 +171,9 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  pending_values: list[str] = None,
                  supplicant_columns: list[str] = None,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,
-                 timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS):
+                 timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+                 baseline_window_seconds: int = DEFAULT_BASELINE_WINDOW_SECONDS,
+                 baseline_min_samples: int = DEFAULT_BASELINE_MIN_SAMPLES):
         super().__init__(c)
 
         if (timeout_seconds <= 0):
@@ -167,11 +197,17 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
         self._timer = SessionTimer(timeout_ns=timeout_seconds * NS_PER_SECOND)
+        self._baselines = TransferEnvelopeTracker(window_ns=baseline_window_seconds * NS_PER_SECOND,
+                                                  quantile=BASELINE_QUANTILE,
+                                                  min_samples=baseline_min_samples)
 
         self._needed_columns[PORT_KEY_COLUMN] = TypeId.STRING
         self._needed_columns[ELAPSED_COLUMN] = TypeId.FLOAT64
         self._needed_columns[ATTEMPTS_COLUMN] = TypeId.INT64
         self._needed_columns[UNPAIRED_COLUMN] = TypeId.BOOL8
+        self._needed_columns[P99_COLUMN] = TypeId.FLOAT64
+        self._needed_columns[RATIO_COLUMN] = TypeId.FLOAT64
+        self._needed_columns[SAMPLES_COLUMN] = TypeId.INT64
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -283,6 +319,9 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             elapsed: list = []
             attempts: list = []
             unpaired: list = []
+            p99s: list = []
+            ratios: list = []
+            samples: list = []
             unordered = 0
             keyless = 0
             abandoned = 0
@@ -302,6 +341,9 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     elapsed.append(None)
                     attempts.append(None)
                     unpaired.append(None)
+                    p99s.append(None)
+                    ratios.append(None)
+                    samples.append(None)
                     keyless += 1
                     continue
 
@@ -316,6 +358,9 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     elapsed.append(None)
                     attempts.append(None)
                     unpaired.append(None)
+                    p99s.append(None)
+                    ratios.append(None)
+                    samples.append(None)
                     unordered += 1
                     continue
 
@@ -332,6 +377,9 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     elapsed.append(None)
                     attempts.append(None)
                     unpaired.append(None)
+                    p99s.append(None)
+                    ratios.append(None)
+                    samples.append(None)
                     implausible += 1
                     continue
 
@@ -349,19 +397,39 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     elapsed.append(None)
                     attempts.append(None)
                     unpaired.append(None)
+                    p99s.append(None)
+                    ratios.append(None)
+                    samples.append(None)
                     continue
 
                 timing = self._timer.complete(exchange_key, event_time_ns, outcome=result)
+                seconds = None if timing.elapsed_ns is None else timing.elapsed_ns / NS_PER_SECOND
 
-                elapsed.append(None if timing.elapsed_ns is None else timing.elapsed_ns / NS_PER_SECOND)
+                elapsed.append(seconds)
                 attempts.append(timing.attempts)
                 unpaired.append(timing.unpaired)
                 unordered += int(timing.out_of_order)
+
+                # Only a timed exchange has a place in the port's distribution. An unpaired outcome has no elapsed
+                # time to measure, which is its own signal and R-D-L2-005's.
+                if (seconds is None):
+                    p99s.append(None)
+                    ratios.append(None)
+                    samples.append(None)
+                    continue
+
+                measured = self._baselines.observe(port_key, event_time_ns, seconds)
+                p99s.append(measured.baseline)
+                ratios.append(measured.ratio)
+                samples.append(measured.samples)
 
             assign_str_column(df, PORT_KEY_COLUMN, port_keys)
             assign_nullable_float_column(df, ELAPSED_COLUMN, elapsed)
             assign_nullable_int_column(df, ATTEMPTS_COLUMN, attempts)
             assign_nullable_bool_column(df, UNPAIRED_COLUMN, unpaired)
+            assign_nullable_float_column(df, P99_COLUMN, p99s)
+            assign_nullable_float_column(df, RATIO_COLUMN, ratios)
+            assign_nullable_int_column(df, SAMPLES_COLUMN, samples)
 
         if (keyless > 0):
             logger.warning("TC2AuthStage saw %d of %d events with a null site, switch, or port; they carry no timing.",
