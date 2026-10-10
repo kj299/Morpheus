@@ -197,8 +197,17 @@ FANOUT = "R-B-L3-001 - Fan-out expansion"
 BEACON = "R-B-L3-002 - Beaconing"
 TTL = "R-B-L3-004 - TTL fingerprint shift"
 SUMMARY = "Behavior summary - per-layer scores"
+FAN_IN = "R-B-L3-006 - Fan-in onto a workstation"
+UPLOAD = "R-B-L3-007 - First-contact upload"
+SWEEP = "R-D-L3-008 - Port sweep"
 FANOUT_DESTINATIONS = threshold(FANOUT, r"dsts_per_src\s*>\s*([\d.]+)")
+FANOUT_STEP = threshold(FANOUT, r"dsts_per_src_step\s*>\s*([\d.]+)")
 FANOUT_INTERNAL_RATIO = threshold(FANOUT, r"internal_dst_ratio\s*>\s*([\d.]+)")
+FAN_IN_SOURCES = threshold(FAN_IN, r"srcs_per_dst\s*>=\s*([\d.]+)")
+FAN_IN_STEP = threshold(FAN_IN, r"srcs_per_dst_step\s*>\s*([\d.]+)")
+UPLOAD_ASYMMETRY = threshold(UPLOAD, r"byte_asymmetry\s*>=\s*([\d.]+)")
+UPLOAD_STEP = threshold(UPLOAD, r"byte_asymmetry_step\s*>\s*([\d.]+)")
+SWEEP_PORTS = threshold(SWEEP, r"dst_ports_per_src\s*>=\s*([\d.]+)")
 BEACON_INTERVAL_CV = threshold(BEACON, r"flow_interval_cv\s*<\s*([\d.]+)")
 BEACON_SIZE_CV = threshold(BEACON, r"flow_size_cv\s*<\s*([\d.]+)")
 TTL_SHIFTED_FLOWS = threshold(TTL, r"shifted_flows\s*>=\s*([\d.]+)")
@@ -258,12 +267,30 @@ def _fan_out_trajectory(flows: pd.DataFrame) -> set:
     return accused
 
 
+requires(FANOUT, r"dsts_per_src_baseline_mature=true")
+requires(FAN_IN, r"srcs_per_dst_baseline_mature=true")
+requires(FAN_IN, r"dst_ctx_device_role=workstation")
+requires(UPLOAD, r"dst_asn_first_seen=true")
+requires(UPLOAD, r"byte_asymmetry_baseline_mature=true")
+requires(SWEEP, r"dst_is_private=true")
+
+
 def layer_3_decisions(result: pd.DataFrame) -> dict:
-    """The five layer 3 rules."""
+    """The eight layer 3 rules."""
     flows = rows(result, "tc3")
-    fanning = flows[(number(flows, "dsts_per_src") > FANOUT_DESTINATIONS)
+    fanning = flows[true(flows, "dsts_per_src_baseline_mature")
+                    & (number(flows, "dsts_per_src_step") > FANOUT_STEP)
+                    & (number(flows, "dsts_per_src") > FANOUT_DESTINATIONS)
                     & (number(flows, "internal_dst_ratio") > FANOUT_INTERNAL_RATIO)]
     fanning = fanning[~fanning["src_ip"].isin(_allowed_scanners())]
+    reached = flows[(flows["dst_ctx_device_role"] == "workstation").fillna(False)
+                    & true(flows, "srcs_per_dst_baseline_mature")
+                    & (number(flows, "srcs_per_dst_step") > FAN_IN_STEP)
+                    & (number(flows, "srcs_per_dst") >= FAN_IN_SOURCES)]
+    uploading = flows[true(flows, "dst_asn_first_seen") & true(flows, "byte_asymmetry_baseline_mature")
+                      & (number(flows, "byte_asymmetry_step") > UPLOAD_STEP)
+                      & (number(flows, "byte_asymmetry") >= UPLOAD_ASYMMETRY)]
+    sweeping = flows[(number(flows, "dst_ports_per_src") >= SWEEP_PORTS) & true(flows, "dst_is_private")]
     beaconing = flows[true(flows, "flow_regularity_mature") & (number(flows, "flow_interval_cv") < BEACON_INTERVAL_CV)
                       & (number(flows, "flow_size_cv") < BEACON_SIZE_CV)]
     reserved = flows[true(flows, "dst_is_reserved") | true(flows, "dst_is_multicast")]
@@ -277,6 +304,9 @@ def layer_3_decisions(result: pd.DataFrame) -> dict:
         "R-B-L3-004": {(str(source), )
                        for (source, count) in shifted.items() if count >= TTL_SHIFTED_FLOWS},
         "R-P-L3-005": _fan_out_trajectory(flows),
+        "R-B-L3-006": keys(reached, ["dst_ip"]),
+        "R-B-L3-007": keys(uploading, ["src_ip", "bgp_as_dst"]),
+        "R-D-L3-008": keys(sweeping, ["src_ip"]),
     }
 
 
@@ -351,13 +381,15 @@ def layer_4_decisions(result: pd.DataFrame) -> dict:
 # --- Layer 6, over the presentation corpus ---------------------------------------------------------------------
 
 SETTLED_HANDSHAKES = threshold("R-B-L6-001 - New TLS client fingerprint", r"ja4_client_observations\s*>=\s*([\d.]+)")
+requires("R-B-L6-001 - New TLS client fingerprint", r"ctx_found=true")
 SINGLE_ISSUER = threshold("R-D-L6-002 - Certificate issuer anomaly", r"cert_issuer_distinct\s*=\s*([\d.]+)")
 
 
 def layer_6_decisions(result: pd.DataFrame) -> dict:
     """The five layer 6 rules, each a filter on the handshake row and a `stats ... BY`."""
     tc6 = rows(result, "tc6")
-    new_stack = tc6[true(tc6, "ja4_client_first_seen") & (number(tc6, "ja4_client_observations") >= SETTLED_HANDSHAKES)]
+    new_stack = tc6[true(tc6, "ja4_client_first_seen") & (number(tc6, "ja4_client_observations") >= SETTLED_HANDSHAKES)
+                    & true(tc6, "ctx_found")]
     intercepted = tc6[true(tc6, "cert_issuer_differs") & true(tc6, "cert_issuer_mature")
                       & (number(tc6, "cert_issuer_distinct") == SINGLE_ISSUER)]
 
@@ -525,7 +557,7 @@ def endpoint_decisions(result: pd.DataFrame) -> dict:
     """R-B-L7-004: `endpoint_pair_novel=true`, one notable per pair per host."""
     endpoint = rows(result, "tc7_endpoint")
 
-    return {"R-B-L7-004": keys(endpoint[true(endpoint, "endpoint_pair_novel")], ["hostname", "endpoint_pair"])}
+    return {"R-B-L7-004": keys(endpoint[true(endpoint, "endpoint_pair_novel")], ["endpoint_host", "endpoint_pair"])}
 
 
 # --- The chains, over the campaign corpus ---------------------------------------------------------------------
@@ -558,13 +590,17 @@ JOIN_TOLERANCE_NS = {
 """The tolerance each joined chain allows a later step to precede an earlier one by, as its search states it."""
 
 requires(EXFIL, r"cert_issuer_new_to_estate=true")
+requires(LATERAL, r"endpoint_pair_novel=true ctx_device_role=server")
+requires(LATERAL, r"eval target = target_host_key")
+requires(LATERAL, r"eval target = endpoint_host")
 
 
 def _lateral_movement(result: pd.DataFrame) -> set:
     """
     R-C-001: a source's first flow in an hour whose fan-out rises above its peak in the hour before, then a first
-    login from that source to a host within the window, then a novel process on that host, each step allowed to
-    precede the last by the join tolerance. Keyed `(src_ip, user_principal, target)`, the search's `stats ... BY`.
+    login from that source to a host within the window, then a novel process on that host where the inventory calls
+    it a server, each step allowed to precede the last by the join tolerance. Hosts are joined on the normalized keys
+    the search joins on. Keyed `(src_ip, user_principal, target)`, the search's `stats ... BY`.
     """
     flows = rows(result, "tc3")
     flows = flows.loc[flows["dsts_per_src"].notna(), ["src_ip", "window_id", "dsts_per_src", "event_time"]]
@@ -578,7 +614,8 @@ def _lateral_movement(result: pd.DataFrame) -> set:
     logins = rows(result, "tc5_auth")
     logins = logins[(logins["auth_result"] == "success") & true(logins, "target_host_first_seen")]
     processes = rows(result, "tc7_endpoint")
-    processes = processes[true(processes, "endpoint_pair_novel")]
+    processes = processes[true(processes, "endpoint_pair_novel")
+                          & (processes["ctx_device_role"] == "server").fillna(False)]
     fired = set()
 
     for (_, start) in starts.iterrows():
@@ -590,9 +627,9 @@ def _lateral_movement(result: pd.DataFrame) -> set:
             if not (t_fanout - LATERAL_LOGIN_TOLERANCE_NS <= t_login <= t_fanout + LATERAL_LOGIN_WINDOW_NS):
                 continue
 
-            target = str(login["target_host"]).lower()
+            target = str(login["target_host_key"])
 
-            for (_, process) in processes[processes["hostname"].str.lower() == target].iterrows():
+            for (_, process) in processes[processes["endpoint_host"] == target].iterrows():
                 t_process = int(process["event_time"])
 
                 if (t_process >= t_login - LATERAL_PROCESS_TOLERANCE_NS

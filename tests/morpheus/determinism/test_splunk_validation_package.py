@@ -656,14 +656,21 @@ def test_the_endpoint_detection_returns_exactly_what_is_written(expected: dict):
     # Evaluated over the events the app is fed, the way the search reads them: one row at a time, the stage's
     # novelty flag the trigger and the integrity level the severity, with no level at the default.
     severity = {"system": 70, "high": 55, "medium": 40, "low": 25}
+    scale = {"high": 1.5, "low": 0.5}
     novel = [event for event in _layer_7_events() if event.get("endpoint_pair_novel") is True]
     derived = sorted(({
-        "hostname": event["hostname"],
-        "integrity": event.get("endpoint_integrity") or "unknown",
-        "endpoint_host_only": event["endpoint_host_only"],
-        "risk_score": severity.get(event.get("endpoint_integrity"), 40),
+        "endpoint_host":
+            event["endpoint_host"],
+        "integrity":
+            event.get("endpoint_integrity") or "unknown",
+        "criticality":
+            event.get("ctx_criticality") or "unknown",
+        "endpoint_host_only":
+            event["endpoint_host_only"],
+        "risk_score":
+            round(severity.get(event.get("endpoint_integrity"), 40) * scale.get(event.get("ctx_criticality"), 1.0)),
     } for event in novel),
-                     key=lambda row: row["hostname"])
+                     key=lambda row: (row["endpoint_host"], row["risk_score"]))
     entry = expected["searches"]["R-B-L7-004 - Process ancestry novelty"]
 
     assert entry["contributing_rows"] == len(novel)
@@ -726,8 +733,8 @@ def test_the_fingerprint_and_beacon_detections_count_exactly_what_is_written(exp
     # re-derives goes stale the first time another corpus shares the sourcetype.
     searches = expected["searches"]
     fingerprints = [
-        event for event in _events_of("morpheus_score_l6.jsonlines")
-        if event.get("ja4_client_first_seen") is True and (event.get("ja4_client_observations") or 0) >= 20
+        event for event in _events_of("morpheus_score_l6.jsonlines") if event.get("ja4_client_first_seen") is True and (
+            event.get("ja4_client_observations") or 0) >= 20 and event.get("ctx_found") is True
     ]
     entry = searches["R-B-L6-001 - New TLS client fingerprint"]
 
@@ -746,6 +753,66 @@ def test_the_fingerprint_and_beacon_detections_count_exactly_what_is_written(exp
 
     assert entry["contributing_rows"] == len(beacons)
     assert entry["expected_rows"] == len({event["flow_pair_key"] for event in beacons})
+
+
+def test_the_layer_3_host_baseline_detections_return_exactly_what_is_written(expected: dict):
+    # Evaluated over every flow the app is fed, the way the four searches read them: the three that measure a host
+    # against its own fortnight, and the port sweep. Flows from the campaign carry no baseline, so they reach none.
+    flows = _events_of("morpheus_score_l3.jsonlines")
+
+    def number(event, column) -> float:
+        value = event.get(column)
+
+        return float("nan") if value is None else float(value)
+
+    fan_out = [
+        event for event in flows
+        if event.get("dsts_per_src_baseline_mature") is True and number(event, "dsts_per_src_step") > 0
+        and number(event, "dsts_per_src") > 50 and number(event, "internal_dst_ratio") > 0.5
+    ]
+    fan_in = [
+        event for event in flows
+        if event.get("dst_ctx_device_role") == "workstation" and event.get("srcs_per_dst_baseline_mature") is True
+        and number(event, "srcs_per_dst_step") > 0 and number(event, "srcs_per_dst") >= 10
+    ]
+    upload = [
+        event for event in flows
+        if event.get("dst_asn_first_seen") is True and event.get("byte_asymmetry_baseline_mature") is True
+        and number(event, "byte_asymmetry_step") > 0 and number(event, "byte_asymmetry") >= 10
+    ]
+    sweep = [
+        event for event in flows if number(event, "dst_ports_per_src") >= 25 and event.get("dst_is_private") is True
+    ]
+
+    for (name, rows, keys) in (("R-B-L3-001 - Fan-out expansion", fan_out,
+                                ("src_ip", )), ("R-B-L3-006 - Fan-in onto a workstation", fan_in, ("dst_ip", )),
+                               ("R-B-L3-007 - First-contact upload", upload,
+                                ("src_ip", "bgp_as_dst")), ("R-D-L3-008 - Port sweep", sweep, ("src_ip", ))):
+        entry = expected["searches"][name]
+        grouped = sorted({tuple(event[key] for key in keys) for event in rows})
+
+        assert entry["contributing_rows"] == len(rows), name
+        assert entry["expected_rows"] == len(grouped), name
+        assert [list(group) for group in grouped] == entry["key_values"], name
+
+
+def test_the_connection_evidence_report_returns_exactly_what_is_written(expected: dict):
+    # Every scored record on layers 3, 4 and 6 that carries a Community ID, grouped on it, kept where all three
+    # layers saw the connection.
+    layers: dict = collections.defaultdict(set)
+
+    for sourcetype_file in ("morpheus_score_l3.jsonlines", "morpheus_score_l4.jsonlines",
+                            "morpheus_score_l6.jsonlines"):
+        for event in _events_of(sourcetype_file):
+            if (event.get("community_id")):
+                layers[event["community_id"]].add(event["osi_layer"])
+
+    joined = sorted(community_id for (community_id, seen) in layers.items() if len(seen) == 3)
+    entry = expected["searches"]["Connection evidence - layers 3, 4 and 6"]
+
+    assert entry["expected_rows"] == len(joined)
+    assert entry["key_values"] == joined
+    assert entry["connections_seen_at_two_layers"] == sum(1 for seen in layers.values() if len(seen) == 2)
 
 
 def test_the_command_and_control_chain_returns_exactly_what_is_written(expected: dict):
@@ -1032,6 +1099,7 @@ NUMBER_WORDS = {
     "forty-six": 46,
     "forty-seven": 47,
     "forty-eight": 48,
+    "fifty-two": 52,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""

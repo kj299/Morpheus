@@ -292,6 +292,16 @@ def test_a_peer_group_change_recorded_late_splits_the_two_views(result: pd.DataF
 
 
 @pytest.mark.cpu_mode
+def test_the_inventory_says_what_each_host_is(result: pd.DataFrame):
+    # What R-C-001 reads to know a login reached a server, and R-B-L3-006 to know a destination is a workstation.
+    # The role and the operating system ride every enrichment of the host, as known at the event and as known now.
+    assert _pair(result, "ledger-before-reclassification-recorded", "device_role") == ("server", "server")
+    assert _pair(result, "bob-workstation-unnoticed-move", "device_role") == ("workstation", "workstation")
+    assert _pair(result, "bob-workstation-unnoticed-move", "os_family") == ("macos", "macos")
+    assert _pair(result, "ledger-after-reclassification-recorded", "os_version") == ("9.4", "9.4")
+
+
+@pytest.mark.cpu_mode
 def test_a_decommissioned_host_is_not_found(result: pd.DataFrame):
     assert _pair(result, "builder-after-decommission", "criticality") == (None, None)
     assert not _probe(result, "builder-after-decommission", "event")["ctx_found"]

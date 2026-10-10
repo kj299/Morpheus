@@ -138,3 +138,26 @@ def test_constructor_rejects_bad_configuration(config: Config):
 
     with pytest.raises(ValueError, match="set_kinds"):
         TC0EnrichStage(config, store=identity_store(), set_kinds={MEMBERSHIP: "groups"})
+
+
+def asset_store() -> BitemporalStore:
+    return BitemporalStore("asset", [make_version("asset", "fin-01", 0, None, 0, values={"criticality": "medium"})])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_host_is_found_however_the_edr_spells_it(config: Config):
+    # The inventory records fin-01; the EDR reports FIN-01 and fin-01.. Looked up as text the first is a host nobody
+    # knows; rendered as a host name, as the asset stage keys it, both find the record.
+    payload = {"hostname": ["FIN-01", "fin-01."], "event_time": [DAY, DAY]}
+
+    as_text = run(config, payload, store=asset_store(), entity_column="hostname")
+    as_host = run(config, payload, store=asset_store(), entity_column="hostname", entity_normalization="hostname")
+
+    assert list(as_text["ctx_found"]) == [False, False]
+    assert list(as_host["ctx_found"]) == [True, True]
+    assert list(as_host["ctx_criticality"]) == ["medium", "medium"]
+
+
+def test_an_unknown_normalization_is_refused(config: Config):
+    with pytest.raises(ValueError, match="entity_normalization"):
+        TC0EnrichStage(config, store=asset_store(), entity_normalization="upper")

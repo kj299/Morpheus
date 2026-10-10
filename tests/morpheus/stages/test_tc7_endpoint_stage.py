@@ -217,3 +217,16 @@ def test_constructor_rejects_bad_configuration(config: Config):
 
     with pytest.raises(ValueError):
         TC7EndpointStage(config, warmup_days=-1)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_every_spelling_of_a_host_shares_one_history(config: Config):
+    # A week of fin-01, then the EDR starts reporting FIN-01. Keyed as text, the second spelling is a host with no
+    # history and nothing it runs could be judged; keyed as a host name it is the same workstation, already mature,
+    # and the key is on the row for a search to group on.
+    rows = warm("fin-01", None) + [("FIN-01", EXPLORER, CMD, 8, None, "Medium")]
+    result = run(config, processes(rows))
+
+    assert list(result["endpoint_host"].unique()) == ["fin-01"]
+    assert truthy(result["endpoint_mature"].iloc[-1])
+    assert truthy(result["endpoint_host_seen"].iloc[-1])

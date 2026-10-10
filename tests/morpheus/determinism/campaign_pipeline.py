@@ -28,19 +28,23 @@ process whose ancestry neither it nor its peer group has run in thirty days. No 
 own. The attacker here reaches twenty-five new addresses, half what R-B-L3-001 fires on, and neither a first login to
 a server nor one new process is an alert by itself.
 
-The attacker does all three, and six others each do all but one:
+The attacker does all three to a server, and seven others each do all but one:
 
 - **wrong order**: the new process runs before the login that would have to have started it;
 - **too slow**: every step happens, the last one thirty-five minutes after the first;
 - **known host**: the login is to a server the principal logs into every day;
 - **other source**: the login comes from an address other than the one whose fan-out rose;
 - **flat fan-out**: a busy host reaching the same twenty servers every hour, so nothing rose;
-- **no new process**: the host only runs what it always runs.
+- **no new process**: the host only runs what it always runs;
+- **workstation**: every step, in order and in time, onto a finance workstation rather than a server. The rule is
+  about a login *to a server*, and the asset inventory is what says which hosts are servers.
 
 **The steps are joined on values, not on `lineage_id`.** The three layers are sealed on three different entities --
 a source address, a principal, a host -- so no lineage chain holds all three, and the rule joins the source address
 to the login's source and the login's target to the process's host, carrying each step's lineage identifiers as
-evidence. Hosts are compared case-folded, because a login log and an EDR name the same machine differently.
+evidence. A login log and an EDR name the same machine differently -- the directory as an administrator typed it,
+the EDR in lower case -- so hosts are joined on the key both stages render with `entity_key.normalize_hostname`:
+`target_host_key` on the login, `endpoint_host` on the process.
 
 **Each step may precede the one it follows by up to two minutes.** That is the rule's declared join tolerance, twice
 a worst-case clock offset of sixty seconds between collectors, as Part 3's governance asks.
@@ -93,6 +97,7 @@ from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
@@ -101,6 +106,7 @@ from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
+from morpheus.stages.telemetry.tc3_baseline_stage import TC3BaselineStage
 from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
 from morpheus.stages.telemetry.tc3_cardinality_stage import TC3CardinalityStage
 from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
@@ -115,6 +121,7 @@ from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
+from morpheus.utils.entity_key import normalize_hostname
 
 PERIOD_SECONDS = 3600
 LATENESS_SECONDS = 900
@@ -177,6 +184,7 @@ KNOWN_HOST = "gus@example.com"
 OTHER_SOURCE = "hal@example.com"
 FLAT_FANOUT = "ivan@example.com"
 NO_NEW_PROCESS = "judy@example.com"
+WORKSTATION_TARGET = "wes@example.com"
 
 ACTORS = {
     ATTACKER: Actor("10.20.0.5", ATTACKER, "srv-dana", "SRV-DB-02", "10.20.0.5", True, 5, 12, 20),
@@ -186,7 +194,17 @@ ACTORS = {
     OTHER_SOURCE: Actor("10.20.0.9", OTHER_SOURCE, "srv-hal", "srv-web-05", "10.20.0.99", True, 5, 12, 20),
     FLAT_FANOUT: Actor("10.20.0.10", FLAT_FANOUT, "srv-ivan", "srv-mq-06", "10.20.0.10", False, 5, 12, 20),
     NO_NEW_PROCESS: Actor("10.20.0.11", NO_NEW_PROCESS, "srv-judy", "srv-ci-07", "10.20.0.11", True, 5, 12, None),
+    WORKSTATION_TARGET: Actor("10.20.0.12", WORKSTATION_TARGET, "srv-wes", "WS-FIN-08", "10.20.0.12", True, 5, 12, 20),
 }
+
+WORKSTATIONS = ("ws-fin-08", )
+"""The hosts the inventory records as workstations. Every other host here is a server."""
+
+
+def edr_name(host: str) -> str:
+    """A host as the EDR reports it: in lower case, where the directory has it as an administrator typed it."""
+    return host.lower()
+
 
 SERVICES = r"C:\Windows\System32\services.exe"
 SVCHOST = r"C:\Windows\System32\svchost.exe"
@@ -307,35 +325,63 @@ BEACONERS = {
 }
 
 
-def servers() -> list:
-    """Every server a principal logs into or a campaign reaches, in one peer group."""
+def hosts() -> list:
+    """Every host a principal logs into or a campaign reaches, as the shared host rule renders it."""
     names = set()
 
     for actor in ACTORS.values():
-        names.update((actor.home, actor.target.lower()))
+        names.update((normalize_hostname(actor.home), normalize_hostname(actor.target)))
 
     return sorted(names)
 
 
 def asset_versions() -> list:
-    return [
-        make_version("asset",
-                     host,
-                     0,
-                     None,
-                     0,
-                     values={
-                         "owner": "it-ops@example.com",
-                         "owning_team": "platform",
-                         "criticality": "high",
-                         "data_classification": "internal",
-                         "peer_group": SERVER_GROUP,
-                     }) for host in servers()
-    ]
+    """The inventory: every server in one peer group, and the finance workstation in its own."""
+    versions = []
+
+    for host in hosts():
+        workstation = host in WORKSTATIONS
+        versions.append(
+            make_version("asset",
+                         host,
+                         0,
+                         None,
+                         0,
+                         values={
+                             "owner": "finance@example.com" if workstation else "it-ops@example.com",
+                             "owning_team": "finance" if workstation else "platform",
+                             "criticality": "medium" if workstation else "high",
+                             "data_classification": "confidential" if workstation else "internal",
+                             "peer_group": "finance-workstations" if workstation else SERVER_GROUP,
+                             "device_role": "workstation" if workstation else "server",
+                             "os_family": "windows",
+                             "os_version": "10.0.19045" if workstation else "10.0.20348",
+                         }))
+
+    return versions
+
+
+def build_address_store() -> BitemporalStore:
+    """The inventory the handshake enrichment reads: every address that holds a session or beacons is a managed
+    workstation, keyed on the address as the layer 6 pipeline looks it up."""
+    addresses = sorted(set(SESSION_HOLDERS.values()) | set(BEACONERS))
+
+    return BitemporalStore(
+        "asset",
+        [
+            make_version("asset",
+                         address,
+                         0,
+                         None,
+                         0,
+                         values={
+                             "device_role": "workstation", "criticality": "medium", "owner": "it-ops@example.com"
+                         }) for address in addresses
+        ])
 
 
 def build_store() -> BitemporalStore:
-    """The inventory the process enrichment reads: every server in one peer group."""
+    """The inventory the process enrichment reads."""
     return BitemporalStore("asset", asset_versions())
 
 
@@ -349,17 +395,32 @@ def _envelope(rows: list, collector: str, schema: str, origin: str, when: int) -
     }
 
 
-def _flow(rows: list, source: str, destination: str, when: int):
+def _ephemeral_port(rows: list) -> int:
+    """A source port, as a client's stack picks one: distinct per connection, and fixed by the corpus."""
+    return 49152 + len(rows) % 16384
+
+
+def _flow(rows: list,
+          source: str,
+          destination: str,
+          when: int,
+          *,
+          src_port: typing.Optional[int] = None,
+          dst_port: int = 445,
+          bytes_out: int = 900,
+          bytes_in: int = 1400,
+          asn: str = "64512"):
     record = _envelope(rows, "netflow-01", "tc3.v1", f"{source}->{destination}", when)
     record.update({
         "src_ip": source,
+        "src_port": _ephemeral_port(rows) if src_port is None else src_port,
         "dst_ip": destination,
-        "dst_port": 445,
+        "dst_port": dst_port,
         "protocol": "tcp",
         "ip_ttl": 128,
-        "bytes_out": 900,
-        "bytes_in": 1400,
-        "bgp_as_dst": "64512",
+        "bytes_out": bytes_out,
+        "bytes_in": bytes_in,
+        "bgp_as_dst": asn,
     })
     rows.append(record)
 
@@ -440,12 +501,15 @@ def _handshake(rows: list,
                destination: str,
                issuer: str,
                when: int,
-               fingerprint: str = presentation_pipeline.CHROME):
+               fingerprint: str = presentation_pipeline.CHROME,
+               src_port: typing.Optional[int] = None):
     record = _envelope(rows, "tls-inspect-01", "tc6.v1", f"{source}->{destination}", when)
     record.update({
         "src_ip": source,
+        "src_port": _ephemeral_port(rows) if src_port is None else src_port,
         "dst_ip": destination,
         "dst_port": 443,
+        "protocol": "tcp",
         "tls_version": "TLSv1.3",
         "ja4_client": fingerprint,
         "certificate_issuer": issuer,
@@ -474,7 +538,11 @@ def _export(rows: list, principal: str, records: int, when: int):
     rows.append(record)
 
 
-def _build_exfiltration(sessions: list, packets: list, handshakes: list, exports: list):
+BREACH_PORT = 45000
+"""The source port of every breach connection, which is how the layer 3, 4 and 6 records of one connection agree."""
+
+
+def _build_exfiltration(sessions: list, packets: list, handshakes: list, exports: list, flows: list):
     for (index, (principal, address)) in enumerate(sorted(SESSION_HOLDERS.items())):
         for day in range(LAST_DAY + 1):
             session_id = f"{principal.split('@')[0]}-{day}"
@@ -503,12 +571,24 @@ def _build_exfiltration(sessions: list, packets: list, handshakes: list, exports
                     at(LAST_DAY, 3, index) + count * 3 * 60 * NS_PER_SECOND)
 
         _export(exports, actor.principal, 5000, at(LAST_DAY, CAMPAIGN_HOUR, actor.export_minute))
-        _packet(packets,
-                actor.breach_address,
-                45000,
-                SYNC_SERVER,
-                60000,
-                at(LAST_DAY, CAMPAIGN_HOUR, actor.breach_minute))
+        breach = at(LAST_DAY, CAMPAIGN_HOUR, actor.breach_minute)
+        _packet(packets, actor.breach_address, BREACH_PORT, SYNC_SERVER, 60000, breach)
+
+        # The same connection as the flow exporter saw it, and, for the attacker, as the inspection point saw its
+        # handshake: one connection at three layers, which the connection evidence search joins on Community ID.
+        # The others' breaches are seen at two layers, which is the control that the search wants all three.
+        _flow(flows,
+              actor.breach_address,
+              SYNC_SERVER,
+              breach,
+              src_port=BREACH_PORT,
+              dst_port=443,
+              bytes_out=60000,
+              bytes_in=2400,
+              asn="64500")
+
+        if (actor.principal == KIM):
+            _handshake(handshakes, actor.breach_address, SYNC_SERVER, PORTAL_ISSUER, breach, src_port=BREACH_PORT)
         _handshake(handshakes,
                    actor.breach_address,
                    f"203.0.113.{10 + index}",
@@ -535,6 +615,7 @@ def _build_command_and_control(flows: list, handshakes: list):
             record = _envelope(flows, "netflow-01", "tc3.v1", f"{actor.host}->{actor.beacon_destination}", when)
             record.update({
                 "src_ip": actor.host,
+                "src_port": _ephemeral_port(flows),
                 "dst_ip": actor.beacon_destination,
                 "dst_port": 443,
                 "protocol": "tcp",
@@ -726,7 +807,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
             # Every principal's working day starts with a login to their own server from their own address.
             _login(logins, actor.principal, actor.source, actor.home, at(day, 9, index))
 
-        for host in servers():
+        for host in hosts():
             _process(processes, host, SERVICES, SVCHOST, at(day, 9, 30))
             _process(processes, host, SVCHOST, WMI, at(day, 9, 30))
 
@@ -737,7 +818,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
                actor.login_source,
                actor.target,
                at(LAST_DAY, CAMPAIGN_HOUR, actor.login_minute))
-        host = actor.target.lower()
+        host = edr_name(actor.target)
 
         if (actor.process_minute is None):
             _process(processes, host, SVCHOST, WMI, at(LAST_DAY, CAMPAIGN_HOUR, 20))
@@ -759,7 +840,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     packets: list = []
     handshakes: list = []
     exports: list = []
-    _build_exfiltration(sessions, packets, handshakes, exports)
+    _build_exfiltration(sessions, packets, handshakes, exports, flows)
     _build_command_and_control(flows, handshakes)
     _build_replays(logins)
     mac_tables: list = []
@@ -824,13 +905,21 @@ def _login_ladder(config: Config, mac_table: BindingTable) -> list:
 def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[BindingTable] = None) -> tuple:
     """Each layer's own stages, its OSI layer and the entity it is sealed on."""
     if (telemetry_class == FLOW_CLASS):
-        return ([
-            TC3CardinalityStage(config, window_seconds=PERIOD_SECONDS),
-            TC3ReachStage(config, window_seconds=PERIOD_SECONDS),
-            TC3BeaconStage(config, window_seconds=2 * PERIOD_SECONDS),
-            TC3TtlStage(config, window_seconds=2 * PERIOD_SECONDS),
-        ],
-                3, ["src_ip"])
+        return (
+            [
+                CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"),
+                TC3CardinalityStage(config, window_seconds=PERIOD_SECONDS),
+                TC3ReachStage(config, window_seconds=PERIOD_SECONDS),
+                TC3BaselineStage(config, bucket_seconds=PERIOD_SECONDS),
+                TC3BeaconStage(config, window_seconds=2 * PERIOD_SECONDS),
+                TC3TtlStage(config, window_seconds=2 * PERIOD_SECONDS),
+                # The same layer 3 composition as the network corpus, so the flows meet the sourcetype's one contract.
+                # There is no fortnight of history here, so every baseline is immature and none of the host-baseline
+                # rules can fire on this corpus; the destination's context comes from the address inventory.
+                TC0EnrichStage(config, store=build_address_store(), entity_column="dst_ip", prefix="dst_ctx_"),
+            ],
+            3,
+            ["src_ip"])
 
     if (telemetry_class == SESSION_CLASS):
         return ([TC5SessionStage(config)], 5, ["user_principal"])
@@ -840,7 +929,10 @@ def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[Bin
 
         return ([TC5NoveltyStage(config, target_host_column="target_host")] + ladder, 5, ["user_principal"])
 
-    return ([TC0EnrichStage(config, store=build_store(), entity_column="hostname"), TC7EndpointStage(config)],
+    return ([
+        TC0EnrichStage(config, store=build_store(), entity_column="hostname", entity_normalization="hostname"),
+        TC7EndpointStage(config)
+    ],
             7, ["hostname"])
 
 
@@ -951,11 +1043,15 @@ def run_pipeline(config: Config,
     # the estate harness closes its supplicant bindings before resolving through them.
     mac_table = build_mac_table(close_mac_bindings(config, batches[MAC_CLASS], impose_order=impose_order))
 
+    # The handshakes' sources are enriched from this estate's inventory, not from the layer 6 corpus's.
+    stores = {HANDSHAKE_CLASS: {"store": build_address_store()}}
+
     for name in CLASSES:
         if (name in delegated):
             frames.append(delegated[name].run_pipeline(config, {name: batches[name][0]},
                                                        batches={name: batches[name]},
-                                                       impose_order=impose_order))
+                                                       impose_order=impose_order,
+                                                       **stores.get(name, {})))
         else:
             frames.append(run_class(config, name, batches[name], impose_order=impose_order, mac_table=mac_table))
 
@@ -999,6 +1095,7 @@ def lateral_movement(result: pd.DataFrame,
                      novel_process: bool = True,
                      same_source: bool = True,
                      ordered: bool = True,
+                     server_only: bool = True,
                      window_seconds: typing.Optional[int] = CHAIN_WINDOW_SECONDS,
                      tolerance_seconds: int = JOIN_TOLERANCE_SECONDS) -> dict:
     """(source, principal, host) chains R-C-001 fires on, each with its three step times.
@@ -1026,6 +1123,9 @@ def lateral_movement(result: pd.DataFrame,
     if (novel_process):
         processes = processes[processes["endpoint_pair_novel"].map(_truthy)]
 
+    if (server_only):
+        processes = processes[(processes["ctx_device_role"] == "server").fillna(False)]
+
     fired: dict = {}
 
     for (_, start) in starts.iterrows():
@@ -1038,9 +1138,9 @@ def lateral_movement(result: pd.DataFrame,
             if (ordered and t2 < t1 - tolerance_ns):
                 continue
 
-            host = str(login["target_host"]).lower()
+            host = login["target_host_key"]
 
-            for (_, process) in processes[processes["hostname"].str.lower() == host].iterrows():
+            for (_, process) in processes[processes["endpoint_host"] == host].iterrows():
                 t3 = int(process["event_time"])
 
                 if (ordered and t3 < t2 - tolerance_ns):
@@ -1053,6 +1153,21 @@ def lateral_movement(result: pd.DataFrame,
                 fired.setdefault(key, (t1, t2, t3))
 
     return fired
+
+
+# --- Connection evidence: one connection at layers 3, 4 and 6 --------------------------------------------------------
+
+
+def connections_across_layers(result: pd.DataFrame) -> dict:
+    """Community IDs every one of the flow, packet and TLS collectors recorded, with the layers' rows for each."""
+    layered = result[result["telemetry_class"].isin((FLOW_CLASS, TRANSFER_CLASS, HANDSHAKE_CLASS))
+                     & result["community_id"].notna()]
+    seen = layered.groupby("community_id")["osi_layer"].nunique()
+
+    return {
+        community_id: layered[layered["community_id"] == community_id]
+        for (community_id, layers) in seen.items() if layers == 3
+    }
 
 
 # --- R-C-004, evaluated the way its search evaluates it ------------------------------------------------------------

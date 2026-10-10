@@ -246,7 +246,7 @@ def test_a_settled_host_acquiring_a_stack_is_the_finding_and_a_new_host_is_not(r
     # R-B-L6-001, both halves, and the half the corpus had to be rebuilt to show. Both hosts below report a
     # fingerprint they have never presented; only one of them had a history to depart from. Without the
     # prior-handshake count the two rows are identical, which is why the count is on the row.
-    novel = result[_truth(result, "ja4_client_first_seen")]
+    novel = result[_truth(result, "ja4_client_first_seen") & (result["src_ip"] != pp_.PERSONAL_DEVICE)]
 
     assert set(novel["src_ip"]) == {pp_.MANAGED, pp_.VARIED}
 
@@ -255,6 +255,28 @@ def test_a_settled_host_acquiring_a_stack_is_the_finding_and_a_new_host_is_not(r
     assert list(settled["src_ip"]) == [pp_.MANAGED]
     assert list(settled["ja4_client"]) == [pp_.NEW_STACK]
     assert novel[novel["src_ip"] == pp_.VARIED]["ja4_client_observations"].max() < SETTLED_HANDSHAKES
+
+
+@pytest.mark.cpu_mode
+def test_a_personal_device_acquiring_a_stack_is_not_a_managed_endpoint_doing_so(result: pd.DataFrame):
+    # R-B-L6-001's managed-endpoint gate. The phone's history is as settled and its new stack as new as the managed
+    # endpoint's; only the inventory tells them apart, and the rule reads it.
+    settled = result[_truth(result, "ja4_client_first_seen")
+                     & (result["ja4_client_observations"] >= SETTLED_HANDSHAKES)]
+
+    assert set(settled["src_ip"]) == {pp_.MANAGED, pp_.PERSONAL_DEVICE}
+
+    fired = settled[_truth(settled, "ctx_found")]
+
+    assert list(fired["src_ip"]) == [pp_.MANAGED]
+    assert list(fired["ctx_criticality"]) == ["medium"]
+    assert not _truth(result[result["src_ip"] == pp_.PERSONAL_DEVICE], "ctx_found").any()
+
+
+@pytest.mark.cpu_mode
+def test_every_handshake_carries_its_community_id(result: pd.DataFrame):
+    assert result["community_id"].notna().all()
+    assert result["community_id"].str.startswith("1:").all()
 
 
 @pytest.mark.cpu_mode

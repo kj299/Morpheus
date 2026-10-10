@@ -20,6 +20,7 @@ import pytest
 
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
 
 
@@ -119,3 +120,25 @@ def test_two_bindings_differing_only_in_dtype_break_ties_the_same_way():
     widened = Binding(key="10.0.0.1", start_ns=0, end_ns=100, values=(10.0, ), uid="b")
 
     assert _sort_key(integral) == _sort_key(widened)
+
+
+@pytest.mark.parametrize("spelling", ["FIN-01", "fin-01", "Fin-01", "  FIN-01  ", "fin-01."])
+def test_every_spelling_of_a_host_name_is_one_host(spelling):
+    # An EDR, a directory and a resolver each spell the same machine their own way. Compared as text they are
+    # different hosts, and a pair history split across them is never a history.
+    assert normalize_hostname(spelling) == "fin-01"
+
+
+def test_a_fully_qualified_name_keeps_its_domain_unless_asked():
+    assert normalize_hostname("FIN-01.Corp.Example.COM.") == "fin-01.corp.example.com"
+    assert normalize_hostname("FIN-01.Corp.Example.COM.", strip_domain=True) == "fin-01"
+
+
+def test_an_address_is_never_stripped_and_a_v6_address_folds_to_its_canonical_case():
+    assert normalize_hostname("10.0.0.5", strip_domain=True) == "10.0.0.5"
+    assert normalize_hostname("FE80::1") == "fe80::1"
+
+
+@pytest.mark.parametrize("missing", [None, np.nan, pd.NA, "", "   ", "."])
+def test_a_missing_host_name_is_none(missing):
+    assert normalize_hostname(missing) is None

@@ -69,6 +69,7 @@ from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
 from morpheus.stages.telemetry.tc2_baseline_stage import TC2BaselineStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
+from morpheus.stages.telemetry.tc3_baseline_stage import TC3BaselineStage
 from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
 from morpheus.stages.telemetry.tc3_cardinality_stage import TC3CardinalityStage
 from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
@@ -461,6 +462,9 @@ def asset_records() -> dict:
         "criticality": ["high", "high", "medium"],
         "data_classification": ["confidential", "restricted", "internal"],
         "peer_group": ["databases", "databases", "finance-workstations"],
+        "device_role": ["server", "server", "workstation"],
+        "os_family": ["linux", "linux", "windows"],
+        "os_version": ["9.4", "9.4", "10.0.19045"],
         "valid_from": [0, 5 * DAY, 0],
         "valid_to": [None, None, None],
         "recorded_at": [0, 7 * DAY, 0],
@@ -481,6 +485,41 @@ def _context_store(correction: str = "Marketing") -> BitemporalStore:
 
 def context_probes() -> dict:
     return {"user_principal": ["carol", "carol", "mallory"], "event_time": [5 * DAY, 25 * DAY, 5 * DAY]}
+
+
+def _host_store() -> BitemporalStore:
+    return BitemporalStore("asset", [make_version("asset", "fin-01", 0, None, 0, values={"criticality": "medium"})])
+
+
+def host_probes() -> dict:
+    """An EDR's spelling of a host the inventory records in lower case."""
+    return {"hostname": ["FIN-01", "fin-01."], "event_time": [DAY, DAY]}
+
+
+def host_flows() -> dict:
+    """Three hosts' flows over thirty hours: a steady fortnight's worth of hours, then a step in the last."""
+    rows = []
+
+    for hour in range(30):
+        last = hour == 29
+        rows.append(("10.0.0.5",
+                     "10.0.0.9",
+                     40 if last else 3,
+                     1 if hour % 2 else 2,
+                     0.5 if not last else 9.0,
+                     "a" if hour < 15 else "b",
+                     10**18 + hour * 3600 * SECOND))
+        rows.append(("10.0.0.6", "10.0.0.9", 2, 30 if last else 2, 0.2, "a", 10**18 + hour * 3600 * SECOND + SECOND))
+
+    return {
+        "src_ip": [row[0] for row in rows],
+        "dst_ip": [row[1] for row in rows],
+        "dsts_per_src": [row[2] for row in rows],
+        "srcs_per_dst": [row[3] for row in rows],
+        "byte_asymmetry": [row[4] for row in rows],
+        "tenant": [row[5] for row in rows],
+        "event_time": [row[6] for row in rows],
+    }
 
 
 def saas_operations() -> dict:
@@ -1399,6 +1438,14 @@ REGISTRY: dict = {
                 Knob("knowledge", DIFFERS, benign="event", extreme="latest"),
                 Knob("prefix", DIFFERS, benign="ctx_", extreme="context_at_event_"),
                 Knob("set_kinds", DIFFERS, benign=None, extreme={}),
+                Knob("entity_normalization",
+                     DIFFERS,
+                     benign="text",
+                     extreme="hostname",
+                     frame=host_probes,
+                     also={
+                         "store": _host_store(), "entity_column": "hostname"
+                     }),
             ),
         ),
     "TC7DnsStage":
@@ -1647,6 +1694,24 @@ REGISTRY: dict = {
                      Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
                      Knob("max_samples", DIFFERS, benign=4096, extreme=2),
                  )),
+    "TC3BaselineStage":
+        Scenario(stage=TC3BaselineStage,
+                 frame=host_flows,
+                 base={"min_buckets": 4},
+                 knobs=(
+                     Knob("src_column", INPUT_COLUMN, benign="src_ip"),
+                     Knob("dst_column", INPUT_COLUMN, benign="dst_ip"),
+                     Knob("fan_out_column", DIFFERS, benign="dsts_per_src", extreme=None),
+                     Knob("fan_in_column", DIFFERS, benign="srcs_per_dst", extreme=None),
+                     Knob("asymmetry_column", DIFFERS, benign="byte_asymmetry", extreme=None),
+                     Knob("group_column", DIFFERS, benign=None, extreme="tenant"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                     Knob("bucket_seconds", DIFFERS, benign=3600, extreme=86400),
+                     Knob("window_seconds", DIFFERS, benign=14 * 24 * 3600, extreme=4 * 3600),
+                     Knob("min_buckets", DIFFERS, benign=4, extreme=40),
+                     Knob("max_buckets", DIFFERS, benign=1024, extreme=4),
+                 )),
     "TC3ReachStage":
         Scenario(stage=TC3ReachStage,
                  frame=flow_records,
@@ -1756,6 +1821,14 @@ REGISTRY: dict = {
                 Knob("osi_layer", DIFFERS, benign=1, extreme=5),
                 Knob("entity_columns", DIFFERS, benign=["site_id", "device_id", "port_id"], extreme=["port_id"]),
                 Knob("overwrite", DIFFERS, benign=False, extreme=True, frame=keyed_ports),
+                Knob("hostname_columns",
+                     DIFFERS,
+                     benign=None,
+                     extreme=[],
+                     frame=host_probes,
+                     also={
+                         "osi_layer": 7, "entity_columns": ["hostname"]
+                     }),
             ),
         ),
     "LineageStampStage":

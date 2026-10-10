@@ -247,3 +247,72 @@ class BucketPeakTracker:
     def _evict(self) -> None:
         while (len(self._histories) > self._max_entities):
             self._histories.popitem(last=False)
+
+
+@dataclasses.dataclass
+class MeasuredRows:
+    """
+    A batch of observations measured against their entities' histories, one list entry per row.
+
+    Attributes
+    ----------
+    references, buckets, mature, steps : list
+        `PeakResult`'s fields for each row, or `None` throughout for a row the tracker did not see.
+    keyless : int
+        Rows with no entity or no value, which entered no history.
+    unordered : int
+        Rows with an entity and a value but no usable event time, or earlier than their entity's previous row.
+    """
+
+    references: list
+    buckets: list
+    mature: list
+    steps: list
+    keyless: int = 0
+    unordered: int = 0
+
+
+def measure_rows(tracker: BucketPeakTracker, keys: list, values: list, event_times_ns: list) -> MeasuredRows:
+    """
+    Show a tracker a batch in row order and collect what each row is measured against.
+
+    A row whose key or value is `None` has nothing to hold a history against or nothing to measure. Pooling the
+    keyless under a fabricated entity would make every bad row one very busy entity, so they carry nulls and are
+    counted. So are rows with no event time, which cannot be placed in a period.
+
+    Parameters
+    ----------
+    tracker : `BucketPeakTracker`
+        The histories, which this call advances.
+    keys : list
+        Each row's entity, already normalized, or `None`.
+    values : list
+        Each row's value, already converted to a number, or `None`.
+    event_times_ns : list
+        Each row's event time in nanoseconds since the epoch, or `None`.
+
+    Returns
+    -------
+    `MeasuredRows`
+    """
+    measured = MeasuredRows(references=[], buckets=[], mature=[], steps=[])
+
+    for (key, value, event_time_ns) in zip(keys, values, event_times_ns):
+        if (key is None or value is None or event_time_ns is None):
+            measured.references.append(None)
+            measured.buckets.append(None)
+            measured.mature.append(None)
+            measured.steps.append(None)
+            measured.keyless += int(key is None or value is None)
+            measured.unordered += int(key is not None and value is not None)
+            continue
+
+        result = tracker.observe(key, event_time_ns, value)
+
+        measured.references.append(result.reference)
+        measured.buckets.append(result.buckets)
+        measured.mature.append(result.mature)
+        measured.steps.append(result.step)
+        measured.unordered += int(result.out_of_order)
+
+    return measured

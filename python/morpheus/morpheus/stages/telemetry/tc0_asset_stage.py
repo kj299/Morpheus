@@ -29,6 +29,14 @@ classification of what was accessed, and a reclassification recorded a week afte
 where "as known then" and "as known now" disagree -- the alert that fired said internal, and the investigation reads
 restricted. Both answers are kept.
 
+**What a host is, as the inventory says.** `device_role`, `os_family` and `os_version` are recorded beside the owner
+and the criticality, because a rule that means "a login to a server" or "fan-in onto a workstation" has to be able to
+ask, and the answer belongs to the inventory rather than to a guess from the host's behaviour.
+
+**A host is one host however the inventory spells it.** The asset is keyed with
+{py:func}`~morpheus.utils.entity_key.normalize_hostname`, the rule the endpoint stage keys hosts on, so a CMDB that
+records `FIN-01` and an EDR that reports `fin-01` agree about which machine they mean.
+
 A row without the instant its source recorded it is refused, as it is for identity.
 """
 
@@ -49,11 +57,19 @@ from morpheus.stages.telemetry.tc0_identity_stage import log_refusals
 from morpheus.stages.telemetry.tc0_identity_stage import write_context_columns
 from morpheus.utils import bitemporal
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import normalize_hostname
 
 ASSET = "asset"
 """The kind of an asset's attributes."""
 
-DEFAULT_ASSET_COLUMNS = ("owner", "owning_team", "criticality", "data_classification", "peer_group")
+DEFAULT_ASSET_COLUMNS = ("owner",
+                         "owning_team",
+                         "criticality",
+                         "data_classification",
+                         "peer_group",
+                         "device_role",
+                         "os_family",
+                         "os_version")
 
 
 @register_stage("tc0-asset", ignore_args=["asset_columns"])
@@ -70,8 +86,8 @@ class TC0AssetStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     asset_column : str, default = "hostname"
         Column holding the asset the record is about.
     asset_columns : list of str, optional
-        The attributes an asset carries. Defaults to owner, owning team, criticality, data classification and peer
-        group.
+        The attributes an asset carries. Defaults to owner, owning team, criticality, data classification, peer
+        group, device role, operating system family and operating system version.
     valid_from_column : str, default = "valid_from"
         Column holding when the fact started to hold.
     valid_to_column : str, default = "valid_to"
@@ -170,8 +186,7 @@ class TC0AssetStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             attributes = {name: to_host_list(df, name) for name in self._asset_columns}
 
             (columns, refused) = bitemporal.context_columns(
-                ASSET,
-                to_host_list(df, self._asset_column), [()] * count, [{
+                ASSET, [normalize_hostname(asset) for asset in to_host_list(df, self._asset_column)], [()] * count, [{
                     name: attributes[name][position]
                     for name in self._asset_columns
                 } for position in range(count)],

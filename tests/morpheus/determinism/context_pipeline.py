@@ -102,6 +102,14 @@ BOB_WORKSTATION = "ws-bob"
 LEDGER = "db-ledger"
 BUILDER = "build-07"
 
+HOST_KINDS = {
+    ALICE_WORKSTATION: ("workstation", "windows", "10.0.19045"),
+    BOB_WORKSTATION: ("workstation", "macos", "14.6"),
+    LEDGER: ("server", "linux", "9.4"),
+    BUILDER: ("server", "linux", "22.04"),
+}
+"""What the inventory says each host is: its role, and the operating system family and version it runs."""
+
 MOVE_DAY = 10
 """Bob moves from Engineering to Finance. Recorded the same morning."""
 
@@ -167,6 +175,8 @@ def _member(principal, group, valid_from, recorded, change=bitemporal.ASSERT):
 
 
 def _asset(host, owner, team, criticality, classification, peer, valid_from, recorded, change=bitemporal.ASSERT):
+    (role, os_family, os_version) = HOST_KINDS[host]
+
     return make_version(
         ASSET,
         host,
@@ -180,6 +190,9 @@ def _asset(host, owner, team, criticality, classification, peer, valid_from, rec
             "criticality": criticality,
             "data_classification": classification,
             "peer_group": peer,
+            "device_role": role,
+            "os_family": os_family,
+            "os_version": os_version,
         })
 
 

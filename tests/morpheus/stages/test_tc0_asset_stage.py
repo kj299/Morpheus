@@ -44,6 +44,9 @@ def inventory(**overrides) -> dict:
         "criticality": ["high", "high", "medium"],
         "data_classification": ["confidential", "restricted", "internal"],
         "peer_group": ["databases", "databases", None],
+        "device_role": ["server", "server", "workstation"],
+        "os_family": ["linux", "linux", "windows"],
+        "os_version": ["9.4", "9.4", "10.0.19045"],
         "valid_from": [0, 5 * DAY, 0],
         "recorded_at": [0, 7 * DAY, 0],
     }
@@ -59,7 +62,26 @@ def test_every_record_is_an_asset_version_keyed_on_its_host(config: Config):
     assert set(result[bitemporal.CONTEXT_KIND]) == {ASSET}
     assert list(result[bitemporal.CONTEXT_KEY]) == ["db-ledger", "db-ledger", "ws-01"]
     assert list(result[bitemporal.CONTEXT_ATTRIBUTES])[0] == \
-        "criticality,data_classification,owner,owning_team,peer_group"
+        "criticality,data_classification,device_role,os_family,os_version,owner,owning_team,peer_group"
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_every_spelling_of_a_host_is_one_asset(config: Config):
+    # A CMDB that records FIN-01 and an EDR that reports fin-01 must agree about which machine they mean, so the asset
+    # is keyed with the rule the endpoint stage keys hosts on.
+    result = run(config, inventory(hostname=["DB-Ledger", "db-ledger.", "WS-01"]))
+
+    assert list(result[bitemporal.CONTEXT_KEY]) == ["db-ledger", "db-ledger", "ws-01"]
+    assert list(result[bitemporal.CONTEXT_ENTITY]) == ["db-ledger", "db-ledger", "ws-01"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_inventory_says_what_a_host_is(config: Config):
+    store = BitemporalStore.from_records("t", run(config, inventory()).to_dict("records"))
+    attributes = store.resolve("ws-01", DAY).attributes
+
+    assert (attributes["device_role"], attributes["os_family"], attributes["os_version"]) == \
+        ("workstation", "windows", "10.0.19045")
 
 
 @pytest.mark.gpu_and_cpu_mode

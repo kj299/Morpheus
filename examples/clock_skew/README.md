@@ -49,7 +49,7 @@ for row.
 
 ## The result
 
-All thirty-eight shipped detections are swept, each over the pipeline that feeds it, through
+All forty-one shipped detections are swept, each over the pipeline that feeds it, through
 [`rules.py`](./rules.py), which reduces every rule to what it accuses and reads every threshold, join tolerance
 and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hundred, one second, ten, thirty and
 sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
@@ -65,14 +65,22 @@ and the session corpus the fortnight those models are trained on. Every rule's a
 one: R-P-L5-006, which changed at a millisecond under the reference arithmetic, now changes at no spread swept,
 on the hour marks or off them. Why is below.
 
-What a sweep can say depends on the clocks in the corpus, and the thirty-eight fall into three groups that must
+It was run again on 2026-10-10 after step 9 (#60) gave layer 3 a fortnight of history, measured each host's
+counts against it, added three layer 3 rules, required R-C-001's last hop to land on a server and keyed the
+endpoint rules on the normalized host name. The three new rules join the network corpus's other five, which
+arrive through one exporter, so they are reported as not measured. The endpoint corpus's renamed host reports
+under two names, and the sweep gives each reported name a clock of its own, so it spreads eight clocks where there
+are seven hosts; R-B-L7-004 is unchanged to a minute all the same. Every chain breaks at the second it broke at
+before, by accusing a control, and loses its attacker at the second it did before.
+
+What a sweep can say depends on the clocks in the corpus, and the forty-one fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
 | Inputs on clocks that disagree | 12 | A tolerance, or the spread at which the rule changes |
 | Inputs on one clock, in a corpus with several | 11 | Boundary sensitivity under a uniform shift, not a tolerance |
-| Corpus with one clock | 15 | Nothing; reported as not measured |
+| Corpus with one clock | 18 | Nothing; reported as not measured |
 
 **Measured against clocks that disagree** -- the estate's five collectors and three switches for layers 1 and 2,
 the campaign's nine collectors for the chains, and the endpoint corpus's seven hosts, each of whose agents stamps
@@ -97,7 +105,7 @@ window edge and nothing about disagreement. All eleven are unchanged to a minute
 millisecond, for the reason below.
 
 **On a corpus with one clock.** The network, transport, presentation and SaaS corpora each arrive through a single
-collector, so a collector sweep gives that one clock no offset and perturbs nothing. Their fifteen rules -- five at
+collector, so a collector sweep gives that one clock no offset and perturbs nothing. Their eighteen rules -- eight at
 layer 3, three at layer 4, five at layer 6, R-B-L7-002 and R-P-L7-006 -- are reported as `"one clock"` in the
 artifact rather than as unchanged, because the absence of a measurement is not a tolerance. Measuring them needs
 the clocks a deployment really has, which the corpora do not carry: an exporter per flow at layers 3 and 4, an

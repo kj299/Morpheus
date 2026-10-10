@@ -35,6 +35,7 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import NS_PER_SECOND
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
@@ -63,6 +64,10 @@ INCREMENT_COLUMNS = {LOCATION: "locincrement", APP: "appincrement", DEVICE: "dev
 
 TARGET_HOST_FIRST_SEEN = "target_host_first_seen"
 """Whether the principal has authenticated to this host before. Written only when a target host column is named."""
+
+TARGET_HOST_KEY = "target_host_key"
+"""The target host as one host, however the log spelled it: `entity_key.normalize_hostname`'s rendering, which is the
+form the endpoint and asset stages key a host on, so a search joins a login to the host's processes by equality."""
 
 ACTIVITY_VALUE = "authentication"
 """The constant `logcount`'s window is fed.
@@ -153,7 +158,8 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         principal had authenticated to that host before, which is the second step of R-C-001. It is not a
         cumulative feature and gets no increment, because R-C-001 asks about one host and not about how many; and
         it is off by default, because an identity provider's sign-in log has no such host and an always-null
-        column would read as a feature that was measured.
+        column would read as a feature that was measured. The stage also writes `target_host_key`, the host as
+        `normalize_hostname` renders it, which is what the novelty is kept on and what R-C-001 joins on.
     """
 
     def __init__(self,
@@ -212,6 +218,7 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         if (target_host_column is not None):
             self._needed_columns[TARGET_HOST_FIRST_SEEN] = TypeId.BOOL8
+            self._needed_columns[TARGET_HOST_KEY] = TypeId.STRING
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -287,6 +294,7 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             asns = optional(self._asn_column)
             targets = optional(self._target_host_column) if self._target_host_column is not None else None
             target_first_seen: list = []
+            target_keys: list = []
 
             locations: list = []
             logcount: list = []
@@ -321,6 +329,7 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                         first_seen[field].append(None)
 
                     target_first_seen.append(None)
+                    target_keys.append(None if targets is None else normalize_hostname(targets[position]))
                     keyless += 1
                     continue
 
@@ -365,14 +374,14 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     increments[field].append(result.distinct_counts[field])
                     first_seen[field].append(result.first_seen[field])
 
-                target = None if targets is None else normalize_text(targets[position])
+                # Normalized, because a host named in one log as WS-12 and in another as ws-12. is one host.
+                target = None if targets is None else normalize_hostname(targets[position])
+                target_keys.append(target)
 
                 if (target is None):
                     target_first_seen.append(None)
                 else:
-                    # Case-folded, because a host named in one log as WS-12 and in another as ws-12 is one host.
-                    result = self._target_hosts.observe(principal,
-                                                        event_time_ns, {TARGET_HOST_FIRST_SEEN: target.lower()})
+                    result = self._target_hosts.observe(principal, event_time_ns, {TARGET_HOST_FIRST_SEEN: target})
                     target_first_seen.append(None if result.out_of_order else result.first_seen[TARGET_HOST_FIRST_SEEN])
 
             assign_str_column(df, "user_location", locations)
@@ -387,6 +396,7 @@ class TC5NoveltyStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             if (targets is not None):
                 assign_nullable_bool_column(df, TARGET_HOST_FIRST_SEEN, target_first_seen)
+                assign_str_column(df, TARGET_HOST_KEY, target_keys)
 
         if (keyless > 0):
             logger.warning(
