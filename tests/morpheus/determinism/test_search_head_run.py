@@ -110,7 +110,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 48
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 52
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
@@ -126,7 +126,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     # the trajectory rule reads it.
     writers = [name for name in names if runner.writes_risk(name)]
 
-    assert len(writers) == 38
+    assert len(writers) == 41
     assert max(position[name] for name in writers) < position[runner.CHAIN]
     assert position[runner.SUMMARY] < position[runner.TRAJECTORY] < position[runner.CHAIN]
     assert min(position[name] for name in expiries) > max(position[name] for name in names if name not in expiries)
@@ -217,6 +217,18 @@ had no fortnight of training rows to group. Every earlier run is compared with w
 differ in each of them for that reason and no other.
 """
 
+BEFORE_THE_HOST_BASELINES = {
+    "R-P-L3-005 - Fan-out trajectory": 15,
+    "R-B-L7-004 - Process ancestry novelty": 10,
+    "Behavior summary - per-layer scores": 4615,
+}
+"""What every run before step 9's host baselines found where they changed the answer.
+
+The layer 3 corpus gained a fortnight of ordinary history, whose mornings and Monday DHCP checks the trajectory rule
+reads as rises; the campaign gained a principal whose novel process lands on a workstation; and the summary groups
+both. The four searches step 9 added are absent from the earlier runs and are not compared.
+"""
+
 FIRST_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-05T0114Z.json")
 """The first search-head run, kept because it is the evidence for the two changes it caused."""
 
@@ -245,10 +257,11 @@ def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it
     }
 
     assert differing == {
+        **BEFORE_THE_HOST_BASELINES,
+        **BEFORE_THE_MODELS,
         "R-B-L2-002 - Port-to-MAC binding novelty": 6,
         "Binding health - unresolved rate": 5,
         "R-P-L3-005 - Fan-out trajectory": 0,
-        **BEFORE_THE_MODELS,
     }, ("the watchlist expiry now expects what the run found; two are nulls that reached the wire; the trajectory "
         "rule's own SPL could not fire, which the third run found")
     assert expected["R-B-L2-002 - Port-to-MAC binding novelty"]["expected_rows"] == 2
@@ -277,7 +290,7 @@ def test_the_second_run_differed_from_what_is_written_only_where_the_trajectory_
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {"R-P-L3-005 - Fan-out trajectory": 0, **BEFORE_THE_MODELS}
+    assert differing == {**BEFORE_THE_HOST_BASELINES, **BEFORE_THE_MODELS, "R-P-L3-005 - Fan-out trajectory": 0}
     assert "risk_records" not in run["checks"], "the write path did not exist when this run was made"
 
 
@@ -330,5 +343,27 @@ def test_the_fourth_run_differs_from_what_is_written_only_where_the_learned_mode
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_MODELS
+    assert differing == {**BEFORE_THE_HOST_BASELINES, **BEFORE_THE_MODELS}
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 94
+
+
+FIFTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-09T2326Z.json")
+"""The run over the events the learned layer 5 models score, which matched every expectation then written."""
+
+
+def test_the_fifth_run_differs_from_what_is_written_only_where_the_host_baselines_arrived():
+    # Made on 2026-10-09 with the learned layer 5 models: all forty-eight then matched, with 166 risk records.
+    # Against step 9's events it differs in exactly the three searches the host baselines changed.
+    with open(FIFTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_HOST_BASELINES
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 166

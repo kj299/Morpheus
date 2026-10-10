@@ -30,6 +30,7 @@ unrelated row had no port. One entity would become two, its baseline would resta
 control 13's batch-split sweep would disagree with itself purely on where the corpus was cut.
 """
 
+import ipaddress
 import math
 import typing
 
@@ -97,6 +98,52 @@ def normalize_text(value: typing.Any) -> typing.Optional[str]:
         text = str(value).strip()
 
     return text if len(text) > 0 else None
+
+
+def normalize_hostname(value: typing.Any, strip_domain: bool = False) -> typing.Optional[str]:
+    """
+    Render a host name as one host, however the source that reported it spelled it.
+
+    DNS names are case-insensitive, and the sources this fork reads disagree about case and about the root: an EDR
+    reports `FIN-01`, a directory logs a login to `fin-01`, a resolver answers `fin-01.corp.example.com.`. Compared
+    as text they are three hosts, and a host whose pair history is split across them never has a history at all.
+    The name is case-folded and a trailing root dot removed, which makes every spelling of one name compare equal
+    and changes nothing a name means.
+
+    Parameters
+    ----------
+    value : any
+        A value read from a DataFrame column.
+    strip_domain : bool, default = False
+        Also drop everything after the first dot, so a short name and its fully qualified form compare equal. Off
+        by default because it is a claim about the estate, not about DNS: two domains can each hold a `fin-01`, and
+        stripping makes them one host. An address is never stripped, since `10.0.0.5` is not a host called `10`.
+
+    Returns
+    -------
+    str or None
+        The normalized name, or `None` if the value was missing or blank.
+    """
+    text = normalize_text(value)
+
+    if (text is None):
+        return None
+
+    text = text.casefold().rstrip(".")
+
+    if (strip_domain and not _is_address(text)):
+        text = text.split(".", 1)[0]
+
+    return text if len(text) > 0 else None
+
+
+def _is_address(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+
+    return True
 
 
 def compose_key(parts: typing.Sequence[typing.Any]) -> typing.Optional[str]:

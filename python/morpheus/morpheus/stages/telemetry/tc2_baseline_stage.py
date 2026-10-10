@@ -33,6 +33,7 @@ from morpheus.utils.bucket_peak import DEFAULT_MAX_BUCKETS
 from morpheus.utils.bucket_peak import DEFAULT_MIN_BUCKETS
 from morpheus.utils.bucket_peak import NS_PER_SECOND
 from morpheus.utils.bucket_peak import BucketPeakTracker
+from morpheus.utils.bucket_peak import measure_rows
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
@@ -183,6 +184,12 @@ class TC2BaselineStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         # A null in an integer column widened to float arrives as NaN, which is not a count.
         return None if math.isnan(number) else int(number)
 
+    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
+        try:
+            return to_epoch_ns(raw, time_unit=self._time_unit)
+        except ValueError:
+            return None
+
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
         Write the baseline, its depth, its maturity and this row's step above it.
@@ -219,47 +226,19 @@ class TC2BaselineStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             raw_times = to_host_list(df, self._time_column)
             row_count = len(entities)
 
-            baselines: list = []
-            buckets: list = []
-            mature: list = []
-            steps: list = []
-            unordered = 0
-            keyless = 0
+            keys = [normalize_text(entity) for entity in entities]
+            counts = [self._count(value) for value in values]
+            times = [None if key is None else self._event_time_ns(raw) for (key, raw) in zip(keys, raw_times)]
 
-            for position in range(row_count):
-                # A row whose key or count is null has nothing to hold a history against or nothing to measure.
-                # Pooling the keyless under a fabricated entity would make every bad row in the estate one very
-                # busy port, so they carry nulls and the stage says how many there were.
-                key = normalize_text(entities[position])
-                count = self._count(values[position])
-
-                try:
-                    event_time_ns = None if key is None else to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
-
-                if (key is None or count is None or event_time_ns is None):
-                    baselines.append(None)
-                    buckets.append(None)
-                    mature.append(None)
-                    steps.append(None)
-                    keyless += int(key is None or count is None)
-                    unordered += int(key is not None and count is not None)
-                    continue
-
-                result = self._tracker.observe(key, event_time_ns, count)
-
-                baselines.append(result.reference)
-                buckets.append(result.buckets)
-                mature.append(result.mature)
-                steps.append(result.step)
-                unordered += int(result.out_of_order)
+            measured = measure_rows(self._tracker, keys, counts, times)
+            keyless = measured.keyless
+            unordered = measured.unordered
 
             prefix = self._value_column
-            assign_nullable_int_column(df, f"{prefix}{BASELINE_SUFFIX}", baselines)
-            assign_nullable_int_column(df, f"{prefix}{BUCKETS_SUFFIX}", buckets)
-            assign_nullable_bool_column(df, f"{prefix}{MATURE_SUFFIX}", mature)
-            assign_nullable_int_column(df, f"{prefix}{STEP_SUFFIX}", steps)
+            assign_nullable_int_column(df, f"{prefix}{BASELINE_SUFFIX}", measured.references)
+            assign_nullable_int_column(df, f"{prefix}{BUCKETS_SUFFIX}", measured.buckets)
+            assign_nullable_bool_column(df, f"{prefix}{MATURE_SUFFIX}", measured.mature)
+            assign_nullable_int_column(df, f"{prefix}{STEP_SUFFIX}", measured.steps)
 
         if (keyless > 0):
             logger.warning(

@@ -153,12 +153,16 @@ PRODUCED: dict = {
             name="morpheus:score:l3",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-3 stages (cardinality, reach, beacon, TTL) behind a WindowSealStage sealing hourly, which "
+            producer="The TC-3 stages (cardinality, reach, host baselines, beacon, TTL), with CommunityIdStage before "
+            "them and TC0EnrichStage on the destination after, behind a WindowSealStage sealing hourly, which "
             "R-C-001's `window_id + 1` depends on; the `tc3` class "
             "of `tests/morpheus/determinism/network_pipeline.py`.",
-            # The five layer 3 detections read these off this sourcetype. `flow_pair_key` is here because
+            # The eight layer 3 detections read these off this sourcetype. `flow_pair_key` is here because
             # R-B-L3-002 is about a conversation rather than about a host, and a search grouping by `src_ip`
-            # would average a beacon in with everything else that host does.
+            # would average a beacon in with everything else that host does. The baseline columns are here with
+            # the counts they are baselines of, because R-B-L3-001, R-B-L3-006 and R-B-L3-007 fire on a step above
+            # a mature history and nothing else; `dst_ctx_device_role` because R-B-L3-006 asks what was reached;
+            # `community_id` because the connection evidence report joins this layer to layers 4 and 6 on it.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -167,9 +171,27 @@ PRODUCED: dict = {
                               "src_ip",
                               "dst_ip",
                               "flow_pair_key",
+                              "community_id",
                               "dsts_per_src",
                               "dsts_per_src_saturated",
+                              "dsts_per_src_step",
+                              "dsts_per_src_baseline_max",
+                              "dsts_per_src_baseline_mature",
                               "internal_dst_ratio",
+                              "srcs_per_dst",
+                              "srcs_per_dst_saturated",
+                              "srcs_per_dst_step",
+                              "srcs_per_dst_baseline_max",
+                              "srcs_per_dst_baseline_mature",
+                              "dst_ctx_device_role",
+                              "byte_asymmetry",
+                              "byte_asymmetry_step",
+                              "byte_asymmetry_baseline_max",
+                              "byte_asymmetry_baseline_mature",
+                              "dst_asn_first_seen",
+                              "dst_ports_per_src",
+                              "dst_ports_per_src_saturated",
+                              "dst_is_private",
                               "flow_intervals",
                               "flow_mean_interval_ns",
                               "flow_interval_cv",
@@ -193,6 +215,7 @@ PRODUCED: dict = {
             # The three fireable layer 4 detections read these off this sourcetype. The counts are here and the
             # ratio columns are not, because a running ratio is not monotone and a search that summarizes a bin
             # has to divide the counts' maxima rather than aggregate the ratio -- see `tc4_flow_stage`.
+            # `community_id` is the connection evidence report's join to layers 3 and 6.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -201,6 +224,7 @@ PRODUCED: dict = {
                               "src_ip",
                               "dst_ip",
                               "dst_port",
+                              "community_id",
                               "flow_id",
                               "rollup_time_ns",
                               "flow_syn",
@@ -222,12 +246,15 @@ PRODUCED: dict = {
             name="morpheus:score:l6",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="The TC-6 stages (fingerprint, certificate, cipher, content) behind WindowSealStage; the "
+            producer="The TC-6 stages (fingerprint, certificate, cipher, content), with CommunityIdStage before them "
+            "and TC0EnrichStage on the source after, behind WindowSealStage; the "
             "`tc6` class of `tests/morpheus/determinism/presentation_pipeline.py`.",
             # The five layer 6 detections read these. `ja4_client_observations` and `cert_issuer_distinct` are
             # here because two of the rules are unusable without them: novelty alone fires on every host the
             # estate has just started seeing, and an issuer difference alone fires on every delivery host behind
-            # more than one authority.
+            # more than one authority. The context columns are here because R-B-L6-001 fires only on a host the
+            # inventory knows, and carries its criticality and owner; `community_id` is the connection evidence
+            # report's join to layers 3 and 4.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -235,6 +262,10 @@ PRODUCED: dict = {
                               *PROVENANCE_COLUMNS,
                               "src_ip",
                               "dst_ip",
+                              "community_id",
+                              "ctx_found",
+                              "ctx_criticality",
+                              "ctx_owner",
                               "ja4_client",
                               "ja4_client_first_seen",
                               "ja4_client_observations",
@@ -276,7 +307,9 @@ PRODUCED: dict = {
             # ratio because the ratio is undefined for a client with no successes, and the search reads the counts
             # for that reason. R-B-L7-002 and R-P-L7-006 read the SaaS columns, the context the enrichment attached,
             # and the weekly trajectory. R-B-L7-004 reads the endpoint columns, and the peer group the enrichment
-            # attached is carried as the stage recorded it.
+            # attached is carried as the stage recorded it, with the host's criticality, which weights the risk, and
+            # the normalized host name the search keys on rather than the name the collector reported. R-C-001 reads
+            # the host's role, because a lateral movement chain ends on a server.
             required_columns=("event_uid", "entity_key", "lineage_id", "osi_layer", "window_id", *PROVENANCE_COLUMNS),
             variant_columns=(
                 ("src_ip",
@@ -307,6 +340,10 @@ PRODUCED: dict = {
                  "drift_rising_windows",
                  "week_window_id"),
                 ("hostname",
+                 "endpoint_host",
+                 "ctx_criticality",
+                 "ctx_device_role",
+                 "ctx_owner",
                  "endpoint_pair",
                  "endpoint_pair_novel",
                  "endpoint_integrity",
@@ -359,9 +396,9 @@ PRODUCED: dict = {
             # R-D-L5-007, R-D-L5-008 and R-D-L5-009 the principal's own cadence, novelty and failure-run columns,
             # R-B-L5-001 and R-B-L5-002 the scores and the model columns that gate them, and R-P-L5-006 the
             # trajectory TC5DriftStage stamps over the daily windows a second WindowSealStage seals behind the
-            # hourly one. A host login -- a Windows logon, an SSH session -- has
-            # no location or factor but names the host logged into, which R-C-001 reads, and its source address
-            # resolved through the DHCP leases and the layer 2 MAC bindings to a switch port and site, with the
+            # hourly one. A host login -- a Windows logon, an SSH session -- has no location or factor but names the
+            # host logged into, normalized as the asset inventory keys hosts, which R-C-001 reads, and its source
+            # address resolved through the DHCP leases and the layer 2 MAC bindings to a switch port and site, with the
             # journey between the sites of a principal's sign-ins, which R-C-005 reads. A session's start and stop
             # records carry the address it came from, which R-C-004 binds a transfer to, and the lifecycle in two
             # words whatever the collector said. An identity provider's sessions enriched with the principal's
@@ -405,6 +442,7 @@ PRODUCED: dict = {
                  "drift_acceleration"),
                 ("source_ip",
                  "target_host",
+                 "target_host_key",
                  "target_host_first_seen",
                  "auth_result",
                  "login_port_key",
@@ -514,6 +552,8 @@ PRODUCED: dict = {
             time_columns=("valid_from", "valid_to", "recorded_at"),
             producer="`morpheus.stages.telemetry.tc0_asset_stage.TC0AssetStage`, one record per version of an asset; "
             "the `tc0_asset` class of `tests/morpheus/determinism/context_pipeline.py`.",
+            # What kind of host it is is here because two rules now ask: R-B-L3-006 for a
+            # workstation, R-C-001 for a server. They read it off the enriched events, and these are its source.
             required_columns=("context_uid",
                               "context_kind",
                               "context_entity",
@@ -522,7 +562,10 @@ PRODUCED: dict = {
                               "change",
                               "hostname",
                               "data_classification",
-                              "peer_group"),
+                              "peer_group",
+                              "device_role",
+                              "os_family",
+                              "os_version"),
         ),
 }
 """Sourcetypes something in this fork emits, keyed by stanza name."""

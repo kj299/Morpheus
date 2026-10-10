@@ -95,7 +95,12 @@
       "expected_rows": 1,
       "expected_empty": false,
       "contributing_rows": 30,
-      "why": "One notable, for the scanner. Two hosts in the corpus reach a comparable number of addresses and only one of them stays inside the estate: 10.0.0.50 reaches 5, 20, 45 and then 80 internal destinations in successive hours, and 10.0.0.60 reaches thirty on the public internet every hour and is not flagged. That is the whole of the difference between a scan and a lunch break, and it is why the rule requires the internal proportion as well as the count. The scanner_allowlist lookup ships header-only, so nothing is excluded here; populated, an authorized scanner would drop out. Note the threshold is a fixed dsts_per_src>50 standing in for the per-source fourteen-day percentile the guide asks for, which this app cannot compute without a history it does not keep."
+      "why": "One notable, for the scanner, and now against the host's own fortnight rather than a literal. 10.0.0.50 reached its three servers in every working hour of fourteen days and then 5, 20, 45 and 80 internal destinations in successive scored hours: every scored hour is a step above that history, and the last clears the floor of fifty the rule keeps from the literal it shipped with, so 30 flows contribute. The DHCP server is the control the step answers: its Monday-morning conflict checks reach sixty internal addresses, which the literal fired on every Monday, and its own Mondays reach sixty-four, so this one is no step. 10.0.0.60 reaches thirty addresses on the public internet every hour and fails the internal proportion. The scanner_allowlist lookup ships header-only, so nothing is excluded here.",
+      "key_values": [
+        [
+          "10.0.0.50"
+        ]
+      ]
     },
     "R-B-L3-002 - Beaconing": {
       "expected_rows": 6,
@@ -115,18 +120,63 @@
       "why": "One notable, for 10.0.0.100, whose traffic starts arriving one hop short from the third hour onward: twelve flows, every one of them shifted by exactly -1, which is what a single interposed device costs. The control is 10.0.0.110, whose TTL never moves. The aggregate threshold of three shifted flows is what makes this a statement about a distribution rather than about a packet, which is what the guide's rule asks for; a single shifted flow is noise."
     },
     "R-P-L3-005 - Fan-out trajectory": {
-      "expected_rows": 15,
+      "expected_rows": 43,
       "expected_empty": false,
       "by_source": {
-        "10.0.0.50": 3,
+        "10.0.0.50": 18,
+        "10.0.1.67": 11,
         "10.20.0.11": 2,
+        "10.20.0.12": 2,
         "10.20.0.5": 2,
         "10.20.0.6": 2,
         "10.20.0.7": 2,
         "10.20.0.8": 2,
         "10.20.0.9": 2
       },
-      "why": "Fifteen rows: three for the planted scanner, whose fan-out reads 5, 20, 35, 45, 45, 78, 80 across the summary's five-minute bins, three of them a third rise in a row, and two for each of six campaign sources whose fan-out rises through three bins in a row. It was empty on the first two search-head runs, and not only because this package indexes pipeline output and the summary had to be collected first: the search read the value two rows back as `last(previous_destinations)` inside the streamstats that creates `previous_destinations`, which Splunk evaluates as null on every row. It now takes two passes, and the runner dispatches it after the summary is searchable. A watchlist rule, so fifteen is not fifteen pages."
+      "why": "Forty-three rows, and the fortnight of ordinary history the layer 3 corpus gained is why there are more. Eighteen are the planted scanner's: four for the scan, whose fan-out climbs 5, 20, 35, 45, 78 and 80 through the summary's five-minute bins, and fourteen for its ordinary mornings, one each, because a workstation reaching its three servers at five-minute intervals reads one, two and three in three consecutive bins. Eleven are the DHCP server's: seven on the two Monday mornings in the fortnight and four this Monday, sixty-odd addresses pinged across twenty minutes. Two each are the seven campaign sources whose fan-out rises through three bins in a row. The rule reads shape and not level or history, so the ordinary first minutes of a host's day read as an expansion; that is recorded rather than tuned away here, and measuring the rise against the host's own baseline is the obvious next condition. It was empty on the first two search-head runs because the search read the value two rows back inside the streamstats that creates it; it takes two passes now. A watchlist rule, so forty-three is not forty-three pages."
+    },
+    "R-B-L3-006 - Fan-in onto a workstation": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 5,
+      "why": "One notable, for 10.0.2.15, a finance workstation the inventory records as one. Its fortnight held one visitor an hour, its owner's jump host; in the third scored hour fourteen internal sources reach it, and the five flows that take the count from ten to fourteen contribute. Two controls: the DNS server, reached by eighteen clients this morning and by twenty on its own Mondays, never steps; the application server steps to fifteen clients when a new service is pointed at it, and is a server. Flows from the campaign carry no baseline and no destination role, so they reach no row.",
+      "key_values": [
+        [
+          "10.0.2.15"
+        ]
+      ]
+    },
+    "R-B-L3-007 - First-contact upload": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 1,
+      "why": "One notable, for 10.0.0.120's first flow to AS64666: nine megabytes out and three kilobytes back, an asymmetry near 3,000 against a fortnight whose most lopsided hour was its nightly backup at 6. Novelty is per host and permanent, so the first flow is the only one. Each half also happens alone and is quiet: a first download from AS64667 is a first contact without the shape, and the backup provider sent five megabytes, more than ever, is the shape without the first contact.",
+      "key_values": [
+        [
+          "10.0.0.120",
+          "64666"
+        ]
+      ]
+    },
+    "R-D-L3-008 - Port sweep": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 16,
+      "why": "One notable, for 10.0.0.130, which tries forty ports on one internal server and is answered on each: the sixteen flows from the twenty-fifth port on contribute. The conferencing client 10.0.0.140 reaches thirty ports on its media relay, which is outside the estate, and the horizontal scanner reaches eighty addresses on one port; neither is this rule's shape.",
+      "key_values": [
+        [
+          "10.0.0.130"
+        ]
+      ]
+    },
+    "Connection evidence - layers 3, 4 and 6": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "connections_seen_at_two_layers": 4,
+      "why": "One connection, the campaign attacker's breach from 10.20.1.5:45000 to the sync server, which the flow exporter, the packet sensor and the inspection point each recorded and each stamped with the same Community ID. The four other exfiltrators' breaches were seen by the flow exporter and the packet sensor only, and the report wants all three. A report rather than a detection: it writes nothing to the risk index.",
+      "key_values": [
+        "1:rUtMBUM4kCNnpRae2Ey5iUs2LG0="
+      ]
     },
     "R-D-L4-002 - SYN without completion": {
       "expected_rows": 1,
@@ -175,7 +225,7 @@
       "expected_rows": 5,
       "expected_empty": false,
       "contributing_rows": 5,
-      "why": "One notable, for 10.0.0.20, which presented one TLS stack across 34 handshakes and then a second. The negative control is 10.0.0.21, whose second stack is equally novel the first time it appears -- it had made two handshakes at that point, so the settled-history floor of twenty separates them. That control is the one the corpus had to be rebuilt to show: novelty alone reports a host the estate has just started seeing exactly like a host whose stack changed. Four more come from the campaign corpus: R-C-002's attacker and three of its controls are settled hosts, twenty-four handshakes each, presenting a new stack once. The fifth control has five handshakes behind it and is held back by the floor, exactly as 10.0.0.21 is. Which of the four went on to beacon to the destination it presented the new stack to, within the hour, is R-C-002's to say.",
+      "why": "One notable, for 10.0.0.20, which presented one TLS stack across 34 handshakes and then a second. Two negative controls. 10.0.0.21's second stack is equally novel the first time it appears -- it had made two handshakes at that point, so the settled-history floor of twenty separates them; that control is the one the corpus had to be rebuilt to show. 10.0.0.23, a personal device, has as settled a history and as new a stack as 10.0.0.20, and no asset inventory knows it, so the managed-endpoint gate holds it back. Four more come from the campaign corpus: R-C-002's attacker and three of its controls are settled hosts the campaign's inventory manages, twenty-four handshakes each, presenting a new stack once. The fifth control has five handshakes behind it and is held back by the floor. Which of the four went on to beacon to the destination it presented the new stack to, within the hour, is R-C-002's to say.",
       "key_values": {
         "src_ip": "10.0.0.20",
         "new_fingerprints": "t13d3104h1_9b1e5a0f4c22_7e0fd1a83b55",
@@ -405,25 +455,25 @@
       ]
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 4615,
+      "expected_rows": 5173,
       "expected_empty": false,
-      "contributing_rows": 8501,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 8501 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week because only TC5ScoreStage produces `max_abs_z`, and it leaves the session corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline."
+      "contributing_rows": 9380,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 9380 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week because only TC5ScoreStage produces `max_abs_z`, and it leaves the session corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline. The figures grew again when step 9 gave layer 3 a fortnight of ordinary history before its scored hours: the network corpus now contributes 1184 flows where it contributed 411, and the presentation corpus 130 handshakes with a personal device among them; the campaign gained a principal who reaches a workstation and the flows of its exfiltrators' breach connections."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 3591,
+      "distinct_lineage_ids": 3994,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "chains_with_a_method": 146,
+      "chains_with_a_method": 156,
       "three_layer_chain_methods": [
         "soft:directory",
         "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3591 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and one detection accuses any of them: R-D-L2-003, the address claimed by two MACs, at 55. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short and no span reaches four. The other 14 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` now reads `resolution_methods`, every hop a resolver ladder took, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 146 chains in all carry one.",
+      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3994 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and one detection accuses any of them: R-D-L2-003, the address claimed by two MACs, at 55. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short and no span reaches four. The other 14 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` now reads `resolution_methods`, every hop a resolver ladder took, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 156 chains in all carry one.",
       "three_layer_chain_risk": {
         "0": 14,
         "55": 1
@@ -568,68 +618,85 @@
       ]
     },
     "R-B-L7-004 - Process ancestry novelty": {
-      "expected_rows": 10,
+      "expected_rows": 11,
       "expected_empty": false,
-      "contributing_rows": 10,
-      "why": "Four notables, and the integrity level sets each one's severity rather than deciding whether it fires. fin-01 started PowerShell from Word at high integrity, which nothing in the finance workstations' peer group had done in thirty days -- although the build servers do it every day, because another group is not a peer: 55. fin-02 ran a remote-access tool at system integrity that it last ran thirty-eight days earlier: 70. kiosk-01, which the inventory knows but has placed in no peer group, started mshta.exe: judged on its own history, endpoint_host_only=true, 40. build-02's git started curl with no integrity level reported: the default 40, with endpoint_integrity empty. The controls each fail one condition: build-02 compiled with a pair it had never run and its peer runs daily; fin-03 started an editor installed under a different user's profile than the peer who runs it, and per-user folders are collapsed; kiosk-01 started Notepad, which it last ran on day 20; lab-01, four days old and not in the inventory, started nmap before any comparison was possible. Six more come from the campaign corpus, on the servers its seven actors reached: each of six started a process no server in the group had run, at system integrity, 70 apiece, and the seventh started only what its server always runs. This rule cannot tell the one of them that followed a fan-out and a first login from the five that did not; R-C-001 is what does.",
+      "contributing_rows": 11,
+      "why": "Four notables from the endpoint corpus, and the integrity level and the host's criticality together set each one's severity rather than deciding whether it fires. fin-01 started PowerShell from Word at high integrity, which nothing in the finance workstations' peer group had done in thirty days -- although the build servers do it every day, because another group is not a peer: 55 on a medium workstation. Its EDR has spelled it FIN-01 since day 20, and it is one host with one history throughout. fin-02 ran a remote-access tool at system integrity that it last ran thirty-eight days earlier: 70. kiosk-01, which the inventory knows, calls low and has placed in no peer group, started mshta.exe: judged on its own history, endpoint_host_only=true, 40 halved to 20. build-02's git started curl with no integrity level reported: the default 40, half again on a server the inventory calls high, 60. The controls each fail one condition: build-02 compiled with a pair it had never run and its peer runs daily; fin-03 started an editor installed under a different user's profile than the peer who runs it, and per-user folders are collapsed; kiosk-01 started Notepad, which it last ran on day 20; lab-01, four days old and not in the inventory, started nmap before any comparison was possible. Seven more come from the campaign corpus, on the hosts its eight actors reached: six servers the inventory calls high each started a process no host in the group had run, at system integrity, 105 apiece, and the finance workstation one actor reached did the same at medium, 70; the eighth started only what its server always runs. This rule cannot tell the one of them that followed a fan-out and a first login to a server from the others; R-C-001 is what does. Risk is summed per chain rather than read as a probability, so the weighting is not capped, and a system-integrity process on a high-criticality server writes more than any other single detection.",
       "key_values": [
         {
-          "hostname": "build-02",
+          "endpoint_host": "build-02",
           "integrity": "unknown",
+          "criticality": "high",
           "endpoint_host_only": false,
-          "risk_score": 40
+          "risk_score": 60
         },
         {
-          "hostname": "fin-01",
+          "endpoint_host": "fin-01",
           "integrity": "high",
+          "criticality": "medium",
           "endpoint_host_only": false,
           "risk_score": 55
         },
         {
-          "hostname": "fin-02",
+          "endpoint_host": "fin-02",
           "integrity": "system",
+          "criticality": "medium",
           "endpoint_host_only": false,
           "risk_score": 70
         },
         {
-          "hostname": "kiosk-01",
+          "endpoint_host": "kiosk-01",
           "integrity": "medium",
+          "criticality": "low",
           "endpoint_host_only": true,
-          "risk_score": 40
+          "risk_score": 20
         },
         {
-          "hostname": "srv-app-03",
+          "endpoint_host": "srv-app-03",
           "integrity": "system",
+          "criticality": "high",
           "endpoint_host_only": false,
-          "risk_score": 70
+          "risk_score": 105
         },
         {
-          "hostname": "srv-db-02",
+          "endpoint_host": "srv-db-02",
           "integrity": "system",
+          "criticality": "high",
           "endpoint_host_only": false,
-          "risk_score": 70
+          "risk_score": 105
         },
         {
-          "hostname": "srv-fs-04",
+          "endpoint_host": "srv-fs-04",
           "integrity": "system",
+          "criticality": "high",
           "endpoint_host_only": false,
-          "risk_score": 70
+          "risk_score": 105
         },
         {
-          "hostname": "srv-gus",
+          "endpoint_host": "srv-gus",
           "integrity": "system",
+          "criticality": "high",
           "endpoint_host_only": false,
-          "risk_score": 70
+          "risk_score": 105
         },
         {
-          "hostname": "srv-mq-06",
+          "endpoint_host": "srv-mq-06",
           "integrity": "system",
+          "criticality": "high",
           "endpoint_host_only": false,
-          "risk_score": 70
+          "risk_score": 105
         },
         {
-          "hostname": "srv-web-05",
+          "endpoint_host": "srv-web-05",
           "integrity": "system",
+          "criticality": "high",
+          "endpoint_host_only": false,
+          "risk_score": 105
+        },
+        {
+          "endpoint_host": "ws-fin-08",
+          "integrity": "system",
+          "criticality": "medium",
           "endpoint_host_only": false,
           "risk_score": 70
         }
@@ -638,7 +705,7 @@
     "R-C-001 - Lateral movement chain": {
       "expected_rows": 1,
       "expected_empty": false,
-      "why": "One chain, and the first chained rule in this app to return a row, because it reads the scored events rather than other rules' notables. From 10.20.0.5, fan-out rose above its own previous hour -- to twenty-five new addresses, half what R-B-L3-001 fires on -- then dana@example.com logged in from that address to SRV-DB-02, a server they had never logged into, and seven minutes later srv-db-02 started a process no server in its peer group had run in thirty days. Six other actors each do all of that but one step, and are quiet: the new process ran before the login; the last step came thirty-five minutes after the first; the login was to the principal's own server; the login came from another address; the fan-out was a busy host's steady twenty; the server only ran what it always runs. Five of those six processes are R-B-L7-004 notables on their own.",
+      "why": "One chain, and the first chained rule in this app to return a row, because it reads the scored events rather than other rules' notables. From 10.20.0.5, fan-out rose above its own previous hour -- to twenty-five new addresses, half what R-B-L3-001 fires on -- then dana@example.com logged in from that address to SRV-DB-02, a server they had never logged into, and seven minutes later srv-db-02, as its EDR spells it, started a process no server in its peer group had run in thirty days. The two spellings are one host because both pipelines render them with the same rule. Seven other actors each do all of that but one step, and are quiet: the new process ran before the login; the last step came thirty-five minutes after the first; the login was to the principal's own server; the login came from another address; the fan-out was a busy host's steady twenty; the server only ran what it always runs; and the host reached was a finance workstation, not a server. Six of those seven processes are R-B-L7-004 notables on their own.",
       "key_values": [
         {
           "src_ip": "10.20.0.5",

@@ -55,10 +55,15 @@ from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import normalize_hostname
+from morpheus.utils.entity_key import normalize_text
 
 logger = logging.getLogger(__name__)
 
 KNOWLEDGE_MODES = ("event", "latest")
+
+ENTITY_NORMALIZATIONS = ("text", "hostname")
+"""How the entity is rendered before it is looked up: as text, or as a host name is by the asset stage."""
 
 SET_SEPARATOR = "|"
 """Joins the members of a set-valued attribute, sorted, so equal sets render equally."""
@@ -96,6 +101,10 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         the store holds. See the module docstring for why the default is the first.
     prefix : str, default = "ctx_"
         Prepended to every column this stage writes.
+    entity_normalization : str, default = "text"
+        `hostname` renders the entity with `entity_key.normalize_hostname` before the lookup, which is how
+        `TC0AssetStage` keys the hosts it records, so an EDR's `FIN-01` finds the inventory's `fin-01`. `text`
+        looks the entity up as it stands, which is right for a principal.
     set_kinds : dict, optional
         Kinds whose facts are collected into a set, mapped to the attribute that names each member and the output
         column. Defaults to collecting memberships by `group_name` into `groups`, when the store holds any.
@@ -109,7 +118,8 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_unit: str = "ns",
                  knowledge: str = "event",
                  prefix: str = "ctx_",
-                 set_kinds: dict = None):
+                 set_kinds: dict = None,
+                 entity_normalization: str = "text"):
         super().__init__(c)
 
         if (store is None):
@@ -120,6 +130,10 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         if (knowledge not in KNOWLEDGE_MODES):
             raise ValueError(f"knowledge must be one of {KNOWLEDGE_MODES}, received {knowledge!r}")
+
+        if (entity_normalization not in ENTITY_NORMALIZATIONS):
+            raise ValueError(f"entity_normalization must be one of {ENTITY_NORMALIZATIONS}, "
+                             f"received {entity_normalization!r}")
 
         if (set_kinds is None):
             set_kinds = {MEMBERSHIP: (GROUP_ATTRIBUTE, "groups")} if MEMBERSHIP in store.kinds() else {}
@@ -134,6 +148,7 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._time_unit = time_unit
         self._knowledge = knowledge
         self._prefix = prefix
+        self._normalize = normalize_hostname if entity_normalization == "hostname" else normalize_text
         self._set_kinds = {kind: tuple(target) for (kind, target) in set_kinds.items()}
 
         # Single-valued attributes, from every kind that is not collected as a set. The first kind in sorted order to
@@ -210,7 +225,7 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 raise KeyError(f"TC0EnrichStage requires columns {missing} which are not present in the DataFrame. "
                                f"Available columns: {sorted(df.columns)}")
 
-            entities = to_host_list(df, self._entity_column)
+            entities = [self._normalize(entity) for entity in to_host_list(df, self._entity_column)]
             raw_times = to_host_list(df, self._time_column)
 
             attributes = {name: [] for name in self._attributes}

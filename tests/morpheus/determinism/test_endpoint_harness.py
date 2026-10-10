@@ -33,6 +33,7 @@ from morpheus.stages.telemetry.tc7_endpoint_stage import normalize_image_path
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
 from morpheus.utils.determinism import permute_within_contiguous_groups
+from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -143,15 +144,23 @@ def _ancestry(result: pd.DataFrame, **switches) -> dict:
     fired = {}
 
     for (_, row) in rows[keep].iterrows():
-        level = row["endpoint_integrity"]
-        fired[(row["hostname"], row["image_path"])] = ep_.SEVERITY.get(None if pd.isna(level) else level,
-                                                                       ep_.UNWEIGHTED_SEVERITY)
+        fired[(row["endpoint_host"], row["image_path"])] = _severity(row)
 
     return fired
 
 
+def _severity(row: pd.Series) -> int:
+    """The search's risk_score: the integrity weight, scaled by the host's criticality, rounded."""
+    level = row["endpoint_integrity"]
+    criticality = row["ctx_criticality"]
+    weight = ep_.SEVERITY.get(None if pd.isna(level) else level, ep_.UNWEIGHTED_SEVERITY)
+    scale = ep_.CRITICALITY_WEIGHT.get(None if pd.isna(criticality) else criticality, ep_.UNKNOWN_CRITICALITY_WEIGHT)
+
+    return round(weight * scale)
+
+
 def _decisive(result: pd.DataFrame, host: str, image: str) -> pd.Series:
-    rows = result[(result["hostname"] == host) & (result["image_path"] == image)
+    rows = result[(result["endpoint_host"] == host) & (result["image_path"] == image)
                   & (result["event_time"].astype("int64") >= ep_.at(ep_.LAST_DAY, 10))]
 
     assert len(rows) == 1, (host, image)
@@ -282,14 +291,51 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
 
 
 @pytest.mark.cpu_mode
-def test_the_rule_fires_on_exactly_the_four_it_should_at_the_severity_integrity_gives(result: pd.DataFrame):
-    # Across all forty-one days, not only the last: nothing in the history is novel once its warm-up has passed.
+def test_the_rule_fires_on_exactly_the_four_it_should_at_the_severity_integrity_and_criticality_give(
+        result: pd.DataFrame):
+    # Across all forty-one days, not only the last: nothing in the history is novel once its warm-up has passed. The
+    # four fire at four severities: high integrity on a medium workstation, system on another, medium on the kiosk the
+    # inventory calls low, and no integrity at all on a build server it calls high.
     assert _ancestry(result) == {
         (ep_.NOVEL_HIGH, ep_.POWERSHELL): ep_.SEVERITY["high"],
         (ep_.STALE, ep_.TEAMVIEWER): ep_.SEVERITY["system"],
-        (ep_.HOST_ONLY_NOVEL, ep_.MSHTA): ep_.SEVERITY["medium"],
-        (ep_.UNWEIGHTED, ep_.CURL): ep_.UNWEIGHTED_SEVERITY,
+        (ep_.HOST_ONLY_NOVEL, ep_.MSHTA): round(ep_.SEVERITY["medium"] * ep_.CRITICALITY_WEIGHT["low"]),
+        (ep_.UNWEIGHTED, ep_.CURL): round(ep_.UNWEIGHTED_SEVERITY * ep_.CRITICALITY_WEIGHT["high"]),
     }
+
+
+@pytest.mark.cpu_mode
+def test_the_weighting_reads_the_inventory_and_carries_the_owner(result: pd.DataFrame):
+    # The scale is the host's criticality as the inventory had it when the process ran, and the owner rides on the
+    # row so the notable says whom to ask.
+    for (host, criticality) in ((ep_.UNWEIGHTED, "high"), (ep_.HOST_ONLY_NOVEL, "low"), (ep_.STALE, "medium")):
+        decisive = _decisive(result,
+                             host, {
+                                 ep_.UNWEIGHTED: ep_.CURL, ep_.HOST_ONLY_NOVEL: ep_.MSHTA, ep_.STALE: ep_.TEAMVIEWER
+                             }[host])
+
+        assert decisive["ctx_criticality"] == criticality, host
+        assert isinstance(decisive["ctx_owner"], str) and decisive["ctx_owner"].endswith("@example.com"), host
+
+
+@pytest.mark.cpu_mode
+def test_fin_01_and_FIN_01_are_one_host(result: pd.DataFrame):  # pylint: disable=invalid-name
+    # From day twenty the EDR spells the first finance workstation in upper case. Every one of its rows is keyed on
+    # one host, found in the inventory, judged against its peers, and its routine the day after the change is a
+    # routine it has run for twenty days rather than a new host's first week.
+    rows = result[result["hostname"].isin({ep_.RENAMED_HOST, ep_.RENAMED_HOST.upper()})]
+    after = rows["event_time"].astype("int64") >= ep_.at(ep_.RENAME_DAY)
+
+    assert set(rows.loc[~after, "hostname"]) == {"fin-01"}
+    assert set(rows.loc[after, "hostname"]) == {"FIN-01"}
+    assert set(rows["endpoint_host"]) == set(rows["entity_key"]) == {"fin-01"}
+    assert _flag(rows["ctx_found"]).all()
+    assert set(rows["endpoint_peer_group"]) == {ep_.FINANCE_GROUP}
+
+    day_after = rows[after & (rows["event_time"].astype("int64") < ep_.at(ep_.RENAME_DAY + 1))]
+    assert len(day_after) > 0
+    assert _flag(day_after["endpoint_mature"]).all()
+    assert _flag(day_after["endpoint_host_seen"]).all()
 
 
 @pytest.mark.cpu_mode
@@ -416,8 +462,15 @@ def test_the_search_carries_the_weights_this_harness_asserts():
     for (level, severity) in ep_.SEVERITY.items():
         assert f'"{level}", {severity}' in search
 
+    for (criticality, scale) in ep_.CRITICALITY_WEIGHT.items():
+        if (scale != ep_.UNKNOWN_CRITICALITY_WEIGHT):
+            assert f'criticality == "{criticality}", {scale}' in search
+
     assert f"true(), {ep_.UNWEIGHTED_SEVERITY}" in search
+    assert f"true(), {ep_.UNKNOWN_CRITICALITY_WEIGHT}" in search
+    assert "round(integrity_weight * criticality_weight)" in search
     assert "endpoint_host_only" in search
+    assert "ctx_owner" in search
 
 
 # --- Stamping ------------------------------------------------------------------------------------------------------
@@ -426,5 +479,6 @@ def test_the_search_carries_the_weights_this_harness_asserts():
 @pytest.mark.cpu_mode
 def test_every_row_is_stamped_at_layer_seven_and_keyed_on_its_host(result: pd.DataFrame):
     assert set(result["osi_layer"]) == {ep_.OSI_LAYER}
-    assert list(result["entity_key"]) == list(result["hostname"])
+    assert list(result["entity_key"]) == list(result["endpoint_host"])
+    assert list(result["endpoint_host"]) == [normalize_hostname(host) for host in result["hostname"]]
     assert result["lineage_id"].notna().all()

@@ -34,7 +34,7 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, and context, each with `_time` anchored on a field the record carries -- `event_time` for scores and edges, an interval bound for bindings, `valid_from` for context |
 | `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, the bucketed L1 history beside them, and the principal watchlist the predictive rules write, with accelerated fields |
 | `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1`, `binding_l1_history` and `principal_watchlist` lookups, and `rule_metadata` |
-| `default/savedsearches.conf` | Search heads | Forty-eight searches: lookup refresh and expiry jobs, including the principal watchlist's, the 5-minute summary rollup, chain assembly, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the two layer 1 detections R-D-L1-001 and the predictive R-P-L1-004, the five layer 2 detections R-B-L2-002 and R-D-L2-001, 003, 004 and 005, the five layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004 and the predictive R-P-L3-005, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the five deterministic layer 5 detections R-D-L5-003, R-D-L5-004, R-D-L5-007, R-D-L5-008 and R-D-L5-009, the two layer 5 model rules R-B-L5-001 and R-B-L5-002, gated on a principal's own model and empty until one is pinned, the layer 5 session duration rule R-B-L5-005, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric. Every detection ends by collecting its rows into `behavior_risk`, which Chain assembly sums, and is a per-result alert suppressed on its stated deduplication key for its dispatch window |
+| `default/savedsearches.conf` | Search heads | Fifty-two searches: lookup refresh and expiry jobs, including the principal watchlist's, the 5-minute summary rollup, chain assembly, the connection evidence report joining layers 3, 4 and 6 on `community_id`, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the two layer 1 detections R-D-L1-001 and the predictive R-P-L1-004, the five layer 2 detections R-B-L2-002 and R-D-L2-001, 003, 004 and 005, the eight layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004, the predictive R-P-L3-005, and the host-baseline rules R-B-L3-006, R-B-L3-007 and R-D-L3-008, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the five deterministic layer 5 detections R-D-L5-003, R-D-L5-004, R-D-L5-007, R-D-L5-008 and R-D-L5-009, the two layer 5 model rules R-B-L5-001 and R-B-L5-002, gated on a principal's own model and empty until one is pinned, the layer 5 session duration rule R-B-L5-005, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, and a TLS table coverage metric. Every detection ends by collecting its rows into `behavior_risk`, which Chain assembly sums, and is a per-result alert suppressed on its stated deduplication key for its dispatch window |
 | `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
 | `lookups/rule_metadata.csv` | Search heads | One row per detection: `rule_id,saved_search,suppress_fields,suppress_period,hysteresis`. The stanzas' `alert.suppress.*` keys are held to it by a test; `hysteresis` is `none` for every rule until a model scores near a threshold |
 | `lookups/scanner_allowlist.csv` | Search heads | The estate's own scanners, which R-B-L3-001 excludes: `src_ip,allowed,owner,note`. Ships header-only; until it is populated the rule fires on every scanner, authorized ones included |
@@ -151,6 +151,32 @@ side alone breaks the joins silently.
   fires, the collector is losing lease or expiry records, and attributions are degrading into
   guesses; fix collection before trusting anything downstream.
 
+## Features without a rule
+
+The host-centric stages emit columns no search here reads, and each is listed with the reason, so a reader can tell a
+feature kept for the analyst or for a model from one nobody uses. The design guide's Part 6 carries the same table,
+and `tests/morpheus/determinism/test_feature_coverage.py` keeps both honest against the stages and these searches.
+
+| Feature | Stage | Why no rule reads it |
+| --- | --- | --- |
+| `dsts_per_src_first_in_window`, `srcs_per_dst_first_in_window`, `dst_ports_per_src_first_in_window` | `TC3CardinalityStage` | Says which flow raised the count. The rules read the count; this is for the analyst reading the row. |
+| `internal_dsts_in_window` | `TC3ReachStage` | The numerator of `internal_dst_ratio`, which R-B-L3-001 reads instead. |
+| `internal_dst_ratio_saturated` | `TC3ReachStage` | The ratio's sample cap. R-B-L3-001 carries `dsts_per_src_saturated`, the cap on the count it fires on. |
+| `dsts_per_src_baseline_buckets`, `srcs_per_dst_baseline_buckets`, `byte_asymmetry_baseline_buckets` | `TC3BaselineStage` | How deep the history is. The rules read `_baseline_mature`, which is this against the stage's floor. |
+| `flow_regularity_saturated` | `TC3BeaconStage` | The interval cap on one pair. A beacon is regular long before it binds. |
+| `ip_ttl_saturated` | `TC3TtlStage` | The sample cap on one source's TTL samples, which a stable path never reaches. |
+| `ja4_client_changed` | `TC6FingerprintStage` | Measured, not reasoned about: in the layer 6 corpus every change on a settled host is either a first sighting, which R-B-L6-001 reads, or the host alternating between two stacks it has always had, which is that rule's control. A rule on the change alone fires only on the control. |
+| `tls_client_key` | `TC6FingerprintStage` | The key the stage keeps a host's stacks on. Searches group by `src_ip`. |
+| `tls_destination_key` | `TC6CertificateStage` | The key the stage keeps a destination's issuers on. Searches group by `dst_ip`. |
+| `cert_destination_is_global` | `TC6CertificateStage` | One half of `cert_self_signed_external`, which R-D-L6-003 reads. |
+| `cert_issuer_saturated` | `TC6CertificateStage` | The issuer cap on one destination, which a destination presenting more is already past. |
+| `cipher_rank`, `cipher_floor` | `TC6CipherStage` | The numbers behind `cipher_tier` and `cipher_floor_tier`, which R-B-L6-004 reports, and `cipher_downgraded`, which it fires on. |
+| `cipher_saturated` | `TC6CipherStage` | The suite cap on one pair. |
+| `flow_bpp`, `flow_ppm`, `flow_psh`, `flow_fin`, `flow_ackpush_ratio`, `flow_fin_ratio`, `flow_rst_ratio` | `TC4FlowStage` | Per-flow model inputs. The searches recover the counts from their maxima rather than aggregate a running ratio, and no layer 4 model is pinned yet (#59). |
+| `flow_bpp_envelope` | `TC4EnvelopeStage` | The envelope R-B-L4-005 measures against; it fires on `flow_bpp_envelope_breached`. |
+| `flow_bpp_envelope_mature`, `flow_data_len_envelope_mature` | `TC4EnvelopeStage` | Folded into the `_breached` flags, which are null until the envelope is mature. |
+| `endpoint_host_seen`, `endpoint_peer_seen`, `endpoint_mature` | `TC7EndpointStage` | The halves of `endpoint_pair_novel`, which R-B-L7-004 reads. Carried so an analyst can see which half decided. |
+
 ## Packaging
 
 To produce an installable package for Splunkbase-style distribution:
@@ -169,7 +195,7 @@ Three levels, strongest last:
 2. **Live load.** The app was installed into a fresh Splunk Enterprise 10.2 instance: `btool check`
    reports no errors, all five indexes are created, all seven scheduled searches that existed at the
    time register, and every one of them executes without a parse error against empty indexes. The app
-   ships forty-eight searches now; the forty-one added since have not been through this step.
+   ships fifty-two searches now; the forty-five added since have not been through this step.
 3. **Functional.** With synthetic JSON telemetry seeded into the indexes and bindings written to the
    KV Store: timestamps anchor to `event_time` as the props intend, the identifier ladder resolves an
    IP through both lookups to a physical port and site, the chain assembly search emits the seeded
@@ -182,9 +208,10 @@ Several things were added after that validation and have **not** been run agains
 `binding:l2` and `binding:l2:open` sourcetypes, the `port_designations` lookup, the layer 2
 detections `R-D-L2-001`, `R-D-L2-003`, `R-D-L2-004`, `R-D-L2-005` and, later, `R-B-L2-002`, and -- added later still -- the
 `morpheus:score:l5` sourcetype with the two layer 5 detections `R-D-L5-003` and `R-D-L5-004` and the
-predictive watchlist `R-P-L5-006`, then the `morpheus:score:l3` sourcetype with five layer 3 detections,
+predictive watchlist `R-P-L5-006`, then the `morpheus:score:l3` sourcetype with five layer 3 detections and,
+later, three more (`R-B-L3-006`, `R-B-L3-007` and `R-D-L3-008`),
 then `morpheus:score:l4` with three more, `morpheus:score:l6` with five, `morpheus:score:l7` with five, the chained `R-C-001`, `R-C-004`
-and `R-C-005`, with `R-C-002` as rewritten, the layer 1 detections `R-D-L1-001` and `R-P-L1-004`, and the layer 5 baseline searches `R-D-L5-007`, `R-D-L5-008` and `R-D-L5-009` with the gated `R-B-L5-001` and `R-B-L5-002` and the session duration rule `R-B-L5-005`, together with the `principal_watchlist` lookup and its expiry job. That is all thirty-eight detection searches this app ships, so the live
+and `R-C-005`, with `R-C-002` as rewritten, the layer 1 detections `R-D-L1-001` and `R-P-L1-004`, and the layer 5 baseline searches `R-D-L5-007`, `R-D-L5-008` and `R-D-L5-009` with the gated `R-B-L5-001` and `R-B-L5-002` and the session duration rule `R-B-L5-005`, together with the `principal_watchlist` lookup and its expiry job. That is all forty-one detection searches this app ships, so the live
 pass above covers the app's oldest part and none of its detections as they now stand; the search-head run
 described below has since run all of them. Their SPL follows
 the same scheduling discipline as the validated searches, and the predicates they encode are asserted in
@@ -196,7 +223,7 @@ plants both a simultaneous and a cross-switch spoof for, alongside a legitimate 
 the stanzas parse on a search head. Run `btool savedsearches list` after installing.
 
 The run that would settle that is packaged: `validate/run_search_head.sh` starts the validation container, indexes
-the sample events, dispatches all forty-eight searches in the order `validate/VALIDATION.md` prescribes, and writes
+the sample events, dispatches all fifty-two searches in the order `validate/VALIDATION.md` prescribes, and writes
 `validate/search_head_results.json`, which `tests/morpheus/determinism/test_search_head_run.py` compares with
 `expected_results.json`. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:
 every one of the forty-eight searches ran without error over the pipeline's own events, and forty-six returned
@@ -212,9 +239,13 @@ a threshold of 60, and R-P-L3-005 fired fifteen times once it took two passes ov
 read a field its `streamstats` was still creating, which is why the second run's zero agreed with an expectation
 that blamed the summary. A fourth, on the Docker image this package ships with, agreed with it on every search and
 every check. A fifth, that night on the tarball install, ran over the events regenerated when each layer 5
-principal gained a learned model of their own: it indexed all 8,680 events, returned what is written for all
-forty-eight -- R-B-L5-001 and R-B-L5-002 their first rows, 42 and 28 -- held the 166 risk records the detections
-returned, and is `validate/search_head_results.json`; the earlier four are kept beside it.
+principal gained a learned model of their own: it indexed all 8,680 events, returned what was then written for
+all forty-eight -- R-B-L5-001 and R-B-L5-002 their first rows, 42 and 28 -- and held the 166 risk records the
+detections returned. A sixth, on 2026-10-10 on the same install, ran over the events step 9 regenerated when layer 3
+gained a fortnight of history and each host a baseline: it indexed all 9,559 events, returned what is written for
+all fifty-two -- the three new layer 3 detections and the connection evidence report one row each -- held the 198
+risk records the detections returned, and is `validate/search_head_results.json`; the earlier five are kept beside
+it.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

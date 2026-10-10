@@ -91,6 +91,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc2_arp_stage.py
     tests/morpheus/stages/test_tc2_auth_stage.py
     tests/morpheus/stages/test_tc2_baseline_stage.py
+    tests/morpheus/stages/test_tc3_baseline_stage.py
     tests/morpheus/stages/test_tc2_binding_stage.py
     tests/morpheus/stages/test_tc2_cardinality_stage.py
     tests/morpheus/stages/test_tc3_beacon_stage.py
@@ -136,6 +137,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_splunk_validation_package.py
     tests/morpheus/determinism/test_stage_parameter_liveness.py
     tests/morpheus/determinism/test_upstream_reuse.py
+    tests/morpheus/determinism/test_feature_coverage.py
     tests/morpheus/determinism/test_verdict_artifacts.py
     tests/morpheus/stages/test_lineage_stage_cli.py
     tests/morpheus/utils/test_arrival_regularity.py

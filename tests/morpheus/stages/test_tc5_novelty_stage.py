@@ -238,11 +238,13 @@ def test_a_record_with_no_principal_carries_no_counts(config: Config):
 @pytest.mark.gpu_and_cpu_mode
 def test_a_host_the_principal_has_never_logged_into_is_first_seen(config: Config):
     payload = frame(4)
-    payload["target_host"] = ["ws-01", "WS-01", "ws-02", "ws-01"]
+    payload["target_host"] = ["ws-01", "WS-01", "ws-02", "ws-01."]
     meta = run(config, payload, target_host_column="target_host")
 
-    # The first sample establishes normal; case is folded, so WS-01 is the host already seen.
+    # The first sample establishes normal; the name is normalized, so WS-01 and ws-01. are the host already seen,
+    # and the key the novelty was kept on is on the row for a search to join on.
     assert _as_list(meta, "target_host_first_seen") == [None, False, True, False]
+    assert _as_list(meta, "target_host_key") == ["ws-01", "ws-01", "ws-02", "ws-01"]
 
 
 @pytest.mark.gpu_and_cpu_mode

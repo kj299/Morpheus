@@ -3,6 +3,8 @@ R-B-L2-002,R-B-L2-002 - Port-to-MAC binding novelty,port_key,1h,none
 R-B-L3-001,R-B-L3-001 - Fan-out expansion,src_ip,1h,none
 R-B-L3-002,R-B-L3-002 - Beaconing,flow_pair_key,1h,none
 R-B-L3-004,R-B-L3-004 - TTL fingerprint shift,src_ip,1h,none
+R-B-L3-006,R-B-L3-006 - Fan-in onto a workstation,dst_ip,1h,none
+R-B-L3-007,R-B-L3-007 - First-contact upload,"src_ip,bgp_as_dst",1h,none
 R-B-L4-005,R-B-L4-005 - Transfer envelope breach,transfer_triple,1h,none
 R-B-L5-001,R-B-L5-001 - Composite authentication anomaly,"user_principal,window_id",1h,none
 R-B-L5-002,R-B-L5-002 - Location novelty anomaly,"user_principal,window_id",1h,none
@@ -11,7 +13,7 @@ R-B-L6-001,R-B-L6-001 - New TLS client fingerprint,src_ip,1h,none
 R-B-L6-004,R-B-L6-004 - Cipher downgrade,tls_pair_key,1h,none
 R-B-L7-001,R-B-L7-001 - DNS tunneling,dns_registered_domain,1h,none
 R-B-L7-002,R-B-L7-002 - Bulk data access,"user_principal,operation",1h,none
-R-B-L7-004,R-B-L7-004 - Process ancestry novelty,"hostname,endpoint_pair",1h,none
+R-B-L7-004,R-B-L7-004 - Process ancestry novelty,"endpoint_host,endpoint_pair",1h,none
 R-C-001,R-C-001 - Lateral movement chain,"src_ip,user_principal,target",3h,none
 R-C-002,R-C-002 - TLS anomaly precedes beaconing,"src_ip,dst_ip",3h,none
 R-C-004,R-C-004 - Staged exfiltration,"user_principal,src_ip",12h,none
@@ -22,6 +24,7 @@ R-D-L2-003,R-D-L2-003 - ARP anomaly,arp_sender_ip,1h,none
 R-D-L2-004,R-D-L2-004 - MAC in two places at once,"mac_address,bind_start",1h,none
 R-D-L2-005,R-D-L2-005 - Authorization without authentication,event_uid,1h,none
 R-D-L3-003,R-D-L3-003 - Reserved-range egress,event_uid,1h,none
+R-D-L3-008,R-D-L3-008 - Port sweep,src_ip,1h,none
 R-D-L4-002,R-D-L4-002 - SYN without completion,src_ip,1h,none
 R-D-L4-003,R-D-L4-003 - RST ratio,"entity_key,refusal_direction",1h,none
 R-D-L5-003,R-D-L5-003 - Impossible travel,"user_principal,window_id",1h,none

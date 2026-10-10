@@ -34,7 +34,10 @@ Into the corpus are planted the things the five rules exist to see, each with th
 quiet:
 
 - a **managed endpoint acquiring a new TLS stack**, which is R-B-L6-001, against a host that alternates between
-  two stacks it has always had -- the case a rule reading "the fingerprint changed" would flag every time;
+  two stacks it has always had -- the case a rule reading "the fingerprint changed" would flag every time -- and
+  against a **personal device** with just as settled a history and just as new a stack, which the asset inventory
+  has never heard of: the guide's argument for this rule is that there are few innocent ways for a managed endpoint
+  to acquire a stack, and a phone updating its browser is one of the many for a device nobody manages;
 - an **interception**, a destination presenting an issuer it never has before, which is R-D-L6-002, against a
   content delivery host legitimately behind four authorities and against a destination whose authority genuinely
   rotates and then settles, which must stop being reported once it is the destination's new normal;
@@ -48,6 +51,10 @@ quiet:
 Three of the five rules need a reference and two do not, which the corpus makes visible: the self-signed and
 content rules fire on a destination's first handshake, while the issuer and cipher rules stay quiet until their
 entity has a history. "The rule is quiet" means different things in those two cases and the harness asserts both.
+
+Each handshake's source is enriched from the TC-0 asset inventory, keyed on the address until hosts have an identity
+of their own across layers, and carries its Community ID, so a handshake joins the flow and the packets of the same
+connection by equality.
 
 Every stateful stage is preceded by `TotalOrderStage`, which is determinism control 8 as a stage. Three of the
 four TC-6 stages are cumulative -- a novelty set, a mode and a running minimum are all functions of what came
@@ -63,17 +70,21 @@ import stamping
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
+from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
 from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
 from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
 from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
 from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 
@@ -105,6 +116,15 @@ RULES = ("R-B-L6-001", "R-D-L6-002", "R-D-L6-003", "R-B-L6-004", "R-D-L6-005")
 MANAGED = "10.0.0.20"
 VARIED = "10.0.0.21"
 LEGACY_CLIENT = "10.0.0.22"
+PERSONAL_DEVICE = "10.0.0.23"
+"""A phone on the corporate wireless. Settled, and then a new stack; and in no inventory."""
+
+INVENTORY = {
+    MANAGED: ("workstation", "medium", "alice@example.com"),
+    VARIED: ("workstation", "medium", "bob@example.com"),
+    LEGACY_CLIENT: ("server", "high", "it-ops@example.com"),
+}
+"""The managed hosts, as the asset inventory has them: role, criticality and owner. The personal device is absent."""
 
 # Destinations. Outside the ranges the RFCs reserve for documentation, which `parsers/ip.py` classifies as
 # private -- the layer 3 corpus was built on those once and reported a host on the public internet as one that
@@ -161,6 +181,25 @@ def at(hour: int, second: int = 0) -> int:
     return (hour * PERIOD_SECONDS + second) * NS_PER_SECOND
 
 
+def asset_versions() -> list:
+    """The inventory's record of every managed host, recorded before the corpus begins."""
+    return [
+        make_version("asset",
+                     address,
+                     0,
+                     None,
+                     0,
+                     values={
+                         "device_role": role, "criticality": criticality, "owner": owner
+                     }) for (address, (role, criticality, owner)) in sorted(INVENTORY.items())
+    ]
+
+
+def build_store() -> BitemporalStore:
+    """The asset store the source enrichment reads."""
+    return BitemporalStore("asset", asset_versions())
+
+
 def _fingerprint_of(destination: str, issuer: str) -> str:
     """A stable stand-in for a certificate's SHA-256 fingerprint.
 
@@ -194,8 +233,10 @@ def build_corpus() -> dict[str, pd.DataFrame]:
             "collector_seq": len(rows),
             "event_time": event_time_ns,
             "src_ip": src,
+            "src_port": 49152 + len(rows),
             "dst_ip": dst,
             "dst_port": 443,
+            "protocol": "tcp",
             "tls_version": "TLSv1.3" if suite.startswith("TLS_AES") or suite.startswith("TLS_CHACHA") else "TLSv1.2",
             "ja4_client": fingerprint,
             "certificate_issuer": issuer,
@@ -214,6 +255,12 @@ def build_corpus() -> dict[str, pd.DataFrame]:
         add(MANAGED, PORTAL, CHROME, CORP_CA, MODERN_SUITE, at(0, 60 + index * 120), declared=PNG, detected=JPEG)
 
     add(MANAGED, PORTAL, NEW_STACK, CORP_CA, MODERN_SUITE, at(1, 300), declared=PNG, detected=JPEG)
+
+    # The personal device: the same settled history and the same departure from it, on a device no inventory holds.
+    for index in range(24):
+        add(PERSONAL_DEVICE, PORTAL, CHROME, CORP_CA, MODERN_SUITE, at(0, 75 + index * 120))
+
+    add(PERSONAL_DEVICE, PORTAL, NEW_STACK, CORP_CA, MODERN_SUITE, at(1, 420))
 
     # The varied host: two stacks it has always had, alternating. A rule reading `changed` would fire on every
     # one of these, which is why the rule reads `first_seen`.
@@ -314,8 +361,8 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def build_stages(config: Config) -> list:
-    """The TC-6 stages, in the order a deployment would compose them.
+def build_stages(config: Config, store: typing.Optional[BitemporalStore] = None) -> list:
+    """The TC-6 stages, in the order a deployment would compose them, and the source's context after them.
 
     The order is not load-bearing -- none of the four reads a column another writes -- so they are composed in
     the order the rules are numbered, which is the order a reader will look for them in.
@@ -325,13 +372,15 @@ def build_stages(config: Config) -> list:
         TC6CertificateStage(config, min_samples=MIN_SAMPLES),
         TC6CipherStage(config, min_samples=MIN_SAMPLES),
         TC6ContentStage(config),
+        TC0EnrichStage(config, store=build_store() if store is None else store, entity_column="src_ip"),
     ]
 
 
 def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                 impose_order: bool = True) -> pd.DataFrame:
+                 impose_order: bool = True,
+                 store: typing.Optional[BitemporalStore] = None) -> pd.DataFrame:
     """
     Run the TC-6 class through its composed pipeline and return one canonicalized frame.
 
@@ -345,6 +394,9 @@ def run_pipeline(config: Config,
         How the corpus is split across source frames. Defaults to one frame.
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages.
+    store : `morpheus.utils.bitemporal.BitemporalStore`, optional
+        The asset inventory the sources are enriched from. Defaults to this corpus's; another corpus running its
+        handshakes through this pipeline supplies its own.
 
     Returns
     -------
@@ -361,7 +413,9 @@ def run_pipeline(config: Config,
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
 
-    for stage in build_stages(config):
+    pipe.add_stage(CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"))
+
+    for stage in build_stages(config, store):
         pipe.add_stage(stage)
 
     pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(TELEMETRY_CLASS, SETTINGS,

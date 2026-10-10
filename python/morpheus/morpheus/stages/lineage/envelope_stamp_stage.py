@@ -54,6 +54,7 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,9 @@ OSI_LAYER_COLUMN = "osi_layer"
 MIN_LAYER = 0
 MAX_LAYER = 7
 """Zero is TC-0, the identity and asset context, which is not an OSI layer but is stamped like one."""
+
+DEFAULT_HOSTNAME_COLUMNS = ("hostname", )
+"""Entity columns rendered as host names unless the caller names others."""
 
 
 @register_stage("envelope-stamp", modes=[])
@@ -83,6 +87,10 @@ class EnvelopeStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     overwrite : bool, default = False
         Replace an `entity_key` that is already present. Off, because the TC-1 stages compose their own and key
         their state on it; overwriting would let this stage disagree with state those stages keep.
+    hostname_columns : list of str, optional
+        Entity columns holding host names, rendered with `entity_key.normalize_hostname` rather than as text, so the
+        key agrees with the one the endpoint and asset stages keep a host's state on and `FIN-01` and `fin-01`
+        are one entity. Defaults to `hostname`, where it is an entity column.
 
     Raises
     ------
@@ -90,7 +98,12 @@ class EnvelopeStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         If the layer is outside 0 through 7, or no entity columns are named.
     """
 
-    def __init__(self, c: Config, osi_layer: int, entity_columns: list[str], overwrite: bool = False):
+    def __init__(self,
+                 c: Config,
+                 osi_layer: int,
+                 entity_columns: list[str],
+                 overwrite: bool = False,
+                 hostname_columns: list[str] = None):
         super().__init__(c)
 
         if (not isinstance(osi_layer, int) or isinstance(osi_layer, bool)):
@@ -106,6 +119,7 @@ class EnvelopeStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._osi_layer = osi_layer
         self._entity_columns = list(entity_columns)
         self._overwrite = overwrite
+        self._hostname_columns = set(DEFAULT_HOSTNAME_COLUMNS if hostname_columns is None else hostname_columns)
 
         self._needed_columns[OSI_LAYER_COLUMN] = TypeId.INT64
         self._needed_columns[ENTITY_KEY_COLUMN] = TypeId.STRING
@@ -180,7 +194,10 @@ class EnvelopeStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     keys.append(held)
                     continue
 
-                keys.append(compose_key([parts[name][position] for name in self._entity_columns]))
+                keys.append(
+                    compose_key([(normalize_hostname(parts[name][position])
+                                  if name in self._hostname_columns else parts[name][position])
+                                 for name in self._entity_columns]))
 
             keyless = sum(1 for key in keys if key is None)
 

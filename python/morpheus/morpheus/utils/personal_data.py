@@ -141,7 +141,8 @@ _IDENTIFIES = (
     "saas_baseline_key",
     "session_id",
     "session_key",
-    "user_principal",
+    "user_principal",  # The owner of the host a flow reached, from the inventory.
+    "dst_ctx_owner",
 )
 
 _ADDRESSES = (
@@ -163,7 +164,9 @@ _ADDRESSES = (
     "tls_client_key",
     "tls_destination_key",
     "tls_pair_key",
-    "transfer_triple",
+    "transfer_triple",  # A host's name as the inventory keys it, at layers 5 and 7.
+    "endpoint_host",
+    "target_host_key",
 )
 
 _LOCATES = (
@@ -378,7 +381,13 @@ _PROFILES = (
     "session_lifecycle",
     "session_duration_baseline",
     "session_duration_ratio",
-    "session_duration_mature",
+    "session_duration_mature",  # Each host's own history at layer 3, and how far this hour stands above it.
+    "dsts_per_src_step",
+    "dsts_per_src_baseline_max",
+    "srcs_per_dst_step",
+    "srcs_per_dst_baseline_max",
+    "byte_asymmetry_step",
+    "byte_asymmetry_baseline_max",
 )
 
 _PSEUDONYMS = (
@@ -392,7 +401,8 @@ _PSEUDONYMS = (
     "origin_hash",
     "parent_process_guid",
     "process_guid",
-    "row_key",
+    "row_key",  # The inventory versions a flow's destination context rests on.
+    "dst_ctx_version_uids",
 )
 
 _OPERATIONAL = (
@@ -585,7 +595,24 @@ _OPERATIONAL = (
     "pipeline_fingerprint",
     "rng_seed",  # A single-record session's bounds: timestamps, like event_time.
     "session_start",
-    "session_end",
+    "session_end",  # What kind of host an asset is, and the layer 3 destination's context and baseline maturity.
+    "device_role",
+    "os_family",
+    "os_version",
+    "ctx_device_role",
+    "ctx_os_family",
+    "ctx_os_version",
+    "dst_ctx_criticality",
+    "dst_ctx_device_role",
+    "dst_ctx_found",
+    "dst_ctx_knowledge",
+    "dst_ctx_recorded_at",
+    "dsts_per_src_baseline_buckets",
+    "dsts_per_src_baseline_mature",
+    "srcs_per_dst_baseline_buckets",
+    "srcs_per_dst_baseline_mature",
+    "byte_asymmetry_baseline_buckets",
+    "byte_asymmetry_baseline_mature",
 )
 
 COLUMNS: dict[str, str] = {}

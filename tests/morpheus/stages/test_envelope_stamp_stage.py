@@ -189,3 +189,22 @@ def test_layer_zero_is_allowed(config: Config):
     # TC-0 is the identity and asset context. Not an OSI layer, but it is a telemetry class and its records need
     # the same envelope as everything else.
     assert EnvelopeStampStage(config, osi_layer=0, entity_columns=["site_id"]) is not None
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_host_name_is_keyed_as_the_endpoint_stage_keys_it(config: Config):
+    # FIN-01 and fin-01 are one machine, and the key a search groups by has to say so, or a host's rows split into
+    # two entities on the day its EDR changed how it spells the name.
+    result = run(config, {"hostname": ["FIN-01", "fin-01", "fin-01."]}, osi_layer=7, entity_columns=["hostname"])
+
+    assert list(result["entity_key"]) == ["fin-01", "fin-01", "fin-01"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_only_the_named_columns_are_host_names(config: Config):
+    # A principal is not a host name, and the default touches only `hostname`.
+    principals = run(config, {"user_principal": ["Alice@Example.com"]}, osi_layer=5, entity_columns=["user_principal"])
+    named = run(config, {"device": ["SW-01"]}, osi_layer=1, entity_columns=["device"], hostname_columns=["device"])
+
+    assert list(principals["entity_key"]) == ["Alice@Example.com"]
+    assert list(named["entity_key"]) == ["sw-01"]

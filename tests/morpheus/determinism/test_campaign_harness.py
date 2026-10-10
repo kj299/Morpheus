@@ -33,6 +33,7 @@ from morpheus.config import Config
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
 from morpheus.utils.determinism import permute_within_contiguous_groups
+from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -128,7 +129,10 @@ def test_the_three_collectors_share_their_entities(corpus: dict[str, pd.DataFram
 
     # R-C-001's actors' logins, that is: R-C-005's principals sign in to the intranet, which no EDR reports.
     actor_logins = logins[logins["user_principal"].isin({actor.principal for actor in cp_.ACTORS.values()})]
-    assert {host.lower() for host in actor_logins["target_host"]} == set(processes["hostname"])
+    assert {cp_.edr_name(host) for host in actor_logins["target_host"]} == set(processes["hostname"])
+    # The directory and the EDR spell the attacker's target differently, which is the case the shared host rule is
+    # for: the join below is on keys both pipelines render the same way, not on a case-fold in the test.
+    assert cp_.ACTORS[cp_.ATTACKER].target != cp_.edr_name(cp_.ACTORS[cp_.ATTACKER].target)
 
     for frame in corpus.values():
         assert set(cp_.ID_COLUMNS) <= set(frame.columns)
@@ -213,7 +217,31 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
 def test_the_chain_fires_on_the_attacker_alone(result: pd.DataFrame):
     attacker = cp_.ACTORS[cp_.ATTACKER]
 
-    assert set(cp_.lateral_movement(result)) == {(attacker.source, cp_.ATTACKER, attacker.target.lower())}
+    assert set(cp_.lateral_movement(result)) == {(attacker.source, cp_.ATTACKER, normalize_hostname(attacker.target))}
+
+
+@pytest.mark.cpu_mode
+def test_both_pipelines_render_the_target_as_one_host(result: pd.DataFrame):
+    # The login names SRV-DB-02 and the EDR reports srv-db-02. Each pipeline renders its own spelling with the shared
+    # rule, and the two keys are equal, which is all R-C-001 joins on.
+    attacker = cp_.ACTORS[cp_.ATTACKER]
+    logins = result[(result["telemetry_class"] == cp_.AUTH_CLASS) & (result["target_host"] == attacker.target)]
+    processes = result[(result["telemetry_class"] == cp_.PROCESS_CLASS)
+                       & (result["hostname"] == cp_.edr_name(attacker.target))]
+
+    assert set(logins["target_host_key"]) == set(processes["endpoint_host"]) == {"srv-db-02"}
+    assert set(processes["entity_key"]) == {"srv-db-02"}
+
+
+@pytest.mark.cpu_mode
+def test_the_inventory_says_which_targets_are_servers(result: pd.DataFrame):
+    # R-C-001 is a login to a server. The process step reads the role the TC-0 enrichment attached, and the one
+    # workstation in the inventory is the only process host that is not a server.
+    processes = result[result["telemetry_class"] == cp_.PROCESS_CLASS]
+    roles = processes.groupby("endpoint_host")["ctx_device_role"].agg(lambda values: set(values))
+
+    assert {host for (host, role) in roles.items() if role != {"server"}} == set(cp_.WORKSTATIONS)
+    assert all(role == {"workstation"} for (host, role) in roles.items() if host in cp_.WORKSTATIONS)
 
 
 @pytest.mark.cpu_mode
@@ -240,6 +268,8 @@ def test_no_step_of_the_attackers_chain_breaches_a_threshold_of_its_own(result: 
                              "rising": False
                          }), (cp_.NO_NEW_PROCESS, {
                              "novel_process": False
+                         }), (cp_.WORKSTATION_TARGET, {
+                             "server_only": False
                          })])
 def test_each_control_is_stopped_by_its_one_condition(result: pd.DataFrame, principal: str, condition: dict):
     assert principal not in _principals(cp_.lateral_movement(result))
@@ -262,7 +292,8 @@ def test_each_control_does_every_other_step(result: pd.DataFrame):
         assert len(login) == 1, principal
         assert (actor.source in rises) == (principal != cp_.FLAT_FANOUT), principal
         assert bool(login["target_host_first_seen"].iloc[0]) == (principal != cp_.KNOWN_HOST), principal
-        assert (actor.target.lower() in set(novel["hostname"])) == (principal != cp_.NO_NEW_PROCESS), principal
+        assert (normalize_hostname(actor.target) in set(novel["endpoint_host"])) == (principal
+                                                                                     != cp_.NO_NEW_PROCESS), principal
 
 
 @pytest.mark.cpu_mode
@@ -270,9 +301,9 @@ def test_the_join_tolerance_admits_a_step_logged_slightly_early(result: pd.DataF
     # Move the attacker's process to one minute before the login: inside the two-minute tolerance, it still chains;
     # three minutes before, it does not.
     attacker = cp_.ACTORS[cp_.ATTACKER]
-    host = attacker.target.lower()
+    host = normalize_hostname(attacker.target)
     process = (result["telemetry_class"] == cp_.PROCESS_CLASS) & (
-        result["hostname"] == host) & result["endpoint_pair_novel"].astype("boolean").fillna(False).astype(bool)
+        result["endpoint_host"] == host) & result["endpoint_pair_novel"].astype("boolean").fillna(False).astype(bool)
     login_time = cp_.at(cp_.LAST_DAY, cp_.CAMPAIGN_HOUR, attacker.login_minute)
 
     for (offset_minutes, fires) in ((1, True), (3, False)):
@@ -280,6 +311,42 @@ def test_the_join_tolerance_admits_a_step_logged_slightly_early(result: pd.DataF
         shifted.loc[process, "event_time"] = login_time - offset_minutes * 60 * cp_.NS_PER_SECOND
 
         assert (cp_.ATTACKER in _principals(cp_.lateral_movement(shifted))) == fires, offset_minutes
+
+
+# --- Connection evidence: one connection, three collectors -----------------------------------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_one_connection_is_joined_across_layers_3_4_and_6_by_its_community_id(result: pd.DataFrame):
+    # The attacker's breach connection, as the flow exporter, the packet sensor and the inspection point each saw
+    # it. The four other breaches were seen at layers 3 and 4 only, and are not returned.
+    connections = cp_.connections_across_layers(result)
+    attacker = cp_.EXFILTRATORS[cp_.KIM]
+
+    assert len(connections) == 1
+
+    [rows] = connections.values()
+
+    assert set(rows["telemetry_class"]) == {cp_.FLOW_CLASS, cp_.TRANSFER_CLASS, cp_.HANDSHAKE_CLASS}
+    assert set(rows["src_ip"]) == {attacker.breach_address}
+    assert set(rows["dst_ip"]) == {cp_.SYNC_SERVER}
+    assert set(rows["src_port"].astype(int)) == {cp_.BREACH_PORT}
+
+    breaches = result[(result["telemetry_class"] == cp_.FLOW_CLASS) & (result["src_port"] == cp_.BREACH_PORT)]
+    assert breaches["src_ip"].nunique() == len(cp_.EXFILTRATORS)
+
+
+def test_the_connection_search_joins_on_community_id_and_wants_all_three_layers():
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        text = handle.read()
+
+    stanza = text.split("[Connection evidence - layers 3, 4 and 6]", 1)[1].split("\n[", 1)[0]
+    search = stanza.split("search =", 1)[1]
+
+    assert "BY community_id" in search
+    assert "where layers = 3" in search
+    # A report: it writes nothing to the risk index.
+    assert "| collect" not in search
 
 
 # --- R-C-004: the staged exfiltration, and one control per condition ------------------------------------------------
@@ -540,9 +607,11 @@ def test_the_search_carries_the_conditions_this_harness_asserts():
     assert "where dsts_per_src > previous_peak" in search
     assert "eval window_id = window_id + 1" in search
     assert 'auth_result="success" target_host_first_seen=true' in search
-    assert "endpoint_pair_novel=true" in search
+    assert "endpoint_pair_novel=true ctx_device_role=server" in search
     assert "rename source_ip AS src_ip" in search
-    assert "lower(target_host)" in search and "lower(hostname)" in search
+    # Joined on the keys both pipelines render with the shared host rule, so the search folds no case of its own.
+    assert "eval target = target_host_key" in search and "eval target = endpoint_host" in search
+    assert "lower(" not in search
     assert f"t_login >= t_fanout - {tolerance} AND t_login - t_fanout <= {window}" in search
     assert f"t_process >= t_login - {tolerance} AND t_process - t_fanout <= {window}" in search
     assert f"risk_score = {cp_.SEVERITY}" in search

@@ -536,7 +536,7 @@ def walk_pipeline(search: str) -> tuple:
 def test_the_app_is_where_we_think_it_is():
     # Without this every assertion below passes over an empty parse, which is the failure mode a linter must not
     # have: it would report a clean bill of health for a file it never read.
-    assert len(searches()) == 48
+    assert len(searches()) == 52
     assert len(lookup_fields()) > 0
     assert len(stage_columns()) > 40
 
@@ -949,8 +949,8 @@ def test_a_chained_rule_attributes_each_base_search_to_its_own_sourcetype():
     reads = reads_by_sourcetype(searches()["R-C-001 - Lateral movement chain"])
 
     assert {"dsts_per_src", "src_ip", "window_id"} <= reads["morpheus:score:l3"]
-    assert {"auth_result", "target_host_first_seen", "source_ip"} <= reads["morpheus:score:l5"]
-    assert {"endpoint_pair_novel", "hostname"} <= reads["morpheus:score:l7"]
+    assert {"auth_result", "target_host_first_seen", "source_ip", "target_host_key"} <= reads["morpheus:score:l5"]
+    assert {"endpoint_pair_novel", "endpoint_host"} <= reads["morpheus:score:l7"]
     assert "previous_peak" not in reads["morpheus:score:l3"], "a stats output is read from the stats, not the source"
 
 

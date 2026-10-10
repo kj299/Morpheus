@@ -30,6 +30,10 @@ nobody has classified; judging it as though it had peers would claim a compariso
 needs seven days of history before anything it has not seen counts as novel. A new laptop in an established group is
 judged against the group from its first process, which is the point of having a group.
 
+**A host is one host however the EDR spells it.** Hosts are keyed with
+{py:func}`~morpheus.utils.entity_key.normalize_hostname`, so `FIN-01` and `fin-01` share one history, and the key is
+written as `endpoint_host` for a search to group and join on, where the reported `hostname` is kept as evidence.
+
 **Paths are compared as the same software would be.** Case is folded, because Windows paths are case-insensitive and
 EDR products disagree about how they report them, and the folder under a per-user profile -- `C:\\Users\\<name>\\`,
 `/home/<name>/`, `/Users/<name>/` -- is collapsed, so software installed per user is one pair across the estate
@@ -58,6 +62,7 @@ from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.pair_history import DAY_NS
 from morpheus.utils.pair_history import DEFAULT_MAX_ENTITIES
@@ -92,6 +97,7 @@ _PROFILE_FOLDERS = (
     re.compile(r"^(/users/)[^/]+(/)"),
 )
 
+HOST = "endpoint_host"
 PAIR = "endpoint_pair"
 PEER_GROUP = "endpoint_peer_group"
 HOST_SEEN = "endpoint_host_seen"
@@ -223,6 +229,7 @@ class TC7EndpointStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                           max_pairs=max_pairs,
                                           max_entities=max_entities)
 
+        self._needed_columns[HOST] = TypeId.STRING
         self._needed_columns[PAIR] = TypeId.STRING
         self._needed_columns[PEER_GROUP] = TypeId.STRING
         self._needed_columns[HOST_SEEN] = TypeId.BOOL8
@@ -294,6 +301,7 @@ class TC7EndpointStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             groups = (to_host_list(df, self._peer_group_column) if self._peer_group_column in df.columns else [None] *
                       len(hosts))
 
+            keys: list = []
             pairs: list = []
             peer_groups: list = []
             host_seen: list = []
@@ -306,7 +314,7 @@ class TC7EndpointStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             unordered = 0
 
             for (position, raw_host) in enumerate(hosts):
-                host = normalize_text(raw_host)
+                host = normalize_hostname(raw_host)
                 parent = normalize_image_path(parents[position])
                 image = normalize_image_path(images[position])
                 group = normalize_text(groups[position])
@@ -317,6 +325,7 @@ class TC7EndpointStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 except ValueError:
                     event_time_ns = None
 
+                keys.append(host)
                 pairs.append(pair)
                 peer_groups.append(group)
                 integrity.append(normalize_integrity(levels[position]))
@@ -346,6 +355,7 @@ class TC7EndpointStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 else:
                     novel.append(not on_host.seen and (in_group is None or not in_group.seen))
 
+            assign_str_column(df, HOST, keys)
             assign_str_column(df, PAIR, pairs)
             assign_str_column(df, PEER_GROUP, peer_groups)
             assign_nullable_bool_column(df, HOST_SEEN, host_seen)

@@ -1,10 +1,10 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-10T03:15:23.251889+00:00",
+  "at": "2026-10-09T23:26:05.809263+00:00",
   "timestamp_shift_weeks": 2953,
   "dispatch_window": {
     "earliest": 1785888000,
-    "latest": 1791605638
+    "latest": 1791591900
   },
   "indexed": {
     "binding:bucketed": 82,
@@ -15,11 +15,11 @@
     "morpheus:edge": 47,
     "morpheus:score:l1": 305,
     "morpheus:score:l2": 1334,
-    "morpheus:score:l3": 1525,
+    "morpheus:score:l3": 719,
     "morpheus:score:l4": 987,
-    "morpheus:score:l5": 661,
-    "morpheus:score:l6": 296,
-    "morpheus:score:l7": 4272
+    "morpheus:score:l5": 651,
+    "morpheus:score:l6": 270,
+    "morpheus:score:l7": 4235
   },
   "expected_indexed": {
     "binding:bucketed": 82,
@@ -30,18 +30,18 @@
     "morpheus:edge": 47,
     "morpheus:score:l1": 305,
     "morpheus:score:l2": 1334,
-    "morpheus:score:l3": 1525,
+    "morpheus:score:l3": 719,
     "morpheus:score:l4": 987,
-    "morpheus:score:l5": 661,
-    "morpheus:score:l6": 296,
-    "morpheus:score:l7": 4272
+    "morpheus:score:l5": 651,
+    "morpheus:score:l6": 270,
+    "morpheus:score:l7": 4235
   },
   "btool_check": "",
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-5624041.000000",
-        "min_drift": "-5627643.000000"
+        "max_drift": "-5610304.000000",
+        "min_drift": "-5613906.000000"
       }
     ],
     "binding_tables": [
@@ -77,8 +77,8 @@
       }
     ],
     "risk_records": {
-      "written": 198,
-      "indexed": 198,
+      "written": 166,
+      "indexed": 166,
       "by_rule": [
         {
           "rule_id": "R-B-L2-002",
@@ -94,14 +94,6 @@
         },
         {
           "rule_id": "R-B-L3-004",
-          "count": "1"
-        },
-        {
-          "rule_id": "R-B-L3-006",
-          "count": "1"
-        },
-        {
-          "rule_id": "R-B-L3-007",
           "count": "1"
         },
         {
@@ -138,7 +130,7 @@
         },
         {
           "rule_id": "R-B-L7-004",
-          "count": "11"
+          "count": "10"
         },
         {
           "rule_id": "R-C-001",
@@ -174,10 +166,6 @@
         },
         {
           "rule_id": "R-D-L3-003",
-          "count": "1"
-        },
-        {
-          "rule_id": "R-D-L3-008",
           "count": "1"
         },
         {
@@ -230,7 +218,7 @@
         },
         {
           "rule_id": "R-P-L3-005",
-          "count": "43"
+          "count": "15"
         },
         {
           "rule_id": "R-P-L5-006",
@@ -257,14 +245,10 @@
     "R-P-L1-004 - Optical degradation forecast",
     "R-D-L2-004 - MAC in two places at once",
     "R-D-L2-005 - Authorization without authentication",
-    "Connection evidence - layers 3, 4 and 6",
     "R-B-L3-001 - Fan-out expansion",
     "R-B-L3-002 - Beaconing",
     "R-D-L3-003 - Reserved-range egress",
     "R-B-L3-004 - TTL fingerprint shift",
-    "R-B-L3-006 - Fan-in onto a workstation",
-    "R-B-L3-007 - First-contact upload",
-    "R-D-L3-008 - Port sweep",
     "R-D-L4-002 - SYN without completion",
     "R-D-L4-003 - RST ratio",
     "R-B-L4-005 - Transfer envelope breach",
@@ -350,10 +334,6 @@
       "phase": "search",
       "rows": 2
     },
-    "Connection evidence - layers 3, 4 and 6": {
-      "phase": "search",
-      "rows": 1
-    },
     "R-B-L3-001 - Fan-out expansion": {
       "phase": "search",
       "rows": 1
@@ -367,18 +347,6 @@
       "rows": 1
     },
     "R-B-L3-004 - TTL fingerprint shift": {
-      "phase": "search",
-      "rows": 1
-    },
-    "R-B-L3-006 - Fan-in onto a workstation": {
-      "phase": "search",
-      "rows": 1
-    },
-    "R-B-L3-007 - First-contact upload": {
-      "phase": "search",
-      "rows": 1
-    },
-    "R-D-L3-008 - Port sweep": {
       "phase": "search",
       "rows": 1
     },
@@ -432,7 +400,7 @@
     },
     "R-B-L7-004 - Process ancestry novelty": {
       "phase": "search",
-      "rows": 11
+      "rows": 10
     },
     "R-D-L2-001 - MAC address count exceeded on an access port": {
       "phase": "search",
@@ -484,11 +452,11 @@
     },
     "Behavior summary - per-layer scores": {
       "phase": "summary",
-      "rows": 5173
+      "rows": 4615
     },
     "R-P-L3-005 - Fan-out trajectory": {
       "phase": "trajectory",
-      "rows": 43
+      "rows": 15
     },
     "Chain assembly - cross-layer risk": {
       "phase": "assembly",

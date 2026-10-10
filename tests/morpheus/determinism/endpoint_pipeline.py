@@ -39,6 +39,15 @@ because that is what an EDR log looks like at logon. On day 40, eight processes 
   is quiet because per-user folders are collapsed;
 - the **kiosk starts Notepad**, which it last did on day 20, and is quiet on its own history;
 - and the **lab machine**, four days old, starts `nmap`, and is quiet because no comparison is possible yet.
+
+**One host, two spellings.** From day 20 the EDR on the first finance workstation reports it as `FIN-01` where it had
+reported `fin-01`, as an agent upgrade does. Keyed as text that is a new host with no history and no inventory record,
+judged alone and immature for a week; keyed with the shared host rule it is the same workstation throughout, which is
+what the harness asserts, and its Word-starts-PowerShell on day 40 is judged against its peers as before.
+
+**Severity is integrity times criticality.** The inventory calls the build servers high, the finance workstations
+medium and the kiosk low, and R-B-L7-004 scales each notable's integrity weight by that, so the four that fire do so
+at four different severities, each asserted.
 """
 
 import hashlib
@@ -78,6 +87,8 @@ ENDPOINT_CLASS = "tc7_endpoint"
 # The rule's own weights, stated once so the corpus is built to exercise each deliberately.
 SEVERITY = {"system": 70, "high": 55, "medium": 40, "low": 25}
 UNWEIGHTED_SEVERITY = 40
+CRITICALITY_WEIGHT = {"high": 1.5, "medium": 1.0, "low": 0.5}
+UNKNOWN_CRITICALITY_WEIGHT = 1.0
 WINDOW_DAYS = 30
 WARMUP_DAYS = 7
 
@@ -105,6 +116,14 @@ BUILD_HOSTS = ("build-01", "build-02")
 KIOSK = "kiosk-01"
 LAB = "lab-01"
 LAB_FIRST_DAY = 36
+
+RENAMED_HOST = "fin-01"
+RENAME_DAY = 20
+"""From this day the EDR reports `fin-01` in upper case, as an agent upgrade does."""
+
+DEVICE_ROLES = {"finance": "workstation", "build": "server", "kiosk": "kiosk"}
+CRITICALITY = {"finance": "medium", "build": "high", "kiosk": "low"}
+OS_VERSIONS = {"finance": "10.0.19045", "build": "10.0.20348", "kiosk": "10.0.19044"}
 
 # Image paths, as an EDR reports them.
 SERVICES = r"C:\Windows\System32\services.exe"
@@ -167,6 +186,7 @@ def asset_versions() -> list:
 
     for host in sorted(set(FINANCE_HOSTS) | set(BUILD_HOSTS) | {KIOSK}):
         group = FINANCE_GROUP if host in FINANCE_HOSTS else (BUILD_GROUP if host in BUILD_HOSTS else None)
+        kind = "finance" if host in FINANCE_HOSTS else ("build" if host in BUILD_HOSTS else "kiosk")
         versions.append(
             make_version("asset",
                          host,
@@ -176,9 +196,12 @@ def asset_versions() -> list:
                          values={
                              "owner": f"{owners[host]}@example.com" if host in owners else "it-ops@example.com",
                              "owning_team": "finance" if host in FINANCE_HOSTS else "platform",
-                             "criticality": "high" if host in BUILD_HOSTS else "medium",
+                             "criticality": CRITICALITY[kind],
                              "data_classification": "confidential" if host in FINANCE_HOSTS else "internal",
                              "peer_group": group,
+                             "device_role": DEVICE_ROLES[kind],
+                             "os_family": "windows",
+                             "os_version": OS_VERSIONS[kind],
                          }))
 
     return versions
@@ -189,6 +212,11 @@ def build_store() -> BitemporalStore:
     return BitemporalStore("asset", asset_versions())
 
 
+def reported_name(host: str, when: int) -> str:
+    """The host as the EDR spells it at an instant."""
+    return host.upper() if (host == RENAMED_HOST and when >= at(RENAME_DAY)) else host
+
+
 def _process(rows: list,
              host: str,
              parent: str,
@@ -197,6 +225,7 @@ def _process(rows: list,
              integrity: typing.Optional[str] = "Medium",
              signature: str = "Valid"):
     command_line = f'"{image}"'
+    host = reported_name(host, when)
     rows.append({
         "collector_id": "edr-01",
         "schema_version": "tc7_endpoint.v1",
@@ -351,7 +380,8 @@ def run_pipeline(config: Config,
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
 
-    pipe.add_stage(TC0EnrichStage(config, store=build_store(), entity_column="hostname"))
+    pipe.add_stage(
+        TC0EnrichStage(config, store=build_store(), entity_column="hostname", entity_normalization="hostname"))
     pipe.add_stage(TC7EndpointStage(config, window_days=WINDOW_DAYS, warmup_days=WARMUP_DAYS))
     pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(ENDPOINT_CLASS, SETTINGS, rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))
