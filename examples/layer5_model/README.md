@@ -15,20 +15,70 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# Layer 5 model determinism
+# Layer 5 models
 
-`run_model.py` trains a per-principal autoencoder on the layer 5 corpus and asks whether it produces the same
-numbers twice.
+Two scripts, two questions.
 
-It is the one script in this fork that cannot run where the fork is developed. `morpheus.models.dfencoder` is in
-the tree, but it is a Torch model on a CUDA device, and the container everything else here is tested in has
-neither. Everything the model half depends on was therefore built and tested first -- the trajectory feature R-P-L5-006
-reads, the determinism envelope, the pinned model manifest, the sharding -- and this arrives last, on a machine
-with a card.
+`train_models.py` trains the per-principal autoencoders the composed layer 5 pipeline scores with, on the CPU, and
+commits them as numbers under [`models/`](./models/). CI scores those numbers without Torch. That is how a learned
+model reaches the golden file, the sample events and a search head.
+
+`run_model.py` trains the same models on a card and asks whether they produce the same numbers twice. It is the
+one script in this fork that cannot run where the fork is developed: it measures the device's own determinism,
+and the container everything else here is tested in has no CUDA device.
+
+## The committed models
+
+The session corpus runs a fortnight of ordinary habits before its scored week. `train_models.py` takes each
+principal's rows from that fortnight -- six principals, forty rows apiece for the office workers, fifty-six for
+the VPN user, fourteen for the service account -- and fits one `morpheus.models.dfencoder` autoencoder per
+principal, on the host, from seed 42, for 20 epochs, with the runner's `[8, 4]` and `[4, 8]` layers. Each fitted
+model is exported by `morpheus.utils.dfencoder_scorer.export_model`: the weights, the mean and deviation each input
+was standardized with, and the mean and deviation of the training losses each feature's error is standardized
+against. Those last two are as much the model as the weights are, so all three are covered by the digest the
+manifest pins, and all three are written to `models/session_models.json` as the exact decimal of every value.
+
+The pipeline reads that file through `load_models`, which recomputes every digest from the numbers and refuses
+an entry whose recorded version no longer matches -- a file edited by hand, or a model moved to another
+principal's key. `NumpyAutoEncoder` evaluates each one: standardize, encoder, decoder, squared error,
+standardize the error. It does so in float64 from the float32 weights, so a score is a property of the row and
+the file rather than of the machine's vector unit; Torch's own float32 pass agrees with it to float32's
+precision, and `tests/morpheus/utils/test_dfencoder_scorer.py` checks that wherever Torch imports by putting the
+committed numbers back into the upstream class with `load_torch_autoencoder`.
+
+The manifest pins each principal to `dfencoder/<principal>:<digest>` and declares `scores_from_ns`, the end of
+the fortnight. `TC5ScoreStage` scores no row before it and `DeterminismStampStage` names no model on
+them, because a model asked about the rows it was fitted on reports how well it memorized them. A principal
+with no fortnight -- the corpus's joiner -- is scored against the declared fallback, frozen population
+statistics fitted on the same fortnight, and her rows say `model_fallback_used` is true.
+
+Rerunning `train_models.py` says whether it reproduces the committed versions. On the machine that wrote them it
+does, twice; another processor may sum in a different order and land on different last bits, which is why the
+file is committed rather than regenerated, and why the script compares before it writes:
+
+```bash
+./examples/layer5_model/train_models.py            # train, compare with the committed file
+./examples/layer5_model/train_models.py --write    # train and replace it
+```
+
+What the models found is recorded in the session harness and the validation package rather than here, and the
+short version is three findings and no detection claim. The scores are not calibrated: where the fortnight never
+varied a feature the training losses' spread is a rounding residue, and any change scores in the thousands. The
+`*increment` features are cumulative, so a principal whose account reached somewhere new keeps firing until a
+model is trained on a window that includes it. And the deterministic R-D-L5-008 misses the takeover the models
+find, because its first sign-in failed. A fortnight of six principals is not a training set; what the committed
+models establish is that a learned score reaches the SIEM pinned, out of sample and reproducible.
+
+## The card run
+
+`run_model.py` trains on a machine with Torch and a CUDA device. Everything the model half depends on was built
+and tested first -- the trajectory feature R-P-L5-006 reads, the determinism envelope, the pinned model manifest,
+the sharding -- and this arrives last, on a machine with a card.
 
 ## What it measures, and what it does not
 
-**Reproducibility, not detection quality.** The corpus is a week of five principals' authentications. That is
+**Reproducibility, not detection quality.** The 2026-10-03 run's corpus was a week of five principals'
+authentications; the runner now trains on the fortnight of six. That is
 nowhere near enough data to train an autoencoder that detects anything, and no claim is made that it does. The
 artifact says so in a field of its own, so the caveat travels with the numbers rather than living in a document
 beside them.
@@ -64,10 +114,12 @@ so a seventh-place wobble upstream arrives as tenths downstream, far past what r
 therefore fixes the shape itself and asks for one row at a time, which makes a score a function of its row.
 The first run of this check on a card failed for exactly this reason, which is what the check was for.
 
-**The models score the rows they were trained on.** That is a leak, made on purpose and written into the
-artifact: the question this run answers is whether the wired path gives the same numbers twice with a real model
-in the slot, and a week of five principals cannot answer any other question about a model. The runner's own
-verdict now requires all four checks.
+**The 2026-10-03 run's models scored the rows they were trained on.** That was a leak, made on purpose and
+written into the artifact: the question that run answered was whether the wired path gives the same numbers twice
+with a real model in the slot. The runner now trains on the fortnight and scores the week after it, through the
+same `PinnedScorer` and fallback CI uses, and records whether the card trained the same numbers the CPU
+committed in a field of its own, `committed_models_match`, outside the verdict. It has not been run on a card
+since that change. The runner's own verdict requires all four checks.
 
 `CUBLAS_WORKSPACE_CONFIG` is set before Torch is imported, because it is read when the CUDA context is created
 and setting it later has no effect while looking exactly like setting it correctly. The script refuses to

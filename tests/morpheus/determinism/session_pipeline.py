@@ -23,8 +23,17 @@ deterministic and the drift watchlist, are asserted against this corpus.
 **A week, not an hour.** The layer 1 and 2 corpus covers an hour because a poller's cadence is a minute. Layer 5
 is event-driven and its features are about habit: an hour-of-day histogram needs days to say anything, an
 impossible journey needs hours to be impossible, and a cumulative location count needs somewhere to have been
-before. The corpus therefore runs seven days from a Monday midnight, and the window period is an hour rather than
-five minutes.
+before. The scored week therefore runs seven days from a Monday midnight, and the window period is an hour rather
+than five minutes.
+
+**And a fortnight before it that is never scored.** Each principal's model is trained on the two weeks before the
+scored week, in which everybody does what they always do, and scores only the week after. That is the line
+between a model and a memory: a model asked about the rows it was fitted on reports how well it memorized them,
+and every run would leak identically, so no determinism control would notice. The fortnight runs through the
+same stages as the week, because the features are cumulative and a scored row's history is part of what it
+measures, and its rows reach the golden file with null scores and no model version. The trained models are
+committed under `examples/layer5_model/models/`, pinned in the scoring manifest by a digest of their numbers, and
+scored without Torch.
 
 Into it are planted the things the layer 5 features exist to see, each with the thing they must **not** fire on
 beside it:
@@ -51,6 +60,12 @@ beside it:
   four hours and end on a five-hour one -- the bimodal shape the rule excludes by account type rather than by luck;
 - **single-record sessions** from an identity provider that states both ends in one record, one of them with its
   end before its start;
+- a **deviating principal**: an office worker whose account, one afternoon of the scored week, signs in from a
+  city it has never used, on a device it has never used, to applications it has never opened, with the second
+  factor skipped and two failures among the successes. Nothing about it is impossible, so the deterministic travel
+  rule stays quiet; it is the case the per-principal models exist for, and R-B-L5-001 and R-B-L5-002 fire on it;
+- an **unseen principal**: a joiner who first signs in on the Monday of the scored week, has no model of her own,
+  and is scored against the declared population fallback, which the two model rules refuse to read;
 - and an **identity store**: each principal's profile and groups, a leaver whose termination is recorded the day
   after it takes effect, a group change on the day of a relocation, and the service account marked as one. Both
   layer 5 classes are enriched from it as known at each event's time.
@@ -60,6 +75,8 @@ have different required columns. Every stateful stage is preceded by `TotalOrder
 control 8 as a stage.
 """
 
+import functools
+import os
 import random
 import typing
 
@@ -94,23 +111,30 @@ from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
+from morpheus.utils.dfencoder_scorer import DfencoderScorer
+from morpheus.utils.dfencoder_scorer import load_models
 
 CORPUS_SEED = 20260906
 
 PERIOD_SECONDS = 3600
 LATENESS_SECONDS = 900
 CORPUS_DAYS = 7
+TRAINING_DAYS = 14
+"""The fortnight before the scored week that the models are trained on. Day indices in it are negative."""
 
 HOUR_S = 3600
 DAY_S = 24 * HOUR_S
 
-CORPUS_EPOCH_S = 4 * DAY_S
-"""The corpus starts on a Monday midnight UTC.
+CORPUS_EPOCH_S = (4 + TRAINING_DAYS) * DAY_S
+"""The scored week starts on a Monday midnight UTC, and the training fortnight on the Monday two weeks before.
 
-1970-01-01 was a Thursday, so four days on is the first Monday. Anchoring there rather than at the epoch itself
-means day zero of the corpus is a weekday and the weekend falls where a reader expects it, without the corpus
-depending on any real date -- and therefore without a golden file that ages.
+1970-01-01 was a Thursday, so four days on is the first Monday, where the fortnight starts. Anchoring there rather
+than at the epoch itself means day zero of the scored week is a weekday and the weekend falls where a reader
+expects it, without the corpus depending on any real date -- and therefore without a golden file that ages.
 """
+
+SCORES_FROM_NS = CORPUS_EPOCH_S * 1_000_000_000
+"""Where the training data ends and scoring begins: the scored week's Monday midnight, in epoch nanoseconds."""
 
 ID_COLUMNS = ["collector_id", "schema_version", "origin_hash", "collector_seq"]
 KEY_COLUMNS = ["telemetry_class", "row_key"]
@@ -134,11 +158,13 @@ LONDON = (51.5074, -0.1278)
 NEW_YORK = (40.7128, -74.0060)
 FRANKFURT = (50.1109, 8.6821)
 DUBLIN = (53.3498, -6.2603)
+AMSTERDAM = (52.3676, 4.9041)
 
 LONDON_PLACE = ("gb", "england", "london")
 NEW_YORK_PLACE = ("us", "ny", "new-york")
 FRANKFURT_PLACE = ("de", "hesse", "frankfurt")
 DUBLIN_PLACE = ("ie", "leinster", "dublin")
+AMSTERDAM_PLACE = ("nl", "north-holland", "amsterdam")
 
 VPN_EGRESS_NETWORK = "198.51.100.0/24"
 VPN_EGRESS_IP = "198.51.100.7"
@@ -153,6 +179,8 @@ BOB = "bob@example.com"
 CAROL = "carol@example.com"
 DAVE = "dave@example.com"
 BATCH = "svc-batch@example.com"
+ERIN = "erin@example.com"
+GRACE = "grace@example.com"
 
 OFFICE_HOURS = (9, 11, 14, 16)
 """The hours the office workers authenticate at. Four a day, five days a week, which is what gives the histogram
@@ -190,6 +218,21 @@ FATIGUE_DENIALS = 5
 FATIGUE_INTERVAL_S = 90
 """Five denials at ninety-second intervals and then an approval: eight minutes, inside the rule's ten."""
 
+TAKEOVER_DAY = 2
+TAKEOVER_HOURS = (14, 15, 16, 17)
+TAKEOVER_APPS = ("payroll", "admin-console", "file-share")
+TAKEOVER_DEVICE = "unmanaged-7f3a"
+TAKEOVER_IP = "192.0.2.41"
+"""Erin's afternoon on the Wednesday of the scored week: three sign-ins an hour from Amsterdam, on a device and
+to applications her account has never used, without the second factor, and two of them failing. She signed in
+from London that morning, and four hours is enough to get to Amsterdam, which is why the deterministic travel
+rule must stay quiet and the per-principal models are the only thing that can say this afternoon is unlike her
+fortnight. Two failures rather than three, so the failure-run rule stays quiet too and the case is the models'
+alone."""
+
+JOINER_DAY = 0
+"""Grace's first day, the Monday of the scored week. She is in no training window and has no model."""
+
 FUMBLE_DAY = 2
 FUMBLE_HOUR = 14
 """Two failed passwords and then a success. Failure-then-success with none of the denial volume R-D-L5-004
@@ -201,6 +244,8 @@ DEVICES = {
     CAROL: "laptop-carol",
     DAVE: "laptop-dave",
     BATCH: "runner-1",
+    ERIN: "laptop-erin",
+    GRACE: "laptop-grace",
 }
 
 ASNS = {
@@ -208,6 +253,7 @@ ASNS = {
     NEW_YORK_PLACE: "as7018",
     FRANKFURT_PLACE: "as3320",
     DUBLIN_PLACE: "as2856",
+    AMSTERDAM_PLACE: "as1136",
 }
 
 HOME_IPS = {
@@ -216,6 +262,8 @@ HOME_IPS = {
     CAROL: "203.0.113.13",
     DAVE: "203.0.113.14",
     BATCH: "203.0.113.15",
+    ERIN: "203.0.113.16",
+    GRACE: "203.0.113.17",
 }
 
 # --- Sessions -----------------------------------------------------------------------------------------------
@@ -299,7 +347,7 @@ def _member(principal: str, group: str, valid_from_s: int, recorded_s: int, chan
 
 def identity_versions() -> list:
     """The identity store the layer 5 classes are enriched from: what the directory recorded, and when."""
-    start = at(0, 0) - DAY_S
+    start = at(-TRAINING_DAYS, 0) - DAY_S
     (london, newyork) = GROUP_CHANGE_GROUPS
 
     return [
@@ -313,6 +361,10 @@ def identity_versions() -> list:
         _member(CAROL, "sales-users", start, start),
         _member(DAVE, "finance-users", start, start),
         _member(BATCH, "batch-jobs", start, start),
+        _profile(ERIN, "Finance", "active", start, start),
+        _member(ERIN, "finance-users", start, start),
+        _profile(GRACE, "Sales", "active", at(JOINER_DAY, 0), at(JOINER_DAY, 0)),
+        _member(GRACE, "sales-users", at(JOINER_DAY, 0), at(JOINER_DAY, 0)),
         _member(BOB, london, at(FLIGHT_DAY, 0), at(FLIGHT_DAY, 0), "retract"),
         _member(BOB, newyork, at(FLIGHT_DAY, 0), at(FLIGHT_DAY, 0)),
         _profile(DAVE, "Finance", "terminated", at(LEAVER_DAY, 0), at(LEAVER_RECORDED_DAY, 0)),
@@ -360,7 +412,8 @@ def _auth_row(principal: str,
               mfa_used: bool = True,
               mfa_result: typing.Optional[str] = "approved",
               token_type: str = "bearer",
-              source_ip: typing.Optional[str] = None) -> dict:
+              source_ip: typing.Optional[str] = None,
+              device_id: typing.Optional[str] = None) -> dict:
     (country, region, city) = place
 
     return {
@@ -374,7 +427,7 @@ def _auth_row(principal: str,
         "source_asn": ASNS[place],
         "source_ip": HOME_IPS[principal] if source_ip is None else source_ip,
         "app": app,
-        "device_id": DEVICES[principal],
+        "device_id": DEVICES[principal] if device_id is None else device_id,
         "auth_result": result,
         "mfa_used": mfa_used,
         "mfa_result": mfa_result,
@@ -382,9 +435,34 @@ def _auth_row(principal: str,
     }
 
 
+def _ordinary_day(day: int) -> list[dict]:
+    """What everybody with a model does on a day nothing happens: the habits the fortnight trains on."""
+    events = []
+
+    if (day % 7 in WEEKDAYS):
+        for hour in OFFICE_HOURS:
+            events.append(_auth_row(ALICE, at(day, hour), LONDON_PLACE, LONDON))
+            events.append(_auth_row(CAROL, at(day, hour, 10), LONDON_PLACE, LONDON))
+            events.append(_auth_row(BOB, at(day, hour, 20), LONDON_PLACE, LONDON))
+            events.append(_auth_row(ERIN, at(day, hour, 30), LONDON_PLACE, LONDON))
+
+    events.append(
+        _auth_row(BATCH, at(day, BATCH_HOUR), DUBLIN_PLACE, DUBLIN, app="batch", mfa_used=False, mfa_result=None))
+
+    for hour in (10, 15):
+        events.append(_auth_row(DAVE, at(day, hour), LONDON_PLACE, LONDON))
+        events.append(_auth_row(DAVE, at(day, hour, 600), FRANKFURT_PLACE, FRANKFURT, source_ip=VPN_EGRESS_IP))
+
+    return events
+
+
 def _build_auth(rng: random.Random) -> pd.DataFrame:
-    """Identity provider sign-in events for a week, with every planted case in place."""
+    """Identity provider sign-in events for the training fortnight and the scored week, with every planted case."""
     events: list[dict] = []
+
+    # The fortnight the models are trained on: ordinary habits and nothing else.
+    for day in range(-TRAINING_DAYS, 0):
+        events.extend(_ordinary_day(day))
 
     # The office workers' ordinary week. Carol and Bob keep the same hours as Alice, which is what makes each
     # principal's own histogram the thing an outlier is measured against rather than a population's.
@@ -401,6 +479,30 @@ def _build_auth(rng: random.Random) -> pd.DataFrame:
                 events.append(_auth_row(BOB, at(day, hour, 20), LONDON_PLACE, LONDON))
             elif (day > FLIGHT_DAY):
                 events.append(_auth_row(BOB, at(day, hour, 20), NEW_YORK_PLACE, NEW_YORK))
+
+            # Erin keeps her hours, except for the afternoon somebody else has her account.
+            if (day != TAKEOVER_DAY or hour < TAKEOVER_HOURS[0]):
+                events.append(_auth_row(ERIN, at(day, hour, 30), LONDON_PLACE, LONDON))
+
+            # Grace, from her first day, keeps the office's hours too.
+            if (day >= JOINER_DAY):
+                events.append(_auth_row(GRACE, at(day, hour, 40), LONDON_PLACE, LONDON))
+
+    # The afternoon Erin's account is used by somebody else.
+    for hour in TAKEOVER_HOURS:
+        for (index, app) in enumerate(TAKEOVER_APPS):
+            failed = hour == TAKEOVER_HOURS[0] and index < 2
+            events.append(
+                _auth_row(ERIN,
+                          at(TAKEOVER_DAY, hour, 300 + index * 900),
+                          AMSTERDAM_PLACE,
+                          AMSTERDAM,
+                          app=app,
+                          result="failure" if failed else "success",
+                          mfa_used=False,
+                          mfa_result=None,
+                          source_ip=TAKEOVER_IP,
+                          device_id=TAKEOVER_DEVICE))
 
     # The service account, every night at the same hour, from the datacentre.
     for day in range(CORPUS_DAYS):
@@ -611,6 +713,8 @@ SETTINGS = {
     "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,
     "session_baseline_min_samples": SESSION_BASELINE_MIN_SAMPLES,
     "excluded_source_networks": [VPN_EGRESS_NETWORK],
+    "training_days": TRAINING_DAYS,
+    "scores_from_ns": SCORES_FROM_NS,
 }
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
 RULES = ("R-D-L5-003",
@@ -708,27 +812,121 @@ SCORED_FEATURES = [
 """The ten TC-5 derived features, the same set `examples/layer5_model/run_model.py` trains on."""
 
 SCORING_WINDOW = 0
-SCORING_MANIFEST = ModelManifest(window_id=SCORING_WINDOW, models={}, fallback="reference-arithmetic:0")
-"""Every principal resolves to the same placeholder, and `DeterminismStampStage`, placed behind the scorer, writes
-`model_fallback_used` as true on every scored row beside this version string.
 
-That is the honest resolution for a corpus with no trained models in it. An event carrying a fallback is a claim
-about a population rather than about the entity's own history, which is exactly what these scores are.
+FALLBACK_VERSION = "reference-arithmetic:0"
+"""The population fallback the manifest declares for a principal with no model of its own.
+
+`DeterminismStampStage`, placed behind the scorer, writes `model_fallback_used` as true beside it, and R-B-L5-001
+and R-B-L5-002 refuse to read such a row: a score against a population is a claim about the population rather than
+about the principal's own history.
 """
 
+MODELS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "..",
+                           "..",
+                           "..",
+                           "examples",
+                           "layer5_model",
+                           "models",
+                           "session_models.json")
+"""The committed per-principal models, trained on the fortnight by `examples/layer5_model/train_models.py`."""
+
+
+class PinnedScorer:
+    """
+    Answers for every version the manifest can resolve: each principal's own model, and the population fallback.
+
+    The pinned versions go to `DfencoderScorer`, which holds the committed models as `NumpyAutoEncoder`s; the
+    fallback goes to `ReferenceScorer`. A version neither holds is refused by `DfencoderScorer`, which is the
+    wiring mistake that refusal exists for.
+    """
+
+    def __init__(self, models: dict):
+        self._models = DfencoderScorer(models, SCORED_FEATURES)
+        self._fallback = ReferenceScorer()
+
+    @property
+    def versions(self) -> list[str]:
+        """Every version this scorer answers for, sorted."""
+        return sorted(self._models.versions + [FALLBACK_VERSION])
+
+    def score(self, model_version: str, features: list) -> list:
+        if (model_version == FALLBACK_VERSION):
+            return self._fallback.score(model_version, features)
+
+        return self._models.score(model_version, features)
+
+
+def build_scoring(models: dict) -> tuple[PinnedScorer, ModelManifest]:
+    """
+    The scorer and the manifest for a set of trained models, built together so neither pins what the other lacks.
+
+    Parameters
+    ----------
+    models : dict
+        Principal to `(pinned version, fitted model)`.
+    """
+    scorer = PinnedScorer(dict(models.values()))
+    manifest = ModelManifest(window_id=SCORING_WINDOW,
+                             models={principal: version
+                                     for (principal, (version, _)) in sorted(models.items())},
+                             fallback=FALLBACK_VERSION,
+                             scores_from_ns=SCORES_FROM_NS)
+
+    return (scorer, manifest)
+
+
+@functools.lru_cache(maxsize=1)
+def committed_scoring() -> tuple[PinnedScorer, ModelManifest]:
+    """The committed models, read and checked against their recorded versions once per process."""
+    return build_scoring(load_models(MODELS_PATH))
+
+
+def scoring_manifest() -> ModelManifest:
+    """
+    The scoring manifest: every principal with a model pinned to the digest of its committed numbers, the
+    population fallback for anybody else, and scoring from the end of the fortnight the models were trained on.
+    """
+    return committed_scoring()[1]
+
+
+def training_frames(result: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """
+    What each principal's model is trained on: its authentication rows from the fortnight, as the ten features.
+
+    Taken from a pipeline run rather than computed separately, because the features are what the stages emit and
+    a training set derived any other way would describe a different pipeline. Rows with a gap in any feature are
+    dropped rather than imputed: these columns are counts and surprise scores, and a null means the row carried no
+    such measurement rather than a measurement of zero.
+    """
+    auth = result[result["telemetry_class"] == "tc5_auth"]
+    training = auth[auth["event_time"].astype("int64") < SCORES_FROM_NS]
+    frames = {}
+
+    for principal in sorted(set(training["user_principal"].dropna())):
+        rows = training[training["user_principal"] == principal]
+        frames[principal] = rows[SCORED_FEATURES].dropna().astype("float64").reset_index(drop=True)
+
+    return frames
+
+
 REFERENCE_PARAMETERS = {
-    "logcount": (4.038095, 1.72888),
-    "locincrement": (1.32381, 0.467928),
+    "logcount": (3.582609, 0.962009),
+    "locincrement": (1.23913, 0.427483),
     "appincrement": (1.0, 0.0),
     "deviceincrement": (1.0, 0.0),
-    "asns_in_window": (1.285714, 0.451754),
-    "hour_surprise_bits": (3.349456, 0.878393),
-    "weekday_surprise_bits": (2.90969, 0.871514),
-    "mfa_ratio": (0.905805, 0.260939),
-    "auth_attempts_in_window": (1.2, 0.785584),
-    "auth_failures_in_window": (0.238095, 0.889342),
+    "asns_in_window": (1.23913, 0.427483),
+    "hour_surprise_bits": (2.887763, 0.828301),
+    "weekday_surprise_bits": (2.762205, 0.672246),
+    "mfa_ratio": (0.93913, 0.239612),
+    "auth_attempts_in_window": (1.0, 0.0),
+    "auth_failures_in_window": (0.0, 0.0),
 }
-"""Per-feature mean and standard deviation, computed once over the whole corpus and frozen here.
+"""Per-feature mean and sample standard deviation over every principal's rows in the training fortnight, frozen here.
+
+This is the population the manifest's fallback scores a principal with no model against, so it is fitted on the
+fortnight alone, as the models are, and never on the week it scores. `test_session_harness` recomputes it from
+the fortnight and fails if these constants drift from it.
 
 Frozen rather than computed, and the reason is the first thing control 5 caught. The first version of the
 scorer below derived these from the rows it was handed, which made every score a function of how the stream
@@ -738,25 +936,24 @@ parameters are learned once and fixed before any scoring happens. Freezing them 
 and it is also what keeps the stub from fitting on the data it is scoring -- a leak no determinism control would
 catch, because every run would leak identically.
 
-A deviation of zero means the feature never varies in this corpus; those score zero rather than dividing by it.
+A deviation of zero means the feature never varied in the fortnight; those score zero rather than dividing by it.
 """
 
 
 class ReferenceScorer:
     """**Not a model.** Arithmetic that stands in for one so the scoring path can be tested.
 
-    `TC5ScoreStage` takes a scorer rather than training one, which is what lets the path be exercised where
-    there is no Torch and no card. Something has to occupy that slot in the composed pipeline, and the choice is
-    between a stub and leaving control 13's six checks unable to reach the stage at all.
+    It is the manifest's declared fallback: the population a principal with no model of their own is scored
+    against, which in this corpus is the joiner. Until each principal had a committed model it answered for
+    everybody; it now answers for nobody who has a fortnight of history.
 
     It returns each feature's distance from a frozen mean in units of a frozen deviation -- a z-score in the
     literal sense and nothing more. Deterministic, independent of batching, independent of the order rows arrive
     in, with no learned parameters, no history and no notion of normal beyond the constants above.
 
-    **No detection claim attaches to any number it produces.** The scores in the golden file are arithmetic, not
-    evidence. A threshold tuned against them would be tuned against this docstring. What the golden proves is
-    that the path from features to scores is deterministic, batch-invariant and permutation-stable, which is a
-    statement about plumbing and a precondition for a real model rather than a substitute for one.
+    **No detection claim attaches to any number it produces.** Its scores in the golden file are arithmetic, not
+    evidence, and every row carrying one says `model_fallback_used` is true, which is why R-B-L5-001 and R-B-L5-002
+    refuse to read them. A threshold tuned against them would be tuned against this docstring.
     """
 
     def score(self, model_version: str, features: list) -> list:
@@ -797,14 +994,12 @@ def run_pipeline(config: Config,
         Place `TotalOrderStage` ahead of the stateful stages. The permutation check's negative control turns it
         off, and every stage here is cumulative, so the difference is visible.
     scorer : `morpheus.stages.telemetry.tc5_score_stage.Scorer`, optional
-        What answers for the scores. Defaults to `ReferenceScorer`, the frozen arithmetic the golden file is
-        built on. `examples/layer5_model/run_model.py` passes a `DfencoderScorer` holding the models it trained,
-        which is how the composed pipeline is run with the autoencoder the guide names -- on the machine that
-        can run one.
+        What answers for the scores. Defaults to the committed models behind `PinnedScorer`, which is what the
+        golden file is built on. `examples/layer5_model/run_model.py` passes the models it has just trained on
+        a card, which is how the same path is run with Torch's own numbers.
     manifest : `morpheus.utils.model_manifest.ModelManifest`, optional
-        What pins each principal to a version. Defaults to `SCORING_MANIFEST`, which resolves everyone to the
-        reference placeholder. Passed together with `scorer`, or the versions one resolves are ones the other
-        does not hold.
+        What pins each principal to a version. Defaults to the committed manifest from `scoring_manifest`.
+        Passed together with `scorer`, or the versions one resolves are ones the other does not hold.
 
     Returns
     -------
@@ -818,8 +1013,8 @@ def run_pipeline(config: Config,
         raise ValueError("scorer and manifest are passed together or not at all; a manifest resolving versions "
                          "the scorer does not hold is the mismatch this pairing exists to prevent")
 
-    scorer = ReferenceScorer() if scorer is None else scorer
-    manifest = SCORING_MANIFEST if manifest is None else manifest
+    if (scorer is None):
+        (scorer, manifest) = committed_scoring()
 
     outputs = {}
 

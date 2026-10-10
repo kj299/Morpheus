@@ -16,18 +16,17 @@
 """
 Trains a per-principal autoencoder on the layer 5 corpus and asks whether it produces the same numbers twice.
 
-This is the third verdict this repository cannot render itself. `morpheus.models.dfencoder` is in the tree, but
-it is a Torch model, and the environment this fork is developed and tested in has no Torch -- so the model half
-of layer 5 is written here and run on a machine that has one. Everything it depends on that is not the model was
-built and tested first, which is why the trajectory feature R-P-L5-006 reads, the determinism envelope, the
-pinned manifest and the sharding are all merged already and this is the only piece that arrives unexercised.
+This is the third verdict this repository cannot render itself. The models the composed pipeline scores with in CI
+were trained on a CPU by `train_models.py` and are committed as numbers; what no CI here can say is whether
+training and scoring on a CUDA device give the same numbers twice, which is what a deployment's scores come from.
 
-**What this measures is reproducibility, not detection quality.** The corpus is a week of five principals'
-authentications, which is nowhere near enough to train an autoencoder that detects anything, and no claim is
-made that it does. What a week is enough for is the question the determinism controls exist to answer: run the
-same training twice with the same seed and the same data, and find out whether the scores are identical. If they
-are not, every threshold tuned against them is tuned against noise, and R-P-L5-006 -- a rule about a score
-rising by fractions of a standard deviation -- is measuring the model's own jitter.
+**What this measures is reproducibility, not detection quality.** The training data is a fortnight of six
+principals' authentications, which is nowhere near enough to train an autoencoder that detects anything in
+general, and no claim is made that it does. What a fortnight is enough for is the question the determinism
+controls exist to answer: run the same training twice with the same seed and the same data, and find out whether
+the scores are identical. If they are not, every threshold tuned against them is tuned against noise, and
+R-P-L5-006 -- a rule about a score rising by fractions of a standard deviation -- is measuring the model's own
+jitter.
 
 Four things are checked, each a control from Part 5:
 
@@ -38,13 +37,11 @@ Four things are checked, each a control from Part 5:
   operation -- batch normalization left in training mode is the usual one -- gives different scores for the same
   row depending on what it was batched with, and no amount of seeding fixes that.
 - **The double run.** Two full train-and-score cycles, compared byte for byte after quantization.
-- **The wired path.** The trained models are placed behind `TC5ScoreStage` through
-  `morpheus.utils.dfencoder_scorer.DfencoderScorer`, with a manifest pinning each principal to a digest of its own
-  weights and no fallback, and the composed layer 5 pipeline is run twice and then under the batch-split sweep.
-  This is the first time the pipeline scores with the model the guide names rather than with frozen arithmetic.
-  The models score the rows they were trained on, which is a leak made on purpose: the question is whether the
-  wired path gives the same numbers twice, and a week of five principals cannot answer any other question about
-  a model.
+- **The wired path.** The trained models are placed behind `TC5ScoreStage` through the session corpus's
+  `PinnedScorer`, with a manifest pinning each principal to a digest of their model and the population fallback
+  for the joiner who has none, and the composed layer 5 pipeline is run twice and then under the batch-split
+  sweep. The models are trained on the corpus's fortnight and score the week after it, as the committed models CI
+  scores with are: this is the same path with Torch's own numbers in it, on the device.
 
 The artifact it writes is the evidence, in the same shape as `gpu_conformance.json`: what ran, on what card, with
 what result, so a number in a document can be traced to a run rather than to a memory of one.
@@ -121,25 +118,19 @@ def prepare_environment(seed: int) -> None:
 
 
 def build_features():
-    """The layer 5 corpus, through the five TC-5 stages, as one frame per principal."""
+    """The layer 5 corpus's training fortnight, through the five TC-5 stages, as one frame per principal."""
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
 
     import session_pipeline  # pylint: disable=import-outside-toplevel
 
+    if (list(session_pipeline.SCORED_FEATURES) != FEATURE_COLUMNS):
+        raise RuntimeError("the runner's features and the pipeline's scored features disagree")
+
+    # The committed models score this run's pipeline by default; the features do not depend on any score, and
+    # what is trained here is trained on the fortnight alone, as they were.
     result = session_pipeline.run_pipeline(session_pipeline.build_pipeline_config(), session_pipeline.build_corpus())
-    scored = result[result["telemetry_class"] == "tc5_auth"]
 
-    frames = {}
-
-    for principal in sorted(set(scored["user_principal"].dropna())):
-        rows = scored[scored["user_principal"] == principal]
-        features = rows[[column for column in FEATURE_COLUMNS if column in rows.columns]].copy()
-        # A gap is not a value the model should learn a distribution for: these columns are counts and scores,
-        # and a null means the row carried no such measurement rather than a measurement of zero. Dropping the
-        # row is the honest reduction, and how many were dropped is reported.
-        frames[principal] = features.dropna().astype("float64").reset_index(drop=True)
-
-    return frames
+    return session_pipeline.training_frames(result)
 
 
 def pipeline_checks(frames: dict, seed: int, epochs: int, eval_batch_size: int) -> dict:
@@ -153,13 +144,14 @@ def pipeline_checks(frames: dict, seed: int, epochs: int, eval_batch_size: int) 
 
     import session_pipeline  # pylint: disable=import-outside-toplevel
     from morpheus.utils.determinism import diff_frames  # pylint: disable=import-outside-toplevel
-    from morpheus.utils.dfencoder_scorer import DfencoderScorer  # pylint: disable=import-outside-toplevel
-    from morpheus.utils.dfencoder_scorer import build_manifest  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.dfencoder_scorer import load_models  # pylint: disable=import-outside-toplevel
     from morpheus.utils.dfencoder_scorer import train_dfencoder_models  # pylint: disable=import-outside-toplevel
 
     trained = train_dfencoder_models(frames, FEATURE_COLUMNS, seed, epochs, eval_batch_size)
-    scorer = DfencoderScorer(trained.models, FEATURE_COLUMNS)
-    manifest = build_manifest(trained.versions, session_pipeline.SCORING_WINDOW)
+    (scorer, manifest) = session_pipeline.build_scoring(
+        {principal: (version, trained.models[version])
+         for (principal, version) in trained.versions.items()})
+    committed = {principal: version for (principal, (version, _)) in load_models(session_pipeline.MODELS_PATH).items()}
 
     config = session_pipeline.build_pipeline_config()
     corpus = session_pipeline.build_corpus()
@@ -195,6 +187,9 @@ def pipeline_checks(frames: dict, seed: int, epochs: int, eval_batch_size: int) 
     scored = first[first["telemetry_class"] == "tc5_auth"]
 
     return {
+        # Whether the device trained the same numbers the CPU committed. Not part of the verdict: a different
+        # processor sums in a different order, and the committed file is what CI pins, not a recipe for it.
+        "committed_models_match": dict(trained.versions) == committed,
         "pipeline_double_run_reproducible": double_run,
         "pipeline_batch_invariant": not sweep_differences,
         "pipeline_differences": differences,
@@ -318,11 +313,10 @@ def main() -> int:
         "batch_invariant": batch_invariant,
         "batch_sizes": list(BATCH_SIZES),
         **wired,
-        "measures": "reproducibility of the scoring path, not detection quality: a week of five principals is "
-                    "far too little data to train an autoencoder that detects anything, and no claim is made "
-                    "that it does. The wired-path checks score the rows the models were trained on, which is a "
-                    "leak made on purpose so the question stays whether the pipeline gives the same numbers "
-                    "twice with a real model in the slot.",
+        "measures": "reproducibility of the scoring path, not detection quality: a fortnight of six principals "
+                    "is far too little data to train an autoencoder that detects anything in general, and no claim "
+                    "is made that it does. The models are trained on the corpus's fortnight and the wired-path "
+                    "checks score the week after it.",
     }
 
     with open(arguments.artifact, "w", encoding="utf-8") as handle:

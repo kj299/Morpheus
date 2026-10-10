@@ -33,6 +33,12 @@ scored against the entity's own, and the difference has to be visible: where a f
 resolution says so and `model_fallback_used` reaches the SIEM; where none is, resolving an unknown entity
 raises, because scoring it against nothing in particular and reporting a number is worse than not scoring it.
 
+**A manifest says when its models may start scoring.** A model fitted on a window of history and then asked to
+score that same history reports how well it memorized, not how unusual anything was, and every run leaks
+identically so no determinism control notices. `scores_from_ns` is the end of the training data, carried with the
+pin: a row before it was available to training, and `TC5ScoreStage` and `DeterminismStampStage` leave it unscored
+and unstamped rather than reporting an in-sample number beside a model version.
+
 This module resolves nothing itself. It holds what a resolver decided and enforces how that decision is used --
 no MLflow client, no registry, no network. What produces the mapping is a deployment's business; what this
 guarantees is that the mapping does not change underneath a window.
@@ -79,11 +85,15 @@ class ModelManifest:
     fallback : str, optional
         The `name:version` to use for an entity with no model of its own. `None` means an unknown entity is
         refused rather than scored against a population model.
+    scores_from_ns : int, optional
+        The first event time, in epoch nanoseconds, these models may score: the end of the data they were
+        trained on. `None` means no training data overlaps what is scored.
     """
 
     window_id: int
     models: dict
     fallback: typing.Optional[str] = None
+    scores_from_ns: typing.Optional[int] = None
 
     def __post_init__(self):
         for (entity, version) in self.models.items():
@@ -91,6 +101,31 @@ class ModelManifest:
 
         if (self.fallback is not None):
             _require_pinned(self.fallback, "fallback model")
+
+        if (self.scores_from_ns is not None
+                and (not isinstance(self.scores_from_ns, int) or isinstance(self.scores_from_ns, bool))):
+            raise ValueError(f"scores_from_ns is {self.scores_from_ns!r}; it is an event time in epoch "
+                             f"nanoseconds")
+
+    def covers(self, event_time_ns: typing.Optional[int]) -> bool:
+        """
+        Whether a row at this event time is one these models may score.
+
+        Parameters
+        ----------
+        event_time_ns : int or None
+            The row's event time in epoch nanoseconds. A row with no event time cannot be placed after the
+            training data and is not covered when `scores_from_ns` is set.
+
+        Returns
+        -------
+        bool
+            True when no training boundary is declared, or the row falls on or after it.
+        """
+        if (self.scores_from_ns is None):
+            return True
+
+        return event_time_ns is not None and event_time_ns >= self.scores_from_ns
 
     @property
     def entities(self) -> int:

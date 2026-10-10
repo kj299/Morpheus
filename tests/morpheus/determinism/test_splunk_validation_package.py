@@ -350,10 +350,10 @@ def test_the_session_duration_rule_returns_exactly_what_is_written(expected: dic
     assert 'account_type != "service"' in search
 
 
-def test_the_model_rules_are_empty_for_the_reason_they_state(expected: dict, sessions: pd.DataFrame):
+def test_the_model_rules_return_exactly_what_is_written(expected: dict, sessions: pd.DataFrame):
     # R-B-L5-001 and R-B-L5-002 read only rows a principal's own model scored. Their expectations record what the
-    # search returns and, separately, what it would return without the gate, so a reference scorer that one day
-    # crosses a threshold shows up as a changed count rather than as a gate that was quietly doing the work.
+    # search returns, who it returns, and separately what it would return without the gate, so a population score
+    # that one day crosses a threshold shows up as a changed count rather than as a gate quietly doing the work.
     auth = sessions[sessions["telemetry_class"] == "tc5_auth"]
     scored = auth[auth["mean_abs_z"].notna()]
     owned = scored[scored["model_fallback_used"].astype("boolean") == False]  # noqa: E712  pylint: disable=singleton-comparison
@@ -365,9 +365,12 @@ def test_the_model_rules_are_empty_for_the_reason_they_state(expected: dict, ses
     for (name, ungated) in (("R-B-L5-001 - Composite authentication anomaly", composite),
                             ("R-B-L5-002 - Location novelty anomaly", location)):
         entry = expected["searches"][name]
+        gated = ungated.loc[ungated.index.intersection(owned.index)]
 
-        assert entry["expected_rows"] == len(ungated.index.intersection(owned.index)) == 0, name
+        assert entry["expected_rows"] == len(gated) > 0, name
+        assert entry["expected_empty"] is False, name
         assert entry["candidate_rows_without_the_gate"] == len(ungated), name
+        assert entry["by_principal"] == dict(sorted(collections.Counter(gated["user_principal"]).items())), name
         assert "model_fallback_used=false" in _stanza_search(name), name
 
 
@@ -1070,7 +1073,11 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # Seven after the risk write path, and the one that left was broken rather than starved: R-P-L3-005 read the
     # value two rows back from a field its own streamstats was still creating, and fires fifteen times now that
     # it takes two passes over a summary the run collects first.
-    assert len(empty) == 7
+    #
+    # Five after the learned models, and the two that left were waiting for exactly that: R-B-L5-001 and R-B-L5-002
+    # read only rows a principal's own model scored, and each principal now has one, trained on a fortnight the
+    # scored week follows.
+    assert len(empty) == 5
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name
@@ -1268,17 +1275,28 @@ def test_every_scored_sample_event_carries_the_determinism_envelope():
 
 
 def test_the_scored_layer_5_samples_name_the_model_and_the_fallback():
-    # R-D-L5-003, R-D-L5-004 and R-P-L5-006 table `model_version` and `model_fallback_used`, so an analyst reading a
-    # notable sees that the score came from the reference arithmetic and not from the principal's own model.
-    scored = [event for event in _events_of("morpheus_score_l5.jsonlines") if event.get("mean_abs_z") is not None]
+    # Every layer 5 rule tables `model_version` and `model_fallback_used`, so an analyst reading a notable sees
+    # which principal's committed model scored it, or that the population fallback did. A scored event names a
+    # pinned `dfencoder/<principal>:<digest>` of its own principal, or the fallback with the flag set; an event the
+    # models were trained on, or one no scorer reads, names nothing.
+    events = _events_of("morpheus_score_l5.jsonlines")
+    scored = [event for event in events if event.get("mean_abs_z") is not None]
 
     assert len(scored) > 0
 
-    for event in scored:
-        assert event["model_version"] == "reference-arithmetic:0", event
-        assert event["model_fallback_used"] is True, event
+    own = [event for event in scored if event["model_fallback_used"] is False]
+    fallback = [event for event in scored if event["model_fallback_used"] is True]
 
-    unscored = [event for event in _events_of("morpheus_score_l5.jsonlines") if event.get("mean_abs_z") is None]
+    assert len(own) + len(fallback) == len(scored)
+    assert own and fallback
+
+    for event in own:
+        assert event["model_version"].startswith(f"dfencoder/{event['user_principal']}:"), event
+
+    for event in fallback:
+        assert event["model_version"] == "reference-arithmetic:0", event
+
+    unscored = [event for event in events if event.get("mean_abs_z") is None]
 
     assert len(unscored) > 0
     assert all(event.get("model_version") is None for event in unscored)

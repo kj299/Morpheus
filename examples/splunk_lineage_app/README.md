@@ -211,7 +211,10 @@ records the detections returned, Chain assembly found the one three-layer chain 
 a threshold of 60, and R-P-L3-005 fired fifteen times once it took two passes over the summary -- its own SPL had
 read a field its `streamstats` was still creating, which is why the second run's zero agreed with an expectation
 that blamed the summary. A fourth, on the Docker image this package ships with, agreed with it on every search and
-every check, and is `validate/search_head_results.json`.
+every check. A fifth, that night on the tarball install, ran over the events regenerated when each layer 5
+principal gained a learned model of their own: it indexed all 8,680 events, returned what is written for all
+forty-eight -- R-B-L5-001 and R-B-L5-002 their first rows, 42 and 28 -- held the 166 risk records the detections
+returned, and is `validate/search_head_results.json`; the earlier four are kept beside it.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

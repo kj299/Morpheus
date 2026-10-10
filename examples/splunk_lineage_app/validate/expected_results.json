@@ -310,8 +310,8 @@
       ]
     },
     "R-D-L5-007 - Off-hours authentication": {
-      "expected_rows": 2,
-      "why": "Two successful sign-ins at an hour the principal's own mature histogram had never held. alice@example.com at 03:00 is the planted case, an office worker who has only ever signed in during office hours. bob@example.com at 08:00 is real too: the sign-in from London before his flight to New York, at an hour his office week never used. That is what the rule is for, and why it is a notable rather than a page. svc-batch@example.com signs in at 03:00 every night and does not appear: the same hour is ordinary in its own history, which is the negative control that makes the feature a statement about a principal rather than about a clock. carol@example.com's 02:00 burst is at an unseen hour as well, and is left to R-D-L5-004 and R-D-L5-009 because its rows at that hour are refusals until the last.",
+      "expected_rows": 4,
+      "why": "Four successful sign-ins at an hour the principal's own mature histogram had never held. alice@example.com at 03:00 is the planted case, an office worker who has only ever signed in during office hours. bob@example.com at 08:00 is real too: the sign-in from London before his flight to New York, at an hour his office week never used. That is what the rule is for, and why it is a notable rather than a page. erin@example.com fires twice, at 15:00 and 17:00 on the afternoon her account is used from Amsterdam: two of its hours her office weeks never held, and the first sign-in at each. svc-batch@example.com signs in at 03:00 every night and does not appear: the same hour is ordinary in its own history, which is the negative control that makes the feature a statement about a principal rather than about a clock. carol@example.com's 02:00 burst is at an unseen hour as well, and is left to R-D-L5-004 and R-D-L5-009 because its rows at that hour are refusals until the last.",
       "key_values": [
         {
           "user_principal": "alice@example.com",
@@ -320,22 +320,30 @@
         {
           "user_principal": "bob@example.com",
           "local_hour": 8
+        },
+        {
+          "user_principal": "erin@example.com",
+          "local_hour": 15
+        },
+        {
+          "user_principal": "erin@example.com",
+          "local_hour": 17
         }
       ]
     },
     "R-D-L5-008 - New authentication location or device": {
       "expected_rows": 2,
-      "why": "Two first sign-ins from a new place by principals whose history is mature. alice@example.com in New York is the impossible-travel row R-D-L5-003 also reports, from the other side: there the speed, here the place. bob@example.com in New York is his arrival after the flight, reported once and never again, because the set the stage keeps is cumulative. dave@example.com's first sign-in through the Frankfurt concentrator is also a new place, one prior sign-in into his history, and the cadence_mature gate keeps it out: in a principal's first days every place is new because nothing is old yet. No principal changes device in this corpus, so device_first_seen is never true.",
+      "why": "Two first sign-ins from a new place by principals whose history is mature. alice@example.com in New York is the impossible-travel row R-D-L5-003 also reports, from the other side: there the speed, here the place. bob@example.com in New York is his arrival after the flight, reported once and never again, because the set the stage keeps is cumulative. dave@example.com's first sign-in through the Frankfurt concentrator is also a new place, on the first day of the training fortnight with one prior sign-in in his history, and the cadence_mature gate keeps it out: in a principal's first days every place is new because nothing is old yet. erin@example.com is the one this search misses. Her account's first sign-in from Amsterdam, on a device it had never used, failed, and that failed row is the one carrying location_first_seen and device_first_seen; every success after it is the second sighting, and the search reads successes only. An attacker who gets the password wrong once first is invisible to it. R-B-L5-001 and R-B-L5-002 find the afternoon; the gap is recorded in the retrospective rather than tuned out of the corpus.",
       "key_values": [
         {
           "user_principal": "alice@example.com",
           "user_location": "us:ny:new-york",
-          "cadence_samples": 24
+          "cadence_samples": 64
         },
         {
           "user_principal": "bob@example.com",
           "user_location": "us:ny:new-york",
-          "cadence_samples": 13
+          "cadence_samples": 53
         }
       ]
     },
@@ -350,16 +358,27 @@
       ]
     },
     "R-B-L5-001 - Composite authentication anomaly": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "Correct, and for a reason the search states: it reads only rows whose model_fallback_used is false, and every scored row in this corpus was scored by the reference arithmetic under the manifest's fallback. A reconstruction error is a statement about a principal only when the model behind it was fitted to that principal. Nothing was tuned to make this empty -- without the gate it is empty too, because the reference scores reach a max_abs_z of 6.1 but never a mean_abs_z of 2.0. It returns rows once a trained per-user model is pinned in the manifest (issue #59).",
-      "candidate_rows_without_the_gate": 0
+      "expected_rows": 42,
+      "expected_empty": false,
+      "candidate_rows_without_the_gate": 42,
+      "by_principal": {
+        "alice@example.com": 10,
+        "bob@example.com": 6,
+        "carol@example.com": 6,
+        "erin@example.com": 20
+      },
+      "why": "Forty-two rows, every one from a principal's own model, committed under examples/layer5_model/models/ and trained on the corpus's fortnight before the scored week. erin@example.com is the case the models exist for: twelve sign-ins one afternoon from Amsterdam, on a device and to applications her account never used, without the second factor -- nothing the deterministic rules call impossible -- and then eight more on Thursday and Friday from London, because the *increment features are cumulative and stay raised until a model is trained on a window that includes the afternoon. The other three are the week's planted departures: alice@example.com from her first failed password on Wednesday through Thursday and again in New York, bob@example.com from his sign-in before his flight, carol@example.com's six-attempt burst. dave@example.com and svc-batch@example.com have models and a week that repeats their fortnight, and do not appear; grace@example.com joins in the scored week, has no model, is scored against the population fallback, and the gate keeps her out -- with the gate removed her population scores cross neither threshold either, so the count without it is the same 42. The scores themselves are not calibrated: a feature the fortnight never varied has a training loss spread of a rounding residue, so any change scores in the thousands, and the thresholds of 6 and 2 read as 'departed from the fortnight' and nothing finer."
     },
     "R-B-L5-002 - Location novelty anomaly": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "Correct, for the same reason as R-B-L5-001: the search reads only rows a principal's own model scored, and every row here was scored under the fallback. Without the gate it is still empty, because the reference losses on locincrement peak at 1.4 against a threshold of 4.0. R-D-L5-008 asks the deterministic form of the question and returns its two rows today.",
-      "candidate_rows_without_the_gate": 0
+      "expected_rows": 28,
+      "expected_empty": false,
+      "candidate_rows_without_the_gate": 28,
+      "by_principal": {
+        "alice@example.com": 2,
+        "bob@example.com": 6,
+        "erin@example.com": 20
+      },
+      "why": "Twenty-eight rows from the three principals who reached somewhere new in the scored week: erin@example.com in Amsterdam and every row of hers after it, bob@example.com in New York, alice@example.com in New York and her next sign-in. The search reads the reconstruction error on locincrement, which is that feature's error given all ten rather than a flag for a new place: bob@example.com's sign-in from London before his flight fires because the hour is one his fortnight never used. R-D-L5-008 asks the deterministic form of the question and misses erin@example.com, whose first sign-in from Amsterdam failed and carried the first-seen flags the successes after it do not; this search finds her. Nobody without a new place appears, and the joiner's fallback-scored rows would not cross the threshold without the gate either."
     },
     "R-B-L5-005 - Session duration anomaly": {
       "expected_rows": 1,
@@ -386,15 +405,15 @@
       ]
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 4335,
+      "expected_rows": 4615,
       "expected_empty": false,
-      "contributing_rows": 8221,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 8221 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's because only TC5ScoreStage produces `max_abs_z`; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control."
+      "contributing_rows": 8501,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 8501 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week because only TC5ScoreStage produces `max_abs_z`, and it leaves the session corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1121 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 3347,
+      "distinct_lineage_ids": 3591,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
@@ -404,7 +423,7 @@
         "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3347 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and one detection accuses any of them: R-D-L2-003, the address claimed by two MACs, at 55. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short and no span reaches four. The other 14 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` now reads `resolution_methods`, every hop a resolver ladder took, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 146 chains in all carry one.",
+      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3591 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and one detection accuses any of them: R-D-L2-003, the address claimed by two MACs, at 55. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short and no span reaches four. The other 14 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` now reads `resolution_methods`, every hop a resolver ladder took, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 146 chains in all carry one.",
       "three_layer_chain_risk": {
         "0": 14,
         "55": 1
@@ -458,30 +477,30 @@
       "key_values": [
         {
           "user_principal": "dave@example.com",
-          "day_window_id": 8
+          "day_window_id": 22
         },
         {
           "user_principal": "dave@example.com",
-          "day_window_id": 9
+          "day_window_id": 23
         },
         {
           "user_principal": "dave@example.com",
-          "day_window_id": 10
+          "day_window_id": 24
         },
         {
           "user_principal": "svc-batch@example.com",
-          "day_window_id": 8
+          "day_window_id": 22
         },
         {
           "user_principal": "svc-batch@example.com",
-          "day_window_id": 9
+          "day_window_id": 23
         },
         {
           "user_principal": "svc-batch@example.com",
-          "day_window_id": 10
+          "day_window_id": 24
         }
       ],
-      "why": "Six principal-days after deduplication, from 15 rows that carry the trajectory. None of them is behaviour, and the search says so in its own comment. Two principals climb for six straight days because the reference scorer's parameters are frozen while `logcount` and the `*increment` features are cumulative: a score whose baseline never moves under a feature that only grows must rise, and that is arithmetic. carol@example.com's day of the planted multi-factor burst used to fire as well -- a run of four whose first three rises are hundredths and whose fourth is the burst -- and the acceleration ceiling now keeps it out: its drift_acceleration is 0.81 against a ceiling of 0.1, while the two climbs accelerate by hundredths. A spike is R-D-L5-004's and R-B-L5-001's to report; drift is the slow climb no single day gives away. The predicate is evaluated here exactly as the search states it, so a corpus change that adds or removes a firing shows up as a diff rather than as a search that quietly means something else. What a deployment should take from this: the drift path's first false positives are cumulative features under a stale baseline, visible in `drift_baseline_sigma`. Every firing is also written to the principal_watchlist lookup, so after this search runs `| inputlookup principal_watchlist` holds six drift-trajectory entries for dave@example.com and svc-batch@example.com."
+      "why": "Six principal-days after deduplication, from 15 rows that carry the trajectory. None of them is behaviour, and the search says so in its own comment. The two principals whose scored week repeats their training fortnight climb on its last three days: their daily mean_abs_z rises by hundredths a day, never as much as a twentieth, because the cadence features keep moving after training ends -- each ordinary sign-in makes its hour a little less surprising -- so each day sits a little further from anything their models were fitted on. The rule measures the rise in units of the principal's own day-to-day spread, and for a principal who never changes that spread is tiny, so hundredths read as several of it. The principals whose week does depart -- erin@example.com's takeover, alice@example.com's fumbled password and journey, bob@example.com's move, carol@example.com's burst -- all cross the mean ceiling of 2.0 and leave: those are R-B-L5-001's to report. The predicate is evaluated here exactly as the search states it, so a corpus change that adds or removes a firing shows up as a diff rather than as a search that quietly means something else. What a deployment should take from this: the drift path's first false positives are principals who do not change, under a model that does not move, read against a spread that is nearly zero, visible in `drift_baseline_sigma`. Every firing is also written to the principal_watchlist lookup, so after this search runs `| inputlookup principal_watchlist` holds six drift-trajectory entries for dave@example.com and svc-batch@example.com."
     },
     "R-B-L7-002 - Bulk data access": {
       "expected_rows": 8,

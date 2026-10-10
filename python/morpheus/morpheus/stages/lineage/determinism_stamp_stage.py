@@ -27,6 +27,7 @@ from morpheus.messages import MessageMeta
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
@@ -57,7 +58,9 @@ class DeterminismStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     about is not the one it was pinned for, and this stage does not catch that: a run that scored a window
     against models pinned for another is a defect worth stopping on rather than annotating. What it does catch
     is an entity with no model and no declared fallback, which is a fact about the estate rather than about the
-    pipeline -- those rows carry a null model version, and are counted and logged.
+    pipeline -- those rows carry a null model version, and are counted and logged. A row before the manifest's
+    `scores_from_ns` also carries a null model version, because `TC5ScoreStage` did not score it: it falls inside
+    the data the models were trained on, and naming a model beside it would claim a score nobody produced.
 
     Parameters
     ----------
@@ -75,6 +78,8 @@ class DeterminismStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Column holding the window each row belongs to, which the manifest checks itself against. Absent from
         the frame means the manifest's own window is assumed, which is correct for a pipeline that seals before
         scoring and is why `WindowSealStage` belongs upstream of this.
+    time_column : str, default = "event_time"
+        The row's event time, read only when the manifest declares `scores_from_ns`.
     """
 
     def __init__(self,
@@ -82,13 +87,15 @@ class DeterminismStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  envelope: DeterminismEnvelope,
                  manifest: typing.Optional[ModelManifest] = None,
                  entity_column: str = "user_principal",
-                 window_column: str = "window_id"):
+                 window_column: str = "window_id",
+                 time_column: str = "event_time"):
         super().__init__(c)
 
         self._envelope = envelope
         self._manifest = manifest
         self._entity_column = entity_column
         self._window_column = window_column
+        self._time_column = time_column
         self._columns = envelope.to_columns()
 
         for (name, value) in self._columns.items():
@@ -153,8 +160,19 @@ class DeterminismStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                             row_count)
                 windows = (to_host_list(df, self._window_column)
                            if self._window_column in df.columns else [self._manifest.window_id] * row_count)
+                times = None
+
+                if (self._manifest.scores_from_ns is not None):
+                    if (self._time_column not in df.columns):
+                        raise KeyError(f"the manifest declares scores_from_ns, and the frame has no "
+                                       f"{self._time_column!r} to place rows against it")
+
+                    times = [to_epoch_ns(value) for value in to_host_list(df, self._time_column)]
 
                 for position in range(row_count):
+                    if (times is not None and not self._manifest.covers(times[position])):
+                        continue
+
                     window = windows[position]
                     window_id = self._manifest.window_id if window is None else int(window)
 

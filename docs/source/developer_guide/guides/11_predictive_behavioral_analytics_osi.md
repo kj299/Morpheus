@@ -60,7 +60,7 @@ scoring path with frozen arithmetic in the model's slot, control 8's total order
 checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
 request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve. That is forty-six stages and forty-one supporting
-modules, covered by 1,971 distinct tests, itemized in
+modules, covered by 1,996 distinct tests, itemized in
 [Part 6](#provided). Thirty-eight of the forty-two rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -75,20 +75,24 @@ scores what all of that adds up to for each class of entity on a network, and li
 
 What remains design rather than a running system: four of the forty-two rules (R-B-L4-001 and
 R-B-L7-003, which need a Triton endpoint; R-B-L4-004, which needs a stack fingerprint on the flow and a
-flow identifier on the request that rode it; and R-C-003), a trained model in the composed pipeline, the
+flow identifier on the request that rode it; and R-C-003), a learned model for hosts, the
 hysteresis half of control 9 (its suppression half ships on every detection), controls 10 and 11 as code, the sharding router's wiring, and clock
 correction, since `clock_source` and `clock_offset_ms` are schema that nothing produces or checks. Layer 5
-is the case to state precisely: **there is no trained per-user model in any shipped artifact.**
-`mean_abs_z` and `max_abs_z` have a producer,
-{py:class}`~morpheus.stages.telemetry.tc5_score_stage.TC5ScoreStage`, but in every composed pipeline the
-scorer behind it is `ReferenceScorer`, ten frozen population constants, so what R-P-L5-006 fires on is
-arithmetic. R-B-L5-001 and R-B-L5-002 read the same columns and ship gated on `model_fallback_used=false`,
-so they return nothing until a trained per-user model is pinned in the manifest. The drift
-trajectory that is this document's flagship predictive claim is built and tested --
+is the case to state precisely: **each principal has a learned model of their own, and only principals do.**
+`mean_abs_z` and `max_abs_z` are produced by
+{py:class}`~morpheus.stages.telemetry.tc5_score_stage.TC5ScoreStage` from a per-principal
+`morpheus.models.dfencoder` autoencoder, trained once on the session corpus's fortnight of ordinary habits and
+committed as plain numbers under `examples/layer5_model/models/`; CI scores them with a NumPy forward pass,
+since it has no Torch, and the manifest pins each principal to a digest of their model's numbers and declares
+where training ended, so the fortnight's rows are never scored by the models fitted to them. A joiner with no
+fortnight is scored against a population fallback fitted on the same fortnight, and says so on every row.
+R-B-L5-001 and R-B-L5-002 read only rows a principal's own model scored, and return their first rows: the
+afternoon one account is used from Amsterdam, and the week's other planted departures. The drift trajectory
+that is this document's flagship predictive claim is built and tested --
 {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` reports the velocity, the
 acceleration, the length of the rising run and its total rise in the principal's own standard deviations
--- against those reference scores, so the rule's shape is settled before there is a model to argue
-about. Given no score column at all it carries a null in every drift column and says so once in the log.
+-- against those learned scores. The scores are not calibrated, which is the first thing the model rules
+taught: a feature the fortnight never varied scores any change in the thousands. Hosts have no model yet. Given no score column at all it carries a null in every drift column and says so once in the log.
 Everything else at this layer is built: the session assembly and the six feature stages run under
 control 13's six checks against a week-long corpus, the five deterministic rules and R-B-L5-005's
 per-principal session-duration baseline ship as saved searches with their predicates asserted against that
@@ -1587,18 +1591,28 @@ feature spikes for a benign reason.
 
 The saved search reads only rows whose `model_fallback_used` is false. A reconstruction error is a
 statement about a principal only when the model behind it was fitted to that principal, and a score from a
-population fallback crossing these thresholds would be an alert about the population. Every composed corpus
-scores under the reference arithmetic's fallback, so the search returns nothing today; it returns nothing
-without the gate as well, because the reference scores reach a `max_abs_z` of 6.1 and never a
-`mean_abs_z` of 2.0, and the validation package records both counts so the gate cannot quietly become
-the only thing keeping it empty.
+population fallback crossing these thresholds would be an alert about the population. Until step 8 every
+composed corpus scored under the reference arithmetic's fallback and the search returned nothing. Each
+principal of the session corpus now has a model trained on a fortnight before the week it scores, and the
+search returns 42 rows: twenty for the account used one afternoon from Amsterdam, on a device and to
+applications it had never used -- twelve that afternoon and eight more back in London, because the
+`*increment` features are cumulative and stay raised until a model is trained on a window that includes it --
+and the rest the week's planted departures. The two principals whose week repeats their fortnight never
+appear, and the joiner's population scores cross neither threshold, so the validation package's count without
+the gate is the same 42. The thresholds read as departure from the fortnight and nothing finer: the
+upstream loss scaler standardizes each feature's error against the errors seen in training, and where the
+fortnight never varied a feature that spread is a rounding residue, so any change scores in the thousands. A
+floor on the spread, or a longer and more varied training window, is what calibration needs.
 
 **R-B-L5-002 - Location novelty.** `locincrement_z_loss` at or above 4.0. Note that `locincrement` is
 cumulative-distinct, so it rises permanently after a legitimate relocation; the z-score handles this
 correctly because the loss scaler is fit per user, but the rule should still carry a 7-day suppression
 after a confirmed benign relocation. It ships gated on `model_fallback_used=false` for the same reason as
-R-B-L5-001, and is empty on the reference corpus with or without the gate: the reference losses peak at
-1.4. R-D-L5-008 asks the deterministic form of the question and fires today.
+R-B-L5-001, and returns 28 rows from the three principals who reached somewhere new in the scored week. The
+loss on `locincrement` is that feature's reconstruction error given all ten, not a flag for a new place, so a
+traveller's sign-in from London at an hour he had never used fires it before he flies. R-D-L5-008 asks the
+deterministic form of the question and misses the Amsterdam afternoon: its first sign-in there failed and
+carried the first-seen flags, and R-D-L5-008 reads successes only.
 
 **R-D-L5-003 - Impossible travel.** Two successful authentications for one principal from locations
 whose great-circle distance divided by the elapsed time exceeds 900 km/h. Exclude authentications from
@@ -1641,14 +1655,18 @@ The trajectory is wired into the composed layer 5 pipeline: a second `WindowSeal
 one seals the scored events into days, with its columns prefixed `day_` so the hourly windows keep their
 identity, and the drift stage reduces each complete day to one observation per principal -- the mean of the
 day's per-event scores -- and stamps it on every row of the day. The saved search `R-P-L5-006 - Drift
-trajectory` reads those columns and deduplicates on principal and day. Without a condition on its shape
-it fires on three principals of the reference corpus, none of them behaviour: two climb for six straight
+trajectory` reads those columns and deduplicates on principal and day. Under the reference arithmetic, without
+a condition on its shape, it fired on three principals, none of them behaviour: two climb for six straight
 days because the reference scorer's parameters are frozen while `logcount` and the `*increment` features
 are cumulative, and the third has a run of four whose first three rises are hundredths and whose fourth is
 the planted multi-factor burst -- a spike the rule's letter admits because the day's mean stays under 2.0.
 `drift_acceleration` separates the two shapes, and the search now reads it: it keeps a rise only while
 `|drift_acceleration|` is under 0.1. The burst accelerates by 0.81 and leaves; the climbs accelerate by
-hundredths and stay, documented as arithmetic. That is the decision this rule's text implies -- drift is
+hundredths and stay, documented as arithmetic. Under the learned models it fires on the same two principals,
+on the scored week's last three days, for a different reason that is no more behaviour: their week repeats
+their fortnight, their cadence features keep moving after training ends, and a daily rise of hundredths reads
+as several of a day-to-day spread that is nearly zero. The principals whose week departs all cross the mean
+ceiling and leave. That is the decision this rule's text implies -- drift is
 the slow climb no single day gives away, and a spike is R-D-L5-004's and R-B-L5-001's to report -- and it
 is a starting value, not a calibrated one. Three of the definitions are load-bearing and easy to get wrong in a way that reads
 plausibly: a gap in the windows restarts the run rather than extending it, the standard deviation is
@@ -3432,8 +3450,8 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Searches over the per-principal baselines those stages compute: R-D-L5-007 reads the cadence histogram,
   R-D-L5-008 the cumulative location and device sets, and R-D-L5-009 the failure run, each with its planted
   case firing and its control quiet. R-B-L5-001 and R-B-L5-002 ship gated on `model_fallback_used=false`
-  and return nothing until a trained model is pinned, with what each would return without the gate
-  recorded beside it. R-P-L5-006 gained an acceleration ceiling, and it and R-P-L7-006 write the `principal_watchlist`
+  and read the committed per-principal models, with what each would return without the gate recorded beside
+  it. R-P-L5-006 gained an acceleration ceiling, and it and R-P-L7-006 write the `principal_watchlist`
   KV Store lookup that R-B-L7-002 reads to report a watched principal's exports more loudly. Every column
   these searches read is in the scored `morpheus:score:l5` contract.
 - Layer 5's identity context and session measurement. Sign-ins and sessions are enriched from the identity
@@ -3722,8 +3740,8 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | --- | --- | --- |
 | Upstream reuse decision | Small | A recorded reuse-or-reject decision, with a measured reason, for `morpheus_dfp`'s rolling window, training and inference stages, the identity-provider and CloudTrail source stages, `TimeSeriesStage` and `MLFlowDriftStage`, all named by this document and used by no fork code. Precedes the model, normalization and health rows. Tracked in #67 |
 | Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
-| **The per-entity learned model in the pipeline (principals, then hosts)** | Large | Still the largest gap and the one the word "predictive" rests on. The scoring path is built: `TC5ScoreStage` scores against a manifest-resolved scorer, `TC5DriftStage` measures the trajectory, `morpheus.utils.dfencoder_scorer` puts a fitted model behind the `Scorer` protocol, and `examples/layer5_model/run_model.py` has trained and run it on one card, most recently on 2026-10-03, scoring the week it trained on. What fills the slot in every composed pipeline and every shipped artifact is `ReferenceScorer`, frozen population arithmetic the class itself calls not a model. Three things remain: the run's artifact and weight digests committed beside the README that quotes them; a CPU inference path (`state_dict` load or an exported forward pass) so the composed pipeline runs with a pinned real model in CI; a corpus with a train window and a disjoint score window, so R-B-L5-001, R-B-L5-002 and R-P-L5-006 are evaluated against a learned baseline for the first time. Then `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame gives hosts the score and drift principals have. Tracked in #59, after #67 |
-| Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run holds 94 risk records for the 94 rows the detections returned. Chain assembly stays empty on the sample events because the one three-layer chain a detection accuses sums 55 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
+| **The per-entity learned model for hosts** | Large | The principals' half is built, in step 8. Each principal of the session corpus has a `morpheus.models.dfencoder` autoencoder trained on the CPU by `examples/layer5_model/train_models.py` on a fortnight before the week it scores, committed as plain numbers under `examples/layer5_model/models/`, loaded and checked against its recorded version by `load_models`, scored in CI by a NumPy forward pass that agrees with the upstream class wherever Torch imports, and pinned in the manifest with the end of its training data, so no model scores the rows it was fitted on; a joiner falls back to a population model fitted on the same fortnight. R-B-L5-001 and R-B-L5-002 return their first rows, 42 and 28, on a search head too. Three findings came with it and are recorded rather than tuned away: the scores are uncalibrated where the fortnight never varied a feature, a cumulative feature keeps a principal firing until the next training window, and R-D-L5-008 misses a new place whose first sign-in failed. `run_model.py` now trains on the fortnight and scores the week through the same pinned scorer; its standing card artifact, from 2026-10-03, predates that and scored the week it trained on. What remains is hosts: `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame, which waits on host identity. Tracked in #59 |
+| Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run held 94 risk records for the 94 rows the detections then returned; with the learned layer 5 models it holds 166 risk records for the 166 rows the detections returned. Chain assembly stays empty on the sample events because the one three-layer chain a detection accuses sums 55 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
 | Clock skew where the corpora cannot measure it | Medium | Step 7's runs are recorded: the search-head run of all forty-eight searches on Splunk 10.2.8 on 2026-10-09 returned what `expected_results.json` says for every one, over events whose wire format the first run, on 2026-10-05, corrected; the conformance runs of 2026-10-09 passed every marked variant on a card, 759 of 759 before step 6 and 760 of 760 after it, the parity test over all twelve corpora among them; both results and the model artifact are committed and the documents' numbers are tested against them; the clock skew experiment decides all thirty-eight detections. What it could not measure remains: fifteen detections whose corpora carry one clock -- layers 3, 4 and 6 and the SaaS pair -- need an exporter, inspection point or context record time per row before skew can be measured on them, and the 120-second join tolerance itself needs a corpus whose chain steps sit within a minute of each other on different clocks. Recorded under #58; correcting the clocks rather than measuring them is #62 |
 | Host baselines at layers 3, 4 and 6 | Medium | R-B-L3-001 reads a literal 50 where the design specifies the source's own fourteen-day 99.5th percentile; the `bucket_peak` pattern `TC2BaselineStage` uses for ports was never applied to hosts, and fan-in per destination has no history. Fan-in, distinct ports, byte asymmetry, first-contact ASN, JA4 change and the endpoint host-seen flags are emitted and read by no search; asset criticality, owner and classification are attached to host rows and read by nothing; `device_role` and `os_family` are absent from the asset record; `community_id` is absent from layer 3; `hostname` is case-folded in the chain SPL and not in the stages; R-B-L6-001 dropped its managed-endpoint gate. Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | A host is `src_ip` at layers 3, 6 and 7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint, and nothing bridges them: no time-bounded `hostname`-to-address binding exists, the network, transport, presentation and application corpora run no `BindingResolverStage`, and asset context cannot attach to a network-layer event. The SIEM `binding_l2_l3` refresh selects `binding_table=dhcp_lease` rows nothing produces, `morpheus:edge` carries no `lineage_id`, `osi_layer`, parent or child `uid` or `join_method`, the principal-to-desk rung the estate corpus proves is a Python dict, and only one resolver passes `uid_column`. A lease stage emitting bucketed `dhcp_lease` rows, a `host_inventory` binding and a `host_key` on every layer 3-7 event, an `EdgeEmitStage` behind the resolvers, MAC and 802.1X lookups in the SIEM, and `community_id`/`session_key` joins above layer 3. The DHCP collector itself is not Morpheus. Tracked in #63 |
@@ -3798,14 +3816,17 @@ beside it keeps firing. A missed detection with nothing visibly wrong is the wor
 handed. The number generalizes as a ratio rather than as sixty seconds: the rule tolerates the slack between
 its threshold and the real sweep time, and tuning the threshold down to the sweep spends that slack.
 
-**R-P-L5-006 looks fragile at one millisecond and is not.** Forty-five of the layer 5 corpus's hundred and five
-authentications sit exactly on an hour mark, because the corpus builds its times from whole hours, and an event
-on a boundary changes window under an offset of one nanosecond. Move the same events into the middle of their
-windows -- a uniform shift, which is not a skew at all -- and a full minute changes nothing the rule accuses.
-The exposure is the fraction of events near a window edge, not the size of the clock error, which is a property
-of an estate's traffic rather than of its NTP discipline. It is also a warning about this kind of measurement:
-a corpus built on round numbers overstates the fragility of anything measured against it, and the only way to
-know was to move it and look again.
+**R-P-L5-006 looked fragile at one millisecond and was not.** A hundred and twenty-seven of the layer 5 corpus's
+three hundred and eighty-five authentications sit exactly on an hour mark, because the corpus builds its times
+from whole hours, and an event on a boundary changes hour under an offset of one nanosecond, moving its surprise
+and its score. Under the reference arithmetic that cost three of the six principal-days the rule accused; move
+the same events into the middle of their windows -- a uniform shift, which is not a skew at all -- and a full
+minute changed nothing. Under the learned models a millisecond still moves the inputs and no longer moves the
+accusations. The exposure is the fraction of events near a window edge, not the size of the clock error, which
+is a property of an estate's traffic rather than of its NTP discipline, and whether it reaches a decision is a
+property of the scorer. It is also a warning about this kind of measurement: a corpus built on round numbers
+overstates the fragility of anything measured against it, and the only way to know was to move it and look
+again.
 
 **The ladder's rungs do not fail together, which counting spans alone would have hidden.** Chains keep their
 span at every width on both axes: fifteen still hold three layers and all fifteen desk sign-ins still resolve to
@@ -3987,7 +4008,7 @@ this order:
 
 1. **Layers 5 and 7 first.** `morpheus_dfp` applies directly, the entity (user) is unambiguous, the
    cardinality is tractable, and these two layers produce most of the standalone detection value. Ship
-   R-B-L5-001, R-P-L5-006 and R-B-L7-002; the last two ship, and R-B-L5-001 waits on a trained per-user model.
+   R-B-L5-001, R-P-L5-006 and R-B-L7-002; all three ship, R-B-L5-001 over a learned model per principal.
 2. **The lineage substrate second**, connecting those two layers only. Prove the `event_uid` and
    `lineage_id` construction, the Splunk edge index, and the chain query on a two-layer chain before
    scaling it to seven. R-C-004 is the target.

@@ -24,16 +24,21 @@ guide actually names -- on a machine that has Torch and a card, which the one th
 never fits one. Training inside the scoring path would fit on the rows being scored, a leak no determinism
 control would catch because every run would leak identically; `ReferenceScorer` freezes its parameters for the
 same reason. `train_dfencoder_models` below trains, on a caller-supplied frame per principal, and returns models
-whose pinned version is a digest of their weights -- so two versions are equal exactly when two models are, which
-is what control 1's "pin the model" has to mean for a model that was trained rather than downloaded.
+whose pinned version is a digest of every number they score with -- so two versions are equal exactly when two
+models are, which is what control 1's "pin the model" has to mean for a model that was trained rather than
+downloaded.
+
+**A trained model is committed as numbers, and scored without Torch.** `export_model` writes what
+`get_results` depends on -- the weights, the input scaling and the training losses' scaling -- as plain JSON,
+and `NumpyAutoEncoder` evaluates it. That is how the composed layer 5 pipeline scores with a learned model in
+CI, where there is no Torch: `examples/layer5_model/train_models.py` trains on the corpus's training window and
+commits the result, and `load_models` reads it back and refuses any entry whose numbers no longer digest to the
+version recorded beside them. `load_torch_autoencoder` puts the same numbers back into the upstream class, so
+the numpy pass is checked against the thing it reimplements wherever Torch is installed.
 
 **Nothing here imports Torch at module import.** The adapter is usable wherever a fitted model can be handed in,
-including a stub in a test; only training reaches for Torch, and refuses in plain words when it is absent.
-
-**What the runner measures with this is reproducibility of the wired path, not detection.** The models are
-trained on the corpus and score the corpus. That is the leak stated above, made deliberately, because the
-question the run answers is whether the pipeline gives the same scores twice with a real model in the slot --
-and a week of five principals cannot answer any other question about a model.
+including a stub in a test; only training and the reverse load reach for Torch, and training refuses in plain
+words when it is absent.
 
 **A row is scored on its own, because control 5 says batching must be irrelevant.** `TC5ScoreStage` hands over
 the rows one entity has *in the message it is processing*, so the size of that group is a function of how the
@@ -207,26 +212,369 @@ class TrainedModels:
     skipped: dict
 
 
-def weight_digest(model) -> str:
-    """
-    A digest of a fitted model's parameters, so its pinned version says which weights it has.
+MODEL_FORMAT = "morpheus/dfencoder-numpy/1"
+"""What `export_model` writes and `NumpyAutoEncoder` reads. Bumped if either side's arithmetic changes."""
 
-    Each parameter tensor's bytes are hashed in sorted name order, on the host, independent of the device it
-    was trained on and of how Torch would serialize it. Two models trained from the same seed on the same rows
-    to the same weights get the same digest, which is the property a version has to have for "same version" to
-    mean "same model".
+SUPPORTED_ACTIVATIONS = ("relu", None)
+"""The activations the numpy forward pass evaluates. The runner trains with `relu` throughout; anything else is
+refused at export rather than approximated at inference."""
+
+
+def export_model(model, feature_columns: list[str]) -> dict:
     """
-    state = model.model.state_dict() if hasattr(model, "model") else model.state_dict()
+    Everything a fitted autoencoder needs to score a row, as plain numbers.
+
+    The weights alone are not the model. `get_results` standardizes each feature with the mean and deviation
+    seen in training, runs the network, takes the per-feature squared error, and standardizes that against the
+    errors seen in training. The two sets of statistics are as much a part of the answer as the weights, so
+    they are exported beside them and covered by the same digest.
+
+    Parameters
+    ----------
+    model : `morpheus.models.dfencoder.AutoEncoder`
+        A fitted model whose features are all numeric, with the `standard` scaler on both the inputs and the
+        losses and no categorical or binary features -- the shape `train_dfencoder_models` produces.
+    feature_columns : list of str
+        The features, in the order the model was trained on.
+
+    Returns
+    -------
+    dict
+        JSON-serializable. Weights are written as the exact decimal of their float32 value, so reading them back
+        reproduces every bit.
+
+    Raises
+    ------
+    ValueError
+        If the model has a feature, scaler or activation the numpy forward pass does not evaluate.
+    """
+    if (list(model.numeric_fts) != list(feature_columns)):
+        raise ValueError(f"the model's numeric features {list(model.numeric_fts)} are not {feature_columns}; an "
+                         f"export in a different order would score each feature against another's weights")
+
+    if (model.binary_fts or model.categorical_fts):
+        raise ValueError("the model has binary or categorical features; the numpy forward pass evaluates numeric "
+                         "features only")
+
+    if (model.loss_scaler_str != "standard"):
+        raise ValueError(f"the loss scaler is {model.loss_scaler_str!r}; only 'standard' is evaluated")
+
+    layers = []
+
+    for (stack, modules) in (("encoder", model.model.encoder), ("decoder", model.model.decoder)):
+        for module in modules:
+            if (module.activation not in SUPPORTED_ACTIVATIONS):
+                raise ValueError(f"a {stack} layer uses {module.activation!r}; only {SUPPORTED_ACTIVATIONS} are "
+                                 f"evaluated")
+
+            layers.append({
+                "stack": stack,
+                "activation": module.activation,
+                "weight": _floats(module.linear_layer.weight),
+                "bias": _floats(module.linear_layer.bias),
+            })
+
+    numeric_scaler = {}
+
+    for name in feature_columns:
+        scaler = model.numeric_fts[name]["scaler"]
+
+        if (type(scaler).__name__ != "StandardScaler"):
+            raise ValueError(f"{name} is scaled by {type(scaler).__name__}; only StandardScaler is evaluated")
+
+        numeric_scaler[name] = {"mean": float(scaler.mean), "std": float(scaler.std)}
+
+    return {
+        "format": MODEL_FORMAT,
+        "features": list(feature_columns),
+        "layers": layers,
+        "output": {
+            "weight": _floats(model.model.numeric_output.weight), "bias": _floats(model.model.numeric_output.bias)
+        },
+        "numeric_scaler": numeric_scaler,
+        "loss_scaler": {
+            name: {
+                "mean": float(model.feature_loss_stats[name]["scaler"].mean),
+                "std": float(model.feature_loss_stats[name]["scaler"].std),
+            }
+            for name in feature_columns
+        },
+    }
+
+
+def _floats(tensor) -> list:
+    """A parameter tensor as nested lists of the exact float32 values, independent of the device it lives on."""
+    return tensor.detach().cpu().contiguous().numpy().astype("float32").tolist()
+
+
+def model_digest(document: dict) -> str:
+    """
+    A digest of an exported model, so the version a manifest pins says which numbers score the row.
+
+    Every weight is hashed as float32 and every statistic as float64, in a fixed order, from the document rather
+    than from Torch: a model loaded from its committed file and the same model straight out of training give the
+    same digest, which is what lets a machine with no Torch check that the file it holds is the version pinned.
+    """
+    import numpy as np  # pylint: disable=import-outside-toplevel
+
     digest = hashlib.sha256()
 
-    for name in sorted(state):
-        tensor = state[name]
+    def feed(name: str, values, dtype: str):
+        array = np.asarray(values, dtype=dtype)
         digest.update(name.encode("utf-8"))
         digest.update(b"\x1f")
-        digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+        digest.update(f"{dtype}{array.shape}".encode("utf-8"))
+        digest.update(b"\x1f")
+        digest.update(np.ascontiguousarray(array).tobytes())
         digest.update(b"\x1e")
 
+    digest.update(document["format"].encode("utf-8"))
+    feed("features", [len(name) for name in document["features"]], "int64")
+    digest.update("\x1f".join(document["features"]).encode("utf-8"))
+
+    for (index, layer) in enumerate(document["layers"]):
+        prefix = f"{layer['stack']}.{index}.{layer['activation']}"
+        feed(f"{prefix}.weight", layer["weight"], "float32")
+        feed(f"{prefix}.bias", layer["bias"], "float32")
+
+    feed("output.weight", document["output"]["weight"], "float32")
+    feed("output.bias", document["output"]["bias"], "float32")
+
+    for section in ("numeric_scaler", "loss_scaler"):
+        for name in document["features"]:
+            feed(f"{section}.{name}", [document[section][name]["mean"], document[section][name]["std"]], "float64")
+
     return digest.hexdigest()[:DIGEST_LENGTH]
+
+
+class NumpyAutoEncoder:
+    """
+    An exported autoencoder, scored without Torch.
+
+    The arithmetic is `AutoEncoder.get_results` for a numeric-only model, written out: standardize each feature,
+    run the encoder and decoder, take each feature's squared reconstruction error, and standardize the error
+    against the errors seen in training. It is evaluated in float64 from the float32 weights, which is the
+    choice that makes the score a property of the row and the file rather than of the machine: a float32
+    product summed in a different order by a different BLAS moves the last bits, and a loss whose training
+    spread was small turns a last-bit difference into one in the fourth decimal that `TC5ScoreStage` publishes.
+    Torch's own float32 pass agrees with this to within float32's precision, which
+    `tests/morpheus/utils/test_dfencoder_scorer.py` checks wherever Torch is installed.
+
+    Parameters
+    ----------
+    document : dict
+        What `export_model` wrote.
+
+    Raises
+    ------
+    ValueError
+        If the document is another format, or its shapes do not chain from the features through the layers and
+        back.
+    """
+
+    def __init__(self, document: dict):
+        import numpy as np  # pylint: disable=import-outside-toplevel
+
+        if (document.get("format") != MODEL_FORMAT):
+            raise ValueError(f"the model file is {document.get('format')!r}, and this reads {MODEL_FORMAT!r}")
+
+        self._features = list(document["features"])
+        self._layers = []
+        width = len(self._features)
+
+        for layer in document["layers"]:
+            weight = np.asarray(layer["weight"], dtype="float32").astype("float64")
+            bias = np.asarray(layer["bias"], dtype="float32").astype("float64")
+
+            if (weight.ndim != 2 or weight.shape[1] != width or bias.shape != (weight.shape[0], )):
+                raise ValueError(f"a {layer['stack']} layer of shape {weight.shape} does not follow one of width "
+                                 f"{width}; the file's layers do not chain")
+
+            if (layer["activation"] not in SUPPORTED_ACTIVATIONS):
+                raise ValueError(f"activation {layer['activation']!r} is not one this evaluates")
+
+            self._layers.append((weight, bias, layer["activation"]))
+            width = weight.shape[0]
+
+        self._output_weight = np.asarray(document["output"]["weight"], dtype="float32").astype("float64")
+        self._output_bias = np.asarray(document["output"]["bias"], dtype="float32").astype("float64")
+
+        if (self._output_weight.shape != (len(self._features), width)):
+            raise ValueError(f"the output layer is {self._output_weight.shape}, and reconstructing "
+                             f"{len(self._features)} features from width {width} needs "
+                             f"{(len(self._features), width)}")
+
+        def stats(section: str) -> tuple:
+            return (np.array([document[section][name]["mean"] for name in self._features], dtype="float64"),
+                    np.array([document[section][name]["std"] for name in self._features], dtype="float64"))
+
+        (self._input_mean, self._input_std) = stats("numeric_scaler")
+        (self._loss_mean, self._loss_std) = stats("loss_scaler")
+        self._version_digest = model_digest(document)
+
+    @property
+    def digest(self) -> str:
+        """The digest of the document this was built from."""
+        return self._version_digest
+
+    @property
+    def features(self) -> list[str]:
+        """The features, in training order."""
+        return list(self._features)
+
+    def get_results(self, df: pd.DataFrame, return_abs: bool = False) -> pd.DataFrame:
+        """
+        Score rows the way `AutoEncoder.get_results` does, returning the columns `DfencoderScorer` reads.
+
+        Parameters
+        ----------
+        df : `pandas.DataFrame`
+            One column per feature. A null is refused rather than filled: `TC5ScoreStage` never sends one, and a
+            filled value would be scored as a measurement nobody made.
+        return_abs : bool, default = False
+            Return the absolute z-scores.
+
+        Returns
+        -------
+        `pandas.DataFrame`
+            `<feature>_loss` and `<feature>_z_loss` per feature, then `max_abs_z` and `mean_abs_z`.
+        """
+        import numpy as np  # pylint: disable=import-outside-toplevel
+
+        values = df[self._features].to_numpy(dtype="float64")
+
+        if (not np.isfinite(values).all()):
+            raise ValueError("a row carries a null or non-finite feature; this scores measurements, not gaps")
+
+        scaled = (values - self._input_mean) / self._input_std
+        hidden = scaled
+
+        for (weight, bias, activation) in self._layers:
+            hidden = hidden @ weight.T + bias
+
+            if (activation == "relu"):
+                hidden = np.maximum(hidden, 0.0)
+
+        reconstructed = hidden @ self._output_weight.T + self._output_bias
+        loss = (reconstructed - scaled)**2
+        z_loss = (loss - self._loss_mean) / self._loss_std
+
+        if (return_abs):
+            z_loss = np.abs(z_loss)
+
+        result = pd.DataFrame(index=df.index)
+
+        for (position, name) in enumerate(self._features):
+            result[f"{name}_loss"] = loss[:, position]
+            result[f"{name}_z_loss"] = z_loss[:, position]
+
+        absolute = np.abs(z_loss)
+        result["max_abs_z"] = absolute.max(axis=1)
+        result["mean_abs_z"] = absolute.mean(axis=1)
+
+        return result
+
+
+def load_models(path: str) -> dict:
+    """
+    Read a committed model file: principal to (pinned version, `NumpyAutoEncoder`).
+
+    The file is what `examples/layer5_model/train_models.py` writes: a `models` object of exported documents
+    keyed by principal, each beside the version it was pinned to when it was trained. That version is
+    recomputed here from the numbers and must match, so a file edited by hand, or a document moved to another
+    principal's key, is refused rather than scored under a version that no longer describes it.
+
+    Raises
+    ------
+    ValueError
+        If a recorded version is not the digest of the document beside it.
+    """
+    import json  # pylint: disable=import-outside-toplevel
+
+    with open(path, encoding="utf-8") as handle:
+        recorded = json.load(handle)
+
+    loaded = {}
+
+    for (principal, entry) in sorted(recorded["models"].items()):
+        model = NumpyAutoEncoder(entry["model"])
+        version = f"{MODEL_NAME_PREFIX}/{principal}:{model.digest}"
+
+        if (entry["model_version"] != version):
+            raise ValueError(f"{path} records {entry['model_version']!r} for {principal}, and the numbers beside "
+                             f"it digest to {version!r}. The file was changed after it was trained, or the entry "
+                             f"was moved; scoring under either version would make model_version on the row a lie.")
+
+        loaded[principal] = (version, model)
+
+    return loaded
+
+
+def load_torch_autoencoder(document: dict):
+    """
+    Rebuild an exported model as a `morpheus.models.dfencoder.AutoEncoder` on the CPU.
+
+    The reverse of `export_model`, for the machine that has Torch: the committed numbers go back into the
+    upstream class, and its own `get_results` answers. That is how the numpy forward pass is checked against the
+    thing it reimplements, rather than against a second reimplementation.
+
+    Raises
+    ------
+    ImportError
+        If Torch is absent.
+    ValueError
+        If the document is another format.
+    """
+    import torch  # pylint: disable=import-outside-toplevel
+
+    from morpheus.models.dfencoder import AutoEncoder  # pylint: disable=import-outside-toplevel
+    from morpheus.models.dfencoder.scalers import StandardScaler  # pylint: disable=import-outside-toplevel
+
+    if (document.get("format") != MODEL_FORMAT):
+        raise ValueError(f"the model file is {document.get('format')!r}, and this reads {MODEL_FORMAT!r}")
+
+    features = list(document["features"])
+    encoder = [layer for layer in document["layers"] if layer["stack"] == "encoder"]
+    decoder = [layer for layer in document["layers"] if layer["stack"] == "decoder"]
+
+    model = AutoEncoder(encoder_layers=[len(layer["bias"]) for layer in encoder],
+                        decoder_layers=[len(layer["bias"]) for layer in decoder],
+                        encoder_activations=[layer["activation"] for layer in encoder],
+                        decoder_activations=[layer["activation"] for layer in decoder],
+                        device=torch.device("cpu"),
+                        preset_cats={},
+                        binary_feature_list=[],
+                        preset_numerical_scaler_params={
+                            name: {
+                                "scaler_type": "standard",
+                                "scaler_attr_dict": dict(document["numeric_scaler"][name]),
+                                "mean": document["numeric_scaler"][name]["mean"],
+                                "std": document["numeric_scaler"][name]["std"],
+                            }
+                            for name in features
+                        },
+                        verbose=False,
+                        progress_bar=False,
+                        patience=-1)
+    model._build_model()  # pylint: disable=protected-access
+
+    with torch.no_grad():
+        for (module, layer) in zip(list(model.model.encoder) + list(model.model.decoder), encoder + decoder):
+            module.linear_layer.weight.copy_(torch.tensor(layer["weight"], dtype=torch.float32))
+            module.linear_layer.bias.copy_(torch.tensor(layer["bias"], dtype=torch.float32))
+
+        model.model.numeric_output.weight.copy_(torch.tensor(document["output"]["weight"], dtype=torch.float32))
+        model.model.numeric_output.bias.copy_(torch.tensor(document["output"]["bias"], dtype=torch.float32))
+
+    for name in features:
+        scaler = StandardScaler()
+        scaler.mean = document["loss_scaler"][name]["mean"]
+        scaler.std = document["loss_scaler"][name]["std"]
+        model.feature_loss_stats[name] = {"scaler": scaler}
+
+    model.eval()
+
+    return model
 
 
 def train_dfencoder_models(frames: dict,
@@ -236,7 +584,8 @@ def train_dfencoder_models(frames: dict,
                            eval_batch_size: int,
                            encoder_layers: typing.Optional[list[int]] = None,
                            decoder_layers: typing.Optional[list[int]] = None,
-                           min_rows: int = DEFAULT_MIN_ROWS) -> TrainedModels:
+                           min_rows: int = DEFAULT_MIN_ROWS,
+                           device: typing.Optional[str] = None) -> TrainedModels:
     """
     Train one autoencoder per principal and pin each to a digest of its weights.
 
@@ -262,6 +611,10 @@ def train_dfencoder_models(frames: dict,
         Decoder layer sizes. The runner's default, `[4, 8]`, is used when unset.
     min_rows : int, default = 4
         A principal with fewer usable rows is skipped rather than fitted on nothing, and reported.
+    device : str, optional
+        Where to train. Unset, the upstream default: the first CUDA device when there is one. `"cpu"` trains on
+        the host and seeds only the host's generators, which is how the committed models were trained on a
+        machine with no card.
 
     Returns
     -------
@@ -293,7 +646,7 @@ def train_dfencoder_models(frames: dict,
             skipped[principal] = len(usable)
             continue
 
-        manual_seed(seed)
+        manual_seed(seed, cpu_only=device == "cpu")
         torch.use_deterministic_algorithms(True, warn_only=False)
 
         model = AutoEncoder(encoder_layers=list(encoder_layers or [8, 4]),
@@ -302,10 +655,11 @@ def train_dfencoder_models(frames: dict,
                             eval_batch_size=eval_batch_size,
                             verbose=False,
                             progress_bar=False,
-                            patience=-1)
+                            patience=-1,
+                            device=None if device is None else torch.device(device))
         model.fit(usable, epochs=epochs)
 
-        version = f"{MODEL_NAME_PREFIX}/{principal}:{weight_digest(model)}"
+        version = f"{MODEL_NAME_PREFIX}/{principal}:{model_digest(export_model(model, feature_columns))}"
         models[version] = model
         versions[principal] = version
 
