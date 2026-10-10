@@ -60,7 +60,7 @@ scoring path with frozen arithmetic in the model's slot, control 8's total order
 checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
 request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve. That is forty-six stages and forty-one supporting
-modules, covered by 1,996 distinct tests, itemized in
+modules, covered by 2,006 distinct tests, itemized in
 [Part 6](#provided). Thirty-eight of the forty-two rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -330,6 +330,7 @@ detection with a forward-looking read on its trend.
   - [Pass 1: Structure, Execution Model, and Type System](#pass-1-structure-execution-model-and-type-system)
   - [Pass 2: The Behavioral Analytics Substrate](#pass-2-the-behavioral-analytics-substrate)
   - [Pass 3: Determinism, Concurrency, and I/O Boundaries](#pass-3-determinism-concurrency-and-io-boundaries)
+  - [Pass 4: What to Reuse, Measured](#pass-4-what-to-reuse-measured)
 - [Part 1: Reference Architecture for Layers 1-7](#part-1-reference-architecture-for-layers-1-7)
 - [Part 2: Telemetry Class Requirements](#part-2-telemetry-class-requirements)
 - [Part 3: Detection Rule Recommendations](#part-3-detection-rule-recommendations)
@@ -730,6 +731,41 @@ subsystem and good provenance primitives that are currently used only internally
 box, a deterministic system. Determinism is achievable, but it is a property you construct through
 configuration discipline and a small number of custom stages, not one you inherit.
 
+### Pass 4: What to Reuse, Measured
+
+The three passes above read the upstream pieces; this one ran them. `morpheus_dfp`'s rolling window, training,
+writer, inference and postprocessing stages, the identity-provider source stages, `MLFlowDriftStage` and
+`TimeSeriesStage` are each named above as building blocks, and the fork built its own paths without recording why.
+[`examples/upstream_reuse/evaluate.py`](../../../../examples/upstream_reuse/evaluate.py) drives each one over the
+fork's own corpora, or over the upstream sample data where the question is what a source emits, and writes what
+happened to `examples/upstream_reuse/artifacts/2026-10-10/upstream_reuse.json`.
+`tests/morpheus/determinism/test_upstream_reuse.py` holds every number below to that artifact, and re-checks the
+reasons that can be checked without a card, so a reason that stops being true fails a test rather than outliving
+its decision.
+
+The run was made without a card. The DFP stages import cuDF when their module loads and declare the GPU as their
+only execution mode, and the drift and time-series stages compute with CuPy, so the runner stood pandas in for
+cuDF and NumPy for CuPy and called the stages' own methods rather than a pipeline that would refuse them; the
+artifact lists each substitution. Three of the defects below stopped the DFP path outright, and the runner
+repaired each in place only to measure what came after it, recording each repair beside the defect. None of the
+decisions rests on the substitutions: a GPU-only stage is a fact about the stage, and the rest are about what the
+stages compute.
+
+| Component | Decision | Measured reason |
+| --- | --- | --- |
+| `DFPSplitUsersStage` and `DFPRollingWindowStage` | Reject | A CPU-mode pipeline refuses them ("Unsupported execution mode"), and their modules fail to import without a CUDA driver. Over the scored week's 155 events, the upstream inference window emits 155 rows when the week arrives as one batch, 194 a day at a time and 807 an event at a time, scoring one event up to 15 times. One sign-in delivered after a later one raises `Invalid rolling window`, which ends a pipeline. The fork's trackers behind `TotalOrderStage` and `WindowSealStage` keep each entity's history instead. |
+| `DFPTraining` and `DFPMLFlowModelWriterStage` | Reject the stages; reuse `AutoEncoder` | Training is not seeded: two runs over one principal's 40 rows give two different weight digests, and two runs after `manual_seed` give one. Under MLflow 3.16.0, the version the fork's CPU lock resolves, the writer registers 0 of 6 trained models and logs the exception rather than raising it; with that repaired it registers each version at a path the model is not at. `train_dfencoder_models` seeds and calls the upstream `AutoEncoder`, which is the part worth reusing and is already reused. |
+| `DFPInferenceStage` and its `ModelManager` | Reject; `TC5ScoreStage`, `ModelManifest` and `DfencoderScorer` stay | The writer names a model `dfp-alice@example_dot_com` and the reader looks up `dfp-alice@example.com`, so 0 of the 5 principals with a registered model is scored by it: all 155 rows are scored by `dfp-generic_user:1`, and no output column says a fallback was used. With the name repaired it resolves whatever is latest. After a second version is registered, the stage already running keeps version 1 for its 600-second cache while a new stage scores version 2, and the same row's `mean_abs_z` moves from 1.6076 to 1.402. Version 1 is trained unseeded, as shipped, so its figure differs on every run, 1.5406 and 1.3501 on two reruns; version 2 follows a seeded training in the same process and does not. Nothing in the stage can pin a version for a window. |
+| `DFPPostprocessingStage` | Reject | It overwrites `event_time` with the clock time of detection. Two runs over the same two sign-ins from 1970 wrote two different times from 2026. |
+| `AzureSourceStage`, `DuoSourceStage` and `CloudTrailSourceStage`, with their base `AutoencoderSourceStage` | Reject the stages; adopt the Azure field mapping for normalization (#66) | The Azure sample holds 3,239 sign-ins by 20 users and carries all 15 fields the fork's layer 5 stages read, with none of the 4 envelope fields a row needs for a lineage identity. As shipped the stage cannot derive its own features: its column renaming changes 0 of the 15 dotted column names under pandas 2.2.2, so its derivation raises `KeyError`. With that repaired, its location count resets each day for 14 of the 20 users, where the fork's counts are cumulative and the rules depend on that. The CloudTrail sample is an API audit log rather than a sign-in log and carries 5 of the 15. The tree holds no Duo sample, so its mapping is taken from its declared schema and is not measured. |
+| `MLFlowDriftStage` | Reject as the health signal (#62) | GPU only. It reads a classifier's `probs` tensor, which no fork stage produces, and raises on the scored rows. Given the scores as that tensor, it logs 5 points at a pipeline batch size of 32 and 1 at 1024 over the same 155 rows, and the first points differ, 0.7381 against 0.7506, so the metric describes the batching. It writes to MLflow rather than to the row and names no model version. Model observability for the health sourcetype comes from `model_version` and `model_fallback_used`, which every scored row carries. |
+| `TimeSeriesStage` | Reject as the forecast-residual mechanism | GPU only, and it reads nothing but the timestamp: over the failing optic's hour with a burst of polls added, its detections are identical with the receive levels flattened or reversed. At its defaults its window is 25 bins, and no value among 25 can sit more than 4.899 standard deviations from their mean, under its threshold of 8, so it can never flag anything; over the hour it ran 0 calculations, because it waits for twelve hours on either side. Widened to 81 bins it found an anomalous bin in 29 released messages and flagged 0 of them, because it writes `ts_anomaly` from the window's first rows by position rather than from the message's own. R-P-L1-004's per-port fit stays. |
+
+What is reused is therefore narrower than the guide's first passes suggested, and it is the part that held up when
+run: the `dfencoder` `AutoEncoder`, trained by the fork with a seed and pinned by a digest; `manual_seed`; and the
+Azure sign-in fields as the target of normalization. Every defect above is in the upstream code and is recorded here as
+found, not repaired in the fork; reporting them upstream is separate work.
+
 ---
 
 ## Part 1: Reference Architecture for Layers 1-7
@@ -770,12 +806,16 @@ Every layer segment follows the same seven-step shape, which is the DFP pattern 
 3. **Key and stamp** - a custom stage that computes the entity key, the deterministic `event_uid`, and
    the lineage identifiers (Part 4). Declare these in `_needed_columns`.
 4. **Window** - `DFPRollingWindowStage` or an analogue, keyed on the layer's entity, with `max_history`
-   expressed as a duration.
+   expressed as a duration. Status: the analogue, because the upstream stage re-emits history depending on the
+   batching and stops on a late row (Pass 4); the fork's trackers behind `TotalOrderStage` and `WindowSealStage`
+   hold it.
 5. **Feature derivation** - a second `DataFrameInputSchema` using `IncrementColumn` and
    `DistinctIncrementColumn` for novelty, plus `CustomColumn` for layer-specific ratios.
 6. **Score** - `DFPInferenceStage` against a per-entity autoencoder, `TritonInferenceStage` for a shared
    model, or `TimeSeriesStage` for periodicity. Layers with high entity cardinality and low per-entity
    volume should use a shared model with the entity as a categorical feature rather than one model per entity.
+   Status: `TC5ScoreStage` with a pinned manifest scores in place of `DFPInferenceStage`, and `TimeSeriesStage`
+   is not used, each for the reasons Pass 4 measured.
 7. **Emit** - `FilterDetectionsStage` (copy mode), `SerializeStage`, then `WriteToKafkaStage`.
 
 ### Where "predictive" actually comes from
@@ -795,7 +835,8 @@ Four mechanisms in this architecture make it forward-looking, in increasing orde
    itself, not just the residual flag, into the SIEM lets you alert on "this entity is projected to exceed
    its envelope in the next window." Status: this mechanism is built for layer 1 optics only, as
    {py:class}`~morpheus.stages.telemetry.tc1_forecast_stage.TC1ForecastStage`'s linear extrapolation; no fork
-   stage uses `TimeSeriesStage` or its forecast (gap G21).
+   stage uses `TimeSeriesStage` or its forecast (gap G21), and Pass 4 records why none should: it reads only
+   timestamps, cannot reach its own threshold at its defaults, and flags the wrong rows when it does.
 4. **Cross-layer precursor chains.** The highest-value predictive signal is ordinal: an entity that shows
    a layer 3 scanning pattern, then a layer 5 authentication anomaly, then a layer 7 data access anomaly,
    within a bounded interval. No single layer's score need cross a threshold for the chain to be alarming.
@@ -1498,7 +1539,8 @@ allowlist. All three conditions are required; the first alone produces unusable 
 **R-B-L3-002 - Beaconing.** Coefficient of variation of inter-flow arrival time for a
 `(src_ip, dst_ip)` pair below 0.15 over at least 12 intervals, with per-flow byte counts in a narrow band.
 Feed the binned series to `TimeSeriesStage`; the periodogram approach in `fftAD` detects this directly
-and more robustly than a variance threshold, because it survives jitter.
+and more robustly than a variance threshold, because it survives jitter. Status: not as shipped upstream, which
+Pass 4 measured writing its flag onto the wrong rows; the beacon rule is the coefficient of variation below.
 
 **R-D-L3-003 - Reserved-range egress.** Traffic to `is_reserved` or `is_multicast` destinations
 crossing an internet egress point, using `parsers/ip.py` classification. Low volume, high signal.
@@ -3312,6 +3354,8 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Per-entity model training, registry integration, caching, and inference (`morpheus_dfp`).
 - Tabular autoencoder with per-feature attribution output (`dfencoder`).
 - Periodicity-based anomaly detection (`TimeSeriesStage`).
+
+Pass 4 measures each of these and records which the fork reuses.
 - Line-rate packet capture into GPU memory (DOCA).
 - Protocol and log parsers for IP, Zeek, Windows events, URLs, and Splunk notables.
 - Kafka, Elasticsearch, HTTP, file, and Delta Lake sinks.
@@ -3738,7 +3782,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 
 | Component | Effort | Notes |
 | --- | --- | --- |
-| Upstream reuse decision | Small | A recorded reuse-or-reject decision, with a measured reason, for `morpheus_dfp`'s rolling window, training and inference stages, the identity-provider and CloudTrail source stages, `TimeSeriesStage` and `MLFlowDriftStage`, all named by this document and used by no fork code. Precedes the model, normalization and health rows. Tracked in #67 |
+| Upstream reuse decision | Small | Decided and measured, in Part 0's Pass 4: every DFP stage, the three identity-provider source stages, `MLFlowDriftStage` and `TimeSeriesStage` are rejected, each for a reason `examples/upstream_reuse/evaluate.py` measured and `test_upstream_reuse.py` holds to its artifact; the `dfencoder` `AutoEncoder` and `manual_seed` are reused, and the Azure sign-in fields are the normalization target. Closed by #67 |
 | Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
 | **The per-entity learned model for hosts** | Large | The principals' half is built, in step 8. Each principal of the session corpus has a `morpheus.models.dfencoder` autoencoder trained on the CPU by `examples/layer5_model/train_models.py` on a fortnight before the week it scores, committed as plain numbers under `examples/layer5_model/models/`, loaded and checked against its recorded version by `load_models`, scored in CI by a NumPy forward pass that agrees with the upstream class wherever Torch imports, and pinned in the manifest with the end of its training data, so no model scores the rows it was fitted on; a joiner falls back to a population model fitted on the same fortnight. R-B-L5-001 and R-B-L5-002 return their first rows, 42 and 28, on a search head too. Three findings came with it and are recorded rather than tuned away: the scores are uncalibrated where the fortnight never varied a feature, a cumulative feature keeps a principal firing until the next training window, and R-D-L5-008 misses a new place whose first sign-in failed. `run_model.py` now trains on the fortnight and scores the week through the same pinned scorer; its standing card artifact, from 2026-10-03, predates that and scored the week it trained on. What remains is hosts: `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame, which waits on host identity. Tracked in #59 |
 | Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run held 94 risk records for the 94 rows the detections then returned; with the learned layer 5 models it holds 166 risk records for the 166 rows the detections returned. Chain assembly stays empty on the sample events because the one three-layer chain a detection accuses sums 55 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
