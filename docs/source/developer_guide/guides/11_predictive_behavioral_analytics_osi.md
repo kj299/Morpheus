@@ -60,8 +60,8 @@ scoring path with frozen arithmetic in the model's slot, control 8's total order
 checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
 request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the card has not yet seen the trees steps 9 and 10 built.
-That is forty-eight stages and forty-one supporting
-modules, covered by 2,107 distinct tests, itemized in
+That is fifty-one stages and forty-one supporting
+modules, covered by 2,182 distinct tests, itemized in
 [Part 6](#provided). Forty-nine of the fifty-three rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -72,8 +72,9 @@ the seven searches then present. On 2026-10-05 all forty-eight ran on Splunk 10.
 sample events: forty-six returned what the written expectation said, and the two that did not found a defect in
 the wire format rather than in a search -- null fields sent as `null`, which Splunk compared as values -- now
 repaired. On 2026-10-09 the run over the repaired events returned what was written for all forty-eight, and on
-2026-10-10 a run over step 9's events returned what was then written for all fifty-two, and a run later that day
-over step 10's returned what is written for all sixty-two the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
+2026-10-10 a run over step 9's events returned what was then written for all fifty-two, a run later that day
+over step 10's returned what was then written for all sixty-two, and a run that night over step 11's
+returned what is written for all sixty-six the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
 scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
 What remains design rather than a running system: four of the fifty-three rules (R-B-L4-001 and
@@ -894,10 +895,39 @@ against the time of day would make a replay of last week's data expire everythin
 one corpus produce different output depending on when it was run. The reference that keeps replay honest is
 the stream's own progress, so a time further ahead of everything seen so far than any operational gap could
 explain is refused, the row carries no per-entity features, and the stage reports how many it refused.
-{py:mod}`~morpheus.utils.event_clock` implements this, and four stages take `max_clock_skew_seconds`:
-`TC1BindingStage`, `TC2BindingStage`, `TC2AuthStage` and `TC5SessionStage`. The other windowed stateful stages,
-`TC2CardinalityStage`, `TC2BaselineStage`, `TC2ArpStage` and the layer 3 to 7 window stages, do not yet guard
-event time this way (gap G71 in [the retrospective](./12_behavioral_analytics_retrospective.md)).
+{py:mod}`~morpheus.utils.event_clock` implements this, and thirteen stages take `max_clock_skew_seconds`:
+`TC1BindingStage`, `TC2BindingStage`, `TC2AuthStage` and `TC5SessionStage` from the start, and since step 11
+`TC1NormalizeStage`, `TC1RateStage`, `TC1OpticalStage`, `TC1ForecastStage`, `TC1FlapStage`, `TC1ChangeStage`,
+`TC2CardinalityStage`, `TC2BaselineStage` and `TC2ArpStage`. All but the two binding stages write `clock_refused`
+on the row they refused, which the pipeline's health record counts. The layer 3 to 7 window stages do not yet guard event time this way.
+
+The guard has a property worth knowing before it is tuned. Its reference is the stream's own progress, so a stream
+that genuinely goes quiet for longer than the bound and then resumes is refused from then on: every later time is
+further ahead of the last accepted one than the bound allows, and nothing that arrives afterwards can move the
+reference forward. A port polled once a month is such a stream under a one-day bound. The bound is therefore a
+statement about the longest real gap a class's stream can have, not about how wrong a clock can be, and a class
+with a long natural silence needs a bound longer than it.
+
+**Validation, quarantine and health.** The envelope's two rules are enforced, not only stated.
+{py:class}`~morpheus.stages.lineage.envelope_validate_stage.EnvelopeValidateStage`, at the head of each class's
+segment, stamps `ingest_time` from the pipeline's own clock where the record has none; checks that every field
+above is present, or null with a reason code in `envelope_null_reasons`, and marks a record that is neither
+`envelope_valid=false` with the defects listed in `envelope_defects`; fills `event_time` from `observed_time` where
+the source reports none; and takes a record out of the stream when its `clock_source` is `unsynchronized` or its
+`|clock_offset_ms|` exceeds `max_offset_ms`, a second by default. A quarantined record is sent to
+`morpheus:quarantine` with `quarantine_reason`, not dropped: its collector's clock is what is wrong, and once that
+is fixed the record can be replayed. An envelope defect does not quarantine a record; it is still scored, and
+counted.
+{py:class}`~morpheus.stages.lineage.collector_sequence_stage.CollectorSequenceStage` checks `collector_seq` after
+the total order, writing `collector_seq_gap` and `collector_seq_regressed`.
+{py:class}`~morpheus.stages.lineage.pipeline_health_stage.PipelineHealthStage`, behind the sealer on its own
+branch, writes one `morpheus:health` record per window, collector, class and tenant -- rows, refusals, keyless
+and unpaired rows, abandoned exchanges, late rows, unresolved bindings, saturated counts, fallback scores, sequence
+gaps, the largest sensor-to-pipeline lag and the reported offsets -- and measures the row count against the same
+feed's own thirty-day peak. A row that arrives after its window sealed carries `window_complete=false` and goes to
+`morpheus:late` rather than to the detections' index, and every detection's base search reads
+`window_complete=true`. TC-0 context records carry `tenant_id` and no other envelope field: a context version is
+dated by the source of record, not observed by a collector.
 
 ### TC-1: Physical
 
@@ -1225,10 +1255,16 @@ guide's own rule that a soft join against an unbounded interval is a guess.
 **Sources:** NetFlow v9, IPFIX, sFlow, VPC and cloud flow logs, firewall session logs, router ACL logs,
 and for full fidelity, the DOCA GPUNetIO path.
 
-**Required fields:** `src_ip`, `dst_ip`, `ip_version`, `protocol`, `ip_ttl`, `ip_id`, `tos_dscp`,
+**Required fields:** `src_ip`, `dst_ip`, `exporter_id`, `ip_version`, `protocol`, `ip_ttl`, `ip_id`, `tos_dscp`,
 `packet_count`, `byte_count`, `flow_start`, `flow_end`, `tcp_flags_union`, `direction`,
 `ingress_interface`, `egress_interface`, `next_hop`, `bgp_as_src`, `bgp_as_dst`, `vrf`,
 `fragmentation_flags`, `icmp_type`, `icmp_code`.
+
+`exporter_id` names the device that metered the flow, as `exporter:observation_domain` for IPFIX and NetFlow v9.
+The collector receives the flow; the exporter stamped its times, with its own clock, so a router whose clock
+drifts moves its flows however well the collector keeps time, and the collector's `clock_offset_ms` says nothing
+about it. Without the column the exporter's clock can be neither measured nor checked, and the same address
+reported by two exporters cannot be told apart from two observations of one flow.
 
 **Behavioral features:** `parsers/ip.py` provides the classification primitives directly. Derive:
 fan-out (distinct `dst_ip` per `src_ip` per window), fan-in, distinct destination port count, ratio of
@@ -1432,6 +1468,38 @@ Five decisions the text above leaves open are made in the code.
 
 An asset's peer group, which R-B-L7-004 compares against, is read from the inventory rather than computed. A group
 derived by clustering hosts on their behaviour would move when the behaviour it is meant to judge moves.
+
+### TC-P: Platform
+
+**Entity key:** `collector_id:telemetry_class:tenant_id`
+
+**Sources:** the pipeline itself. A platform -- an identity provider, a SaaS tenant, a flow collector, the
+pipeline -- emits no telemetry of its own here; its behaviour is the shape of the telemetry it delivers.
+{py:class}`~morpheus.stages.lineage.pipeline_health_stage.PipelineHealthStage` derives one record per sealed window
+from the scored rows, and `EnvelopeValidateStage` contributes the records it quarantined.
+
+**Required fields:** `window_id`, `collector_id`, `telemetry_class`, `tenant_id`, `rows`, the refusal counts
+(`envelope_invalid`, `clock_refused`), `late`, `seq_gap`, `seq_regressed`, `max_ingest_lag_seconds`, the reported
+offsets (`clock_offset_ms_min`, `_median`, `_max`), and the baseline columns `rows_baseline_max`,
+`rows_baseline_buckets`, `rows_baseline_mature` and `rows_step`. A count whose column no stage wrote is null rather
+than zero: "nothing was unpaired" and "nothing here can be unpaired" are different answers.
+
+**Behavioral features:** the row count against the same collector, class and tenant's thirty-day peak, from the
+same {py:mod}`~morpheus.utils.bucket_peak` tracker a port's MAC count uses; the refusal rate; the sequence gaps; the
+lag from sensor to pipeline. Every score sourcetype carries `tenant_id` and `collector_id` as required columns, so
+the key is on every row a platform search groups.
+
+**What it detects.** Four reports ship. `Pipeline health - refusal rate` is the share of a collector's records the
+pipeline refused or quarantined; `Collector health` a collector that skipped or repeated sequence numbers,
+reported an offset beyond a second, or delivered late; `Late arrivals by class` what reached the pipeline after its
+window sealed; and `Platform baseline step` a feed whose volume held at twice its own peak for two consecutive
+windows. One window over is a burst, and a burst is what the detections are for; a platform step -- a tenant
+onboarding, a collector double-sending, an export schedule changing -- holds into the next window. The SaaS
+corpus plants a second tenant whose sync exports twice as often for its last two days, and the step fires on
+that tenant alone; the layer 5 corpus's identity provider doubles for one hour and does not.
+
+**Cadence:** one record per sealed window per key. **Cardinality:** collectors times classes times tenants --
+hundreds, not millions. **Retention:** as long as the events the records describe.
 
 ---
 
@@ -2465,7 +2533,7 @@ pipe.add_stage(SiemWireStage(config, sourcetype="morpheus:score:l2"))   # 2026-0
 
 Which columns it renders is deliberately not a parameter, because a parameter is somewhere the two
 sides can disagree. It comes from {py:mod}`~morpheus.utils.siem_sourcetypes`, which records for each of
-the app's fourteen stanzas the column its `TIME_PREFIX` anchors on, and
+the app's seventeen stanzas the column its `TIME_PREFIX` anchors on, and
 `tests/morpheus/utils/test_siem_sourcetypes.py` checks that record against the configuration file
 itself. Rendering the wrong column for a stanza requires those two halves to disagree first, and they
 cannot disagree quietly.
@@ -2478,9 +2546,11 @@ compares against a threshold -- and rounding them to microseconds to fit a times
 quietly change that arithmetic. Where a single column is all that is needed,
 {py:func}`~morpheus.utils.siem_wire.render_event_time_series` is the same rendering without a stage.
 
-That module also carries a fact the app could not previously state anywhere. None of the fourteen
+That module also carries a fact the app could not previously state anywhere. None of the seventeen
 stanzas is without a producer in this fork any longer: every score sourcetype from layer 1 to 7 has
-one, and the last two, `context:identity` and `context:asset`, gained theirs with the TC-0 context store.
+one, the last two of the first fourteen, `context:identity` and `context:asset`, gained theirs with the TC-0 context
+store, and the three the pipeline reports on itself with -- `morpheus:quarantine`, `morpheus:health` and
+`morpheus:late` -- shipped with theirs.
 It was eight until the layer 5 stages landed, seven until `TC1BindingStage` gave `binding:l1` one, then
 six, five, four and three as layers 3, 4, 6 and 7 landed, and two until the context store did -- the
 sort of number that goes stale silently, which is why `tests/morpheus/utils/test_siem_sourcetypes.py`
@@ -3571,7 +3641,7 @@ Pass 4 measures each of these and records which the fork reuses.
   `tests/morpheus/determinism/`).
 - The SIEM wire format, rendered by the stanza the SIEM will parse it with
   ({py:class}`~morpheus.stages.output.siem_wire_stage.SiemWireStage` and
-  {py:mod}`~morpheus.utils.siem_sourcetypes`), with every one of the app's fourteen stanzas either
+  {py:mod}`~morpheus.utils.siem_sourcetypes`), with every one of the app's seventeen stanzas either
   mapped to a producer or recorded as having none, with what is missing.
 - TC-1 counter normalization: monotonic interface counters turned into per-interval deltas, with a
   counter wrap distinguished from a device reboot, and the `site_id:device_id:port_id` entity key
@@ -3917,7 +3987,7 @@ Pass 4 measures each of these and records which the fork reuses.
   [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
   the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
   and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Five of the
-  sixty-two searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
+  sixty-six searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
   empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
   is working from a rule that is broken.
 - One rule run end to end offline, from a file to bytes a SIEM parses
@@ -4030,7 +4100,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Host baselines at layers 3, 4 and 6 | Medium | Built, in step 9. `TC3BaselineStage` keeps each host's hourly peak fan-out, fan-in and byte asymmetry over fourteen days, with an optional group column so one address in two routing domains is two hosts, and the network corpus gained the fortnight it is measured against. R-B-L3-001 fires on a step above the source's own history with the literal fifty kept as a floor, and a DHCP server's Monday checks, which the literal fired on, are its control; R-B-L3-006 reads fan-in onto a destination the inventory calls a workstation, R-B-L3-007 a first contact more lopsided than the host has ever sent, and R-D-L3-008 a port sweep inside the estate. `community_id` is on layers 3 and 6, and a report joins one connection across layers 3, 4 and 6 on it. `normalize_hostname` keys a host in the endpoint, asset, enrichment and envelope stages and in the layer 5 target, so `FIN-01` and `fin-01` are one host and R-C-001 joins without folding case; the asset record carries `device_role`, `os_family` and `os_version`, R-C-001 requires a server, R-B-L7-004 scales its severity by criticality and carries the owner, and R-B-L6-001 is gated on a managed host again. Every host feature is read by a search or listed under [Features without a rule](#features-without-a-rule), and a test holds the list to the stages. What remains: layer 4 still has no per-host baseline beyond the per-triple envelope, `ja4_client_changed` has no rule because the corpus shows nothing a rule on it would add, R-P-L3-005 now visibly fires on every host's first minutes of the day and wants the same step condition, and the inventory is looked up on the address at layer 6 until hosts have an identity across layers (#63). Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | A host is `src_ip` at layers 3, 6 and 7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint, and nothing bridges them: no time-bounded `hostname`-to-address binding exists, the network, transport, presentation and application corpora run no `BindingResolverStage`, and asset context cannot attach to a network-layer event. The SIEM `binding_l2_l3` refresh selects `binding_table=dhcp_lease` rows nothing produces, `morpheus:edge` carries no `lineage_id`, `osi_layer`, parent or child `uid` or `join_method`, the principal-to-desk rung the estate corpus proves is a Python dict, and only one resolver passes `uid_column`. A lease stage emitting bucketed `dhcp_lease` rows, a `host_inventory` binding and a `host_key` on every layer 3-7 event, an `EdgeEmitStage` behind the resolvers, MAC and 802.1X lookups in the SIEM, and `community_id`/`session_key` joins above layer 3. The DHCP collector itself is not Morpheus. Tracked in #63 |
 | Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | Built, in step 10. R-D-L1-002 reads the optical tap step, R-D-L1-003 flap instability with restarts excluded, R-D-L1-006 a neighbour the port has never had, and a `Device restart` report gathers the reboot flags into one row per device. `TC1RateStage` divides each delta by its interval into error, discard and traffic rates and `utilization` against `link_speed_bps`, from the 64-bit octet counters TC-1 now requires, and measures each port's error rate against its own peak (R-B-L1-005) and its traffic against its own peak and trough per UTC hour (R-B-L1-007). `link_key` names a link by its two ends and `Topology - LLDP adjacency` keeps the record; R-B-L2-002 leaves trunk and LAG-member ports out. `ouis_per_vlan` is keyed `site_id:vlan_id`, measured against its own history and read by R-B-L2-006; the four-part key is gone from Part 2. `TC2AuthStage` keeps each port's 99th percentile and R-B-L2-007 and 008 read its two tails. `TC2BindingStage` gains a stop column and a snapshot mode, and the corpus ends one binding `explicit` and one `snapshot_absent`. What remains: a link resolves to one name from both ends only where the LLDP identity and the key the poller builds agree, which needs TC-0's mapping; a restart splits each of its ports' layer 1 bindings for the poll its neighbour is unknown; discards have no baseline; and the hour-of-day history is untested beyond one hour of corpus. Tracked in #61 |
-| Envelope validation, clock quarantine, collector and pipeline health, late-arrival delivery, platform baselines | Medium | Ten of the fourteen universal envelope fields (`observed_time`, `ingest_time`, `clock_source`, `clock_offset_ms`, `sampling_policy`, `tenant_id` among them) are produced, validated and quarantined on by nothing, so the clock-skew experiment measures damage with no mitigation; `collector_seq` regressions and gaps are unchecked; refusals, abandoned sessions and unpaired records are log lines; late rows are marked `is_late` and then read like any other row; no identity provider, tenant or collector has a key or baseline; eight stateful TC-1/TC-2 stages take no `max_clock_skew_seconds`. A validate stage with a quarantine route, a `morpheus:health` record per sealed window per collector, class and tenant with a baseline, a late route with the backfill procedure written, `window_complete=true` on every detection, and `tenant_id`/`collector_id` on every score row. This is what gives a platform its first behaviour. Tracked in #62 |
+| Envelope validation, clock quarantine, collector and pipeline health, late-arrival delivery, platform baselines | Medium | Built, in step 11. Every corpus record carries `observed_time`, `ingest_time`, `clock_source`, `clock_offset_ms`, `sampling_policy` and `tenant_id`, and every layer 3 flow `exporter_id`. `EnvelopeValidateStage` stamps `ingest_time`, marks a missing field that has no stated reason, and quarantines a record whose clock is unsynchronized or more than a second out: the telemetry corpus's DMZ poller, three polls at 4500 ms, reaches `morpheus:quarantine` and nothing else. `CollectorSequenceStage` finds the ARP sensor's three undelivered records; `PipelineHealthStage` writes 851 `morpheus:health` records over the sample events, and its per-feed baseline steps on the SaaS corpus's doubling tenant alone. Nine more stateful stages refuse a far-future time; a late flow reaches `morpheus:late` and no detection, and every detection reads `window_complete=true`. Four reports ship with expectations, and Part 2 gains TC-P. What is not built: correcting an event time by the offset a collector reports, and guarding the layer 3 to 7 window stages' clocks |
 | Device telemetry class and R-C-003 | Large | A switch or router exists only as the middle segment of a port key; a reboot surfaces once per port in the pipeline, and only the `Device restart` report in the SIEM gathers it into one row per device; configuration change, route churn and CPU are absent from design and code. R-C-003, the chain that justifies layer 1, has no stanza, corpus actor or harness, and two of its three inputs are absent: OUI novelty is kept per VLAN only and the closed binding carries no `oui`; nothing classifies a management destination. A `tc1_device` sub-class keyed `site_id:device_id` with a stage deriving reboot, `config`-change and route-count features and two rules; per-port OUI novelty, `dst_is_management` and a `vlan_designations` lookup; a rogue-host actor in a corpus holding layers 1, 2 and 3 together. Tracked in #65 |
 | Service and application entity | Large | No stage, key, baseline or sourcetype treats a `dst_ip:dst_port` service or a SaaS application as a subject; `sni`, `client_app` and `service_account` are never read; DNS and HTTP rules are fixed thresholds with no per-client history; user-agent novelty, NXDOMAIN/DGA and the 5xx ratio named in Part 2 have no producer; TC-0 has no application-to-server or service-account kind although Part 2 says it is built; `tcp_options_order` is not carried so R-B-L4-004 cannot be written. A `tc7_service` composition keyed on the destination, `[dst_ip, sni]` as the certificate key, per-client baselines under R-B-L7-001, an `application` kind with `ctx_application_*` enrichment, and the TCP option columns. Tracked in #64 |
 | Triton-backed rules R-B-L4-001 and R-B-L7-003 | Medium | Specified over the `abp` features and over request bodies; no fork pipeline composes `TritonInferenceStage` and no `Scorer`-protocol adapter exists for layers 4 or 7 the way `ReferenceScorer` and `DfencoderScorer` do for layer 5. Both need a Triton endpoint and a GPU path CPU CI cannot exercise; revisit once the per-user model's CPU inference path exists as the pattern to copy. Not scheduled; recorded as gap G48 in the retrospective |
@@ -4116,8 +4186,8 @@ again.
 span at every width on both axes: fifteen still hold three layers and all fifteen desk sign-ins still resolve to
 the port they were made at, because a principal reaches a port through an 802.1X session lasting most of the
 hour. The rung below reaches through a MAC binding lasting one poll cadence, and there a minute is a large
-fraction of the interval: of 1040 ARP observations rooted on a port, fifteen fall back to their own address and
-six acquire a port they did not have. Attribution moved while reach did not.
+fraction of the interval: of 1040 ARP observations rooted on a port, ten fall back to their own address and
+five acquire a port they did not have. Attribution moved while reach did not.
 
 Each of those findings is asserted in `tests/morpheus/determinism/test_clock_skew_experiment.py` against the
 pipelines rather than quoted from a saved artifact, and the experiment's own machinery was sabotaged three ways
@@ -4126,13 +4196,22 @@ pointing the switch sweep at collector clocks -- with each break failing the tes
 is the one that matters: without it, a sweep that quietly measured the wrong clock would have confirmed this
 document's prediction and missed the correction.
 
-What remains missing is correction rather than measurement.
-{py:mod}`~morpheus.utils.event_clock` bounds a catastrophically wrong timestamp so one bad row cannot
-expire every open binding; it is not drift correction and its default would not notice a device an hour
-out. `clock_source` and `clock_offset_ms` are in the universal envelope, and **nothing in this repository
-produces, consumes or checks either of them** -- they are schema, not a control. The numbers above are
-therefore the damage a deployment takes today, with no correction in the path. What a corrected pipeline would
-take is a different experiment, and it needs the control built first.
+Step 11 built the control and ran the different experiment. Every corpus record now carries `clock_source` and
+`clock_offset_ms`, and `EnvelopeValidateStage` holds a record whose collector reports its clock more than a second
+out. The experiment runs every collector sweep twice -- uncorrected, and with each skewed collector reporting the
+offset it was given -- and the two curves are in [the experiment's README](../../../../examples/clock_skew/README.md).
+The delta is one finding. Inside the bound, quarantine costs nothing: at a second's spread no corpus holds anything
+but the DMZ poller it always holds. Beyond it, no rule ever accuses something it should not, but every rule reading a
+held collector loses everything it accused -- at ten seconds, eleven accusations on the estate, twenty-two on layer
+5, three on DNS and HTTP and all four chains' attackers -- at spreads where the uncorrected pipeline still decided
+correctly, because the single-layer rules held to a minute and the chains to sixteen. Quarantine trades a wrong
+answer for no answer, and a one-second bound makes that trade long before any rule here needs it; the bound
+belongs per class, set from the tolerances above. It is not a correction: nothing subtracts a reported offset from
+an event time. And it cannot see a clock the envelope does not describe. The network corpus now names the router
+that stamped each flow, and swept on three routers' clocks its eight rules -- unmeasured until now -- hold to a
+minute but R-P-L3-005, which loses one of the scanner's twenty rises at thirty seconds; no collector's
+`clock_offset_ms` could have caught it. {py:mod}`~morpheus.utils.event_clock` still bounds only the catastrophic
+case, and its default would not notice a device an hour out.
 
 **Why does no chain span more than two layers?** Closed. One at a time, and the last of them here.
 {py:class}`~morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage` put `osi_layer` and `entity_key` on

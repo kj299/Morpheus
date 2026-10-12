@@ -52,6 +52,16 @@ that must stay quiet:
 - and a **quiet server** whose TTL never moves, so the TTL feature is a statement about a change rather than
   about a value.
 
+Every flow names the exporter that sent it, `exporter_id`: the router and the IPFIX observation domain, from the
+source's subnet. One collector, `netflow-01`, receives them all, and that is exactly why the exporter has to be on
+the record -- a flow's timestamp is the exporter's clock, not the collector's, and the clock-skew experiment and the
+quarantine both need to know whose clock it is.
+
+And one flow is **late**: the access router held a record in its cache and exported it at the end of the scored
+hours, long after the hour it belongs to was sealed. It is delivered as its own trailing frame, after every other
+record, because that is when it reached the pipeline; the sealer marks it `is_late` and not `window_complete`, it
+reaches the sample events, and no detection reads it.
+
 Every stateful stage is preceded by `TotalOrderStage`, which is determinism control 8 as a stage. The stages
 here are cumulative in the same way the layer 1 and 2 ones are -- a count, a proportion, a rhythm, a reference and a
 history are all functions of what came before -- so the permutation check has something to catch.
@@ -60,12 +70,14 @@ history are all functions of what came before -- so the permutation check has so
 import random
 import typing
 
+import envelope
 import pandas as pd
-
 import stamping
+
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
@@ -131,6 +143,15 @@ RULES = ("R-B-L3-001", "R-B-L3-002", "R-D-L3-003", "R-B-L3-004", "R-P-L3-005", "
 
 COLLECTOR = "netflow-01"
 SCHEMA_VERSION = "tc3.v1"
+
+EXPORTERS = (("10.0.0.", "rtr-access-1:256"), ("10.0.2.", "rtr-access-2:768"), ("10.0.1.", "rtr-dc-1:512"),
+             ("10.0.9.", "rtr-access-1:256"))
+"""The router that exports a source's flows, and its IPFIX observation domain, by the source's subnet."""
+EDGE_EXPORTER = "rtr-edge-1:1024"
+"""Every source outside the estate's subnets is seen first at the edge."""
+
+LATE_DELIVERY_CLASS = "tc3_late_delivery"
+"""The frame the late flow arrives in, after everything else. Its records are TC-3 flows like any other."""
 
 SCANNER = "10.0.0.50"
 BROWSER = "10.0.0.60"
@@ -274,6 +295,15 @@ def build_store() -> BitemporalStore:
     return BitemporalStore("asset", asset_versions())
 
 
+def exporter_for(source: str) -> str:
+    """The exporter that sees a source's flows first."""
+    for (prefix, exporter) in EXPORTERS:
+        if (source.startswith(prefix)):
+            return exporter
+
+    return EDGE_EXPORTER
+
+
 def _flow(source: str,
           destination: str,
           event_time_ns: int,
@@ -291,6 +321,7 @@ def _flow(source: str,
         "schema_version": SCHEMA_VERSION,
         "origin_hash": f"{source}->{destination}",
         "collector_seq": seq,
+        "exporter_id": exporter_for(source),
         "event_time": event_time_ns,
         "src_ip": source,
         "src_port": 49152 + seq % 16384 if src_port is None else src_port,
@@ -544,7 +575,13 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     frame = pd.DataFrame(rows).sort_values("event_time", kind="mergesort").reset_index(drop=True)
     frame["collector_seq"] = range(len(frame))
 
-    return {TELEMETRY_CLASS: frame}
+    # The late flow: the quiet host's half-hour connection in the second scored hour, exported from the access
+    # router's cache at the end of the fourth. Its event time is when the flow began, its observed time when the
+    # exporter let it go, and it is the collector's last record because it was the last to arrive.
+    late = _flow(source=QUIET, destination=QUIET_SERVER, event_time_ns=at(1, 1800), seq=len(frame))
+    late["observed_time"] = at(CORPUS_HOURS - 1, 3000)
+
+    return envelope.attach_all({TELEMETRY_CLASS: frame, LATE_DELIVERY_CLASS: pd.DataFrame([late])})
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -641,12 +678,20 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
+    # Validated once per class, ahead of every stage: ingest_time stamped, the envelope checked, untrusted clocks
+    # taken out of the stream and kept.
+    (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
+
     pipe = LinearPipeline(config)
-    pipe.set_source(InMemorySourceStage(config, dataframes=batches[TELEMETRY_CLASS]))
+    # The late delivery arrives after every other record, however the rest were split, because that is when it came.
+    pipe.set_source(
+        InMemorySourceStage(config, dataframes=batches[TELEMETRY_CLASS] + batches.get(LATE_DELIVERY_CLASS, [])))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
+
+    pipe.add_stage(CollectorSequenceStage(config))
 
     # The flow's Community ID, so a layer 3 record joins the layer 4 and 6 records of the same connection by
     # equality rather than by a time window. Stateless, so its place relative to the order makes no difference.
@@ -672,7 +717,9 @@ def run_pipeline(config: Config,
     result["telemetry_class"] = TELEMETRY_CLASS
     result["row_key"] = result["event_uid"]
 
-    return canonicalize(result, key_columns=KEY_COLUMNS, ignore_columns=IGNORE_COLUMNS)
+    return canonicalize(envelope.with_quarantine(result, quarantined),
+                        key_columns=KEY_COLUMNS,
+                        ignore_columns=IGNORE_COLUMNS)
 
 
 def render(result: pd.DataFrame) -> str:

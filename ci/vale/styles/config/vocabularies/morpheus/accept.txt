@@ -97,6 +97,7 @@ Zeek
 [Ii]nferencing
 [Ii]nterop
 [Jj]oinable
+[Kk]eyless
 [Ll]iveness
 [Ll]ookup('?s)?
 [Mm]emoization
@@ -107,10 +108,12 @@ Zeek
 [Nn]amespace(s?)
 [Nn]ondeterminism
 [Nn]ondeterministic
+[Oo]nboarding
 [Pp]arallelization
 [Pp]arsable
 [Pp]eriodogram
 [Pp]laintext
+[Pp]oller's
 [Pp]ostprocess
 [Pp]reallocate(d|s)?
 [Pp]reprocess
@@ -160,6 +163,7 @@ Zeek
 [Uu]nrendered
 [Uu]nsampled
 [Uu]nsharded
+[Uu]nsynchronized
 [Uu]ntuned
 [Uu]ploader
 [Ww]atchlist(s?)

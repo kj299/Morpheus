@@ -36,8 +36,10 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.session_timer import NS_PER_SECOND
 from morpheus.utils.session_timer import SessionTimer
 from morpheus.utils.transfer_envelope import TransferEnvelopeTracker
@@ -63,6 +65,9 @@ PORT_KEY_COLUMN = "auth_port_key"
 P99_COLUMN = "auth_elapsed_p99"
 RATIO_COLUMN = "auth_elapsed_ratio"
 SAMPLES_COLUMN = "auth_elapsed_samples"
+ABANDONED_COLUMN = "auth_abandoned"
+"""Per row: the pending exchanges this row's arrival abandoned for having gone unresolved past the timeout. A count on
+the row rather than a log line, so the pipeline's health record can sum it per collector and window."""
 
 BASELINE_QUANTILE = 0.99
 """The quantile of the port's own prior exchanges each one is measured against, which the column name states."""
@@ -202,6 +207,8 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                                   min_samples=baseline_min_samples)
 
         self._needed_columns[PORT_KEY_COLUMN] = TypeId.STRING
+        self._needed_columns[ABANDONED_COLUMN] = TypeId.INT64
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
         self._needed_columns[ELAPSED_COLUMN] = TypeId.FLOAT64
         self._needed_columns[ATTEMPTS_COLUMN] = TypeId.INT64
         self._needed_columns[UNPAIRED_COLUMN] = TypeId.BOOL8
@@ -326,6 +333,8 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             keyless = 0
             abandoned = 0
             implausible = 0
+            abandoned_rows = [0] * len(ports)
+            refused = [False] * len(ports)
             has_site = self._site_column in df.columns
 
             for (position, raw_port) in enumerate(ports):
@@ -381,9 +390,12 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     ratios.append(None)
                     samples.append(None)
                     implausible += 1
+                    refused[position] = True
                     continue
 
-                abandoned += len(self._timer.expire(event_time_ns))
+                expired = len(self._timer.expire(event_time_ns))
+                abandoned += expired
+                abandoned_rows[position] = expired
 
                 # The port is what is being authorized onto the network, but the exchange belongs to a device on
                 # it. Extending the key with the supplicant is what keeps two devices on one interface from
@@ -430,6 +442,8 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_float_column(df, P99_COLUMN, p99s)
             assign_nullable_float_column(df, RATIO_COLUMN, ratios)
             assign_nullable_int_column(df, SAMPLES_COLUMN, samples)
+            assign_nullable_int_column(df, ABANDONED_COLUMN, abandoned_rows)
+            mark_refused(df, refused)
 
         if (keyless > 0):
             logger.warning("TC2AuthStage saw %d of %d events with a null site, switch, or port; they carry no timing.",

@@ -416,6 +416,9 @@ def test_one_row_from_a_broken_clock_does_not_abandon_every_pending_exchange(con
 
     assert stage._timer.pending_count == 3, "the refused row abandons nothing and opens nothing"
     assert _as_list(meta, "auth_unpaired") == [None], "and carries no timing of its own"
+    # A column rather than a log line, so the pipeline's health record can count it.
+    assert _as_list(meta, "clock_refused") == [True]
+    assert _as_list(meta, "auth_abandoned") == [0]
 
     # The legitimate outcome still pairs with its own start rather than reading as a bypass.
     finished = frame(["success"], times=[2 * NS_PER_SECOND], ports=["Gi1/0/1"])

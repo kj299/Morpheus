@@ -137,7 +137,8 @@ def test_the_three_collectors_share_their_entities(corpus: dict[str, pd.DataFram
     for frame in corpus.values():
         assert set(cp_.ID_COLUMNS) <= set(frame.columns)
         assert frame["event_time"].is_monotonic_increasing
-        assert frame["collector_seq"].is_monotonic_increasing
+        # Each collector numbers its own stream, so the sequence rises per collector rather than across them.
+        assert frame.groupby("collector_id")["collector_seq"].apply(lambda seq: seq.is_monotonic_increasing).all()
 
 
 # --- Checks 2 through 6: determinism -------------------------------------------------------------------------------

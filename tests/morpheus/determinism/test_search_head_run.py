@@ -110,7 +110,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 62
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 66
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
@@ -150,6 +150,8 @@ def test_each_sourcetype_goes_where_the_procedure_sends_it(runner):
     for (sourcetype, index) in where.items():
         if (sourcetype == "morpheus:edge"):
             assert index == "behavior_lineage"
+        elif (sourcetype in ("morpheus:health", "morpheus:quarantine", "morpheus:late")):
+            assert index == "behavior_" + sourcetype.split(":")[1], sourcetype
         elif (sourcetype.startswith("morpheus:score:")):
             assert index == "behavior_events", sourcetype
         elif (sourcetype.startswith("binding:")):
@@ -407,5 +409,38 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
     }
 
     assert differing == BEFORE_THE_NETWORK_OBJECTS
-    assert len(run["searches"]) == 52 and len(expected) == 62
+    assert len(run["searches"]) == 52 and len(expected) == 66
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
+
+
+BEFORE_THE_PLATFORM = {
+    "Behavior summary - per-layer scores": 5345,
+}
+"""What every run before step 11's platform plants found where they changed the answer.
+
+The SaaS corpus gained a second tenant's sync exports, which the summary groups. The four searches step 11 added are
+absent from the earlier runs and are not compared.
+"""
+
+SEVENTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-10T0451Z.json")
+"""The run over step 10's events, which matched every expectation then written."""
+
+
+def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_arrived():
+    # Made on 2026-10-10 with step 10's network objects: all sixty-two then matched, with 209 risk records. Against
+    # step 11's events it differs in the summary alone, and has none of the four searches step 11 added. Every
+    # detection's base search reading window_complete=true changed nothing, because no scored event is incomplete.
+    with open(SEVENTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_PLATFORM
+    assert len(run["searches"]) == 62 and len(expected) == 66
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209

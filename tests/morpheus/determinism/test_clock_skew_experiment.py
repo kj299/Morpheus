@@ -235,10 +235,11 @@ def test_the_ladder_still_reaches_three_layers_under_a_minute_of_skew(experiment
 def test_the_ladders_lower_rung_moves_where_its_upper_rung_does_not(experiment):
     # The finding the span alone would have hidden. A principal reaches a port through an 802.1X session that
     # lasts most of the hour, so a minute of skew never takes it outside; an ARP observation reaches a port
-    # through a MAC binding that lasts one poll cadence, and a minute is a large fraction of that. Nine of the
-    # thousand and forty observations rooted on a port lose or change theirs -- fifteen fall back to their own
-    # address, six acquire a port they did not have -- while every chain keeps its span and every sign-in keeps
-    # its desk. Attribution and reach are not the same property and do not fail together.
+    # through a MAC binding that lasts one poll cadence, and a minute is a large fraction of that. Five of the
+    # thousand and forty observations rooted on a port lose theirs net -- ten fall back to their own address, five
+    # acquire a port they did not have -- while every chain keeps its span and every sign-in keeps its desk.
+    # Attribution and reach are not the same property and do not fail together. The DMZ poller is a sixth clock
+    # in the spread, so a minute's spread places the other five a little differently than it did.
     config = ep.build_pipeline_config()
     corpus = ep.build_corpus()
     offsets = experiment.offsets_for(experiment.sources_in(corpus, experiment.COLLECTOR_CLOCKS),
@@ -248,7 +249,7 @@ def test_the_ladders_lower_rung_moves_where_its_upper_rung_does_not(experiment):
     skewed = ep.run_pipeline(config, experiment.skew_corpus(corpus, offsets, experiment.COLLECTOR_CLOCKS))
 
     assert experiment.chain_reach(baseline)["arp_observations_rooted_on_a_port"] == 1040
-    assert experiment.chain_reach(skewed)["arp_observations_rooted_on_a_port"] == 1031
+    assert experiment.chain_reach(skewed)["arp_observations_rooted_on_a_port"] == 1035
 
     left = baseline.set_index(["telemetry_class", "row_key"]).sort_index()
     right = skewed.set_index(["telemetry_class", "row_key"]).sort_index()
@@ -260,8 +261,8 @@ def test_the_ladders_lower_rung_moves_where_its_upper_rung_does_not(experiment):
     became = left[moved].groupby([left[moved]["chain_anchor_source"], right[moved]["chain_anchor_source"]]).size()
 
     assert became.to_dict() == {
-        ("resolved_port_key", "arp_sender_ip"): 15,
-        ("arp_sender_ip", "resolved_port_key"): 6,
+        ("resolved_port_key", "arp_sender_ip"): 10,
+        ("arp_sender_ip", "resolved_port_key"): 5,
     }
 
 
@@ -410,3 +411,57 @@ def test_each_chain_first_breaks_by_accusing_a_control(experiment, rule):
     broken = _chains_at(experiment, corpus, edge)[rule]
 
     assert baseline < broken and len(broken - baseline) == 1
+
+
+# --- The corrected curve and the exporter axis --------------------------------------------------------------------
+
+
+@pytest.mark.slow
+@pytest.mark.cpu_mode
+def test_quarantine_holds_nothing_inside_its_bound_and_only_takes_away_beyond_it(experiment):
+    # With the collectors reporting the offsets they were given, a spread of a second leaves every clock within
+    # half a second and EnvelopeValidateStage holds only the DMZ poller it always held. At ten seconds the outer
+    # collectors are three and five seconds out and their records are held whole, so the rules that read them lose
+    # what they accused -- and never accuse anything new, which is the trade quarantine makes against skew.
+    def estate(result):
+        return {
+            **experiment.rules.layer_1_decisions(result),
+            **experiment.rules.layer_2_decisions(result, tp.SINGLE_HOST_PORTS)
+        }
+
+    report = experiment.sweep("estate, quarantine on",
+                              ep,
+                              estate,
+                              magnitudes=(experiment.SECOND_NS, 10 * experiment.SECOND_NS),
+                              report_offsets=True)
+    (inside, beyond) = report["runs"]
+
+    assert report["baseline_quarantined"] == inside["quarantined"] == len(tp.QUARANTINED_MINUTES)
+    assert inside["rules_changed"] == []
+
+    assert beyond["quarantined"] > inside["quarantined"]
+    assert len(beyond["rules_changed"]) > 0
+    assert all(entry["newly_flagged"] == [] for entry in beyond["rules"].values())
+
+
+@pytest.mark.slow
+@pytest.mark.cpu_mode
+def test_a_routers_clock_moves_only_the_fan_out_trajectory(experiment):
+    # The exporter axis: each router stamps its own flows, and the collector's reported offset says nothing about
+    # it. The eight layer 3 rules were unmeasured while the corpus named no exporter; on three router clocks seven
+    # hold to a minute, and R-P-L3-005 -- a rise across three five-minute bins, the narrowest window any layer 3 rule
+    # reads -- loses one of the scanner's twenty at thirty seconds and gains nothing.
+    import network_pipeline as np_  # pylint: disable=import-outside-toplevel
+
+    report = experiment.sweep("network, exporter clocks",
+                              np_,
+                              experiment.rules.layer_3_decisions,
+                              columns="exporter_id",
+                              magnitudes=(10 * experiment.SECOND_NS, 30 * experiment.SECOND_NS))
+    (held, moved) = report["runs"]
+
+    assert len(report["clocks"]) == 3
+    assert held["rules_changed"] == []
+    assert moved["rules_changed"] == ["R-P-L3-005"]
+    assert moved["rules"]["R-P-L3-005"]["newly_flagged"] == []
+    assert len(moved["rules"]["R-P-L3-005"]["no_longer_flagged"]) == 1

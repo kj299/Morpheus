@@ -29,9 +29,13 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import to_epoch_ns
-from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.link_flap import NS_PER_SECOND
 from morpheus.utils.link_flap import LinkFlapTracker
 
@@ -97,6 +101,11 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         unconverted it is `TimeTicks`, hundredths of a second, and `"cs"` is the unit to give.
     window_seconds : int, default = 3600
         Interval the windowed count covers.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The windowed count
+        expires transitions on event time, so one poll from a device whose clock is wrong by years would empty every
+        port's hour at once and hide a link that was flapping. A refused row carries no per-entity features from this
+        stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
 
     def __init__(self,
@@ -107,8 +116,12 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  status_column: str = "oper_status",
                  last_change_column: str = None,
                  last_change_unit: str = "ns",
-                 window_seconds: int = DEFAULT_WINDOW_SECONDS):
+                 window_seconds: int = DEFAULT_WINDOW_SECONDS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -127,6 +140,9 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         for flag in FLAG_COLUMNS:
             self._needed_columns[flag] = TypeId.BOOL8
+
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -215,6 +231,7 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             flaps: list = []
             windowed: list = []
             flags: dict[str, list] = {name: [] for name in FLAG_COLUMNS}
+            refused = [False] * len(entity_keys)
             unordered = 0
             keyless = 0
 
@@ -251,6 +268,16 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unordered += 1
                     continue
 
+                if (not self._clock.accept(event_time_ns)):
+                    flaps.append(None)
+                    windowed.append(None)
+
+                    for name in FLAG_COLUMNS:
+                        flags[name].append(False)
+
+                    refused[position] = True
+                    continue
+
                 result = self._tracker.observe(key,
                                                event_time_ns,
                                                self._status(statuses[position]),
@@ -268,6 +295,15 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             for (name, values) in flags.items():
                 df[name] = values
+
+            mark_refused(df, refused)
+
+        if (any(refused)):
+            logger.warning(
+                "TC1FlapStage refused %d of %d polls whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they carry no count, set clock_refused and expired nothing.",
+                sum(refused),
+                len(entity_keys))
 
         if (keyless > 0):
             logger.warning(

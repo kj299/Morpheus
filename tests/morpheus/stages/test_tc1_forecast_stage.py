@@ -45,6 +45,9 @@ FLOORS = {"10GBASE-LR": -14.4, "1000BASE-LX": -19.0}
 FAILING = [-7.0 - 0.1 * index for index in range(10)]
 STEADY = [-7.0] * 10
 
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A device clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
 
 def frame(levels: list,
           entity: str = "hq:sw1:Gi1/0/1",
@@ -349,3 +352,19 @@ def test_a_null_key_does_not_disturb_a_real_ones_state(config: Config):
     # The real port saw four readings; the keyless row in the middle entered nobody's history.
     assert _as_list(meta, "optical_rx_dbm_trend_samples") == [1, 2, None, 3, 4]
     assert _as_list(meta, "optical_rx_dbm_forecast_status")[-1] == STATUS_PROJECTED
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    times = [index * MINUTE_NS for index in range(6)] + [YEARS_AHEAD_NS, 6 * MINUTE_NS]
+    meta = run(config, frame(STEADY[:6] + [-30.0, -7.0], times=times))
+
+    assert _as_list(meta, "clock_refused") == [False] * 6 + [True, False]
+    assert _as_list(meta, "optical_rx_dbm_forecast_status")[6] is None
+    # The fit after it still holds the six readings before it, rather than being expired by a decade.
+    assert _as_list(meta, "optical_rx_dbm_trend_samples")[7] == 7
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC1ForecastStage(config, max_clock_skew_seconds=0)

@@ -38,6 +38,11 @@ from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import mark_refused
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +111,11 @@ class TC2BaselineStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Committed periods required before a baseline is published. A day of hours.
     max_buckets : int, default = 1024
         Periods retained per entity whatever the window implies.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The history commits
+        periods on event time, so one row from a switch whose clock is wrong by years would commit every entity's open
+        period at once and stand a period of its own years ahead of the rest. A refused row carries no per-entity
+        features from this stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
 
     def __init__(self,
@@ -117,8 +127,12 @@ class TC2BaselineStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  bucket_seconds: int = DEFAULT_BUCKET_SECONDS,
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_buckets: int = DEFAULT_MIN_BUCKETS,
-                 max_buckets: int = DEFAULT_MAX_BUCKETS):
+                 max_buckets: int = DEFAULT_MAX_BUCKETS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (not value_column):
             raise ValueError(
@@ -141,6 +155,9 @@ class TC2BaselineStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._needed_columns[f"{value_column}{BUCKETS_SUFFIX}"] = TypeId.INT64
         self._needed_columns[f"{value_column}{MATURE_SUFFIX}"] = TypeId.BOOL8
         self._needed_columns[f"{value_column}{STEP_SUFFIX}"] = TypeId.INT64
+
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -229,6 +246,7 @@ class TC2BaselineStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             keys = [normalize_text(entity) for entity in entities]
             counts = [self._count(value) for value in values]
             times = [None if key is None else self._event_time_ns(raw) for (key, raw) in zip(keys, raw_times)]
+            (times, refused) = guard_times(self._clock, times)
 
             measured = measure_rows(self._tracker, keys, counts, times)
             keyless = measured.keyless
@@ -239,6 +257,14 @@ class TC2BaselineStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_int_column(df, f"{prefix}{BUCKETS_SUFFIX}", measured.buckets)
             assign_nullable_bool_column(df, f"{prefix}{MATURE_SUFFIX}", measured.mature)
             assign_nullable_int_column(df, f"{prefix}{STEP_SUFFIX}", measured.steps)
+            mark_refused(df, refused)
+
+        if (any(refused)):
+            logger.warning(
+                "TC2BaselineStage refused %d of %d rows whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they carry no baseline, set clock_refused and committed no period.",
+                sum(refused),
+                row_count)
 
         if (keyless > 0):
             logger.warning(

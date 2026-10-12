@@ -29,10 +29,15 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import to_epoch_ns
-from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import NS_PER_SECOND
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.value_novelty import DEFAULT_MAX_VALUES
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
@@ -95,6 +100,12 @@ class TC1ChangeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_values : int, default = 64
         Distinct values recalled per identifier per port. Beyond this the least recently seen is forgotten, so its
         return reads as first seen again; the bound errs toward over-reporting novelty rather than hiding it.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The previous value is
+        kept per port in event-time order, so one poll from a device whose clock is wrong by years would become every
+        later poll's predecessor, and each honest poll after it would read as out of order with no verdict. A refused
+        row carries no per-entity features from this stage, sets `clock_refused`, and moves no horizon. See
+        `morpheus.utils.event_clock`.
     """
 
     def __init__(self,
@@ -103,8 +114,12 @@ class TC1ChangeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_column: str = "event_time",
                  time_unit: str = "ns",
                  novelty_columns: list[str] = None,
-                 max_values: int = DEFAULT_MAX_VALUES):
+                 max_values: int = DEFAULT_MAX_VALUES,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         novelty_columns = list(DEFAULT_NOVELTY_COLUMNS) if novelty_columns is None else list(novelty_columns)
 
@@ -122,6 +137,9 @@ class TC1ChangeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             self._needed_columns[f"{name}{CHANGED_SUFFIX}"] = TypeId.BOOL8
             self._needed_columns[f"{name}{FIRST_SEEN_SUFFIX}"] = TypeId.BOOL8
             self._needed_columns[f"{name}{DISTINCT_SUFFIX}"] = TypeId.INT64
+
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -197,6 +215,7 @@ class TC1ChangeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             changed: dict[str, list] = {name: [] for name in self._novelty_columns}
             first_seen: dict[str, list] = {name: [] for name in self._novelty_columns}
             distinct: dict[str, list] = {name: [] for name in self._novelty_columns}
+            refused = [False] * len(entity_keys)
             unordered = 0
             keyless = 0
 
@@ -231,6 +250,15 @@ class TC1ChangeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unordered += 1
                     continue
 
+                if (not self._clock.accept(event_time_ns)):
+                    for name in self._novelty_columns:
+                        changed[name].append(None)
+                        first_seen[name].append(None)
+                        distinct[name].append(None)
+
+                    refused[position] = True
+                    continue
+
                 result = self._tracker.observe(
                     key,
                     event_time_ns, {name: self._value(identifiers[name][position])
@@ -247,6 +275,15 @@ class TC1ChangeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 assign_nullable_bool_column(df, f"{name}{CHANGED_SUFFIX}", changed[name])
                 assign_nullable_bool_column(df, f"{name}{FIRST_SEEN_SUFFIX}", first_seen[name])
                 assign_nullable_int_column(df, f"{name}{DISTINCT_SUFFIX}", distinct[name])
+
+            mark_refused(df, refused)
+
+        if (any(refused)):
+            logger.warning(
+                "TC1ChangeStage refused %d of %d polls whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they carry no verdict and set clock_refused.",
+                sum(refused),
+                len(entity_keys))
 
         if (keyless > 0):
             logger.warning(

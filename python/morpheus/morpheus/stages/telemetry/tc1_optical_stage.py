@@ -29,10 +29,14 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import to_epoch_ns
-from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.optical_baseline import DEFAULT_MIN_SAMPLES
 from morpheus.utils.optical_baseline import NS_PER_SECOND
 from morpheus.utils.optical_baseline import OpticalBaselineTracker
@@ -92,6 +96,11 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Trailing window the baseline is taken over. See the note on what the length costs.
     min_samples : int, default = 5
         Prior readings required before a baseline is published. Below this a port carries null deviations.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The baseline window
+        trails event time, so one reading from a device whose clock is wrong by years would expire every honest reading
+        behind it and leave the port with no baseline. A refused row carries no per-entity features from this stage,
+        sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
 
     Notes
     -----
@@ -111,8 +120,12 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_unit: str = "ns",
                  channel_columns: list[str] = None,
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
-                 min_samples: int = DEFAULT_MIN_SAMPLES):
+                 min_samples: int = DEFAULT_MIN_SAMPLES,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         channel_columns = list(DEFAULT_CHANNEL_COLUMNS) if channel_columns is None else list(channel_columns)
 
@@ -135,6 +148,9 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             self._needed_columns[f"{name}{BASELINE_SUFFIX}"] = TypeId.FLOAT64
             self._needed_columns[f"{name}{DEVIATION_SUFFIX}"] = TypeId.FLOAT64
             self._needed_columns[f"{name}{SAMPLES_SUFFIX}"] = TypeId.INT64
+
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -211,6 +227,7 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             baselines: dict[str, list] = {name: [] for name in self._channel_columns}
             deviations: dict[str, list] = {name: [] for name in self._channel_columns}
             counts: dict[str, list] = {name: [] for name in self._channel_columns}
+            refused = [False] * len(entity_keys)
             unordered = 0
             keyless = 0
 
@@ -245,6 +262,15 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unordered += 1
                     continue
 
+                if (not self._clock.accept(event_time_ns)):
+                    for name in self._channel_columns:
+                        baselines[name].append(None)
+                        deviations[name].append(None)
+                        counts[name].append(0)
+
+                    refused[position] = True
+                    continue
+
                 result = self._tracker.observe(
                     key,
                     event_time_ns, {name: self._reading(channels[name][position])
@@ -261,6 +287,15 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 assign_nullable_float_column(df, f"{name}{BASELINE_SUFFIX}", baselines[name])
                 assign_nullable_float_column(df, f"{name}{DEVIATION_SUFFIX}", deviations[name])
                 assign_nullable_int_column(df, f"{name}{SAMPLES_SUFFIX}", counts[name])
+
+            mark_refused(df, refused)
+
+        if (any(refused)):
+            logger.warning(
+                "TC1OpticalStage refused %d of %d readings whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they carry no deviation, set clock_refused and expired nothing.",
+                sum(refused),
+                len(entity_keys))
 
         if (keyless > 0):
             logger.warning(

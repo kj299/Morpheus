@@ -32,6 +32,9 @@ from morpheus.utils.type_utils import get_df_class
 
 MINUTE_NS = 60 * NS_PER_SECOND
 
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A device clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
 
 def frame(statuses: list, last_changes: list = None, entity: str = "hq:sw1:Gi1/0/1") -> dict:
     count = len(statuses)
@@ -264,3 +267,20 @@ def test_null_entity_keys_do_not_share_a_flap_count(config: Config):
 
     assert _as_list(meta, "link_flaps") == [None, None, None, None]
     assert _as_list(meta, "link_flaps_in_window") == [None, None, None, None]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    payload = frame(["up", "up", "down", "up"])
+    payload["event_time"] = [0, MINUTE_NS, YEARS_AHEAD_NS, 2 * MINUTE_NS]
+    meta = run(config, payload)
+
+    assert _as_list(meta, "clock_refused") == [False, False, True, False]
+    assert _as_list(meta, "link_flaps")[2] is None
+    # The poll after it is compared with the one before it, and the port never went down.
+    assert _as_list(meta, "link_flaps")[3] == 0
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC1FlapStage(config, max_clock_skew_seconds=0)

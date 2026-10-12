@@ -48,16 +48,24 @@ R-P-L7-006 is breadth rising for four consecutive weeks with the role unchanged:
 - and a principal whose **role change was recorded late** is watchlisted, because on every week of the rise the
   store said the role was unchanged. That is the event-time knowledge the enrichment defaults to, and the harness
   asserts what the latest knowledge would have said instead.
+
+**A second tenant shares the audit collector.** Its sync service exports the same small dataset twice a day all
+month, and for the last two days exports it twice as often. Neither rule has anything to say about that -- the
+records and the object type never change -- and it is not a principal's behaviour at all: it is the platform's. The
+health pass over this corpus is where it shows, as the one step above its own history among every collector, class
+and tenant, which is what the 'Platform baseline step' search reads.
 """
 
 import typing
 
+import envelope
 import pandas as pd
-
 import stamping
+
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
@@ -168,6 +176,26 @@ ROLE_CHANGE_WEEK = 5
 LATE_RECORDING_WEEK = 9
 """Kate's change reaches the directory after the corpus ends."""
 
+# The second tenant.
+DOUBLING_TENANT = "labs"
+SYNC_PRINCIPAL = "sync@labs.example.com"
+SYNC_OBJECT = "lab-dataset"
+SYNC_RECORDS = 50
+SYNC_HOURS = (2, 14)
+"""The sync runs at these hours every day, each run in its own hourly window."""
+
+SYNC_EXPORTS = 2
+"""Exports a sync run makes: one per shard of the dataset, a minute apart."""
+
+SYNC_DAYS = (FIRST_MONDAY_DAY + 1, 56)
+"""The days the sync runs on, first included and last excluded: the whole corpus but its edges."""
+
+DOUBLING_DAY = 54
+"""From this day each run exports every shard twice, and the tenant's rows per window double."""
+
+HEALTH_MIN_BUCKETS = 24
+"""Windows a history needs before its baseline is published: twelve days of the sync's two runs a day."""
+
 
 def at(day: float, hour: float = 0) -> int:
     """An instant `day` days and `hour` hours into the corpus, in nanoseconds since the epoch."""
@@ -264,7 +292,8 @@ def _operation(rows: list,
                object_type: str,
                records: int,
                when: int,
-               result: str = "success"):
+               result: str = "success",
+               tenant_id: str = envelope.TENANT):
     rows.append({
         "collector_id": "saas-audit-01",
         "schema_version": "tc7_saas.v1",
@@ -278,6 +307,7 @@ def _operation(rows: list,
         "record_count": records,
         "result": result,
         "client_app": "web",
+        "tenant_id": tenant_id,
     })
 
 
@@ -346,16 +376,34 @@ def _build_breadth(rows: list):
                     _operation(rows, principal, READ, f"{object_type.lower()}-{week}", object_type, 1 + index, when)
 
 
+def _build_sync(rows: list):
+    """The second tenant's sync: the same exports at the same hours every day, twice as many from `DOUBLING_DAY`."""
+    for day in range(*SYNC_DAYS):
+        repeats = 2 if day >= DOUBLING_DAY else 1
+
+        for hour in SYNC_HOURS:
+            for index in range(SYNC_EXPORTS * repeats):
+                _operation(rows,
+                           SYNC_PRINCIPAL,
+                           EXPORT,
+                           SYNC_OBJECT,
+                           "Dataset",
+                           SYNC_RECORDS,
+                           at(day, hour) + (30 + index) * 60 * NS_PER_SECOND,
+                           tenant_id=DOUBLING_TENANT)
+
+
 def build_corpus() -> dict[str, pd.DataFrame]:
     """The seeded corpus: one frame of SaaS audit records."""
     rows: list = []
     _build_bulk(rows)
     _build_breadth(rows)
+    _build_sync(rows)
 
     frame = pd.DataFrame(rows).sort_values("event_time", kind="mergesort").reset_index(drop=True)
     frame["collector_seq"] = range(len(frame))
 
-    return {SAAS_CLASS: frame}
+    return envelope.attach_all({SAAS_CLASS: frame})
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -426,6 +474,10 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
+    # Validated once per class, ahead of every stage: ingest_time stamped, the envelope checked, untrusted clocks
+    # taken out of the stream and kept.
+    (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
+
     (identity, asset) = build_stores()
 
     pipe = LinearPipeline(config)
@@ -434,6 +486,8 @@ def run_pipeline(config: Config,
 
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
+
+    pipe.add_stage(CollectorSequenceStage(config))
 
     pipe.add_stage(TC0EnrichStage(config, store=identity, entity_column="user_principal", knowledge=knowledge))
     pipe.add_stage(
@@ -468,7 +522,9 @@ def run_pipeline(config: Config,
     frame["telemetry_class"] = SAAS_CLASS
     frame["row_key"] = frame["event_uid"]
 
-    return canonicalize(frame, key_columns=KEY_COLUMNS, ignore_columns=IGNORE_COLUMNS)
+    return canonicalize(envelope.with_quarantine(frame, quarantined),
+                        key_columns=KEY_COLUMNS,
+                        ignore_columns=IGNORE_COLUMNS)
 
 
 def render(result: pd.DataFrame) -> str:

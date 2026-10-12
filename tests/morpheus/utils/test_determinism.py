@@ -17,10 +17,10 @@
 import pandas as pd
 import pytest
 
+from morpheus.utils.determinism import apply_clock_skew
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import apply_clock_skew
 from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.determinism import quantize_value
 from morpheus.utils.determinism import sort_for_cumulative_features
@@ -149,6 +149,22 @@ def test_sort_for_cumulative_features_orders_by_every_key():
     # event_time alone leaves the two rows at 10 tied; collector_id then collector_seq settles them.
     assert result["row"].tolist() == ["first", "third", "second", "fourth"]
     assert result.index.tolist() == [0, 1, 2, 3]
+
+
+def test_a_sequence_sent_as_text_sorts_by_its_numbers():
+    # "10" sorts before "9" as text, so a collector that sends its sequence as a string would otherwise be put in a
+    # different order from one that sends an integer, and everything order-dependent after it would differ.
+    frame = pd.DataFrame({
+        "event_time": [0, 0, 0], "collector_id": ["a", "a", "a"], "collector_seq": ["10", "9", "100"]
+    })
+
+    assert list(sort_for_cumulative_features(frame)["collector_seq"]) == ["9", "10", "100"]
+
+
+def test_a_name_is_never_read_as_a_number():
+    frame = pd.DataFrame({"event_time": [0, 0, 0], "collector_id": ["b", "a10", "a9"], "collector_seq": [1, 1, 1]})
+
+    assert list(sort_for_cumulative_features(frame)["collector_id"]) == ["a10", "a9", "b"]
 
 
 def test_sort_for_cumulative_features_rejects_ties():

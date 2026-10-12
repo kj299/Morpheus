@@ -31,9 +31,9 @@ import pandas as pd
 import pytest
 
 from morpheus.io import serializers
-from morpheus.utils.siem_wire import SPLUNK_TIME_FORMAT
 from morpheus.utils.binding_table import TABLE_NAME_COLUMN
 from morpheus.utils.binding_table import BindingTable
+from morpheus.utils.siem_wire import SPLUNK_TIME_FORMAT
 from morpheus.utils.siem_wire import omit_null_fields
 from morpheus.utils.siem_wire import render_event_time
 from morpheus.utils.siem_wire import render_event_time_series
@@ -173,6 +173,8 @@ TIMESTAMP_FIELD_OWNERS = {
     # The two context stanzas shipped ahead of their producer and were listed here as "not built" until the TC-0
     # store landed; the tripwire below is what moved this entry.
     "valid_from": "TC0IdentityStage and TC0AssetStage, on every version they record",
+    # A quarantined record is timed on when it arrived, the one clock in it nobody doubts.
+    "ingest_time": "EnvelopeValidateStage, on every record it passes or quarantines",
 }
 
 UNBUILT_TIMESTAMP_FIELDS: set = set()

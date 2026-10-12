@@ -1129,6 +1129,7 @@ NUMBER_WORDS = {
     "sixty": 60,
     "sixty-one": 61,
     "sixty-two": 62,
+    "sixty-six": 66,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -1599,3 +1600,121 @@ def test_the_new_layer_2_detections_return_exactly_what_is_written(expected: dic
         assert [(row["auth_port_key"], row["dot1x_identity"]) for row in searches[key]["key_values"]] == [
             (rows[0]["auth_port_key"], rows[0]["dot1x_identity"]) for rows in notables
         ], key
+
+
+# --- The pipeline's own reports, read off the health, quarantine and late streams ------------------------------
+
+
+def _optional_events(sourcetype_file: str) -> list:
+    return _events_of(sourcetype_file) if os.path.exists(os.path.join(EVENTS, sourcetype_file)) else []
+
+
+def test_no_scored_event_reaches_the_detections_from_an_incomplete_window():
+    # The late row goes on its own sourcetype, so the detections' index holds only complete windows. Every
+    # detection also filters on window_complete=true, which is the second guard; this is the first.
+    for name in sorted(os.listdir(EVENTS)):
+        if (name.startswith("morpheus_score_l") and name.endswith(".jsonlines")):
+            assert all(event.get("window_complete") is True for event in _events_of(name)), name
+
+    late = _events_of("morpheus_late.jsonlines")
+
+    assert len(late) > 0
+    assert all(event["is_late"] is True and event["window_complete"] is False for event in late)
+
+
+def test_every_detection_reads_only_complete_windows():
+    import configparser  # pylint: disable=import-outside-toplevel
+
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
+
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.read_string(folded)
+
+    for name in parser.sections():
+        query = parser[name].get("search", "")
+        reads = re.findall(r"index=behavior_events sourcetype=morpheus:score:l[1-7*]( window_complete=true)?", query)
+
+        assert all(reads), f"{name} reads behavior_events without window_complete=true"
+
+
+def test_the_refusal_rate_is_what_the_quarantine_and_health_streams_say(expected: dict):
+    received = collections.Counter()
+    refused = collections.Counter()
+
+    for event in _events_of("morpheus_quarantine.jsonlines"):
+        key = (event["collector_id"], event["tenant_id"])
+        received[key] += 1
+        refused[key] += 1
+
+    for event in _events_of("morpheus_health.jsonlines"):
+        key = (event["collector_id"], event["tenant_id"])
+        received[key] += event["rows"]
+        refused[key] += event.get("clock_refused", 0)
+
+    rows = [{
+        "collector_id": collector,
+        "tenant_id": tenant,
+        "received": received[(collector, tenant)],
+        "refusal_rate": round(refused[(collector, tenant)] / received[(collector, tenant)], 3)
+    } for (collector, tenant) in sorted(received) if refused[(collector, tenant)] > 0]
+    entry = expected["searches"]["Pipeline health - refusal rate"]
+
+    assert entry["expected_rows"] == len(rows)
+    assert [{
+        key: row[key]
+        for key in ("collector_id", "tenant_id", "received", "refusal_rate")
+    } for row in entry["key_values"]] == rows
+
+
+def test_collector_health_names_the_collectors_whose_streams_are_broken(expected: dict):
+    gaps = collections.Counter()
+    regressed = collections.Counter()
+    worst_offset = collections.Counter()
+
+    for event in _events_of("morpheus_health.jsonlines"):
+        collector = event["collector_id"]
+        gaps[collector] += event.get("seq_gap", 0)
+        regressed[collector] += event.get("seq_regressed", 0)
+        worst_offset[collector] = max(worst_offset[collector],
+                                      abs(event.get("clock_offset_ms_min", 0)),
+                                      abs(event.get("clock_offset_ms_max", 0)))
+
+    flagged = sorted(collector for collector in gaps
+                     if gaps[collector] > 0 or regressed[collector] > 0 or worst_offset[collector] > 1000)
+    entry = expected["searches"]["Collector health"]
+
+    assert entry["expected_rows"] == len(flagged)
+    assert [(row["collector_id"], row["seq_gap"], row["seq_regressed"]) for row in entry["key_values"]
+            ] == [(collector, gaps[collector], regressed[collector]) for collector in flagged]
+
+
+def test_late_arrivals_are_counted_by_class(expected: dict):
+    counts = collections.Counter((event["telemetry_class"], event["collector_id"], event["tenant_id"])
+                                 for event in _optional_events("morpheus_late.jsonlines"))
+    entry = expected["searches"]["Late arrivals by class"]
+
+    assert entry["expected_rows"] == len(counts)
+    assert [(row["telemetry_class"], row["collector_id"], row["tenant_id"], row["late_rows"])
+            for row in entry["key_values"]] == [(*key, count) for (key, count) in sorted(counts.items())]
+
+
+def test_the_platform_step_is_the_doubling_tenant_alone(expected: dict):
+    import envelope  # pylint: disable=import-outside-toplevel
+
+    records = pd.DataFrame(_events_of("morpheus_health.jsonlines"))
+    steps = envelope.platform_steps(records)
+    entry = expected["searches"]["Platform baseline step"]
+
+    assert entry["expected_rows"] == len(steps)
+    assert [(row["collector_id"],
+             row["telemetry_class"],
+             row["tenant_id"],
+             row["previous_baseline"],
+             row["previous_rows"],
+             row["rows"]) for row in entry["key_values"]] == [(row["collector_id"],
+                                                               row["telemetry_class"],
+                                                               row["tenant_id"],
+                                                               int(row["previous_baseline"]),
+                                                               int(row["previous_rows"]),
+                                                               int(row["rows"])) for (_, row) in steps.iterrows()]

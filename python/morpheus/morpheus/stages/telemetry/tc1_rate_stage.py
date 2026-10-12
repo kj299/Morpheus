@@ -72,6 +72,11 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import mark_refused
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +188,11 @@ class TC1RateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Committed periods a history needs before it is published.
     max_buckets : int, default = 4096
         Periods retained per history.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The histories commit
+        periods on event time, so one poll from a device whose clock is wrong by years would close every open period at
+        once and stand a period of its own years ahead of the rest. A refused row carries no per-entity features from
+        this stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
 
     def __init__(self,
@@ -200,8 +210,12 @@ class TC1RateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  bucket_seconds: int = DEFAULT_BUCKET_SECONDS,
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_buckets: int = DEFAULT_MIN_BUCKETS,
-                 max_buckets: int = DEFAULT_MAX_BUCKETS):
+                 max_buckets: int = DEFAULT_MAX_BUCKETS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         error_columns = list(DEFAULT_ERROR_COLUMNS) if error_columns is None else list(error_columns)
         discard_columns = list(DEFAULT_DISCARD_COLUMNS) if discard_columns is None else list(discard_columns)
@@ -237,6 +251,9 @@ class TC1RateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         for name in (ERROR_RATE, DISCARD_RATE, BITS_IN, BITS_OUT, BITS, UTILIZATION):
             self._needed_columns[name] = TypeId.FLOAT64
+
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._needed_columns[f"{ERROR_RATE}{BASELINE_MAX_SUFFIX}"] = TypeId.FLOAT64
         self._needed_columns[f"{ERROR_RATE}{BUCKETS_SUFFIX}"] = TypeId.INT64
@@ -331,6 +348,9 @@ class TC1RateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             keys = [normalize_text(value) for value in column(self._entity_key_column)]
             times = [self._event_time_ns(raw) for raw in column(self._time_column)]
+            # Only a keyed row can move a history, so only a keyed row is put to the clock.
+            (times, refused) = guard_times(self._clock,
+                                           [time if key is not None else None for (key, time) in zip(keys, times)])
             intervals = [_number(value) for value in column("interval_seconds")]
             resets = [_flag(value) for value in column("counter_reset")]
             unordered = [_flag(value) for value in column("sample_out_of_order")]
@@ -409,14 +429,22 @@ class TC1RateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_int_column(df, f"{BITS}{BUCKETS_SUFFIX}", peaks.buckets)
             assign_nullable_bool_column(df, f"{BITS}{MATURE_SUFFIX}", peaks.mature)
             assign_nullable_float_column(df, f"{BITS}{STEP_SUFFIX}", peaks.steps)
+            mark_refused(df, refused)
 
-        refused = errors.unordered + peaks.unordered
+        if (any(refused)):
+            logger.warning(
+                "TC1RateStage refused %d of %d polls whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they carry no rate, set clock_refused and committed no period.",
+                sum(refused),
+                row_count)
 
-        if (refused > 0):
+        late = errors.unordered + peaks.unordered
+
+        if (late > 0):
             logger.warning(
                 "TC1RateStage saw %d rates earlier than their port's previous one; they entered no history. Preserve "
                 "per-port ordering upstream.",
-                refused)
+                late)
 
         return message
 

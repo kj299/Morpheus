@@ -277,6 +277,8 @@ def test_a_session_past_the_timeout_is_abandoned(config: Config):
     stage.on_data(second)
 
     assert stage.open_sessions == 0
+    # The record whose arrival abandoned the session carries the count, for the health record to sum.
+    assert _as_list(second, "session_abandoned") == [1, 0]
 
     # The lost session's stop, if it ever arrives, reads as unpaired rather than as a two-day session.
     third = MessageMeta(get_df_class(config.execution_mode)(frame(["end"], times=[3 * HOUR_NS])))
@@ -331,6 +333,7 @@ def test_one_row_from_a_broken_clock_does_not_abandon_every_open_session(config:
     stage.on_data(broken)
 
     assert _as_list(broken, "session_unpaired") == [None]
+    assert _as_list(broken, "clock_refused") == [True]
     assert stage.open_sessions == 1
 
     closed = MessageMeta(get_df_class(config.execution_mode)(frame(["end"], times=[600 * NS_PER_SECOND])))
@@ -346,6 +349,8 @@ def test_the_lifecycle_column_names_each_end_in_two_words_whatever_the_collector
     meta = run(config, frame(["logon", "LOGOFF", "start", "stop", "heartbeat"]))
 
     assert _as_list(meta, "session_lifecycle") == ["start", "end", "start", "end", None]
+    # The one the stage could not place is marked, so the health record counts it rather than a log line.
+    assert _as_list(meta, "session_unclassified") == [False, False, False, False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode

@@ -35,6 +35,10 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.optical_forecast import DEFAULT_MAX_RESIDUAL_DB
 from morpheus.utils.optical_forecast import DEFAULT_MAX_SAMPLES
 from morpheus.utils.optical_forecast import DEFAULT_MIN_SAMPLES
@@ -130,6 +134,11 @@ class TC1ForecastStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Standard errors a falling slope must be from flat before it is projected.
     decimals : int, default = 4
         Decimal places every reported figure is rounded to, under determinism control 9.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The fit's window
+        trails event time, so one reading from a device whose clock is wrong by years would expire the whole week of
+        honest readings behind it. A refused row carries no per-entity features from this stage, sets `clock_refused`,
+        and moves no horizon. See `morpheus.utils.event_clock`.
     """
 
     def __init__(self,
@@ -147,8 +156,12 @@ class TC1ForecastStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  max_samples: int = DEFAULT_MAX_SAMPLES,
                  max_residual_db: float = DEFAULT_MAX_RESIDUAL_DB,
                  min_significance: float = DEFAULT_MIN_SIGNIFICANCE,
-                 decimals: int = DEFAULT_FLOAT_DECIMALS):
+                 decimals: int = DEFAULT_FLOAT_DECIMALS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (not channel_column):
             raise ValueError("channel_column is required; it names the level to fit and prefixes every column written")
@@ -176,6 +189,9 @@ class TC1ForecastStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                                max_residual_db=max_residual_db,
                                                min_significance=min_significance,
                                                decimals=decimals)
+
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._warned_typeless = False
 
@@ -289,6 +305,7 @@ class TC1ForecastStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             floors: list = []
             days: list = []
             statuses: list = []
+            refused = [False] * row_count
             unordered = 0
             keyless = 0
 
@@ -315,6 +332,13 @@ class TC1ForecastStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     unordered += int(key is not None)
                     continue
 
+                if (not self._clock.accept(event_time_ns)):
+                    for column in (trends, residuals, significances, samples, floors, days, statuses):
+                        column.append(None)
+
+                    refused[position] = True
+                    continue
+
                 result = self._tracker.observe(key,
                                                event_time_ns,
                                                self._reading(levels[position]),
@@ -338,6 +362,14 @@ class TC1ForecastStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_float_column(df, f"{prefix}{FLOOR_SUFFIX}", floors)
             assign_nullable_float_column(df, f"{prefix}{DAYS_SUFFIX}", days)
             assign_str_column(df, f"{prefix}{STATUS_SUFFIX}", statuses)
+            mark_refused(df, refused)
+
+        if (any(refused)):
+            logger.warning(
+                "TC1ForecastStage refused %d of %d readings whose event time was further ahead of the stream than "
+                "max_clock_skew_seconds allows; they carry no forecast, set clock_refused and expired nothing.",
+                sum(refused),
+                row_count)
 
         if (not has_types and self._default_floor is None and not self._warned_typeless):
             self._warned_typeless = True

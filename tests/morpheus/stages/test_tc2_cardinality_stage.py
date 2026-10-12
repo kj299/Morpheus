@@ -32,6 +32,9 @@ from morpheus.utils.type_utils import get_df_class
 
 MINUTE_NS = 60 * NS_PER_SECOND
 
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A device clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
 
 def frame(macs: list, ports: list = None, vlans: list = None, ouis: list = None, times: list = None) -> dict:
     count = len(macs)
@@ -386,3 +389,19 @@ def test_one_vlan_number_at_two_sites_is_two_segments(config: Config):
 
 def test_needed_columns_name_the_vlan_key(config: Config):
     assert TC2CardinalityStage(config).get_needed_columns()["vlan_key"] == TypeId.STRING
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    macs = ["aa:00:00:00:00:01", "aa:00:00:00:00:02", "aa:00:00:00:00:03", "aa:00:00:00:00:04"]
+    meta = run(config, frame(macs, times=[0, MINUTE_NS, YEARS_AHEAD_NS, 2 * MINUTE_NS]))
+
+    assert _as_list(meta, "clock_refused") == [False, False, True, False]
+    assert _as_list(meta, "macs_per_port")[2] is None
+    # The window still holds the two sightings before it, rather than being emptied by a decade.
+    assert _as_list(meta, "macs_per_port")[3] == 3
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC2CardinalityStage(config, max_clock_skew_seconds=0)

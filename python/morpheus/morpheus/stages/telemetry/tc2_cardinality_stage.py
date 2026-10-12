@@ -37,6 +37,10 @@ from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import mark_refused
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +118,11 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_samples : int, default = 4096
         Observations retained per entity regardless of the window. When this binds the count is a lower bound and
         the row is marked saturated.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The windows expire
+        sightings on event time, so one MAC table row from a switch whose clock is wrong by years would empty every
+        port's window at once and let a flood begin from zero. A refused row carries no per-entity features from this
+        stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
 
     def __init__(self,
@@ -127,8 +136,12 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_column: str = "event_time",
                  time_unit: str = "ns",
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
-                 max_samples: int = 4096):
+                 max_samples: int = 4096,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -154,6 +167,9 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         self._needed_columns["port_key"] = TypeId.STRING
         self._needed_columns[VLAN_KEY] = TypeId.STRING
+
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -254,6 +270,7 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             counts: dict[str, list] = {name: [] for name in COUNTS}
             first: dict[str, list] = {name: [] for name in COUNTS}
             saturated: dict[str, list] = {name: [] for name in COUNTS}
+            refused = [False] * len(macs)
             unordered = 0
             keyless = 0
 
@@ -283,6 +300,15 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                         saturated[name].append(False)
 
                     unordered += 1
+                    continue
+
+                if (not self._clock.accept(event_time_ns)):
+                    for name in COUNTS:
+                        counts[name].append(None)
+                        first[name].append(None)
+                        saturated[name].append(False)
+
+                    refused[position] = True
                     continue
 
                 observations = {
@@ -321,6 +347,15 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 assign_nullable_int_column(df, name, counts[name])
                 assign_nullable_bool_column(df, f"{name}_first_in_window", first[name])
                 df[f"{name}_saturated"] = saturated[name]
+
+            mark_refused(df, refused)
+
+        if (any(refused)):
+            logger.warning(
+                "TC2CardinalityStage refused %d of %d observations whose event time was further ahead of the stream "
+                "than max_clock_skew_seconds allows; they entered no window, set clock_refused and expired nothing.",
+                sum(refused),
+                len(macs))
 
         if (keyless > 0):
             logger.warning(

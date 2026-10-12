@@ -648,6 +648,27 @@ _OPERATIONAL = (
     "auth_elapsed_p99",
     "auth_elapsed_samples",
     "mac_action",
+    # The envelope's account of the collector and its clock, the tenant the record belongs to, and the pipeline's
+    # own refusals and counts: what a health search groups by, and nothing about whom a record concerns. The tenant
+    # is an organization, and the exporter a router.
+    "observed_time",
+    "ingest_time",
+    "clock_source",
+    "clock_offset_ms",
+    "sampling_policy",
+    "tenant_id",
+    "exporter_id",
+    "envelope_valid",
+    "envelope_defects",
+    "clock_quarantined",
+    "quarantine_reason",
+    "quarantined_from",
+    "clock_refused",
+    "collector_seq_gap",
+    "collector_seq_regressed",
+    "auth_abandoned",
+    "session_abandoned",
+    "session_unclassified",
 )
 
 COLUMNS: dict[str, str] = {}

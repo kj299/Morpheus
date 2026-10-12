@@ -32,6 +32,9 @@ from morpheus.utils.type_utils import get_df_class
 
 DAY_NS = 24 * 3600 * 10**9
 
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A device clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
 
 def frame(serials: list, neighbors: list = None, times: list = None, entity: str = "hq:sw1:Gi1/0/1") -> dict:
     count = len(serials)
@@ -51,6 +54,15 @@ def _as_list(meta: MessageMeta, column: str) -> list:
         series = series.to_pandas()
 
     return [None if value is None or value is pd.NA or value != value else value for value in series.tolist()]
+
+
+LONE_PORT_SKEW_SECONDS = 500 * 86400
+"""A clock bound wide enough for a corpus of one port.
+
+Here the port is the whole stream, so the port's gap between polls is the stream's gap, and the stream's own clock
+refuses a time more than a week ahead of it by default. In an estate the other ports keep the stream moving and a
+port may go a year between polls under the default bound; these tests are about the port, so they widen the bound
+to say so rather than hide it."""
 
 
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
@@ -95,7 +107,9 @@ def test_a_substitution_is_detected(config: Config):
 def test_a_change_across_a_month_boundary_is_detected(config: Config):
     # The case the period-bucketed feature cannot see. Two samples forty days apart fall in different monthly
     # buckets, each holding one distinct value, so a distinct count reads them as no change at all.
-    meta = run(config, frame(["SN-AAA", "SN-BBB"], times=[0, 40 * DAY_NS]))
+    meta = run(config,
+               frame(["SN-AAA", "SN-BBB"], times=[0, 40 * DAY_NS]),
+               max_clock_skew_seconds=LONE_PORT_SKEW_SECONDS)
 
     assert _as_list(meta, "transceiver_serial_changed") == [None, True]
 
@@ -116,7 +130,7 @@ def test_it_sees_what_the_period_bucketed_feature_cannot(config: Config):
     bucketed = TC1FeatureStage(config).on_data(MessageMeta(df_class(dict(payload))))
 
     compared = MessageMeta(df_class(dict(payload)))
-    TC1ChangeStage(config).on_data(compared)
+    TC1ChangeStage(config, max_clock_skew_seconds=LONE_PORT_SKEW_SECONDS).on_data(compared)
 
     # The distinct count reads 1 on each side of the boundary, so the substitution leaves no trace in it.
     assert _as_list(bucketed, "transceiver_increment") == [1, 1]
@@ -127,7 +141,9 @@ def test_it_sees_what_the_period_bucketed_feature_cannot(config: Config):
 @pytest.mark.gpu_and_cpu_mode
 def test_a_change_across_any_gap_is_detected(config: Config):
     # No calendar is consulted, so more than a year between polls behaves exactly like a minute.
-    meta = run(config, frame(["SN-AAA", "SN-BBB"], times=[0, 400 * DAY_NS]))
+    meta = run(config,
+               frame(["SN-AAA", "SN-BBB"], times=[0, 400 * DAY_NS]),
+               max_clock_skew_seconds=LONE_PORT_SKEW_SECONDS)
 
     assert _as_list(meta, "transceiver_serial_changed") == [None, True]
 
@@ -298,3 +314,19 @@ def test_a_null_key_does_not_disturb_a_real_ones_state(config: Config):
     # port's history, the third row would have compared SN-AAA against SN-ZZZ and reported a substitution.
     assert _as_list(meta, "transceiver_serial_changed") == [None, None, False]
     assert _as_list(meta, "transceiver_serial_first_seen") == [None, None, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    meta = run(config, frame(["SN-AAA", "SN-AAA", "SN-ZZZ", "SN-AAA"], times=[0, DAY_NS, YEARS_AHEAD_NS, 2 * DAY_NS]))
+
+    assert _as_list(meta, "clock_refused") == [False, False, True, False]
+    assert _as_list(meta, "transceiver_serial_changed")[2] is None
+    # Believed, the decade-ahead poll would have been the port's previous one and the next honest poll would have
+    # been out of order with no verdict; refused, the optic simply never changed.
+    assert _as_list(meta, "transceiver_serial_changed")[3] is False
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC1ChangeStage(config, max_clock_skew_seconds=0)

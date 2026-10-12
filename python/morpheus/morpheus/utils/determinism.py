@@ -117,7 +117,27 @@ def sort_for_cumulative_features(df: pd.DataFrame,
                 "Add a tie-breaking column, or pass require_total_order=False to accept the input's own order for "
                 "ties.")
 
-    return df.sort_values(order_columns, kind="mergesort").reset_index(drop=True)
+    return df.sort_values(order_columns, kind="mergesort", key=_numeric_order).reset_index(drop=True)
+
+
+def _numeric_order(column: pd.Series) -> pd.Series:
+    """
+    The sort key for one order column: its numbers, where a column of text carries nothing but whole numbers.
+
+    A collector that sends `collector_seq` as text sends the same sequence, and sorting it as text puts `"10"` before
+    `"9"` -- an order that depends on the type the value arrived in, which control 8 must not. A column with any value
+    that is not a whole number is left as it is, so a name is never read as a number.
+    """
+    if (column.dtype != object and not pd.api.types.is_string_dtype(column)):
+        return column
+
+    present = column.dropna()
+
+    if (len(present) == 0
+            or not all(isinstance(value, str) and value.strip().lstrip("-").isdigit() for value in present)):
+        return column
+
+    return pd.to_numeric(column, errors="coerce").astype("Int64")
 
 
 def quantize_value(value: float, decimals: int = DEFAULT_FLOAT_DECIMALS) -> float:

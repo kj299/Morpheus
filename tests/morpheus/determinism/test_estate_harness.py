@@ -44,6 +44,7 @@ from morpheus.utils.lineage import window_id_from_timestamp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import envelope as universal_envelope  # noqa: E402
 import estate_pipeline as ep  # noqa: E402
 
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_estate_expected.csv")
@@ -362,7 +363,8 @@ def test_every_class_ran_and_only_the_chained_ones_sealed(result: pd.DataFrame):
     # The binding classes ride along because the Splunk package is rendered from this one run, and they are what
     # the two binding sourcetypes are made of. They carry no chain, and saying so here keeps a future sealer that
     # swept them up from passing quietly.
-    assert set(result["telemetry_class"]) == set(ep.CHAINED_CLASSES) | set(ep.UNCHAINED_CLASSES)
+    assert set(result["telemetry_class"]) == (set(ep.CHAINED_CLASSES) | set(ep.UNCHAINED_CLASSES)
+                                              | {universal_envelope.QUARANTINE_CLASS})
 
     for name in ep.CHAINED_CLASSES:
         rows = _rows(result, name)

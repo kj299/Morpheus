@@ -41,6 +41,9 @@ PORT = "hq:sw1:Gi1/0/3"
 STEADY = [1] * 8
 HUB = [1, 2, 3, 4, 5]
 
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A device clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
 
 def frame(counts: list, entity: str = PORT, times: list = None) -> dict:
     count = len(counts)
@@ -300,3 +303,17 @@ def test_null_entities_and_counts_are_not_pooled(config: Config):
     assert _as_list(meta, "macs_per_port_step")[2] is None
     assert _as_list(meta, "macs_per_port_step")[3] is None
     assert _as_list(meta, "macs_per_port_baseline_buckets")[4] == 2
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    meta = run(config, frame([1, 1, 9, 1], times=[0, PERIOD_NS, YEARS_AHEAD_NS, 2 * PERIOD_NS]))
+
+    assert _as_list(meta, "clock_refused") == [False, False, True, False]
+    assert _as_list(meta, "macs_per_port_baseline_buckets")[2] is None
+    assert _as_list(meta, "macs_per_port_baseline_buckets")[3] == 2
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC2BaselineStage(config, max_clock_skew_seconds=0)

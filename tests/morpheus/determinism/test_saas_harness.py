@@ -43,6 +43,7 @@ from morpheus.utils.lineage import window_id_from_timestamp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import envelope  # noqa: E402
 import saas_pipeline as sp_  # noqa: E402
 
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_saas_expected.csv")
@@ -476,3 +477,51 @@ def test_every_row_is_stamped_at_layer_seven_and_keyed_on_its_principal(result: 
     assert result["lineage_id"].notna().all()
     assert result["week_window_id"].notna().all()
     assert (result["week_window_id"].astype(int) == result["saas_week_id"].astype(int)).all()
+
+
+# --- The platform: a second tenant whose export volume doubles ------------------------------------------------
+
+
+def _health(pipeline_config: Config, result: pd.DataFrame) -> pd.DataFrame:
+    return envelope.health(pipeline_config, result, sp_.PERIOD_SECONDS, sp_.HEALTH_MIN_BUCKETS)
+
+
+@pytest.mark.cpu_mode
+def test_every_operation_names_its_tenant(result: pd.DataFrame):
+    tenants = result.groupby("tenant_id")["user_principal"].unique()
+
+    assert set(tenants.index) == {envelope.TENANT, sp_.DOUBLING_TENANT}
+    assert list(tenants[sp_.DOUBLING_TENANT]) == [sp_.SYNC_PRINCIPAL]
+
+
+@pytest.mark.cpu_mode
+def test_the_doubling_tenant_is_quiet_to_both_rules(result: pd.DataFrame):
+    # Its records never change and it reaches one object type, so neither rule has anything to say: what changed
+    # is the platform's volume, not a principal's behaviour.
+    assert sp_.SYNC_PRINCIPAL not in _bulk(result)
+    assert sp_.SYNC_PRINCIPAL not in _creeping(result, role=False)
+
+
+@pytest.mark.cpu_mode
+def test_the_platform_step_fires_on_the_doubling_tenant_alone(pipeline_config: Config, result: pd.DataFrame):
+    records = _health(pipeline_config, result)
+    steps = envelope.platform_steps(records)
+
+    assert list(steps["tenant_id"]) == [sp_.DOUBLING_TENANT]
+
+    step = steps.iloc[0]
+    first_doubled = sp_.at(sp_.DOUBLING_DAY, sp_.SYNC_HOURS[0]) // (sp_.PERIOD_SECONDS * sp_.NS_PER_SECOND)
+
+    # Held: the first doubled run and the one after it, each twice the two exports a run made all month.
+    assert step["previous_window_id"] == first_doubled
+    assert (step["previous_baseline"], step["previous_rows"],
+            step["rows"]) == (sp_.SYNC_EXPORTS, 2 * sp_.SYNC_EXPORTS, 2 * sp_.SYNC_EXPORTS)
+
+
+@pytest.mark.cpu_mode
+def test_the_corp_tenant_never_reaches_twice_its_own_peak(pipeline_config: Config, result: pd.DataFrame):
+    records = _health(pipeline_config, result)
+    corp = records[(records["tenant_id"] == envelope.TENANT) & records["rows_baseline_mature"].astype(bool)]
+
+    assert len(corp) > 0
+    assert (corp["rows"] < envelope.STEP_MULTIPLE * corp["rows_baseline_max"]).all()

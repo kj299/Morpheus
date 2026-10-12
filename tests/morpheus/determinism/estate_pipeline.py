@@ -55,9 +55,12 @@ order, because a Merkle root is computed per sealer and classes sealed separatel
 import random
 import typing
 
+import envelope
 import pandas as pd
-
+import session_pipeline as sp
 import stamping
+import telemetry_pipeline as tp
+
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
@@ -65,6 +68,7 @@ from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
+from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
@@ -78,9 +82,6 @@ from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
-
-import session_pipeline as sp
-import telemetry_pipeline as tp
 
 CORPUS_SEED = 20260920
 
@@ -149,7 +150,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     planted cases are asserted elsewhere, and the point of this harness is the join rather than a second estate.
     """
     corpus = tp.build_corpus()
-    corpus[AUTH_CLASS] = _build_desk_auth(random.Random(CORPUS_SEED))
+    corpus[AUTH_CLASS] = envelope.attach(_build_desk_auth(random.Random(CORPUS_SEED)))
 
     return corpus
 
@@ -231,6 +232,10 @@ def build_directory_table(principals: typing.Optional[dict] = None) -> BindingTa
 
 def build_supplicant_table(bindings: pd.DataFrame) -> BindingTable:
     """The derived half: which port an 802.1X identity was authorized on, as the binding stage closed it."""
+    # An authenticator every record of which was quarantined closed no bindings, and the table is empty.
+    if (len(bindings) == 0):
+        return BindingTable(name="dot1x", value_columns=["auth_port_key"], bindings=[])
+
     return BindingTable.from_dataframe(bindings,
                                        name="dot1x",
                                        key_column="dot1x_identity",
@@ -268,6 +273,8 @@ def _run_class(config: Config, dataframes: list, stages: list, impose_order: boo
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
 
+    pipe.add_stage(CollectorSequenceStage(config))
+
     for stage in stages:
         pipe.add_stage(stage)
 
@@ -285,6 +292,13 @@ def _seal_chains(config: Config, outputs: dict[str, pd.DataFrame], parts: int = 
     because the set of classes differs, and a shared helper parameterized on that set would be a helper whose
     only caller-visible behaviour is the list it is given.
     """
+    # A class every record of which was quarantined has nothing to seal, and stays empty.
+    empty = {name: frame for (name, frame) in outputs.items() if len(frame) == 0}
+    outputs = {name: frame for (name, frame) in outputs.items() if len(frame) > 0}
+
+    if (len(outputs) == 0):
+        return empty
+
     columns = {name: list(frame.columns) for (name, frame) in outputs.items()}
     tagged = []
 
@@ -319,7 +333,7 @@ def _seal_chains(config: Config, outputs: dict[str, pd.DataFrame], parts: int = 
         rows = sealed[sealed["telemetry_class"] == name]
         result[name] = rows[columns[name] + added].reset_index(drop=True)
 
-    return result
+    return {**empty, **result}
 
 
 def run_pipeline(config: Config,
@@ -360,6 +374,15 @@ def run_pipeline(config: Config,
     # them would force whoever renders the estate to run the telemetry pipeline a second time beside it.
     outputs = dict(telemetry)
 
+    # The sign-ins are validated as the telemetry classes were, and anything quarantined joins theirs.
+    (auth_batches, quarantined) = envelope.validate(config, {AUTH_CLASS: batches[AUTH_CLASS]}, ID_COLUMNS)
+
+    if (len(quarantined) > 0):
+        quarantined["row_key"] = quarantined["event_uid"]
+        outputs[envelope.QUARANTINE_CLASS] = pd.concat(
+            [frame for frame in (outputs.get(envelope.QUARANTINE_CLASS), quarantined) if frame is not None],
+            ignore_index=True)
+
     # The 802.1X exchanges, closed into identity bindings by the stage that closes MAC ones. Keyed on the
     # identity rather than the address, because the address is the asset and the identity is the person's half of
     # the exchange -- and the directory can only bind a principal to the half a person actually presents.
@@ -370,7 +393,7 @@ def run_pipeline(config: Config,
 
     outputs[AUTH_CLASS] = _run_class(
         config,
-        batches[AUTH_CLASS],
+        auth_batches[AUTH_CLASS],
         [
             TC5NoveltyStage(config),
             TC5RiskStage(config, min_denominator=1),
@@ -396,6 +419,10 @@ def run_pipeline(config: Config,
     frames = []
 
     for (name, frame) in outputs.items():
+        # A class every record of which was quarantined produced nothing, and is absent rather than an empty frame.
+        if (len(frame) == 0):
+            continue
+
         frame = frame.copy()
         frame["telemetry_class"] = name
 

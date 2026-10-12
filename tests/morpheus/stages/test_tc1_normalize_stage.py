@@ -46,6 +46,9 @@ SAMPLES = {
     "output_discards": [1, 1, 0],
 }
 
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A device clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
 
 def make_stage(config: Config, **kwargs) -> TC1NormalizeStage:
     defaults = {"uptime_column": "uptime"}
@@ -394,3 +397,24 @@ def test_a_collector_without_lldp_carries_no_link(config: Config, samples_df):
     make_stage(config).on_data(meta)
 
     assert _as_list(meta, "link_key") == [None, None, None]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    payload = dict(SAMPLES)
+    payload["event_time"] = [0, YEARS_AHEAD_NS, MINUTE_NS]
+    payload["uptime"] = [3600, 3660, 3660]
+    payload["crc_errors"] = [100, 900, 142]
+    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
+    make_stage(config).on_data(meta)
+
+    assert _as_list(meta, "clock_refused") == [False, True, False]
+    # Believed, the decade-ahead sample would have become the port's previous one, and the honest sample after it
+    # would have read as out of order with no delta.
+    assert _as_list(meta, "crc_errors_delta") == [None, None, 42]
+    assert _as_list(meta, "sample_out_of_order") == [False, False, False]
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        make_stage(config, max_clock_skew_seconds=0)

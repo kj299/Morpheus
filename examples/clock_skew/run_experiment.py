@@ -38,9 +38,19 @@ Row identity survives the perturbation, which is what makes a column-by-column a
 `event_uid` is derived from the collector sequence rather than from the timestamp, so the same record keeps its
 identifier however its clock is set, and baseline and skewed frames align row for row.
 
-What this does not do is correct anything. `clock_source` and `clock_offset_ms` are in the envelope and nothing
-produces or consumes them; this measures the damage a deployment takes today, not the damage after a correction
-that has not been built.
+**Two curves per collector sweep: uncorrected, and with quarantine on.** Uncorrected, a collector's clock is
+wrong and nothing says so -- the damage a deployment takes when nothing reads the envelope. With quarantine on,
+each skewed collector reports the offset it was given in `clock_offset_ms`, as a disciplined collector reports its
+last measured offset, and `EnvelopeValidateStage` takes every record more than its bound (a second) out of the
+stream. Nothing subtracts the offset from the event time: a correction is only as good as the offset measurement,
+and an experiment that injected an offset and then subtracted the same number would measure its own arithmetic.
+What quarantine changes is the kind of failure -- a rule that would have accused the wrong entity on a misplaced
+record instead never sees the record -- and the two curves side by side are that trade.
+
+**The exporter axis** skews the clock of the router that stamped a flow rather than of the collector that
+received it. NetFlow and IPFIX carry the exporter's own timestamps, so a router whose clock drifts moves its flows
+however well the collector keeps time -- and the collector's reported offset says nothing about it, which is why
+the exporter sweep has no quarantine curve: nothing in the envelope could catch it.
 """
 
 import argparse
@@ -138,7 +148,17 @@ def sources_in(corpus: dict, columns) -> list:
     return sorted(found)
 
 
-def skew_corpus(corpus: dict, offsets: dict, columns) -> dict:
+QUARANTINE_BOUND_MS = 1000
+"""`EnvelopeValidateStage`'s default bound on a collector's reported offset, above which its records are held."""
+
+
+def skew_corpus(corpus: dict, offsets: dict, columns, report_offsets: bool = False) -> dict:
+    """
+    Move each source's records by its offset.
+
+    With `report_offsets`, each collector also reports the offset it was given, added to whatever it reported
+    already, in `clock_offset_ms` -- so a collector a corpus planted as wrong stays wrong by the same amount.
+    """
     from morpheus.utils.determinism import apply_clock_skew  # pylint: disable=import-outside-toplevel
 
     skewed = {}
@@ -151,9 +171,24 @@ def skew_corpus(corpus: dict, offsets: dict, columns) -> dict:
             continue
 
         present = {source: offset for (source, offset) in offsets.items() if source in set(frame[column].dropna())}
-        skewed[name] = apply_clock_skew(frame, present, source_column=column)
+        moved = apply_clock_skew(frame, present, source_column=column)
+
+        if (report_offsets and "clock_offset_ms" in moved.columns):
+            added = moved[column].map({source: offset // MILLISECOND_NS for (source, offset) in present.items()})
+            added = added.fillna(0)
+            moved["clock_offset_ms"] = moved["clock_offset_ms"].astype("Int64") + added.astype("Int64")
+
+        skewed[name] = moved
 
     return skewed
+
+
+def quarantined(result) -> int:
+    """How many records the envelope check held out of the stream."""
+    if ("telemetry_class" not in result.columns):
+        return 0
+
+    return int((result["telemetry_class"] == "quarantine").sum())
 
 
 # --- What each rule accuses -----------------------------------------------------------------------------------
@@ -277,7 +312,8 @@ def sweep(label: str,
           extra=lambda _: {},
           columns=COLLECTOR_CLOCKS,
           shift_ns: int = 0,
-          magnitudes=MAGNITUDES_NS) -> dict:
+          magnitudes=MAGNITUDES_NS,
+          report_offsets: bool = False) -> dict:
     """
     Run one pipeline at every magnitude and report what moved.
 
@@ -286,6 +322,9 @@ def sweep(label: str,
     and an event exactly on a boundary crosses it under an offset of one nanosecond. Sweeping the same corpus
     on and off the boundary is what separates a rule that is genuinely sensitive to skew from a rule that
     merely inherited a corpus built on round numbers.
+
+    With `report_offsets`, the skewed collectors report their offsets and the envelope check quarantines what is
+    beyond its bound: the corrected curve. Without, nothing says a clock is wrong: the uncorrected one.
 
     A sweep over one clock measures nothing: `offsets_for` gives a lone clock no offset, because nothing can
     disagree with itself. Such a sweep still runs, so its report is complete, and `breaking_point` says it was not
@@ -306,7 +345,10 @@ def sweep(label: str,
 
     for magnitude in magnitudes:
         offsets = offsets_for(sources, magnitude)
-        result = module.run_pipeline(config, skew_corpus(corpus, offsets, columns))
+        result = module.run_pipeline(config, skew_corpus(corpus, offsets, columns, report_offsets))
+        # A collector the quarantine held entirely leaves its class with no rows and its columns with no producer.
+        # Its rules then accuse nothing, which is what the reductions see once the columns exist, null.
+        result = result.reindex(columns=list(result.columns) + [c for c in baseline.columns if c not in result.columns])
 
         difference = diff_frames(baseline, result)
         moved_columns = compare_columns(baseline, result, KEY_COLUMNS, IGNORE_COLUMNS)
@@ -322,18 +364,21 @@ def sweep(label: str,
             "columns_moved": moved_columns,
             "rules": verdicts,
             "rules_changed": changed,
+            "quarantined": quarantined(result),
             "measures": extra(result),
         })
 
         names = ", ".join(entry["column"] for entry in moved_columns[:4]) or "nothing"
         print(f"    {_readable(magnitude):>6}: {len(moved_columns):>3} columns moved ({names}), "
-              f"rules changed: {', '.join(changed) or 'none'}")
+              f"{quarantined(result)} quarantined, rules changed: {', '.join(changed) or 'none'}")
 
     return {
         "clocks": sources,
         "skewed_by": columns if isinstance(columns, str) else dict(sorted(columns.items())),
         "uniform_shift_ns": shift_ns,
+        "quarantine_on": report_offsets,
         "baseline_rows": int(len(baseline)),
+        "baseline_quarantined": quarantined(baseline),
         "baseline_measures": extra(baseline),
         "baseline_decisions": {
             rule: len(keys)
@@ -453,45 +498,63 @@ def main() -> int:
     def estate(result) -> dict:
         return {**rules.layer_1_decisions(result), **rules.layer_2_decisions(result, single_host)}
 
-    sweeps = {
+    def spec(label, module, decisions, extra=lambda _: {}, columns=COLLECTOR_CLOCKS, **kwargs) -> dict:
+        return {"label": label, "module": module, "decisions": decisions, "extra": extra, "columns": columns, **kwargs}
+
+    specs = {
         "estate_collectors":
-            sweep("estate, collector clocks: layers 1, 2 and 5 over one hour", estate_pipeline, estate, chain_reach),
+            spec("estate, collector clocks: layers 1, 2 and 5 over one hour", estate_pipeline, estate, chain_reach),
         "estate_switches":
-            sweep("estate, switch clocks: the guide's own claim, tested",
-                  estate_pipeline,
-                  estate,
-                  chain_reach,
-                  columns=SWITCH_CLOCKS),
+            spec("estate, switch clocks: the guide's own claim, tested",
+                 estate_pipeline,
+                 estate,
+                 chain_reach,
+                 columns=SWITCH_CLOCKS),
         "session":
-            sweep("session, collector clocks: layer 5 over a week", session_pipeline, rules.layer_5_decisions),
+            spec("session, collector clocks: layer 5 over a week", session_pipeline, rules.layer_5_decisions),
         "session_off_boundary":
-            sweep("session, same but moved off the hour marks first",
-                  session_pipeline,
-                  rules.layer_5_decisions,
-                  shift_ns=HALF_WINDOW_NS),
+            spec("session, same but moved off the hour marks first",
+                 session_pipeline,
+                 rules.layer_5_decisions,
+                 shift_ns=HALF_WINDOW_NS),
         "network":
-            sweep("network, collector clocks: layer 3", network_pipeline, rules.layer_3_decisions),
+            spec("network, collector clocks: layer 3", network_pipeline, rules.layer_3_decisions),
+        "network_exporters":
+            spec("network, exporter clocks: each router stamps its own flows",
+                 network_pipeline,
+                 rules.layer_3_decisions,
+                 columns="exporter_id"),
         "transport":
-            sweep("transport, collector clocks: layer 4", transport_pipeline, rules.layer_4_decisions),
+            spec("transport, collector clocks: layer 4", transport_pipeline, rules.layer_4_decisions),
         "presentation":
-            sweep("presentation, collector clocks: layer 6", presentation_pipeline, rules.layer_6_decisions),
+            spec("presentation, collector clocks: layer 6", presentation_pipeline, rules.layer_6_decisions),
         "application":
-            sweep("application, collector clocks: DNS and HTTP", application_pipeline, rules.application_decisions),
+            spec("application, collector clocks: DNS and HTTP", application_pipeline, rules.application_decisions),
         "saas":
-            sweep("saas, collector clocks: the provider's audit log", saas_pipeline, rules.saas_decisions),
+            spec("saas, collector clocks: the provider's audit log", saas_pipeline, rules.saas_decisions),
         "endpoint":
-            sweep("endpoint, collector clocks", endpoint_pipeline, rules.endpoint_decisions),
+            spec("endpoint, collector clocks", endpoint_pipeline, rules.endpoint_decisions),
         "endpoint_hosts":
-            sweep("endpoint, host clocks: each agent stamps its own process starts",
-                  endpoint_pipeline,
-                  rules.endpoint_decisions,
-                  columns="hostname"),
+            spec("endpoint, host clocks: each agent stamps its own process starts",
+                 endpoint_pipeline,
+                 rules.endpoint_decisions,
+                 columns="hostname"),
         "campaign":
-            sweep("campaign, collector clocks: the four chains, to three hours",
-                  campaign_pipeline,
-                  rules.chain_decisions,
-                  magnitudes=CHAIN_MAGNITUDES_NS),
+            spec("campaign, collector clocks: the four chains, to three hours",
+                 campaign_pipeline,
+                 rules.chain_decisions,
+                 magnitudes=CHAIN_MAGNITUDES_NS),
     }
+
+    # The corrected curve: every collector-clock sweep again, the collectors reporting the offsets they were given.
+    # A switch, a router or a host stamps its own records and reports no offset, so those sweeps have no second
+    # curve -- nothing in the envelope could catch their clocks.
+    for name in [name for (name, entry) in specs.items() if entry["columns"] == COLLECTOR_CLOCKS]:
+        specs[f"{name}_quarantine"] = {
+            **specs[name], "label": f"{specs[name]['label']}, quarantine on", "report_offsets": True
+        }
+
+    sweeps = {name: sweep(**entry) for (name, entry) in specs.items()}
 
     points = breaking_point(sweeps)
     chain_edges = {}
@@ -522,9 +585,10 @@ def main() -> int:
                      "the width the clocks are spread across, so the worst pair disagrees by exactly that much. A "
                      "rule is counted as changed when the set of entities it accuses changes, never when only a "
                      "timestamp moves. A sweep over a corpus with one clock perturbs nothing, and is reported as "
-                     "not measured rather than as a tolerance. Nothing here corrects for skew: clock_source and "
-                     "clock_offset_ms are in the envelope and no stage reads them, so this is the damage a "
-                     "deployment takes today."),
+                     "not measured rather than as a tolerance. Each collector-clock sweep runs twice: uncorrected, "
+                     "and with quarantine on, the collectors reporting their offsets in clock_offset_ms and "
+                     "EnvelopeValidateStage holding every record beyond its one-second bound. Nothing subtracts an "
+                     "offset from an event time."),
     }
 
     with open(arguments.artifact, "w", encoding="utf-8") as handle:

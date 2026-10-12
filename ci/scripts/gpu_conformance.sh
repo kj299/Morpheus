@@ -75,11 +75,14 @@ TARGETS=(
     tests/morpheus/determinism/test_transport_harness.py
     tests/morpheus/stages/test_binding_resolver_stage.py
     tests/morpheus/stages/test_chain_anchor_stage.py
+    tests/morpheus/stages/test_collector_sequence_stage.py
     tests/morpheus/stages/test_determinism_stamp_stage.py
     tests/morpheus/stages/test_envelope_stamp_stage.py
+    tests/morpheus/stages/test_envelope_validate_stage.py
     tests/morpheus/stages/test_community_id_stage.py
     tests/morpheus/stages/test_lineage_stamp_stage.py
     tests/morpheus/stages/test_minimization_stage.py
+    tests/morpheus/stages/test_pipeline_health_stage.py
     tests/morpheus/stages/test_siem_wire_stage.py
     tests/morpheus/stages/test_tc1_binding_stage.py
     tests/morpheus/stages/test_tc1_change_stage.py

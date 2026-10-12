@@ -80,13 +80,15 @@ import os
 import random
 import typing
 
+import envelope as universal_envelope
 import pandas as pd
-
 import stamping
+
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
@@ -102,7 +104,6 @@ from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
 from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
 from morpheus.stages.telemetry.tc5_score_stage import Scorer
 from morpheus.stages.telemetry.tc5_score_stage import TC5ScoreStage
-from morpheus.utils.model_manifest import ModelManifest
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.utils.binding_table import NS_PER_SECOND
@@ -113,6 +114,7 @@ from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.dfencoder_scorer import DfencoderScorer
 from morpheus.utils.dfencoder_scorer import load_models
+from morpheus.utils.model_manifest import ModelManifest
 
 CORPUS_SEED = 20260906
 
@@ -400,7 +402,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     """
     rng = random.Random(CORPUS_SEED)
 
-    return {"tc5_auth": _build_auth(rng), "tc5_session": _build_sessions(rng)}
+    return universal_envelope.attach_all({"tc5_auth": _build_auth(rng), "tc5_session": _build_sessions(rng)})
 
 
 def _auth_row(principal: str,
@@ -757,6 +759,8 @@ def _run_class(config: Config,
     if (impose_order):
         pipe.add_stage(TotalOrderStage(config))
 
+    pipe.add_stage(CollectorSequenceStage(config))
+
     for stage in stages:
         pipe.add_stage(stage)
 
@@ -1009,6 +1013,10 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
+    # Validated once per class, ahead of every stage: ingest_time stamped, the envelope checked, untrusted clocks
+    # taken out of the stream and kept.
+    (batches, quarantined) = universal_envelope.validate(config, batches, ID_COLUMNS)
+
     if ((scorer is None) != (manifest is None)):
         raise ValueError("scorer and manifest are passed together or not at all; a manifest resolving versions "
                          "the scorer does not hold is the mismatch this pairing exists to prevent")
@@ -1052,6 +1060,10 @@ def run_pipeline(config: Config,
     frames = []
 
     for (name, frame) in outputs.items():
+        # A class every record of which was quarantined produced nothing, and is absent rather than an empty frame.
+        if (len(frame) == 0):
+            continue
+
         frame = frame.copy()
         frame["telemetry_class"] = name
         frame["row_key"] = frame["event_uid"]
@@ -1059,7 +1071,9 @@ def run_pipeline(config: Config,
 
     combined = pd.concat(frames, ignore_index=True)
 
-    return canonicalize(combined, key_columns=KEY_COLUMNS, ignore_columns=IGNORE_COLUMNS)
+    return canonicalize(universal_envelope.with_quarantine(combined, quarantined),
+                        key_columns=KEY_COLUMNS,
+                        ignore_columns=IGNORE_COLUMNS)
 
 
 def render(result: pd.DataFrame) -> str:
