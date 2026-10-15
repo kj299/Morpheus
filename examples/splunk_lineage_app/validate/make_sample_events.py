@@ -150,8 +150,8 @@ def main() -> int:
     import context_pipeline  # pylint: disable=import-outside-toplevel
     import endpoint_pipeline  # pylint: disable=import-outside-toplevel
     import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
-    import lineage_pipeline  # pylint: disable=import-outside-toplevel
     import network_pipeline  # pylint: disable=import-outside-toplevel
+    import pandas as pd  # pylint: disable=import-outside-toplevel
     import presentation_pipeline  # pylint: disable=import-outside-toplevel
     import saas_pipeline  # pylint: disable=import-outside-toplevel
     import session_pipeline as sp  # pylint: disable=import-outside-toplevel
@@ -189,8 +189,9 @@ def main() -> int:
 
     _health(by_sourcetype, sp, sessions)
 
-    lineage = lineage_pipeline.run_pipeline(lineage_pipeline.build_pipeline_config(), [lineage_pipeline.build_corpus()])
-    by_sourcetype["morpheus:edge"] = _render(lineage, "morpheus:edge")
+    # The edge stream: one record per hop a record was resolved through and per layer a connection was seen at
+    # above the first, written by EdgeEmitStage over the estate's sealed rows here and the campaign's below.
+    estate_edges = ep.build_edges(ep.build_pipeline_config(), telemetry)
 
     # Layer 3 comes from its own corpus and its own pipeline, as layer 5 does. Its records share no entity with
     # the estate's -- an address is not a port and not a principal -- so they carry their own chains and the
@@ -232,14 +233,17 @@ def main() -> int:
     # The campaign: one estate seen by all its collectors, which is what R-C-001 and R-C-004 are asserted on. Its
     # records go on the sourcetypes their layers' records always go on, because that is where a chained rule has to
     # find them, and they share no entity with any other corpus's records.
-    campaign = campaign_pipeline.run_pipeline(campaign_pipeline.build_pipeline_config(),
-                                              campaign_pipeline.build_corpus())
+    campaign_config = campaign_pipeline.build_pipeline_config()
+    campaign_corpus = campaign_pipeline.build_corpus()
+    campaign = campaign_pipeline.run_pipeline(campaign_config, campaign_corpus)
 
     for (name, sourcetype) in CAMPAIGN_SOURCETYPES.items():
         rows = campaign[campaign["telemetry_class"] == name]
         _scored(by_sourcetype, rows.dropna(axis=1, how="all"), sourcetype)
 
     _health(by_sourcetype, campaign_pipeline, campaign)
+    edges = pd.concat([estate_edges, campaign_pipeline.build_edges(campaign_config, campaign)], ignore_index=True)
+    by_sourcetype["morpheus:edge"] = _render(edges, "morpheus:edge")
 
     # The TC-0 context store: every version the two producers recorded, refused ones included, because a count of
     # refusals is something an estate should be able to see on its search head. The probes are the harness's own
@@ -261,7 +265,32 @@ def main() -> int:
     port_history = tp.build_port_binding_table(port_bindings).superseded().to_bucketed_frame(
         bucket_seconds=DEFAULT_L1_BUCKET_SECONDS, key_name="entity_key")
 
+    # The campaign DHCP server's leases, the rows the L2/L3 refresh builds `binding_l2_l3` from: an address, the
+    # interface it was handed to, and the switch port the relay saw the request arrive on. Only the desks' leases
+    # are rendered. The workstations' run nine days each, which is two and a half thousand five-minute buckets
+    # apiece, and they carry no port; a deployment ships them to the same lookup.
+    acknowledgements = campaign_corpus[campaign_pipeline.LEASE_CLASS]
+    desks = acknowledgements[acknowledgements["port_id"].notna()]
+    leases = campaign_pipeline.build_lease_table(campaign_pipeline.close_lease_bindings(
+        campaign_config, [desks])).to_bucketed_frame(key_name="ip", table_name="dhcp_lease")
+
+    # The campaign's two sites' MAC bindings, the rows the L2 refresh builds `binding_l2` from: a workstation's MAC
+    # and the port it was plugged into. With the leases above they are the walk from a sign-in's address to a port.
+    macs = campaign_pipeline.build_mac_table(
+        campaign_pipeline.close_mac_bindings(
+            campaign_config, [campaign_corpus[campaign_pipeline.MAC_CLASS]])).to_bucketed_frame(table_name="mac_table")
+
+    # The estate's 802.1X supplicant bindings, the rows the L5/L2 refresh builds `binding_l5_l2` from: an identity
+    # and the port it was authorized on. The estate's desk sign-ins carry the identity the directory gave them.
+    supplicants = ep.build_supplicant_table(
+        ep.close_supplicant_bindings(ep.build_pipeline_config(),
+                                     [telemetry[telemetry["telemetry_class"] == "tc2_auth"].copy()])).to_bucketed_frame(
+                                         key_name="dot1x_identity", table_name="dot1x_supplicant")
+
     rendered = _render(bucketed, "binding:bucketed")
+    rendered.extend(_render(leases, "binding:bucketed"))
+    rendered.extend(_render(macs, "binding:bucketed"))
+    rendered.extend(_render(supplicants, "binding:bucketed"))
 
     if (len(port_history) > 0):
         rendered.extend(_render(port_history, "binding:bucketed"))

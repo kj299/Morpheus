@@ -24,9 +24,12 @@ Nothing upstream provides it. A switch MAC table is a snapshot of what is bound 
 missing, and DHCP releases are advisory. Ends have to be inferred, and this module is where that inference lives,
 with the reason recorded on every record so a consumer can tell an observed end from a deduced one.
 
-Five things end a binding, and only the first is a fact:
+Six things end a binding, and only the first two are facts:
 
 - **Explicit.** The source said so: an accounting stop, a release, a cleared entry. The end time is known.
+- **Granted.** The source said so in advance. A DHCP server's acknowledgement hands an address to a MAC for a stated
+  term, and nothing else is given that address until the term ends or the server sees it released, so the binding
+  lasts until the grant runs out, however long the device stays silent. A renewal extends the grant.
 - **Displacement.** The same key was observed somewhere else. The binding ended somewhere between its last
   observation and the new one, and this module closes it at the earlier bound.
 - **Conflict.** The same key was observed somewhere else *at the same instant*, so neither sighting can be said to
@@ -76,6 +79,8 @@ SNAPSHOT_ABSENT = "snapshot_absent"
 IDLE_TIMEOUT = "idle_timeout"
 EVICTED = "evicted"
 DRAINED = "drained"
+GRANTED = "granted"
+"""The end the source stated in advance -- a DHCP lease's term -- which arrived without a renewal or a release."""
 
 INFERRED_REASONS = frozenset({DISPLACED, CONFLICT, SNAPSHOT_ABSENT, IDLE_TIMEOUT, EVICTED, DRAINED})
 """Every reason but `EXPLICIT`. A consumer that only trusts observed ends filters on this."""
@@ -104,6 +109,9 @@ class ClosedBinding:
         once.
     last_seen_ns : int
         The last observation, which is where an inferred end was derived from.
+    granted_until_ns : int or None
+        The end the source granted in advance, for a binding observed with one -- a lease's term, extended by every
+        renewal. `None` for a binding no source granted.
     gap_ns : int or None
         How long passed between the last sighting here and the sighting elsewhere that ended this binding, for the
         two reasons that mean the key turned up somewhere else: `DISPLACED` and `CONFLICT`. `None` for every other
@@ -123,6 +131,7 @@ class ClosedBinding:
     observations: int
     last_seen_ns: int
     gap_ns: typing.Optional[int] = None
+    granted_until_ns: typing.Optional[int] = None
 
     @property
     def duration_ns(self) -> int:
@@ -198,6 +207,7 @@ class _OpenBinding:
     start_ns: int
     last_seen_ns: int
     observations: int
+    granted_until_ns: typing.Optional[int] = None
 
 
 class BindingCloser:
@@ -299,9 +309,23 @@ class BindingCloser:
                              end_reason=reason,
                              observations=state.observations,
                              last_seen_ns=state.last_seen_ns,
-                             gap_ns=gap_ns)
+                             gap_ns=gap_ns,
+                             granted_until_ns=state.granted_until_ns)
 
-    def observe(self, key: str, event_time_ns: int, attributes: dict) -> ObserveResult:
+    @staticmethod
+    def _grant(current: typing.Optional[int], granted_until_ns: typing.Optional[int]) -> typing.Optional[int]:
+        # A renewal extends a grant and never shortens it: a later acknowledgement with a shorter term than the one
+        # still running does not take back the time already granted.
+        if (granted_until_ns is None):
+            return current
+
+        return granted_until_ns if current is None else max(current, granted_until_ns)
+
+    def observe(self,
+                key: str,
+                event_time_ns: int,
+                attributes: dict,
+                granted_until_ns: typing.Optional[int] = None) -> ObserveResult:
         """
         Record one binding observation.
 
@@ -314,6 +338,10 @@ class BindingCloser:
         attributes : dict
             Where it was observed. Compared against the open binding's target to decide whether this extends the
             binding or displaces it.
+        granted_until_ns : int, optional
+            The end the source grants in advance with this observation, such as a DHCP acknowledgement's lease
+            term. While a grant runs the binding is not closed for silence; when it lapses without a renewal the
+            binding closes at the granted end, as `GRANTED`.
 
         Returns
         -------
@@ -334,6 +362,7 @@ class BindingCloser:
             if (state.attributes == target):
                 state.last_seen_ns = event_time_ns
                 state.observations += 1
+                state.granted_until_ns = self._grant(state.granted_until_ns, granted_until_ns)
                 self._open.move_to_end(key)
 
                 return ObserveResult(closed=[], out_of_order=False)
@@ -341,15 +370,22 @@ class BindingCloser:
             # Seen somewhere else. When the new sighting is later, the move happened between the two observations
             # and closing at the earlier bound leaves the interval between them uncovered rather than claiming the
             # key was still here. When it is simultaneous, nothing can be said about order, the two intervals
-            # overlap by one tick, and the reason says so.
+            # overlap by one tick, and the reason says so. A granted binding is the exception: while its grant ran
+            # nothing else was given the key, so it held the key until the grant lapsed or the key was handed on.
             reason = CONFLICT if event_time_ns == state.last_seen_ns else DISPLACED
-            closed.append(self._close(state, state.last_seen_ns, reason, gap_ns=event_time_ns - state.last_seen_ns))
+            end_ns = state.last_seen_ns
+
+            if (state.granted_until_ns is not None):
+                end_ns = min(state.granted_until_ns, event_time_ns)
+
+            closed.append(self._close(state, end_ns, reason, gap_ns=event_time_ns - state.last_seen_ns))
 
         self._open[key] = _OpenBinding(key=key,
                                        attributes=target,
                                        start_ns=event_time_ns,
                                        last_seen_ns=event_time_ns,
-                                       observations=1)
+                                       observations=1,
+                                       granted_until_ns=self._grant(None, granted_until_ns))
         self._open.move_to_end(key)
         closed.extend(self._evict())
 
@@ -419,7 +455,8 @@ class BindingCloser:
 
     def expire(self, now_ns: int) -> list[ClosedBinding]:
         """
-        Close bindings that have gone quiet for longer than `idle_timeout_ns`.
+        Close bindings that have gone quiet for longer than `idle_timeout_ns`, and granted bindings whose grant has
+        lapsed. A granted binding is never closed for silence while its grant runs: the source has said it holds.
 
         The callers run this once per row, on that row's own event time, because expiring on a batch boundary or a
         wall clock would make the output depend on how the stream was divided. A scan of every open binding per row
@@ -440,15 +477,21 @@ class BindingCloser:
         -------
         list of `ClosedBinding`
         """
-        horizon = now_ns - self._idle_timeout_ns
-
-        if (self._expired_through_ns is not None and horizon <= self._expired_through_ns):
+        if (self._expired_through_ns is not None and now_ns <= self._expired_through_ns):
             return []
 
-        self._expired_through_ns = horizon
-        stale = [key for (key, state) in self._open.items() if state.last_seen_ns < horizon]
+        self._expired_through_ns = now_ns
+        horizon = now_ns - self._idle_timeout_ns
+        closed = []
 
-        return [self._close(self._open.pop(key), 0, IDLE_TIMEOUT) for key in stale]
+        for (key, state) in list(self._open.items()):
+            if (state.granted_until_ns is not None):
+                if (state.granted_until_ns <= now_ns):
+                    closed.append(self._close(self._open.pop(key), state.granted_until_ns, GRANTED))
+            elif (state.last_seen_ns < horizon):
+                closed.append(self._close(self._open.pop(key), 0, IDLE_TIMEOUT))
+
+        return closed
 
     def drain(self) -> list[ClosedBinding]:
         """
@@ -459,7 +502,9 @@ class BindingCloser:
         list of `ClosedBinding`
             Emitted in the order the bindings were last seen, oldest first, so the output is reproducible.
         """
-        drained = [self._close(state, 0, DRAINED) for state in self._open.values()]
+        # A grant still running when the stream stops is the source's own statement of how long the binding lasts,
+        # so a drained lease ends at its term rather than one tick past its last acknowledgement.
+        drained = [self._close(state, state.granted_until_ns or 0, DRAINED) for state in self._open.values()]
         self._open.clear()
 
         return drained

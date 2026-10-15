@@ -110,13 +110,13 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 66
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 72
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
     expiries = [name for name in names if phases[name] == "expiry"]
 
-    assert len(refreshes) == 3 and len(expiries) == 3
+    assert len(refreshes) == 5 and len(expiries) == 5
     assert max(position[name] for name in refreshes) < min(position[name] for name in runner.PREDICTIVE)
 
     for writer in runner.PREDICTIVE:
@@ -243,6 +243,18 @@ and the polls, exchanges and MAC rows step 10 planted, which the summary groups.
 absent from the earlier runs and are not compared.
 """
 
+BEFORE_THE_LEASES = {
+    "Binding lookup - L2/L3 refresh": 0,
+    "Binding lookup - L2/L3 expiry": 0,
+    "Binding lookup - L1 history expiry": 0,
+}
+"""What every run before step 12's leases found where they changed the answer.
+
+The L2/L3 refresh had no lease to select, so it and its expiry were empty; and the layer 1 history's expiry kept
+nothing, because its refresh keyed each row on a day counted from 1970, which the run's `now()` placed past the
+retention window. Every refresh now keys its rows on the bucket their own time falls in.
+"""
+
 FIRST_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-05T0114Z.json")
 """The first search-head run, kept because it is the evidence for the two changes it caused."""
 
@@ -271,6 +283,7 @@ def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it
     }
 
     assert differing == {
+        **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS,
         **BEFORE_THE_HOST_BASELINES,
         **BEFORE_THE_MODELS,
@@ -306,6 +319,7 @@ def test_the_second_run_differed_from_what_is_written_only_where_the_trajectory_
     }
 
     assert differing == {
+        **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS,
         **BEFORE_THE_HOST_BASELINES,
         **BEFORE_THE_MODELS,
@@ -363,7 +377,9 @@ def test_the_fourth_run_differs_from_what_is_written_only_where_the_learned_mode
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**BEFORE_THE_NETWORK_OBJECTS, **BEFORE_THE_HOST_BASELINES, **BEFORE_THE_MODELS}
+    assert differing == {
+        **BEFORE_THE_LEASES, **BEFORE_THE_NETWORK_OBJECTS, **BEFORE_THE_HOST_BASELINES, **BEFORE_THE_MODELS
+    }
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 94
 
 
@@ -385,7 +401,7 @@ def test_the_fifth_run_differs_from_what_is_written_only_where_the_host_baseline
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**BEFORE_THE_NETWORK_OBJECTS, **BEFORE_THE_HOST_BASELINES}
+    assert differing == {**BEFORE_THE_LEASES, **BEFORE_THE_NETWORK_OBJECTS, **BEFORE_THE_HOST_BASELINES}
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 166
 
 
@@ -408,8 +424,8 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_NETWORK_OBJECTS
-    assert len(run["searches"]) == 52 and len(expected) == 66
+    assert differing == {**BEFORE_THE_LEASES, **BEFORE_THE_NETWORK_OBJECTS}
+    assert len(run["searches"]) == 52 and len(expected) == 72
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
 
 
@@ -441,6 +457,31 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_PLATFORM
-    assert len(run["searches"]) == 62 and len(expected) == 66
+    assert differing == {**BEFORE_THE_LEASES, **BEFORE_THE_PLATFORM}
+    assert len(run["searches"]) == 62 and len(expected) == 72
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
+
+
+EIGHTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-10T2235Z.json")
+"""The run over step 11's events, which matched every expectation then written."""
+
+
+def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arrived():
+    # Made on 2026-10-10 when the pipeline began reporting on itself: all sixty-six then matched, with 209 risk
+    # records. Against step 12's events it differs in the L2/L3 refresh, which had no lease to select, and the two
+    # expiry jobs whose refreshes keyed rows on a bucket counted from 1970; it has none of the six searches step 12
+    # added. The summary groups the same rows: the chains rooted on machines regroup lineage, not windows.
+    with open(EIGHTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_LEASES
+    assert len(run["searches"]) == 66 and len(expected) == 72
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209

@@ -55,6 +55,7 @@ order, because a Merkle root is computed per sealer and classes sealed separatel
 import random
 import typing
 
+import edge_stream
 import envelope
 import pandas as pd
 import session_pipeline as sp
@@ -137,6 +138,10 @@ DIRECTORY_METHOD_COLUMN = "directory_resolution"
 SUPPLICANT_METHOD_COLUMN = "supplicant_resolution"
 DESK_IDENTITY_COLUMN = "desk_identity"
 DESK_PORT_COLUMN = "desk_port_key"
+DIRECTORY_UID_COLUMN = "desk_identity_uid"
+"""The directory entry a sign-in's principal was resolved to an 802.1X identity through."""
+SUPPLICANT_UID_COLUMN = "desk_binding_uid"
+"""The supplicant binding the identity was resolved to a port through, as `TC2BindingStage` closed it."""
 
 APPS = ("wiki", "mail", "crm")
 """What the desk sign-ins are for. Three so `appincrement` has something to count."""
@@ -242,6 +247,19 @@ def build_supplicant_table(bindings: pd.DataFrame) -> BindingTable:
                                        value_columns=["auth_port_key"],
                                        start_column="bind_start",
                                        end_column="bind_end")
+
+
+def close_supplicant_bindings(config: Config, dataframes: list, impose_order: bool = True) -> pd.DataFrame:
+    """
+    The authenticator's 802.1X records, closed into which port each identity was authorized on and for how long.
+
+    The rows the supplicant hop resolves through, and the rows the SIEM's `binding_l5_l2` lookup is built from,
+    rendered with `to_bucketed_records(key_name="dot1x_identity", table_name="dot1x_supplicant")`.
+    """
+    return _run_class(config,
+                      dataframes,
+                      [TC2BindingStage(config, key_column="dot1x_identity", attribute_columns=["auth_port_key"])],
+                      impose_order)
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -386,10 +404,7 @@ def run_pipeline(config: Config,
     # The 802.1X exchanges, closed into identity bindings by the stage that closes MAC ones. Keyed on the
     # identity rather than the address, because the address is the asset and the identity is the person's half of
     # the exchange -- and the directory can only bind a principal to the half a person actually presents.
-    identity_bindings = _run_class(
-        config, [telemetry["tc2_auth"].copy()],
-        [TC2BindingStage(config, key_column="dot1x_identity", attribute_columns=["auth_port_key"])],
-        impose_order)
+    identity_bindings = close_supplicant_bindings(config, [telemetry["tc2_auth"].copy()], impose_order)
 
     outputs[AUTH_CLASS] = _run_class(
         config,
@@ -401,12 +416,14 @@ def run_pipeline(config: Config,
                                  binding_table=build_directory_table(),
                                  key_column="user_principal",
                                  output_columns={"dot1x_identity": DESK_IDENTITY_COLUMN},
-                                 method_column=DIRECTORY_METHOD_COLUMN),
+                                 method_column=DIRECTORY_METHOD_COLUMN,
+                                 uid_column=DIRECTORY_UID_COLUMN),
             BindingResolverStage(config,
                                  binding_table=build_supplicant_table(identity_bindings),
                                  key_column=DESK_IDENTITY_COLUMN,
                                  output_columns={"auth_port_key": DESK_PORT_COLUMN},
-                                 method_column=SUPPLICANT_METHOD_COLUMN),
+                                 method_column=SUPPLICANT_METHOD_COLUMN,
+                                 uid_column=SUPPLICANT_UID_COLUMN),
             ChainAnchorStage(config, candidates=[DESK_PORT_COLUMN, "user_principal"]),
             EnvelopeStampStage(config, osi_layer=5, entity_columns=["user_principal"]),
             DeterminismStampStage(config, envelope=stamping.envelope_for(AUTH_CLASS, SETTINGS, rules=RULES)),
@@ -434,6 +451,21 @@ def run_pipeline(config: Config,
     combined = pd.concat(frames, ignore_index=True)
 
     return canonicalize(combined, key_columns=KEY_COLUMNS, ignore_columns=IGNORE_COLUMNS)
+
+
+EDGE_HOPS = {
+    "hop_method_columns": ["resolution_method", DIRECTORY_METHOD_COLUMN, SUPPLICANT_METHOD_COLUMN],
+    "hop_uid_columns": ["binding_uid", DIRECTORY_UID_COLUMN, SUPPLICANT_UID_COLUMN],
+    "hop_layers": [2, None, 2],
+}
+"""The estate's resolution hops: an ARP observation's MAC through the MAC table, and a desk sign-in's principal through
+the directory to an 802.1X identity and through the supplicant bindings to a port. The directory is a record of
+who is who, not an observation at any layer, so its end of the edge has none."""
+
+
+def build_edges(config: Config, result: pd.DataFrame) -> pd.DataFrame:
+    """The estate's `morpheus:edge` records: one per hop a record was resolved through."""
+    return edge_stream.emit(config, result, **EDGE_HOPS)
 
 
 def render(result: pd.DataFrame) -> str:

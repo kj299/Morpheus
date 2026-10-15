@@ -43,7 +43,6 @@ import context_pipeline  # noqa: E402
 import endpoint_pipeline  # noqa: E402
 import envelope  # noqa: E402
 # pylint: disable=wrong-import-position
-import lineage_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
 import presentation_pipeline  # noqa: E402
 import saas_pipeline  # noqa: E402
@@ -150,11 +149,11 @@ def context_fixture() -> pd.DataFrame:
     yield context_pipeline.run_pipeline(config, context_pipeline.build_corpus())
 
 
-@pytest.fixture(name="lineage", scope="module")
-def lineage_fixture() -> pd.DataFrame:
-    config = lineage_pipeline.build_pipeline_config()
-
-    yield lineage_pipeline.run_pipeline(config, [lineage_pipeline.build_corpus()])
+@pytest.fixture(name="edges", scope="module")
+def edges_fixture(campaign: pd.DataFrame) -> pd.DataFrame:
+    # The campaign's, because they hold both relations: resolution hops at four layers and one connection carried
+    # from layer 3 to layer 6.
+    yield campaign_pipeline.build_edges(campaign_pipeline.build_pipeline_config(), campaign)
 
 
 @pytest.fixture(name="wire_config")
@@ -328,8 +327,9 @@ def test_the_context_pipeline_produces_a_parsable_timestamp(wire_config: Config,
 
 
 @pytest.mark.gpu_and_cpu_mode
-def test_the_lineage_pipeline_produces_a_parsable_timestamp(wire_config: Config, lineage: pd.DataFrame):
-    assert_parses_as_its_own_stanza(wire_config, lineage.copy(), "morpheus:edge")
+def test_the_edge_stream_produces_a_parsable_timestamp(wire_config: Config, edges: pd.DataFrame):
+    assert set(edges["relation_type"]) == {"resolved_through", "carried_by"}
+    assert_parses_as_its_own_stanza(wire_config, edges.copy(), "morpheus:edge")
 
 
 @pytest.mark.gpu_and_cpu_mode

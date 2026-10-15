@@ -77,6 +77,7 @@ TARGETS=(
     tests/morpheus/stages/test_chain_anchor_stage.py
     tests/morpheus/stages/test_collector_sequence_stage.py
     tests/morpheus/stages/test_determinism_stamp_stage.py
+    tests/morpheus/stages/test_edge_emit_stage.py
     tests/morpheus/stages/test_envelope_stamp_stage.py
     tests/morpheus/stages/test_envelope_validate_stage.py
     tests/morpheus/stages/test_community_id_stage.py
@@ -134,6 +135,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_clock_skew_experiment.py
     tests/morpheus/determinism/test_end_to_end_mac_spoof.py
     tests/morpheus/determinism/test_first_detections.py
+    tests/morpheus/determinism/test_host_identity_harness.py
     tests/morpheus/determinism/test_layer5_model_runner.py
     tests/morpheus/determinism/test_readme_inventory.py
     tests/morpheus/determinism/test_representation_invariance.py

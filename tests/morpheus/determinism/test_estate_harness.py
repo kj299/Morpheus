@@ -508,3 +508,44 @@ def test_a_fully_minimized_layer_five_is_still_not_anonymous(pipeline_config: Co
 
     for (principal, ports) in recovered.items():
         assert ports == {f"{ep.tp.SITE}:{ep.tp.SWITCH}:{ep.DESKS[principal]}"}, principal
+
+
+# --- The edge stream ------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_desk_sign_in_is_two_edges_to_the_two_bindings_it_was_placed_through(pipeline_config: Config,
+                                                                               result: pd.DataFrame):
+    # The desk port a sign-in carries is an inference two bindings deep. Each binding it rests on is named on the row
+    # and is the parent of one edge, so the chain can be walked back to the records it was inferred from.
+    edges = ep.build_edges(pipeline_config, result)
+    placed = _auth(result)
+    placed = placed[placed[ep.DESK_PORT_COLUMN].notna()]
+
+    assert len(placed) > 0
+
+    for (_, row) in placed.iterrows():
+        mine = edges[edges["child_event_uid"] == row["event_uid"]].set_index("join_method")
+
+        assert mine.loc["soft:directory", "parent_event_uid"] == row[ep.DIRECTORY_UID_COLUMN]
+        assert mine.loc["soft:dot1x", "parent_event_uid"] == row[ep.SUPPLICANT_UID_COLUMN]
+        assert pd.isna(mine.loc["soft:directory", "parent_osi_layer"])
+        assert mine.loc["soft:dot1x", "parent_osi_layer"] == 2
+        assert set(mine["lineage_id"]) == {row["lineage_id"]}
+        assert set(mine["child_osi_layer"]) == {5}
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_every_edge_carries_its_chain_and_how_it_was_joined(pipeline_config: Config, result: pd.DataFrame):
+    edges = ep.build_edges(pipeline_config, result)
+    lineage = dict(zip(result["event_uid"], result["lineage_id"]))
+
+    assert len(edges) > 0
+    assert edges["lineage_id"].notna().all() and edges["join_method"].notna().all()
+    assert not edges["link_uid"].duplicated().any()
+    assert all(lineage[child] == chain for (child, chain) in zip(edges["child_event_uid"], edges["lineage_id"]))
+    # A sign-in no directory entry names was resolved through nothing, and is the child of no edge.
+    unplaced = _auth(result)
+    unplaced = unplaced[unplaced[ep.DIRECTORY_UID_COLUMN].isna()]
+
+    assert set(unplaced["event_uid"]).isdisjoint(set(edges["child_event_uid"]))

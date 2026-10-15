@@ -727,9 +727,11 @@ def test_the_staged_exfiltration_chain_returns_exactly_what_is_written(expected:
     stamps = pd.to_datetime(frame["event_time"].str.replace("UTC", "", regex=False), utc=True)
     frame["event_time"] = (stamps - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(nanoseconds=1)
 
+    # The join method as the search reports it: a session's own key where every step carried one, the address
+    # otherwise.
     chains = sorted(({
-        "user_principal": principal, "src_ip": address
-    } for (principal, address) in campaign_pipeline.staged_exfiltration(frame)),
+        "user_principal": principal, "src_ip": address, "join_method": method
+    } for ((principal, address), (*_, method)) in campaign_pipeline.exfiltration_chains(frame).items()),
                     key=lambda row: (row["user_principal"], row["src_ip"]))
     entry = expected["searches"]["R-C-004 - Staged exfiltration"]
 
@@ -840,8 +842,8 @@ def test_the_command_and_control_chain_returns_exactly_what_is_written(expected:
     frame["event_time"] = (stamps - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(nanoseconds=1)
 
     chains = sorted(({
-        "src_ip": source, "dst_ip": destination
-    } for (source, destination) in campaign_pipeline.tls_before_beaconing(frame)),
+        "src_ip": source, "dst_ip": destination, "join_method": method
+    } for ((source, destination), (*_, method)) in campaign_pipeline.c2_chains(frame).items()),
                     key=lambda row: (row["src_ip"], row["dst_ip"]))
     entry = expected["searches"]["R-C-002 - TLS anomaly precedes beaconing"]
 
@@ -982,6 +984,7 @@ def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(
         edges = [json.loads(line) for line in handle if line.strip()]
 
     method_field = re.search(r"values\((\w+)\)\s+AS\s+methods", chain).group(1)
+    edge_field = re.search(r"values\((\w+)\)\s+AS\s+edge_methods", chain).group(1)
     risk_threshold = float(re.search(r"total_risk\s*>=\s*([\d.]+)", chain).group(1))
     layers = collections.defaultdict(set)
     methods = collections.defaultdict(set)
@@ -990,9 +993,12 @@ def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(
         if (event.get("lineage_id") is not None):
             layers[event["lineage_id"]].add(event.get("osi_layer"))
 
-            # `makemv delim=";"` before the stats: one value per hop the ladder took.
+            # `makemv delim=";"` before the stats: one value per hop the ladder took. An edge names its one join.
             if (event.get(method_field) is not None):
                 methods[event["lineage_id"]].update(event[method_field].split(";"))
+
+            if (event.get(edge_field) is not None):
+                methods[event["lineage_id"]].add(event[edge_field])
 
     spans = {lineage: len(seen - {None}) for (lineage, seen) in layers.items()}
     three_layer = {lineage for (lineage, span) in spans.items() if span >= 3}
@@ -1080,6 +1086,8 @@ def test_the_validation_document_says_the_same_thing_the_expectation_file_does(e
 
 
 NUMBER_WORDS = {
+    "two": 2,
+    "three": 3,
     "four": 4,
     "five": 5,
     "six": 6,
@@ -1130,6 +1138,7 @@ NUMBER_WORDS = {
     "sixty-one": 61,
     "sixty-two": 62,
     "sixty-six": 66,
+    "seventy-two": 72,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -1177,7 +1186,13 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # scored week follows.
     #
     # Five of sixty-two after step 10, whose ten searches each arrived with something planted for it to find.
-    assert len(empty) == 5
+    #
+    # Two after step 12. The L2/L3 refresh left: `TC2BindingStage` closes the campaign DHCP server's
+    # acknowledgements into leases, and their buckets are what the refresh selects. The expiry jobs left with it,
+    # and their reason had been wrong all along: an expiry rewrites the lookup with every row it keeps, and it had
+    # kept none only because each refresh keyed its rows on a bucket counted from 1970. Keyed on the bucket the
+    # row's own time falls in, which a validation run moves to the weeks before it, every row is kept.
+    assert len(empty) == 2
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name
@@ -1718,3 +1733,104 @@ def test_the_platform_step_is_the_doubling_tenant_alone(expected: dict):
                                                                int(row["previous_baseline"]),
                                                                int(row["previous_rows"]),
                                                                int(row["rows"])) for (_, row) in steps.iterrows()]
+
+
+def test_the_edge_stream_is_edges():
+    # `morpheus:edge` carried the reference corpus's flow records for its whole life: no parent, no child, no join
+    # method and no chain, so chain assembly's read of `lineage_id` from it was hollow. Every record is now an edge
+    # `EdgeEmitStage` wrote, and each names the two records it joins, how, and the chain the child was sealed into.
+    with open(os.path.join(EVENTS, "morpheus_edge.jsonlines"), encoding="utf-8") as handle:
+        edges = [json.loads(line) for line in handle if line.strip()]
+
+    scored = {event["event_uid"]: event for event in _scored_events()}
+
+    assert len(edges) > 0
+
+    for edge in edges:
+        for field in ("link_uid",
+                      "parent_event_uid",
+                      "child_event_uid",
+                      "relation_type",
+                      "join_method",
+                      "lineage_id",
+                      "child_osi_layer"):
+            assert edge.get(field) is not None, (field, edge)
+
+        child = scored[edge["child_event_uid"]]
+
+        assert child["lineage_id"] == edge["lineage_id"]
+        assert child["osi_layer"] == edge["child_osi_layer"]
+
+    assert {edge["relation_type"] for edge in edges} == {"resolved_through", "carried_by"}
+    assert {edge["join_method"] for edge in edges if edge["relation_type"] == "carried_by"} == {"hard:community_id"}
+
+
+def _bucketed(table: str) -> list:
+    with open(os.path.join(EVENTS, "binding_bucketed.jsonlines"), encoding="utf-8") as handle:
+        return [row for row in (json.loads(line) for line in handle if line.strip()) if row["binding_table"] == table]
+
+
+def _identity_walk() -> list:
+    """
+    'Identity walk - sign-in to switch port' over the sample events, with the three lookups built the way their
+    refreshes build them: one row per key and bucket, keyed as the search keys them.
+    """
+    leases = {(row["ip"], row["bucket"]): row["mac"] for row in _bucketed("dhcp_lease")}
+    macs = {(row["key"], row["bucket"]): row["port_key"] for row in _bucketed("mac_table")}
+    identities = {(row["dot1x_identity"], row["bucket"]): row["auth_port_key"] for row in _bucketed("dot1x_supplicant")}
+    walked = []
+
+    for event in _scored_events():
+        if (event.get("osi_layer") != 5 or event.get("window_complete") is not True):
+            continue
+
+        if (not event.get("desk_identity") and not event.get("login_port_key")):
+            continue
+
+        bucket = _five_minute_bin(event["event_time"]) // 300
+        by_identity = identities.get((event.get("desk_identity"), bucket))
+        mac = leases.get((event.get("source_ip"), bucket))
+        by_address = macs.get((mac, bucket))
+        port = by_identity if by_identity is not None else by_address
+
+        if (port is not None):
+            walked.append({
+                "user_principal": event["user_principal"],
+                "rung": "dot1x_identity" if by_identity is not None else "address",
+                "walked_port_key": port,
+                "resolved_port_key": event.get("desk_port_key") or event.get("login_port_key"),
+            })
+
+    return walked
+
+
+def test_each_binding_refresh_fills_its_lookup(expected: dict):
+    # The three rungs Part 4's ladder walks, each fed from the bucketed bindings its refresh selects. The L2/L3
+    # refresh was empty for its whole life because nothing produced a lease; the other two did not exist.
+    for (search, table, key) in (("Binding lookup - L2/L3 refresh", "dhcp_lease",
+                                  "ip"), ("Binding lookup - L2 refresh", "mac_table", "key"),
+                                 ("Binding lookup - L5/L2 refresh", "dot1x_supplicant", "dot1x_identity")):
+        rows = _bucketed(table)
+        entry = expected["searches"][search]
+
+        assert len(rows) > 0, table
+        assert len({(row[key], row["bucket"]) for row in rows}) == len(rows), f"{table}: one row per key and bucket"
+        assert entry["expected_rows"] == len(rows) and entry["expected_empty"] is False, search
+
+        stanza = _search_text(search)
+
+        assert f"binding_table={table}" in stanza and "key_field=_key" in stanza, search
+
+
+def test_the_identity_walk_reaches_the_port_the_pipeline_resolved(expected: dict):
+    # Part 4's ladder walked twice: by the pipeline, which wrote the port on each sign-in, and by the SIEM through
+    # the lookups. A desk sign-in walks by its 802.1X identity; a host login by its address to a MAC and the MAC
+    # to a port. The two must land on the same port for every sign-in either reaches.
+    walked = _identity_walk()
+    entry = expected["searches"]["Identity walk - sign-in to switch port"]
+
+    assert len(walked) > 0
+    assert all(row["walked_port_key"] == row["resolved_port_key"] for row in walked)
+    assert {row["rung"] for row in walked} == {"dot1x_identity", "address"}
+    assert entry["expected_rows"] == len(walked)
+    assert entry["walked_by_rung"] == dict(sorted(collections.Counter(row["rung"] for row in walked).items()))

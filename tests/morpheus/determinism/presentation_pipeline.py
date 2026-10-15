@@ -65,12 +65,14 @@ import hashlib
 import typing
 
 import envelope
+import host_identity
 import pandas as pd
 import stamping
 
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
@@ -85,10 +87,12 @@ from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
 from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
 from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
+from morpheus.utils.entity_key import normalize_hostname
 
 PERIOD_SECONDS = 3600
 LATENESS_SECONDS = 900
@@ -184,10 +188,10 @@ def at(hour: int, second: int = 0) -> int:
 
 
 def asset_versions() -> list:
-    """The inventory's record of every managed host, recorded before the corpus begins."""
+    """The inventory's record of every managed host, recorded before the corpus begins, keyed by host name."""
     return [
         make_version("asset",
-                     address,
+                     normalize_hostname(host_identity.hostname_for(address)),
                      0,
                      None,
                      0,
@@ -321,7 +325,15 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     frame = pd.DataFrame(rows).sort_values("event_time", kind="mergesort").reset_index(drop=True)
     frame["collector_seq"] = range(len(frame))
 
-    return envelope.attach_all({TELEMETRY_CLASS: frame})
+    # Which machine each client address was: the DHCP server's leases and the EDR agent's inventory, over the span.
+    # The personal device is leased an address like any client and runs no EDR agent, so its address resolves to
+    # an interface and to no machine -- which is why the inventory has no context for it.
+    hosts = host_identity.build(frame["src_ip"],
+                                int(frame["event_time"].min()),
+                                int(frame["event_time"].max()),
+                                unmanaged=(PERSONAL_DEVICE, ))
+
+    return envelope.attach_all({TELEMETRY_CLASS: frame, **hosts})
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -363,18 +375,29 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def build_stages(config: Config, store: typing.Optional[BitemporalStore] = None) -> list:
-    """The TC-6 stages, in the order a deployment would compose them, and the source's context after them.
+def build_stages(config: Config,
+                 store: typing.Optional[BitemporalStore] = None,
+                 hosts: typing.Optional[tuple] = None) -> list:
+    """The TC-6 stages, in the order a deployment would compose them, then the source's machine and its context.
 
-    The order is not load-bearing -- none of the four reads a column another writes -- so they are composed in
-    the order the rules are numbered, which is the order a reader will look for them in.
+    The order of the four is not load-bearing -- none reads a column another writes -- so they are composed in the
+    order the rules are numbered, which is the order a reader will look for them in. The source address is then
+    resolved to its machine through the leases and the EDR inventory in `hosts`, and the machine is what the asset
+    inventory is looked up on: an address names a host only for as long as its lease does, and a host name for as
+    long as the host does.
     """
+    (leases, inventory) = host_identity.tables(config, {}) if hosts is None else hosts
+
     return [
         TC6FingerprintStage(config),
         TC6CertificateStage(config, min_samples=MIN_SAMPLES),
         TC6CipherStage(config, min_samples=MIN_SAMPLES),
         TC6ContentStage(config),
-        TC0EnrichStage(config, store=build_store() if store is None else store, entity_column="src_ip"),
+        *host_identity.resolver_stages(config, leases, inventory, fallback_anchor="src_ip"),
+        TC0EnrichStage(config,
+                       store=build_store() if store is None else store,
+                       entity_column=host_identity.HOST_KEY_COLUMN,
+                       entity_normalization="hostname"),
     ]
 
 
@@ -382,7 +405,9 @@ def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
                  impose_order: bool = True,
-                 store: typing.Optional[BitemporalStore] = None) -> pd.DataFrame:
+                 store: typing.Optional[BitemporalStore] = None,
+                 hosts: typing.Optional[tuple] = None,
+                 sessions: typing.Optional[BindingTable] = None) -> pd.DataFrame:
     """
     Run the TC-6 class through its composed pipeline and return one canonicalized frame.
 
@@ -399,6 +424,14 @@ def run_pipeline(config: Config,
     store : `morpheus.utils.bitemporal.BitemporalStore`, optional
         The asset inventory the sources are enriched from. Defaults to this corpus's; another corpus running its
         handshakes through this pipeline supplies its own.
+    hosts : tuple, optional
+        The lease and inventory tables the source addresses resolve through, from `host_identity.tables`. Defaults
+        to the ones this corpus's own DHCP and inventory records close into; a corpus composing this pipeline over
+        its own estate passes that estate's.
+    sessions : `morpheus.utils.binding_table.BindingTable`, optional
+        Which principal's session held each address, from `host_identity.session_table`. Given, each handshake
+        carries the `session_key` of the session that held its source address; this corpus has no sessions of its
+        own.
 
     Returns
     -------
@@ -411,6 +444,7 @@ def run_pipeline(config: Config,
     # Validated once per class, ahead of every stage: ingest_time stamped, the envelope checked, untrusted clocks
     # taken out of the stream and kept.
     (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
+    (leases, inventory) = host_identity.tables(config, batches, impose_order) if hosts is None else hosts
 
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=batches[TELEMETRY_CLASS]))
@@ -423,8 +457,13 @@ def run_pipeline(config: Config,
 
     pipe.add_stage(CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"))
 
-    for stage in build_stages(config, store):
+    # The handshake stages, the source address to its interface and its machine with the chain rooted on the
+    # machine where there is one, and the machine's context.
+    for stage in build_stages(config, store, (leases, inventory)):
         pipe.add_stage(stage)
+
+    if (sessions is not None):
+        pipe.add_stage(host_identity.session_resolver(config, sessions))
 
     pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(TELEMETRY_CLASS, SETTINGS,
                                                                                 rules=RULES)))
@@ -434,14 +473,18 @@ def run_pipeline(config: Config,
                         period_seconds=PERIOD_SECONDS,
                         lateness_seconds=LATENESS_SECONDS,
                         order_columns=list(DEFAULT_ORDER_COLUMNS),
-                        entity_key_column="entity_key"))
+                        entity_key_column=DEFAULT_ANCHOR_COLUMN))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
     result = _collect(sink)
-    result["telemetry_class"] = TELEMETRY_CLASS
-    result["row_key"] = result["event_uid"]
+
+    # A collector every record of which was quarantined delivered nothing, and the class is absent rather than an
+    # empty frame -- which, with the DHCP server and the EDR inventory beside it, is now a spread the sweeps reach.
+    if (len(result) > 0):
+        result["telemetry_class"] = TELEMETRY_CLASS
+        result["row_key"] = result["event_uid"]
 
     return canonicalize(envelope.with_quarantine(result, quarantined),
                         key_columns=KEY_COLUMNS,

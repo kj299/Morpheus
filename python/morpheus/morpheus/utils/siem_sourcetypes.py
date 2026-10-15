@@ -212,6 +212,8 @@ PRODUCED: dict = {
             # the counts they are baselines of, because R-B-L3-001, R-B-L3-006 and R-B-L3-007 fire on a step above
             # a mature history and nothing else; `dst_ctx_device_role` because R-B-L3-006 asks what was reached;
             # `community_id` because the connection evidence report joins this layer to layers 4 and 6 on it.
+            # `host_key` and `mac_address` are the host evidence report's: the machine the source address
+            # resolved to through the DHCP leases and the asset inventory, null for a static address neither knows.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -223,6 +225,8 @@ PRODUCED: dict = {
                               "flow_pair_key",
                               "community_id",
                               "exporter_id",
+                              "host_key",
+                              "mac_address",
                               "dsts_per_src",
                               "dsts_per_src_saturated",
                               "dsts_per_src_step",
@@ -266,7 +270,8 @@ PRODUCED: dict = {
             # The three fireable layer 4 detections read these off this sourcetype. The counts are here and the
             # ratio columns are not, because a running ratio is not monotone and a search that summarizes a bin
             # has to divide the counts' maxima rather than aggregate the ratio -- see `tc4_flow_stage`.
-            # `community_id` is the connection evidence report's join to layers 3 and 6.
+            # `community_id` is the connection evidence report's join to layers 3 and 6. `host_key` and
+            # `mac_address` are the host evidence report's, as on layer 3.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -278,6 +283,8 @@ PRODUCED: dict = {
                               "dst_port",
                               "community_id",
                               "flow_id",
+                              "host_key",
+                              "mac_address",
                               "rollup_time_ns",
                               "flow_syn",
                               "flow_ack",
@@ -292,6 +299,10 @@ PRODUCED: dict = {
                               "flow_bpp",
                               "flow_bpp_envelope_ratio",
                               "flow_bpp_envelope_breached"),
+            # `session_key` is on the records a deployment resolves to the session holding their source address, and
+            # absent where it does not: R-C-004 joins on it where it is present and on the address where it is not,
+            # so a producer without sessions still satisfies the contract with the empty variant.
+            variant_columns=(("session_key", "session_resolution"), ()),
         ),
     "morpheus:score:l6":
         Sourcetype(
@@ -306,7 +317,7 @@ PRODUCED: dict = {
             # estate has just started seeing, and an issuer difference alone fires on every delivery host behind
             # more than one authority. The context columns are here because R-B-L6-001 fires only on a host the
             # inventory knows, and carries its criticality and owner; `community_id` is the connection evidence
-            # report's join to layers 3 and 4.
+            # report's join to layers 3 and 4, and `host_key` and `mac_address` the host evidence report's.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -316,6 +327,8 @@ PRODUCED: dict = {
                               "src_ip",
                               "dst_ip",
                               "community_id",
+                              "host_key",
+                              "mac_address",
                               "ctx_found",
                               "ctx_criticality",
                               "ctx_owner",
@@ -345,6 +358,8 @@ PRODUCED: dict = {
                               "content_category_detected",
                               "content_category_crossed",
                               "content_category_unclassified"),
+            # As on layer 4: R-C-004 joins a handshake to the session holding its address where one was resolved.
+            variant_columns=(("session_key", "session_resolution"), ()),
         ),
     "morpheus:score:l7":
         Sourcetype(
@@ -362,7 +377,9 @@ PRODUCED: dict = {
             # and the weekly trajectory. R-B-L7-004 reads the endpoint columns, and the peer group the enrichment
             # attached is carried as the stage recorded it, with the host's criticality, which weights the risk, and
             # the normalized host name the search keys on rather than the name the collector reported. R-C-001 reads
-            # the host's role, because a lateral movement chain ends on a server.
+            # the host's role, because a lateral movement chain ends on a server. The host evidence report reads
+            # `host_key` off DNS, HTTP and endpoint records alike: the machine a query's or request's source address
+            # resolved to, and the machine a process ran on, under the one name layers 3, 4 and 6 use for it.
             required_columns=("event_uid",
                               "entity_key",
                               "lineage_id",
@@ -372,6 +389,8 @@ PRODUCED: dict = {
                               *ENVELOPE_COLUMNS),
             variant_columns=(
                 ("src_ip",
+                 "host_key",
+                 "mac_address",
                  "query_name",
                  "dns_registered_domain",
                  "dns_subdomain",
@@ -379,6 +398,8 @@ PRODUCED: dict = {
                  "dns_mean_label_length",
                  "dns_subdomains_per_domain"),
                 ("src_ip",
+                 "host_key",
+                 "mac_address",
                  "url_path",
                  "status_code",
                  "http_4xx_in_window",
@@ -398,8 +419,25 @@ PRODUCED: dict = {
                  "ctx_groups",
                  "drift_rising_windows",
                  "week_window_id"),
+                ("user_principal",
+                 "operation",
+                 "target_object_type",
+                 "record_count",
+                 "saas_baseline_mature",
+                 "saas_record_baseline",
+                 "saas_record_ratio",
+                 "saas_object_types_in_week",
+                 "ctx_object_data_classification",
+                 "ctx_object_found",
+                 "ctx_groups",
+                 "drift_rising_windows",
+                 "week_window_id",
+                 "source_ip",
+                 "session_key",
+                 "session_resolution"),
                 ("hostname",
                  "endpoint_host",
+                 "host_key",
                  "ctx_criticality",
                  "ctx_device_role",
                  "ctx_owner",
@@ -475,6 +513,9 @@ PRODUCED: dict = {
             # records carry the address it came from, which R-C-004 binds a transfer to, and the lifecycle in two
             # words whatever the collector said. An identity provider's sessions enriched with the principal's
             # identity context carry each session's duration against the principal's own, which R-B-L5-005 reads.
+            # A desk sign-in in the estate carries the 802.1X identity the directory names its principal by and the
+            # port that identity was authorized on, each with the binding it rests on, which the identity walk reads
+            # beside a host login's address and port.
             required_columns=("event_uid",
                               "user_principal",
                               "lineage_id",
@@ -520,11 +561,14 @@ PRODUCED: dict = {
                  "auth_result",
                  "login_port_key",
                  "login_site_id",
+                 "login_lease_uid",
+                 "login_port_uid",
                  "resolution_method",
                  "resolution_methods",
                  "site_travel_status",
                  "site_travel_kmh",
                  "site_travel_elapsed_ns"),
+                ("auth_result", "desk_identity", "desk_port_key", "desk_identity_uid", "desk_binding_uid"),
                 ("source_ip", "session_key", "session_action", "session_lifecycle"),
                 ("session_key",
                  "session_lifecycle",
@@ -608,9 +652,20 @@ PRODUCED: dict = {
             name="morpheus:edge",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="`morpheus.stages.lineage.community_id_stage.CommunityIdStage` behind WindowSealStage; the "
-            "reference pipeline in `tests/morpheus/determinism/lineage_pipeline.py`.",
-            required_columns=("event_uid", "community_id", "src_ip", "dest_ip"),
+            producer="`morpheus.stages.lineage.edge_emit_stage.EdgeEmitStage` behind the resolvers and "
+            "WindowSealStage, one record per resolution hop and per layer a connection was seen at above the first; "
+            "`build_edges` in `tests/morpheus/determinism/estate_pipeline.py` and `campaign_pipeline.py`.",
+            # Chain assembly reads the chain and how it was joined. The rest is what makes an edge an edge: the
+            # two records it joins, what kind of relation it is, and the layer at each end. `community_id` is on
+            # the records whose child carried one and is not required, because a resolution hop of a sign-in has
+            # none to carry.
+            required_columns=("link_uid",
+                              "parent_event_uid",
+                              "child_event_uid",
+                              "relation_type",
+                              "join_method",
+                              "child_osi_layer",
+                              "lineage_id"),
         ),
     "binding:bucketed":
         Sourcetype(
@@ -620,12 +675,15 @@ PRODUCED: dict = {
             producer="`morpheus.utils.binding_table.BindingTable.to_bucketed_records`, which renders `bucket_start` "
             "itself rather than relying on a sink to do it.",
             required_columns=("binding_table", "bucket", "binding_uid"),
-            # One variant per table the lookups read: the port inventory the L1 refreshes bucket, the MAC table,
-            # and the DHCP leases the L2/L3 refresh selects, which nothing in this fork produces yet (issue #63).
+            # One variant per table the lookups read: the port inventory the L1 refreshes bucket; the MAC table the
+            # L2 refresh selects; the DHCP leases the L2/L3 refresh selects, which `TC2BindingStage` closes from a
+            # DHCP server's acknowledgements and releases, each lease held for the term the server granted; and the
+            # 802.1X supplicant bindings the L5/L2 refresh selects, which it closes from an authenticator's records.
             variant_columns=(
                 ("port_id", "switch_id", "site_id", "transceiver_serial", "lldp_neighbor_chassis_id"),
                 ("key", "port_key"),
                 ("ip", "mac", "port_id", "switch_id"),
+                ("dot1x_identity", "auth_port_key"),
             ),
         ),
     "binding:l1":

@@ -145,11 +145,12 @@ def stage_columns() -> set:
     for stage in built:
         columns.update(stage.get_needed_columns())
 
-    # The health stage replaces its payload rather than adding columns to it, so it declares none; the record it
-    # writes in their place is its contract.
+    # The health and edge stages replace their payload rather than adding columns to it, so they declare none; the
+    # record each writes in their place is its contract.
+    from morpheus.stages.lineage.edge_emit_stage import EDGE_COLUMNS
     from morpheus.stages.lineage.pipeline_health_stage import HEALTH_COLUMNS
 
-    return columns | set(HEALTH_COLUMNS)
+    return columns | set(HEALTH_COLUMNS) | set(EDGE_COLUMNS)
 
 
 def lookup_fields() -> set:
@@ -540,7 +541,7 @@ def walk_pipeline(search: str) -> tuple:
 def test_the_app_is_where_we_think_it_is():
     # Without this every assertion below passes over an empty parse, which is the failure mode a linter must not
     # have: it would report a clean bill of health for a file it never read.
-    assert len(searches()) == 66
+    assert len(searches()) == 72
     assert len(lookup_fields()) > 0
     assert len(stage_columns()) > 40
 
@@ -909,12 +910,7 @@ def reads_by_sourcetype(search: str) -> dict:
     return reads
 
 
-KNOWN_HOLLOW_READS = {
-    ("Chain assembly - cross-layer risk", "morpheus:edge"): {
-        "lineage_id": "the edge stream carries no lineage_id, so its rows leave the chain's stats; the edge "
-                      "producer is issue #63",
-    },
-}
+KNOWN_HOLLOW_READS: dict = {}
 """
 Reads this linter knows are hollow and the retrospective tracks: a search reading a field its sourcetype's contract
 cannot promise because nothing produces it. Each is listed with the issue that closes it, so the check below stays

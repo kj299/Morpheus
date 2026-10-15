@@ -87,7 +87,9 @@ The attacker signs in at headquarters and, twenty minutes later, in Edinburgh. F
 
 import typing
 
+import edge_stream
 import envelope
+import host_identity
 import pandas as pd
 import presentation_pipeline
 import saas_pipeline
@@ -98,6 +100,7 @@ from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
@@ -312,6 +315,10 @@ class Beaconer(typing.NamedTuple):
     """Minutes after the campaign hour starts; negative for the hour before."""
 
 
+C2_PORT = 47000
+"""The attacker's new stack's connection: the handshake that showed the new fingerprint, and the beacon's first flow
+record, which the flow exporter writes when that connection ends. One connection at two layers, one Community ID."""
+
 C2_ATTACKER = "10.20.2.5"
 BEACON_FIRST = "10.20.2.6"
 OTHER_DESTINATION = "10.20.2.7"
@@ -365,14 +372,14 @@ def asset_versions() -> list:
 
 def build_address_store() -> BitemporalStore:
     """The inventory the handshake enrichment reads: every address that holds a session or beacons is a managed
-    workstation, keyed on the address as the layer 6 pipeline looks it up."""
+    workstation, keyed on the host name its address resolves to, as the layer 6 pipeline looks it up."""
     addresses = sorted(set(SESSION_HOLDERS.values()) | set(BEACONERS))
 
     return BitemporalStore(
         "asset",
         [
             make_version("asset",
-                         address,
+                         normalize_hostname(host_identity.hostname_for(address)),
                          0,
                          None,
                          0,
@@ -526,10 +533,12 @@ def _handshake(rows: list,
     rows.append(record)
 
 
-def _export(rows: list, principal: str, records: int, when: int):
+def _export(rows: list, principal: str, records: int, when: int, source: str):
     record = _envelope(rows, "saas-audit-01", "tc7_saas.v1", f"{principal}>export@{records}", when)
     record.update({
         "user_principal": principal,
+        # The client address the audit log records, which is what places the export in a session.
+        "source_ip": source,
         "operation": saas_pipeline.EXPORT,
         "target_object": "customer-list",
         "target_object_type": "Account",
@@ -561,7 +570,11 @@ def _build_exfiltration(sessions: list, packets: list, handshakes: list, exports
     for (index, actor) in enumerate(EXFILTRATORS.values()):
         # A long, even history of exports, ending the day before, so the baseline is mature and small.
         for count in range(PRIOR_EXPORTS):
-            _export(exports, actor.principal, 40 + (count * 4) % 21, at(0, 12, index) + count * 90 * 60 * NS_PER_SECOND)
+            _export(exports,
+                    actor.principal,
+                    40 + (count * 4) % 21,
+                    at(0, 12, index) + count * 90 * 60 * NS_PER_SECOND,
+                    actor.address)
 
         # The breach address's regular uploads to the sync server, inside the envelope's eight-hour window.
         for count in range(PRIOR_TRANSFERS):
@@ -572,7 +585,7 @@ def _build_exfiltration(sessions: list, packets: list, handshakes: list, exports
                     1200,
                     at(LAST_DAY, 3, index) + count * 3 * 60 * NS_PER_SECOND)
 
-        _export(exports, actor.principal, 5000, at(LAST_DAY, CAMPAIGN_HOUR, actor.export_minute))
+        _export(exports, actor.principal, 5000, at(LAST_DAY, CAMPAIGN_HOUR, actor.export_minute), actor.address)
         breach = at(LAST_DAY, CAMPAIGN_HOUR, actor.breach_minute)
         _packet(packets, actor.breach_address, BREACH_PORT, SYNC_SERVER, 60000, breach)
 
@@ -604,12 +617,16 @@ def _build_command_and_control(flows: list, handshakes: list):
         for count in range(actor.history):
             _handshake(handshakes, actor.host, PORTAL, PORTAL_ISSUER, at(LAST_DAY, 8, 2 * count, index))
 
+        # Only the attacker's beacon runs over the connection the new stack opened. The controls' fingerprints and
+        # beacons are separate connections, so R-C-002 joins them on their addresses, as it always did.
+        shared = actor.host == C2_ATTACKER
         _handshake(handshakes,
                    actor.host,
                    actor.fingerprint_destination,
                    PUBLIC_ISSUER,
                    at(LAST_DAY, CAMPAIGN_HOUR, actor.fingerprint_minute, index),
-                   fingerprint=presentation_pipeline.NEW_STACK)
+                   fingerprint=presentation_pipeline.NEW_STACK,
+                   src_port=C2_PORT if shared else None)
 
         for count in range(BEACON_FLOWS):
             when = at(LAST_DAY, CAMPAIGN_HOUR, actor.beacon_start_minute,
@@ -617,7 +634,7 @@ def _build_command_and_control(flows: list, handshakes: list):
             record = _envelope(flows, "netflow-01", "tc3.v1", f"{actor.host}->{actor.beacon_destination}", when)
             record.update({
                 "src_ip": actor.host,
-                "src_port": _ephemeral_port(flows),
+                "src_port": C2_PORT if (shared and count == 0) else _ephemeral_port(flows),
                 "dst_ip": actor.beacon_destination,
                 "dst_port": 443,
                 "protocol": "tcp",
@@ -633,9 +650,6 @@ def _build_command_and_control(flows: list, handshakes: list):
 
 MAC_CLASS = "tc2_mac"
 """The two sites' MAC table snapshots. Closed into bindings and resolved through, not emitted as events."""
-
-CORPUS_CLASSES = CLASSES + (MAC_CLASS, )
-"""Every collector in the corpus: the emitted classes, and the MAC tables R-C-005 resolves through."""
 
 REPLAY_KMH = 900
 """R-C-005's speed, the guide's and R-D-L5-003's: above any commercial aircraft."""
@@ -749,34 +763,90 @@ def _build_mac_tables(rows: list):
             rows.append(record)
 
 
-def build_lease_table() -> BindingTable:
-    """
-    The estate's DHCP leases: which workstation each desk address was handed to, and for how long.
+LEASE_CLASS = "tc3_dhcp"
+"""The estate's DHCP server: an acknowledgement per desk, which is what says which workstation held an address, and
+the daily renewals of the workstations the other campaigns run from."""
 
-    Supplied rather than derived, the way the estate harness supplies its directory: a lease is a DHCP server's
-    record, and no switch telemetry produces it. Every lease covers the afternoon except the one the expired-lease
-    control's second sign-in comes from, which ended an hour before it, and the remote address has none.
+INVENTORY_CLASS = host_identity.INVENTORY_CLASS
+"""The EDR agents' daily inventory reports: which machine each workstation's network interface belongs to."""
+
+CORPUS_CLASSES = CLASSES + (MAC_CLASS, LEASE_CLASS, INVENTORY_CLASS)
+"""Every collector in the corpus: the emitted classes, and the MAC tables, leases and inventory reports the
+addresses resolve through."""
+
+CLIENT_POOLS = ("10.20.1.", "10.20.2.")
+"""The workstation subnets the DHCP server hands out: R-C-004's and R-C-002's hosts. The servers on 10.20.0.x are on
+static addresses, and the desks R-C-005 signs in from are leased by the acknowledgements above."""
+
+LEASE_COLLECTOR = "dhcp-01"
+LEASE_STARTS_HOUR = 8
+LEASE_ENDS_HOUR = 20
+
+
+def _build_leases(rows: list):
     """
-    rows = []
+    One acknowledgement per desk address, at the start of the working day, granting it to the desk's workstation.
+
+    Each lease runs to the evening, except the one the expired-lease control's second sign-in comes from, whose
+    term ends an hour before that sign-in; the remote address was never leased. The relay names the switch and port
+    the request arrived on, as DHCP option 82 does, so a lease places its address on a port without the MAC table.
+    """
+    granted = set()
 
     for (index, replay) in enumerate(REPLAYERS.values()):
         (_, second_time) = _replay_times(index, replay)
 
         for (desk, ends) in ((replay.first, None), (replay.second, replay.lease_ended_minutes_before)):
-            if (desk.address == REMOTE_ADDRESS):
+            if (desk.address == REMOTE_ADDRESS or desk.address in granted):
                 continue
 
-            rows.append({
-                "address": desk.address,
-                "mac_address": desk.mac,
-                "bind_start": at(LAST_DAY, 8),
-                "bind_end": at(LAST_DAY, 20) if ends is None else second_time - ends * 60 * NS_PER_SECOND,
+            granted.add(desk.address)
+            start = at(LAST_DAY, LEASE_STARTS_HOUR)
+            end = at(LAST_DAY, LEASE_ENDS_HOUR) if ends is None else second_time - ends * 60 * NS_PER_SECOND
+            record = _envelope(rows, LEASE_COLLECTOR, "tc3_dhcp.v1", f"{desk.address}>{desk.mac}", start)
+            record.update({
+                "ip": desk.address,
+                "mac": desk.mac,
+                "switch_id": SITE_SWITCHES[desk.site],
+                "port_id": desk.port,
+                "dhcp_message": "ack",
+                "lease_seconds": (end - start) // NS_PER_SECOND,
             })
+            rows.append(record)
 
-    return BindingTable.from_dataframe(pd.DataFrame(rows),
+
+def close_lease_bindings(config: Config, dataframes: list[pd.DataFrame], impose_order: bool = True) -> pd.DataFrame:
+    """The DHCP server's acknowledgements, closed into leases: each one held until its term ran out or was released."""
+    pipe = LinearPipeline(config)
+    pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
+    pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
+
+    if (impose_order):
+        pipe.add_stage(TotalOrderStage(config))
+
+    pipe.add_stage(CollectorSequenceStage(config))
+    pipe.add_stage(
+        TC2BindingStage(config,
+                        key_column="ip",
+                        attribute_columns=["mac", "switch_id", "port_id"],
+                        action_column="dhcp_message",
+                        grant_seconds_column="lease_seconds"))
+    sink = pipe.add_stage(InMemorySinkStage(config))
+    pipe.run()
+
+    return _collect(sink)
+
+
+def build_lease_table(bindings: pd.DataFrame) -> BindingTable:
+    """Which workstation each desk address was handed to, and for how long, as the DHCP server's leases closed."""
+    # A DHCP server every record of which was quarantined granted nothing anyone can see, and the table is empty.
+    if (len(bindings) == 0):
+        return BindingTable(name="dhcp_lease", value_columns=["mac", "switch_id", "port_id"], bindings=[])
+
+    return BindingTable.from_dataframe(bindings,
                                        name="dhcp_lease",
-                                       key_column="address",
-                                       value_columns=["mac_address"],
+                                       key_column="ip",
+                                       value_columns=["mac", "switch_id", "port_id"],
                                        start_column="bind_start",
                                        end_column="bind_end")
 
@@ -862,6 +932,14 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     _build_replays(logins)
     mac_tables: list = []
     _build_mac_tables(mac_tables)
+    leases: list = []
+    _build_leases(leases)
+
+    # The workstations' daily renewals and inventory reports, which say which machine an address was at layers 3, 4
+    # and 6. The renewals come from the same DHCP server as the desks' leases.
+    sources = [row["src_ip"] for row in flows + packets + handshakes]
+    times = [row["event_time"] for row in flows + packets + handshakes]
+    workstations = host_identity.build(sources, min(times), max(times), pools=CLIENT_POOLS)
 
     # Every flow names the router that metered it, which is what stamped its times.
     flow_frame = frame(flows)
@@ -876,6 +954,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
         HANDSHAKE_CLASS: frame(handshakes),
         SAAS_CLASS: frame(exports),
         MAC_CLASS: frame(mac_tables),
+        LEASE_CLASS: frame(leases + workstations[LEASE_CLASS].to_dict("records")),
+        INVENTORY_CLASS: frame(workstations[INVENTORY_CLASS].to_dict("records")),
     })
 
 
@@ -901,31 +981,46 @@ def build_pipeline_config(execution_mode=None) -> Config:
 
 LEASE_METHOD_COLUMN = "login_lease_resolution"
 PORT_METHOD_COLUMN = "login_port_resolution"
+LEASE_UID_COLUMN = "login_lease_uid"
+"""The DHCP lease a sign-in's source address was resolved to a workstation through."""
+PORT_UID_COLUMN = "login_port_uid"
+"""The MAC binding the workstation was resolved to a switch port through."""
 
 
-def _login_ladder(config: Config, mac_table: BindingTable) -> list:
+def _login_ladder(config: Config, mac_table: BindingTable, lease_table: BindingTable) -> list:
     """A sign-in's source address to a workstation through the leases, to a port and site through the MAC bindings,
     and the journey between the sites of a principal's consecutive sign-ins."""
     return [
         BindingResolverStage(config,
-                             binding_table=build_lease_table(),
+                             binding_table=lease_table,
                              key_column="source_ip",
-                             output_columns={"mac_address": "login_mac"},
-                             method_column=LEASE_METHOD_COLUMN),
+                             output_columns={"mac": "login_mac"},
+                             method_column=LEASE_METHOD_COLUMN,
+                             uid_column=LEASE_UID_COLUMN),
         BindingResolverStage(config,
                              binding_table=mac_table,
                              key_column="login_mac",
                              output_columns={
                                  "port_key": "login_port_key", "site_id": "login_site_id"
                              },
-                             method_column=PORT_METHOD_COLUMN),
+                             method_column=PORT_METHOD_COLUMN,
+                             uid_column=PORT_UID_COLUMN),
         TC5TravelStage(config, column_prefix="site_travel", location_column="login_site_id", locations=SITE_LOCATIONS),
     ]
 
 
-def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[BindingTable] = None) -> tuple:
+def _stages(config: Config,
+            telemetry_class: str,
+            mac_table: typing.Optional[BindingTable] = None,
+            lease_table: typing.Optional[BindingTable] = None,
+            inventory_table: typing.Optional[BindingTable] = None) -> tuple:
     """Each layer's own stages, its OSI layer and the entity it is sealed on."""
     if (telemetry_class == FLOW_CLASS):
+        # The source address to its interface and its machine, and the chain rooted on the machine where there is one,
+        # as the network corpus does.
+        resolvers = [] if inventory_table is None else host_identity.resolver_stages(
+            config, lease_table, inventory_table)
+
         return (
             [
                 CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"),
@@ -938,6 +1033,7 @@ def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[Bin
                 # There is no fortnight of history here, so every baseline is immature and none of the host-baseline
                 # rules can fire on this corpus; the destination's context comes from the address inventory.
                 TC0EnrichStage(config, store=build_address_store(), entity_column="dst_ip", prefix="dst_ctx_"),
+                *resolvers,
             ],
             3,
             ["src_ip"])
@@ -946,7 +1042,7 @@ def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[Bin
         return ([TC5SessionStage(config)], 5, ["user_principal"])
 
     if (telemetry_class == AUTH_CLASS):
-        ladder = [] if mac_table is None else _login_ladder(config, mac_table)
+        ladder = [] if mac_table is None else _login_ladder(config, mac_table, lease_table)
 
         return ([TC5NoveltyStage(config, target_host_column="target_host")] + ladder, 5, ["user_principal"])
 
@@ -997,9 +1093,13 @@ def run_class(config: Config,
               telemetry_class: str,
               dataframes: list[pd.DataFrame],
               impose_order: bool = True,
-              mac_table: typing.Optional[BindingTable] = None) -> pd.DataFrame:
+              mac_table: typing.Optional[BindingTable] = None,
+              lease_table: typing.Optional[BindingTable] = None,
+              inventory_table: typing.Optional[BindingTable] = None) -> pd.DataFrame:
     """Source, stamp, total order, the layer's stages, determinism stamp, envelope, hourly seal, sink: one collector."""
-    (stages, osi_layer, entity_columns) = _stages(config, telemetry_class, mac_table)
+    (stages, osi_layer, entity_columns) = _stages(config, telemetry_class, mac_table, lease_table, inventory_table)
+    # A flow's chain is rooted on the machine it came from where its address resolved to one.
+    anchored = telemetry_class == FLOW_CLASS and inventory_table is not None
 
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
@@ -1021,7 +1121,7 @@ def run_class(config: Config,
                         period_seconds=PERIOD_SECONDS,
                         lateness_seconds=LATENESS_SECONDS,
                         order_columns=list(DEFAULT_ORDER_COLUMNS),
-                        entity_key_column="entity_key"))
+                        entity_key_column=DEFAULT_ANCHOR_COLUMN if anchored else "entity_key"))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
@@ -1076,9 +1176,18 @@ def run_pipeline(config: Config,
     # R-C-005's ladder resolves through bindings the layer 2 collector closes, so those are closed first, the way
     # the estate harness closes its supplicant bindings before resolving through them.
     mac_table = build_mac_table(close_mac_bindings(config, batches[MAC_CLASS], impose_order=impose_order))
+    # And the addresses the sign-ins came from are named by the DHCP server's leases, closed the same way.
+    lease_table = build_lease_table(close_lease_bindings(config, batches[LEASE_CLASS], impose_order=impose_order))
+    # Which machine each workstation's interface belongs to, which the flows, transfers and handshakes resolve through.
+    inventory_table = host_identity.inventory_table(
+        host_identity.close_inventory(config, batches.get(INVENTORY_CLASS, []), impose_order=impose_order))
+    resolved = {"hosts": (lease_table, inventory_table)}
+    # Which principal's session held each address. Built from the sessions class's output once it has run; a
+    # sessions collector every record of which was quarantined leaves nothing to resolve through.
+    sessions = host_identity.session_table(pd.DataFrame(), 0)
 
     # The handshakes' sources are enriched from this estate's inventory, not from the layer 6 corpus's.
-    stores = {HANDSHAKE_CLASS: {"store": build_address_store()}}
+    stores = {HANDSHAKE_CLASS: {"store": build_address_store(), **resolved}, TRANSFER_CLASS: resolved, SAAS_CLASS: {}}
 
     for name in CLASSES:
         # A collector every record of which was quarantined delivered nothing for its class to run over.
@@ -1086,16 +1195,58 @@ def run_pipeline(config: Config,
             continue
 
         if (name in delegated):
+            # The packets, handshakes and exports run after the sessions, and carry the session that held their
+            # source address -- the key R-C-004 joins its steps on where it is present.
             frames.append(delegated[name].run_pipeline(config, {name: batches[name][0]},
                                                        batches={name: batches[name]},
                                                        impose_order=impose_order,
+                                                       sessions=sessions,
                                                        **stores.get(name, {})))
         else:
-            frames.append(run_class(config, name, batches[name], impose_order=impose_order, mac_table=mac_table))
+            frames.append(
+                run_class(config,
+                          name,
+                          batches[name],
+                          impose_order=impose_order,
+                          mac_table=mac_table,
+                          lease_table=lease_table,
+                          inventory_table=inventory_table))
 
-    return canonicalize(envelope.with_quarantine(pd.concat(frames, ignore_index=True), quarantined),
+            if (name == SESSION_CLASS and len(frames[-1]) > 0):
+                sessions = host_identity.session_table(session_intervals(frames[-1]), at(LAST_DAY + 1))
+
+    # Every collector whose records the classes emit can be held at once: at a wide enough spread the one clock left
+    # inside the bound is a site's MAC table, which only the bindings read.
+    combined = pd.concat(frames, ignore_index=True) if len(frames) > 0 else pd.DataFrame()
+
+    return canonicalize(envelope.with_quarantine(combined, quarantined),
                         key_columns=KEY_COLUMNS,
                         ignore_columns=IGNORE_COLUMNS)
+
+
+EDGE_HOPS = {
+    "hop_method_columns": [
+        LEASE_METHOD_COLUMN,
+        PORT_METHOD_COLUMN,
+        host_identity.LEASE_METHOD_COLUMN,
+        host_identity.INVENTORY_METHOD_COLUMN
+    ],
+    "hop_uid_columns": [
+        LEASE_UID_COLUMN, PORT_UID_COLUMN, host_identity.LEASE_UID_COLUMN, host_identity.INVENTORY_UID_COLUMN
+    ],
+    "hop_layers": [3, 2, 3, 7],
+}
+"""The campaign's resolution hops: a sign-in's address through the DHCP leases and its workstation through the MAC
+bindings, and a flow's, packet's or handshake's address through the leases and its interface through the EDR
+inventory. The end of each edge is the layer of the collector the binding was closed from."""
+
+
+def build_edges(config: Config, result: pd.DataFrame) -> pd.DataFrame:
+    """
+    The campaign's `morpheus:edge` records: one per hop a record was resolved through, and one per layer a
+    connection was seen at above the first, joined on the Community ID every layer stamped.
+    """
+    return edge_stream.emit(config, result, join_column="community_id", **EDGE_HOPS)
 
 
 def render(result: pd.DataFrame) -> str:
@@ -1224,6 +1375,18 @@ def session_intervals(result: pd.DataFrame) -> pd.DataFrame:
     return starts.reset_index().merge(ends.reset_index(), on="session_key", how="left")
 
 
+HARD_SESSION = "hard:session_key"
+VALUE_ADDRESS = "value:source_ip"
+HARD_CONNECTION = "hard:community_id"
+VALUE_PAIR = "value:src_ip,dst_ip"
+
+
+def _key(row: pd.Series, column: str) -> typing.Optional[str]:
+    value = row.get(column)
+
+    return None if value is None or pd.isna(value) else value
+
+
 def staged_exfiltration(result: pd.DataFrame,
                         in_session: bool = True,
                         session_bound: bool = True,
@@ -1235,6 +1398,29 @@ def staged_exfiltration(result: pd.DataFrame,
 
     `session_bound` off lets a breach from any address count; `in_session` off keeps the address a session of the
     principal's but drops the requirement that it was open at the breach.
+    """
+    return {
+        chain: tuple(times)
+        for (chain, (*times, _)) in exfiltration_chains(
+            result, in_session=in_session, session_bound=session_bound, new_issuer=new_issuer, ordered=ordered,
+            window_seconds=window_seconds, tolerance_seconds=tolerance_seconds).items()
+    }
+
+
+def exfiltration_chains(result: pd.DataFrame,
+                        in_session: bool = True,
+                        session_bound: bool = True,
+                        new_issuer: bool = True,
+                        ordered: bool = True,
+                        window_seconds: typing.Optional[int] = EXFIL_WINDOW_SECONDS,
+                        tolerance_seconds: int = JOIN_TOLERANCE_SECONDS) -> dict:
+    """
+    `staged_exfiltration`, with how each chain's steps were joined: the three step times and the join method.
+
+    Where a step carries the `session_key` of the session that held its source address, it is joined to the
+    principal's session on that key, `hard:session_key`. Where it carries none -- a collector nothing resolved -- it
+    is joined on the address, and a breach only while the session holding that address was open, as the rule
+    always did, `value:source_ip`. A chain is hard only if every step was.
     """
     tolerance_ns = tolerance_seconds * NS_PER_SECOND
     window_ns = None if window_seconds is None else window_seconds * NS_PER_SECOND
@@ -1258,29 +1444,43 @@ def staged_exfiltration(result: pd.DataFrame,
         t1 = int(export["event_time"])
         own = sessions[sessions["user_principal"] == principal]
 
+        # An export placed in a session is joined to that session alone.
+        if (_key(export, "session_key") is not None):
+            own = own[own["session_key"] == export["session_key"]]
+
         for (_, breach) in breaches.iterrows():
             t2 = int(breach["event_time"])
             address = breach["src_ip"]
+            breach_session = _key(breach, "session_key")
 
             if (ordered and t2 < t1 - tolerance_ns) or (window_ns is not None and t2 - t1 > window_ns):
                 continue
 
             if (session_bound):
-                held = own[own["source_ip"] == address]
+                if (breach_session is not None and in_session):
+                    held = own[own["session_key"] == breach_session]
+                else:
+                    held = own[own["source_ip"] == address]
 
-                if (in_session):
-                    held = held[(held["opened"] <= t2) & (held["closed"].isna() | (held["closed"] >= t2))]
+                    if (in_session):
+                        held = held[(held["opened"] <= t2) & (held["closed"].isna() | (held["closed"] >= t2))]
 
                 if (len(held) == 0):
                     continue
 
             for (_, handshake) in handshakes[handshakes["src_ip"] == address].iterrows():
                 t3 = int(handshake["event_time"])
+                handshake_session = _key(handshake, "session_key")
 
                 if (ordered and t3 < t2 - tolerance_ns) or (window_ns is not None and t3 - t1 > window_ns):
                     continue
 
-                fired.setdefault((principal, address), (t1, t2, t3))
+                if (session_bound and in_session and breach_session is not None and handshake_session is not None
+                        and handshake_session != breach_session):
+                    continue
+
+                hard = all(key is not None for key in (_key(export, "session_key"), breach_session, handshake_session))
+                fired.setdefault((principal, address), (t1, t2, t3, HARD_SESSION if hard else VALUE_ADDRESS))
 
     return fired
 
@@ -1298,6 +1498,27 @@ def tls_before_beaconing(result: pd.DataFrame,
 
     The beacon is dated when it first matures, which is when R-B-L3-002 would first report it.
     """
+    return {
+        pair: tuple(times)
+        for (pair, (*times,
+                    _)) in c2_chains(result, settled=settled, same_destination=same_destination, ordered=ordered,
+                                     window_seconds=window_seconds, tolerance_seconds=tolerance_seconds).items()
+    }
+
+
+def c2_chains(result: pd.DataFrame,
+              settled: bool = True,
+              same_destination: bool = True,
+              ordered: bool = True,
+              window_seconds: typing.Optional[int] = C2_WINDOW_SECONDS,
+              tolerance_seconds: int = JOIN_TOLERANCE_SECONDS) -> dict:
+    """
+    `tls_before_beaconing`, with how each pair's fingerprint was joined to the flows: the two times and the method.
+
+    A fingerprint whose connection the flow exporter also recorded -- one Community ID at layers 3 and 6 -- takes its
+    host and destination from that flow record, `hard:community_id`. One whose connection no flow record carries is
+    joined on its own addresses, `value:src_ip,dst_ip`, as the rule always did.
+    """
     tolerance_ns = tolerance_seconds * NS_PER_SECOND
     fingerprints = result[(result["telemetry_class"] == HANDSHAKE_CLASS) & result["ja4_client_first_seen"].map(_truthy)]
 
@@ -1307,13 +1528,21 @@ def tls_before_beaconing(result: pd.DataFrame,
     flows = result[(result["telemetry_class"] == FLOW_CLASS) & result["flow_regularity_mature"].map(_truthy)]
     flows = flows[(flows["flow_interval_cv"].astype(float) < 0.15) & (flows["flow_size_cv"].astype(float) < 0.15)]
     beacons = flows.groupby(["src_ip", "dst_ip"])["event_time"].min().astype("int64")
+    carried = result[(result["telemetry_class"] == FLOW_CLASS) & result["community_id"].notna()]
+    carried = carried.drop_duplicates("community_id").set_index("community_id")[["src_ip", "dst_ip"]]
     fired: dict = {}
 
     for (_, fingerprint) in fingerprints.iterrows():
         t1 = int(fingerprint["event_time"])
+        connection = _key(fingerprint, "community_id")
+
+        if (connection is not None and connection in carried.index):
+            (host, reached, method) = (*carried.loc[connection], HARD_CONNECTION)
+        else:
+            (host, reached, method) = (fingerprint["src_ip"], fingerprint["dst_ip"], VALUE_PAIR)
 
         for ((source, destination), t2) in beacons.items():
-            if (source != fingerprint["src_ip"]) or (same_destination and destination != fingerprint["dst_ip"]):
+            if (source != host) or (same_destination and destination != reached):
                 continue
 
             if (ordered and t2 < t1 - tolerance_ns):
@@ -1322,7 +1551,7 @@ def tls_before_beaconing(result: pd.DataFrame,
             if (window_seconds is not None and t2 - t1 > window_seconds * NS_PER_SECOND):
                 continue
 
-            fired.setdefault((source, destination), (t1, int(t2)))
+            fired.setdefault((source, destination), (t1, int(t2), method))
 
     return fired
 

@@ -32,7 +32,9 @@ judged against the group from its first process, which is the point of having a 
 
 **A host is one host however the EDR spells it.** Hosts are keyed with
 {py:func}`~morpheus.utils.entity_key.normalize_hostname`, so `FIN-01` and `fin-01` share one history, and the key is
-written as `endpoint_host` for a search to group and join on, where the reported `hostname` is kept as evidence.
+written as `endpoint_host` for a search to group and join on, where the reported `hostname` is kept as evidence. The
+same key is written as `host_key`, the column layers 3, 4 and 6 carry for the machine their source address resolved
+to through the DHCP leases and the asset inventory, so one search joins a process to its machine's traffic.
 
 **Paths are compared as the same software would be.** Case is folded, because Windows paths are case-insensitive and
 EDR products disagree about how they report them, and the folder under a per-user profile -- `C:\\Users\\<name>\\`,
@@ -98,6 +100,7 @@ _PROFILE_FOLDERS = (
 )
 
 HOST = "endpoint_host"
+HOST_KEY = "host_key"
 PAIR = "endpoint_pair"
 PEER_GROUP = "endpoint_peer_group"
 HOST_SEEN = "endpoint_host_seen"
@@ -230,6 +233,7 @@ class TC7EndpointStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                           max_entities=max_entities)
 
         self._needed_columns[HOST] = TypeId.STRING
+        self._needed_columns[HOST_KEY] = TypeId.STRING
         self._needed_columns[PAIR] = TypeId.STRING
         self._needed_columns[PEER_GROUP] = TypeId.STRING
         self._needed_columns[HOST_SEEN] = TypeId.BOOL8
@@ -356,6 +360,7 @@ class TC7EndpointStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     novel.append(not on_host.seen and (in_group is None or not in_group.seen))
 
             assign_str_column(df, HOST, keys)
+            assign_str_column(df, HOST_KEY, keys)
             assign_str_column(df, PAIR, pairs)
             assign_str_column(df, PEER_GROUP, peer_groups)
             assign_nullable_bool_column(df, HOST_SEEN, host_seen)

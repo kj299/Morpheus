@@ -32,10 +32,11 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | --- | --- | --- |
 | `default/indexes.conf` | Indexers | `behavior_events`, `behavior_lineage`, `behavior_bindings`, `behavior_context`, `behavior_summary`, `behavior_risk`, and the pipeline's own `behavior_health`, `behavior_quarantine` and `behavior_late`, with deliberately asymmetric retention, and a statement of what each one holds about a person beside the period it holds it for |
 | `default/props.conf` | Indexers or heavy forwarders | One JSON sourcetype per OSI layer plus edges, bindings, context, health, quarantine and late rows, each with `_time` anchored on a field the record carries -- `event_time` for scores, edges, late rows and health (a window's end), an interval bound for bindings, `valid_from` for context, and `ingest_time` for a quarantined record, whose own event time is the thing in doubt |
-| `default/collections.conf` | Search heads | KV Store collections for the L2/L3 bucketed bindings, the unbucketed L1 bindings, the bucketed L1 history beside them, the LLDP adjacency the topology search writes, and the principal watchlist the predictive rules write, with accelerated fields |
-| `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l1`, `binding_l1_history`, `lldp_adjacency` and `principal_watchlist` lookups, and `rule_metadata` |
-| `default/savedsearches.conf` | Search heads | Sixty-six searches: lookup refresh and expiry jobs, including the principal watchlist's and the LLDP adjacency refresh, the 5-minute summary rollup, chain assembly, the connection evidence report joining layers 3, 4 and 6 on `community_id`, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the seven layer 1 detections R-D-L1-001, 002, 003 and 006, R-B-L1-005 and 007 and the predictive R-P-L1-004, the device restart report, the eight layer 2 detections R-B-L2-002, 006, 007 and 008 and R-D-L2-001, 003, 004 and 005, the eight layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004, the predictive R-P-L3-005, and the host-baseline rules R-B-L3-006, R-B-L3-007 and R-D-L3-008, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the five deterministic layer 5 detections R-D-L5-003, R-D-L5-004, R-D-L5-007, R-D-L5-008 and R-D-L5-009, the two layer 5 model rules R-B-L5-001 and R-B-L5-002, gated on a principal's own model and empty until one is pinned, the layer 5 session duration rule R-B-L5-005, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, a TLS table coverage metric, and four reports on the pipeline itself -- the refusal rate, collector health, late arrivals by class and the platform baseline step. Every detection reads only rows whose window was complete (`window_complete=true`), ends by collecting its rows into `behavior_risk`, which Chain assembly sums, and is a per-result alert suppressed on its stated deduplication key for its dispatch window |
+| `default/collections.conf` | Search heads | KV Store collections for the L2/L3, L2 and L5/L2 bucketed bindings, the unbucketed L1 bindings, the bucketed L1 history beside them, the LLDP adjacency the topology search writes, and the principal watchlist the predictive rules write, with accelerated fields |
+| `default/transforms.conf` | Search heads | The `binding_l2_l3`, `binding_l2`, `binding_l5_l2`, `binding_l1`, `binding_l1_history`, `lldp_adjacency` and `principal_watchlist` lookups, and the `rule_metadata` and `principal_directory` files |
+| `default/savedsearches.conf` | Search heads | Seventy-two searches: lookup refresh and expiry jobs for the address, MAC and 802.1X identity rungs and the layer 1 bindings, including the principal watchlist's and the LLDP adjacency refresh, the 5-minute summary rollup, chain assembly, the connection evidence report joining layers 3, 4 and 6 on `community_id`, the host evidence report joining layers 3, 4, 6 and 7 on `host_key`, the identity walk from a sign-in to its switch port through the binding lookups, the chained detections R-C-001, R-C-002, R-C-004 and R-C-005, the seven layer 1 detections R-D-L1-001, 002, 003 and 006, R-B-L1-005 and 007 and the predictive R-P-L1-004, the device restart report, the eight layer 2 detections R-B-L2-002, 006, 007 and 008 and R-D-L2-001, 003, 004 and 005, the eight layer 3 detections R-B-L3-001, R-B-L3-002, R-D-L3-003, R-B-L3-004, the predictive R-P-L3-005, and the host-baseline rules R-B-L3-006, R-B-L3-007 and R-D-L3-008, the three layer 4 detections R-D-L4-002, R-D-L4-003 and R-B-L4-005, the five layer 6 detections R-B-L6-001, R-D-L6-002, R-D-L6-003, R-B-L6-004 and R-D-L6-005, the five layer 7 detections R-B-L7-001, R-D-L7-005, R-B-L7-002, R-B-L7-004 and the predictive R-P-L7-006, the five deterministic layer 5 detections R-D-L5-003, R-D-L5-004, R-D-L5-007, R-D-L5-008 and R-D-L5-009, the two layer 5 model rules R-B-L5-001 and R-B-L5-002, gated on a principal's own model and empty until one is pinned, the layer 5 session duration rule R-B-L5-005, the layer 5 predictive watchlist R-P-L5-006, a binding health alert, a TLS table coverage metric, and four reports on the pipeline itself -- the refusal rate, collector health, late arrivals by class and the platform baseline step. Every detection reads only rows whose window was complete (`window_complete=true`), ends by collecting its rows into `behavior_risk`, which Chain assembly sums, and is a per-result alert suppressed on its stated deduplication key for its dispatch window |
 | `lookups/port_designations.csv` | Search heads | The port designation list R-D-L2-001 reads, and R-B-L2-002 reads to leave `trunk` and `lag-member` ports out: `port_key,designation,max_macs`. Ships header-only; populate it from the inventory |
+| `lookups/principal_directory.csv` | Search heads | The estate's directory: which 802.1X identity each principal presents, `user_principal,dot1x_identity,valid_from,valid_until`. Ships header-only; it is the first rung from a person to a port and no telemetry this app reads supplies it |
 | `lookups/rule_metadata.csv` | Search heads | One row per detection: `rule_id,saved_search,suppress_fields,suppress_period,hysteresis`. The stanzas' `alert.suppress.*` keys are held to it by a test; `hysteresis` is `none` for every rule until a model scores near a threshold |
 | `lookups/scanner_allowlist.csv` | Search heads | The estate's own scanners, which R-B-L3-001 excludes: `src_ip,allowed,owner,note`. Ships header-only; until it is populated the rule fires on every scanner, authorized ones included |
 
@@ -163,9 +164,14 @@ side alone breaks the joins silently.
 ## What to expect once data flows
 
 - The two layer 1 refresh searches populate the KV Store from `binding:l1` within their first scheduled cycle;
-  `| inputlookup binding_l1 | head 5` confirms rows are landing. `binding_l2_l3` stays empty until a DHCP lease
-  feed is expanded with `to_bucketed_records(table_name="dhcp_lease")`, which nothing in the fork produces yet
-  (issue #63).
+  `| inputlookup binding_l1 | head 5` confirms rows are landing. `binding_l2_l3` fills from the DHCP leases
+  `TC2BindingStage` closes from a DHCP server's acknowledgements and releases with a `grant_seconds_column`,
+  expanded with `to_bucketed_records(key_name="ip", table_name="dhcp_lease")`; `binding_l2` from the MAC table
+  bindings, `binding_table=mac_table`; and `binding_l5_l2` from the 802.1X supplicant bindings closed with
+  `key_column="dot1x_identity"`, expanded with `table_name="dot1x_supplicant"`. The directory that says which
+  identity a principal presents is the estate's own export, `lookups/principal_directory.csv`, and ships
+  header-only. `Identity walk - sign-in to switch port` walks a sign-in to a port through the three and shows the
+  port the pipeline resolved beside the one the walk found; the two disagreeing is a lookup refresh behind.
 - `binding_l1_history` is the one lookup that is *expected* to be empty in a healthy estate, and stays
   empty until somebody replaces an optic or moves a fibre. Do not read an empty result there as a broken
   refresh; read it against `| inputlookup binding_l1 | stats count`, which should hold one row per port
@@ -230,7 +236,7 @@ Three levels, strongest last:
 2. **Live load.** The app was installed into a fresh Splunk Enterprise 10.2 instance: `btool check`
    reports no errors, all five indexes are created, all seven scheduled searches that existed at the
    time register, and every one of them executes without a parse error against empty indexes. The app
-   ships sixty-six searches now; the fifty-nine added since have not been through this step.
+   ships seventy-two searches now; the sixty-five added since have not been through this step.
 3. **Functional.** With synthetic JSON telemetry seeded into the indexes and bindings written to the
    KV Store: timestamps anchor to `event_time` as the props intend, the identifier ladder resolves an
    IP through both lookups to a physical port and site, the chain assembly search emits the seeded
@@ -258,7 +264,7 @@ plants both a simultaneous and a cross-switch spoof for, alongside a legitimate 
 the stanzas parse on a search head. Run `btool savedsearches list` after installing.
 
 The run that would settle that is packaged: `validate/run_search_head.sh` starts the validation container, indexes
-the sample events, dispatches all sixty-six searches in the order `validate/VALIDATION.md` prescribes, and writes
+the sample events, dispatches all seventy-two searches in the order `validate/VALIDATION.md` prescribes, and writes
 `validate/search_head_results.json`, which `tests/morpheus/determinism/test_search_head_run.py` compares with
 `expected_results.json`. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:
 every one of the forty-eight searches ran without error over the pipeline's own events, and forty-six returned
@@ -283,10 +289,15 @@ risk records the detections returned. A seventh, later the same day on the same 
 10 regenerated when the estate gained its network-object plants: it indexed all 10,285 events, returned what was then
 written for all sixty-two -- each of the ten new searches what its plant leaves for it -- and held the 209 risk
 records the detections returned. An eighth, that night on the same install, ran over the events step 11 regenerated
-when the pipeline began reporting on itself: it indexed all 11,352 events across seventeen sourcetypes, returned what
-is written for all sixty-six -- each of the four health reports one row -- held the same 209 risk records, every
-detection now reading only complete windows, and is `validate/search_head_results.json`; the earlier seven are kept
-beside it.
+when the pipeline began reporting on itself: it indexed all 11,352 events across sixteen sourcetypes, returned what
+was then written for all sixty-six -- each of the four health reports one row -- and held the same 209 risk records,
+every detection now reading only complete windows. A ninth, on 2026-10-15 on the same install, ran over the events
+step 12 regenerated when hosts gained an identity across layers: it indexed all 16,423 events, returned what is
+written for all seventy-two -- the L2/L3 refresh its first rows, the host evidence report seventeen machines and the
+identity walk all twenty-five sign-ins -- held the same 209 risk records, and is `validate/search_head_results.json`;
+the earlier eight are kept beside it. Its first attempt found the walk empty, because the refreshes keyed rows on the
+producer's bucket ordinal while the walk computed its bucket from a `_time` the run had moved; every refresh now keys
+its rows on the bucket its own time falls in.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields
