@@ -1215,7 +1215,11 @@ def run_pipeline(config: Config,
             if (name == SESSION_CLASS and len(frames[-1]) > 0):
                 sessions = host_identity.session_table(session_intervals(frames[-1]), at(LAST_DAY + 1))
 
-    return canonicalize(envelope.with_quarantine(pd.concat(frames, ignore_index=True), quarantined),
+    # Every collector whose records the classes emit can be held at once: at a wide enough spread the one clock left
+    # inside the bound is a site's MAC table, which only the bindings read.
+    combined = pd.concat(frames, ignore_index=True) if len(frames) > 0 else pd.DataFrame()
+
+    return canonicalize(envelope.with_quarantine(combined, quarantined),
                         key_columns=KEY_COLUMNS,
                         ignore_columns=IGNORE_COLUMNS)
 

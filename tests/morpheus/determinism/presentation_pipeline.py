@@ -479,8 +479,12 @@ def run_pipeline(config: Config,
     pipe.run()
 
     result = _collect(sink)
-    result["telemetry_class"] = TELEMETRY_CLASS
-    result["row_key"] = result["event_uid"]
+
+    # A collector every record of which was quarantined delivered nothing, and the class is absent rather than an
+    # empty frame -- which, with the DHCP server and the EDR inventory beside it, is now a spread the sweeps reach.
+    if (len(result) > 0):
+        result["telemetry_class"] = TELEMETRY_CLASS
+        result["row_key"] = result["event_uid"]
 
     return canonicalize(envelope.with_quarantine(result, quarantined),
                         key_columns=KEY_COLUMNS,
