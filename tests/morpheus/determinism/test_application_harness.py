@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import application_pipeline as ap_  # noqa: E402
+import host_identity  # noqa: E402
 
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_application_expected.csv")
 DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_application_pipeline.py")
@@ -150,7 +151,7 @@ def _permuted(corpus: dict, seed: int) -> dict:
 def test_corpus_is_fixed(corpus: dict[str, pd.DataFrame]):
     again = ap_.build_corpus()
 
-    assert set(again) == set(corpus) == set(ap_.TELEMETRY_CLASSES)
+    assert set(again) == set(corpus) == set(ap_.TELEMETRY_CLASSES) | set(host_identity.HOST_CLASSES)
 
     for name in corpus:
         pd.testing.assert_frame_equal(corpus[name], again[name])

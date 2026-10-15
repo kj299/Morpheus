@@ -88,6 +88,7 @@ The attacker signs in at headquarters and, twenty minutes later, in Edinburgh. F
 import typing
 
 import envelope
+import host_identity
 import pandas as pd
 import presentation_pipeline
 import saas_pipeline
@@ -98,6 +99,7 @@ from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
+from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
@@ -634,9 +636,6 @@ def _build_command_and_control(flows: list, handshakes: list):
 MAC_CLASS = "tc2_mac"
 """The two sites' MAC table snapshots. Closed into bindings and resolved through, not emitted as events."""
 
-CORPUS_CLASSES = CLASSES + (MAC_CLASS, )
-"""Every collector in the corpus: the emitted classes, and the MAC tables R-C-005 resolves through."""
-
 REPLAY_KMH = 900
 """R-C-005's speed, the guide's and R-D-L5-003's: above any commercial aircraft."""
 
@@ -749,34 +748,90 @@ def _build_mac_tables(rows: list):
             rows.append(record)
 
 
-def build_lease_table() -> BindingTable:
-    """
-    The estate's DHCP leases: which workstation each desk address was handed to, and for how long.
+LEASE_CLASS = "tc3_dhcp"
+"""The estate's DHCP server: an acknowledgement per desk, which is what says which workstation held an address, and
+the daily renewals of the workstations the other campaigns run from."""
 
-    Supplied rather than derived, the way the estate harness supplies its directory: a lease is a DHCP server's
-    record, and no switch telemetry produces it. Every lease covers the afternoon except the one the expired-lease
-    control's second sign-in comes from, which ended an hour before it, and the remote address has none.
+INVENTORY_CLASS = host_identity.INVENTORY_CLASS
+"""The EDR agents' daily inventory reports: which machine each workstation's network interface belongs to."""
+
+CORPUS_CLASSES = CLASSES + (MAC_CLASS, LEASE_CLASS, INVENTORY_CLASS)
+"""Every collector in the corpus: the emitted classes, and the MAC tables, leases and inventory reports the
+addresses resolve through."""
+
+CLIENT_POOLS = ("10.20.1.", "10.20.2.")
+"""The workstation subnets the DHCP server hands out: R-C-004's and R-C-002's hosts. The servers on 10.20.0.x are on
+static addresses, and the desks R-C-005 signs in from are leased by the acknowledgements above."""
+
+LEASE_COLLECTOR = "dhcp-01"
+LEASE_STARTS_HOUR = 8
+LEASE_ENDS_HOUR = 20
+
+
+def _build_leases(rows: list):
     """
-    rows = []
+    One acknowledgement per desk address, at the start of the working day, granting it to the desk's workstation.
+
+    Each lease runs to the evening, except the one the expired-lease control's second sign-in comes from, whose
+    term ends an hour before that sign-in; the remote address was never leased. The relay names the switch and port
+    the request arrived on, as DHCP option 82 does, so a lease places its address on a port without the MAC table.
+    """
+    granted = set()
 
     for (index, replay) in enumerate(REPLAYERS.values()):
         (_, second_time) = _replay_times(index, replay)
 
         for (desk, ends) in ((replay.first, None), (replay.second, replay.lease_ended_minutes_before)):
-            if (desk.address == REMOTE_ADDRESS):
+            if (desk.address == REMOTE_ADDRESS or desk.address in granted):
                 continue
 
-            rows.append({
-                "address": desk.address,
-                "mac_address": desk.mac,
-                "bind_start": at(LAST_DAY, 8),
-                "bind_end": at(LAST_DAY, 20) if ends is None else second_time - ends * 60 * NS_PER_SECOND,
+            granted.add(desk.address)
+            start = at(LAST_DAY, LEASE_STARTS_HOUR)
+            end = at(LAST_DAY, LEASE_ENDS_HOUR) if ends is None else second_time - ends * 60 * NS_PER_SECOND
+            record = _envelope(rows, LEASE_COLLECTOR, "tc3_dhcp.v1", f"{desk.address}>{desk.mac}", start)
+            record.update({
+                "ip": desk.address,
+                "mac": desk.mac,
+                "switch_id": SITE_SWITCHES[desk.site],
+                "port_id": desk.port,
+                "dhcp_message": "ack",
+                "lease_seconds": (end - start) // NS_PER_SECOND,
             })
+            rows.append(record)
 
-    return BindingTable.from_dataframe(pd.DataFrame(rows),
+
+def close_lease_bindings(config: Config, dataframes: list[pd.DataFrame], impose_order: bool = True) -> pd.DataFrame:
+    """The DHCP server's acknowledgements, closed into leases: each one held until its term ran out or was released."""
+    pipe = LinearPipeline(config)
+    pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
+    pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
+
+    if (impose_order):
+        pipe.add_stage(TotalOrderStage(config))
+
+    pipe.add_stage(CollectorSequenceStage(config))
+    pipe.add_stage(
+        TC2BindingStage(config,
+                        key_column="ip",
+                        attribute_columns=["mac", "switch_id", "port_id"],
+                        action_column="dhcp_message",
+                        grant_seconds_column="lease_seconds"))
+    sink = pipe.add_stage(InMemorySinkStage(config))
+    pipe.run()
+
+    return _collect(sink)
+
+
+def build_lease_table(bindings: pd.DataFrame) -> BindingTable:
+    """Which workstation each desk address was handed to, and for how long, as the DHCP server's leases closed."""
+    # A DHCP server every record of which was quarantined granted nothing anyone can see, and the table is empty.
+    if (len(bindings) == 0):
+        return BindingTable(name="dhcp_lease", value_columns=["mac", "switch_id", "port_id"], bindings=[])
+
+    return BindingTable.from_dataframe(bindings,
                                        name="dhcp_lease",
-                                       key_column="address",
-                                       value_columns=["mac_address"],
+                                       key_column="ip",
+                                       value_columns=["mac", "switch_id", "port_id"],
                                        start_column="bind_start",
                                        end_column="bind_end")
 
@@ -862,6 +917,14 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     _build_replays(logins)
     mac_tables: list = []
     _build_mac_tables(mac_tables)
+    leases: list = []
+    _build_leases(leases)
+
+    # The workstations' daily renewals and inventory reports, which say which machine an address was at layers 3, 4
+    # and 6. The renewals come from the same DHCP server as the desks' leases.
+    sources = [row["src_ip"] for row in flows + packets + handshakes]
+    times = [row["event_time"] for row in flows + packets + handshakes]
+    workstations = host_identity.build(sources, min(times), max(times), pools=CLIENT_POOLS)
 
     # Every flow names the router that metered it, which is what stamped its times.
     flow_frame = frame(flows)
@@ -876,6 +939,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
         HANDSHAKE_CLASS: frame(handshakes),
         SAAS_CLASS: frame(exports),
         MAC_CLASS: frame(mac_tables),
+        LEASE_CLASS: frame(leases + workstations[LEASE_CLASS].to_dict("records")),
+        INVENTORY_CLASS: frame(workstations[INVENTORY_CLASS].to_dict("records")),
     })
 
 
@@ -903,14 +968,14 @@ LEASE_METHOD_COLUMN = "login_lease_resolution"
 PORT_METHOD_COLUMN = "login_port_resolution"
 
 
-def _login_ladder(config: Config, mac_table: BindingTable) -> list:
+def _login_ladder(config: Config, mac_table: BindingTable, lease_table: BindingTable) -> list:
     """A sign-in's source address to a workstation through the leases, to a port and site through the MAC bindings,
     and the journey between the sites of a principal's consecutive sign-ins."""
     return [
         BindingResolverStage(config,
-                             binding_table=build_lease_table(),
+                             binding_table=lease_table,
                              key_column="source_ip",
-                             output_columns={"mac_address": "login_mac"},
+                             output_columns={"mac": "login_mac"},
                              method_column=LEASE_METHOD_COLUMN),
         BindingResolverStage(config,
                              binding_table=mac_table,
@@ -923,9 +988,18 @@ def _login_ladder(config: Config, mac_table: BindingTable) -> list:
     ]
 
 
-def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[BindingTable] = None) -> tuple:
+def _stages(config: Config,
+            telemetry_class: str,
+            mac_table: typing.Optional[BindingTable] = None,
+            lease_table: typing.Optional[BindingTable] = None,
+            inventory_table: typing.Optional[BindingTable] = None) -> tuple:
     """Each layer's own stages, its OSI layer and the entity it is sealed on."""
     if (telemetry_class == FLOW_CLASS):
+        # The source address to its interface and its machine, and the chain rooted on the machine where there is one,
+        # as the network corpus does.
+        resolvers = [] if inventory_table is None else host_identity.resolver_stages(config, lease_table,
+                                                                                     inventory_table)
+
         return (
             [
                 CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"),
@@ -938,6 +1012,7 @@ def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[Bin
                 # There is no fortnight of history here, so every baseline is immature and none of the host-baseline
                 # rules can fire on this corpus; the destination's context comes from the address inventory.
                 TC0EnrichStage(config, store=build_address_store(), entity_column="dst_ip", prefix="dst_ctx_"),
+                *resolvers,
             ],
             3,
             ["src_ip"])
@@ -946,7 +1021,7 @@ def _stages(config: Config, telemetry_class: str, mac_table: typing.Optional[Bin
         return ([TC5SessionStage(config)], 5, ["user_principal"])
 
     if (telemetry_class == AUTH_CLASS):
-        ladder = [] if mac_table is None else _login_ladder(config, mac_table)
+        ladder = [] if mac_table is None else _login_ladder(config, mac_table, lease_table)
 
         return ([TC5NoveltyStage(config, target_host_column="target_host")] + ladder, 5, ["user_principal"])
 
@@ -997,9 +1072,13 @@ def run_class(config: Config,
               telemetry_class: str,
               dataframes: list[pd.DataFrame],
               impose_order: bool = True,
-              mac_table: typing.Optional[BindingTable] = None) -> pd.DataFrame:
+              mac_table: typing.Optional[BindingTable] = None,
+              lease_table: typing.Optional[BindingTable] = None,
+              inventory_table: typing.Optional[BindingTable] = None) -> pd.DataFrame:
     """Source, stamp, total order, the layer's stages, determinism stamp, envelope, hourly seal, sink: one collector."""
-    (stages, osi_layer, entity_columns) = _stages(config, telemetry_class, mac_table)
+    (stages, osi_layer, entity_columns) = _stages(config, telemetry_class, mac_table, lease_table, inventory_table)
+    # A flow's chain is rooted on the machine it came from where its address resolved to one.
+    anchored = telemetry_class == FLOW_CLASS and inventory_table is not None
 
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
@@ -1021,7 +1100,7 @@ def run_class(config: Config,
                         period_seconds=PERIOD_SECONDS,
                         lateness_seconds=LATENESS_SECONDS,
                         order_columns=list(DEFAULT_ORDER_COLUMNS),
-                        entity_key_column="entity_key"))
+                        entity_key_column=DEFAULT_ANCHOR_COLUMN if anchored else "entity_key"))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
@@ -1076,9 +1155,15 @@ def run_pipeline(config: Config,
     # R-C-005's ladder resolves through bindings the layer 2 collector closes, so those are closed first, the way
     # the estate harness closes its supplicant bindings before resolving through them.
     mac_table = build_mac_table(close_mac_bindings(config, batches[MAC_CLASS], impose_order=impose_order))
+    # And the addresses the sign-ins came from are named by the DHCP server's leases, closed the same way.
+    lease_table = build_lease_table(close_lease_bindings(config, batches[LEASE_CLASS], impose_order=impose_order))
+    # Which machine each workstation's interface belongs to, which the flows, transfers and handshakes resolve through.
+    inventory_table = host_identity.inventory_table(
+        host_identity.close_inventory(config, batches.get(INVENTORY_CLASS, []), impose_order=impose_order))
+    resolved = {"hosts": (lease_table, inventory_table)}
 
     # The handshakes' sources are enriched from this estate's inventory, not from the layer 6 corpus's.
-    stores = {HANDSHAKE_CLASS: {"store": build_address_store()}}
+    stores = {HANDSHAKE_CLASS: {"store": build_address_store(), **resolved}, TRANSFER_CLASS: resolved}
 
     for name in CLASSES:
         # A collector every record of which was quarantined delivered nothing for its class to run over.
@@ -1091,7 +1176,14 @@ def run_pipeline(config: Config,
                                                        impose_order=impose_order,
                                                        **stores.get(name, {})))
         else:
-            frames.append(run_class(config, name, batches[name], impose_order=impose_order, mac_table=mac_table))
+            frames.append(
+                run_class(config,
+                          name,
+                          batches[name],
+                          impose_order=impose_order,
+                          mac_table=mac_table,
+                          lease_table=lease_table,
+                          inventory_table=inventory_table))
 
     return canonicalize(envelope.with_quarantine(pd.concat(frames, ignore_index=True), quarantined),
                         key_columns=KEY_COLUMNS,

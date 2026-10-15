@@ -212,6 +212,8 @@ PRODUCED: dict = {
             # the counts they are baselines of, because R-B-L3-001, R-B-L3-006 and R-B-L3-007 fire on a step above
             # a mature history and nothing else; `dst_ctx_device_role` because R-B-L3-006 asks what was reached;
             # `community_id` because the connection evidence report joins this layer to layers 4 and 6 on it.
+            # `host_key` and `mac_address` are the host evidence report's: the machine the source address
+            # resolved to through the DHCP leases and the asset inventory, null for a static address neither knows.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -223,6 +225,8 @@ PRODUCED: dict = {
                               "flow_pair_key",
                               "community_id",
                               "exporter_id",
+                              "host_key",
+                              "mac_address",
                               "dsts_per_src",
                               "dsts_per_src_saturated",
                               "dsts_per_src_step",
@@ -266,7 +270,8 @@ PRODUCED: dict = {
             # The three fireable layer 4 detections read these off this sourcetype. The counts are here and the
             # ratio columns are not, because a running ratio is not monotone and a search that summarizes a bin
             # has to divide the counts' maxima rather than aggregate the ratio -- see `tc4_flow_stage`.
-            # `community_id` is the connection evidence report's join to layers 3 and 6.
+            # `community_id` is the connection evidence report's join to layers 3 and 6. `host_key` and
+            # `mac_address` are the host evidence report's, as on layer 3.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -278,6 +283,8 @@ PRODUCED: dict = {
                               "dst_port",
                               "community_id",
                               "flow_id",
+                              "host_key",
+                              "mac_address",
                               "rollup_time_ns",
                               "flow_syn",
                               "flow_ack",
@@ -306,7 +313,7 @@ PRODUCED: dict = {
             # estate has just started seeing, and an issuer difference alone fires on every delivery host behind
             # more than one authority. The context columns are here because R-B-L6-001 fires only on a host the
             # inventory knows, and carries its criticality and owner; `community_id` is the connection evidence
-            # report's join to layers 3 and 4.
+            # report's join to layers 3 and 4, and `host_key` and `mac_address` the host evidence report's.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -316,6 +323,8 @@ PRODUCED: dict = {
                               "src_ip",
                               "dst_ip",
                               "community_id",
+                              "host_key",
+                              "mac_address",
                               "ctx_found",
                               "ctx_criticality",
                               "ctx_owner",
@@ -362,7 +371,9 @@ PRODUCED: dict = {
             # and the weekly trajectory. R-B-L7-004 reads the endpoint columns, and the peer group the enrichment
             # attached is carried as the stage recorded it, with the host's criticality, which weights the risk, and
             # the normalized host name the search keys on rather than the name the collector reported. R-C-001 reads
-            # the host's role, because a lateral movement chain ends on a server.
+            # the host's role, because a lateral movement chain ends on a server. The host evidence report reads
+            # `host_key` off DNS, HTTP and endpoint records alike: the machine a query's or request's source address
+            # resolved to, and the machine a process ran on, under the one name layers 3, 4 and 6 use for it.
             required_columns=("event_uid",
                               "entity_key",
                               "lineage_id",
@@ -372,6 +383,8 @@ PRODUCED: dict = {
                               *ENVELOPE_COLUMNS),
             variant_columns=(
                 ("src_ip",
+                 "host_key",
+                 "mac_address",
                  "query_name",
                  "dns_registered_domain",
                  "dns_subdomain",
@@ -379,6 +392,8 @@ PRODUCED: dict = {
                  "dns_mean_label_length",
                  "dns_subdomains_per_domain"),
                 ("src_ip",
+                 "host_key",
+                 "mac_address",
                  "url_path",
                  "status_code",
                  "http_4xx_in_window",
@@ -400,6 +415,7 @@ PRODUCED: dict = {
                  "week_window_id"),
                 ("hostname",
                  "endpoint_host",
+                 "host_key",
                  "ctx_criticality",
                  "ctx_device_role",
                  "ctx_owner",
@@ -621,7 +637,8 @@ PRODUCED: dict = {
             "itself rather than relying on a sink to do it.",
             required_columns=("binding_table", "bucket", "binding_uid"),
             # One variant per table the lookups read: the port inventory the L1 refreshes bucket, the MAC table,
-            # and the DHCP leases the L2/L3 refresh selects, which nothing in this fork produces yet (issue #63).
+            # and the DHCP leases the L2/L3 refresh selects, which `TC2BindingStage` closes from a DHCP server's
+            # acknowledgements and releases, each lease held for the term the server granted.
             variant_columns=(
                 ("port_id", "switch_id", "site_id", "transceiver_serial", "lldp_neighbor_chassis_id"),
                 ("key", "port_key"),

@@ -1177,7 +1177,10 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # scored week follows.
     #
     # Five of sixty-two after step 10, whose ten searches each arrived with something planted for it to find.
-    assert len(empty) == 5
+    #
+    # Four after step 12, and the one that left is the L2/L3 refresh: `TC2BindingStage` closes the campaign DHCP
+    # server's acknowledgements into leases, and their buckets are what the refresh selects.
+    assert len(empty) == 4
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name

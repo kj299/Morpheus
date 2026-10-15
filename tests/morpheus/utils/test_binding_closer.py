@@ -20,6 +20,7 @@ from morpheus.utils.binding_closer import CONFLICT
 from morpheus.utils.binding_closer import DISPLACED
 from morpheus.utils.binding_closer import EVICTED
 from morpheus.utils.binding_closer import EXPLICIT
+from morpheus.utils.binding_closer import GRANTED
 from morpheus.utils.binding_closer import IDLE_TIMEOUT
 from morpheus.utils.binding_closer import INFERRED_REASONS
 from morpheus.utils.binding_closer import MINIMUM_TICK_NS
@@ -427,3 +428,53 @@ def test_a_close_that_is_not_a_move_elsewhere_carries_no_gap():
     subject.observe("aa:bb:cc:00:00:02", 0, PORT_A)
 
     assert all(record.gap_ns is None for record in subject.drain())
+
+
+# --- Granted ends: a DHCP lease's term ---------------------------------------------------------------------------
+
+LEASE = {"mac": "aa:00:00:00:00:05"}
+OTHER_LEASE = {"mac": "aa:00:00:00:00:06"}
+HOUR_NS = 60 * MINUTE_NS
+
+
+def test_a_grant_holds_a_binding_through_silence_and_ends_it_at_its_term():
+    # Half an hour of silence ends an ungranted binding; a lease granted for an hour is the server's statement that
+    # nothing else is given the address for that hour, so it holds and then ends exactly there.
+    subject = closer(attribute_names=["mac"])
+    subject.observe("10.0.0.5", 0, LEASE, granted_until_ns=HOUR_NS)
+
+    assert subject.expire(45 * MINUTE_NS) == []
+
+    (ended, ) = subject.expire(HOUR_NS)
+
+    assert (ended.bind_start_ns, ended.bind_end_ns, ended.end_reason) == (0, HOUR_NS, GRANTED)
+    assert ended.end_reason not in INFERRED_REASONS and not ended.end_observed
+
+
+def test_a_renewal_extends_a_grant_and_never_shortens_it():
+    subject = closer(attribute_names=["mac"])
+    subject.observe("10.0.0.5", 0, LEASE, granted_until_ns=HOUR_NS)
+    subject.observe("10.0.0.5", 30 * MINUTE_NS, LEASE, granted_until_ns=90 * MINUTE_NS)
+    subject.observe("10.0.0.5", 40 * MINUTE_NS, LEASE, granted_until_ns=50 * MINUTE_NS)
+
+    assert subject.expire(HOUR_NS) == []
+    assert subject.expire(90 * MINUTE_NS)[0].bind_end_ns == 90 * MINUTE_NS
+
+
+def test_an_address_handed_on_ends_the_old_grant_where_the_new_one_begins():
+    # The server handed the address to another MAC before the first lease ran out, so the first was released in a
+    # message nobody saw. It held the address until then and not after.
+    subject = closer(attribute_names=["mac"])
+    subject.observe("10.0.0.5", 0, LEASE, granted_until_ns=HOUR_NS)
+    result = subject.observe("10.0.0.5", 20 * MINUTE_NS, OTHER_LEASE, granted_until_ns=80 * MINUTE_NS)
+
+    (ended, ) = result.closed
+
+    assert (ended.bind_end_ns, ended.end_reason) == (20 * MINUTE_NS, DISPLACED)
+
+
+def test_a_grant_still_running_when_the_stream_stops_ends_at_its_term():
+    subject = closer(attribute_names=["mac"])
+    subject.observe("10.0.0.5", 0, LEASE, granted_until_ns=HOUR_NS)
+
+    assert subject.drain()[0].bind_end_ns == HOUR_NS

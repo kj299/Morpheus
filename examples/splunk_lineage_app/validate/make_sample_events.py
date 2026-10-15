@@ -232,8 +232,9 @@ def main() -> int:
     # The campaign: one estate seen by all its collectors, which is what R-C-001 and R-C-004 are asserted on. Its
     # records go on the sourcetypes their layers' records always go on, because that is where a chained rule has to
     # find them, and they share no entity with any other corpus's records.
-    campaign = campaign_pipeline.run_pipeline(campaign_pipeline.build_pipeline_config(),
-                                              campaign_pipeline.build_corpus())
+    campaign_config = campaign_pipeline.build_pipeline_config()
+    campaign_corpus = campaign_pipeline.build_corpus()
+    campaign = campaign_pipeline.run_pipeline(campaign_config, campaign_corpus)
 
     for (name, sourcetype) in CAMPAIGN_SOURCETYPES.items():
         rows = campaign[campaign["telemetry_class"] == name]
@@ -261,7 +262,17 @@ def main() -> int:
     port_history = tp.build_port_binding_table(port_bindings).superseded().to_bucketed_frame(
         bucket_seconds=DEFAULT_L1_BUCKET_SECONDS, key_name="entity_key")
 
+    # The campaign DHCP server's leases, the rows the L2/L3 refresh builds `binding_l2_l3` from: an address, the
+    # interface it was handed to, and the switch port the relay saw the request arrive on. Only the desks' leases
+    # are rendered. The workstations' run nine days each, which is two and a half thousand five-minute buckets
+    # apiece, and they carry no port; a deployment ships them to the same lookup.
+    acknowledgements = campaign_corpus[campaign_pipeline.LEASE_CLASS]
+    desks = acknowledgements[acknowledgements["port_id"].notna()]
+    leases = campaign_pipeline.build_lease_table(campaign_pipeline.close_lease_bindings(
+        campaign_config, [desks])).to_bucketed_frame(key_name="ip", table_name="dhcp_lease")
+
     rendered = _render(bucketed, "binding:bucketed")
+    rendered.extend(_render(leases, "binding:bucketed"))
 
     if (len(port_history) > 0):
         rendered.extend(_render(port_history, "binding:bucketed"))

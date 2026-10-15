@@ -178,6 +178,30 @@
         "1:rUtMBUM4kCNnpRae2Ey5iUs2LG0="
       ]
     },
+    "Host evidence - one machine across layers": {
+      "expected_rows": 17,
+      "expected_empty": false,
+      "why": "Seventeen machines seen at two layers or more under one host_key. Ten are the campaign's workstations, resolved at layers 3, 4 and 6 through the campaign DHCP server's daily leases and the EDR inventory; the five R-C-004's breaches and handshakes come from were seen at all three, and R-C-002's five beaconers at layers 3 and 6. The other seven are client addresses the network and transport corpora both carry: both corpora resolve their clients through leases and inventory built the same way, so the same address in the two is the same workstation, seen at layer 3 in one and layer 4 in the other. The campaign's servers are on static addresses no lease names, so their flows carry no host_key and their processes, which do, are seen at layer 7 alone. A report rather than a detection: it writes nothing to the risk index.",
+      "key_values": [
+        "ws-0-110",
+        "ws-0-120",
+        "ws-0-50",
+        "ws-0-60",
+        "ws-0-70",
+        "ws-0-80",
+        "ws-0-90",
+        "ws-1-10",
+        "ws-1-5",
+        "ws-1-7",
+        "ws-1-8",
+        "ws-1-9",
+        "ws-2-5",
+        "ws-2-6",
+        "ws-2-7",
+        "ws-2-8",
+        "ws-2-9"
+      ]
+    },
     "R-D-L4-002 - SYN without completion": {
       "expected_rows": 1,
       "expected_empty": false,
@@ -455,7 +479,7 @@
       ]
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 5447,
+      "expected_rows": 5449,
       "expected_empty": false,
       "contributing_rows": 10247,
       "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 10247 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week because only TC5ScoreStage produces `max_abs_z`, and it leaves the session corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1333 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline. The figures grew again when step 9 gave layer 3 a fortnight of ordinary history before its scored hours: the network corpus now contributes 1184 flows where it contributed 411, and the presentation corpus 130 handshakes with a personal device among them; the campaign gained a principal who reaches a workstation and the flows of its exfiltrators' breach connections. And again when step 10 gave the port, the link, the VLAN and the 802.1X exchange behaviour of their own: the layer 1 stream grew from 305 polls of five ports to 793 of thirteen, the MAC table by 45 rows with a camera VLAN, a printer and a guest, and the 802.1X stream by 122 events from two lab benches reauthenticating every two minutes, 655 events in all. And when step 11 gave the SaaS corpus a second tenant whose sync service exports twice a day, 212 operations, and gave the layer 3 corpus one late flow, which goes to morpheus:late, where neither a detection nor the summary reads it."
@@ -463,17 +487,17 @@
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 4268,
+      "distinct_lineage_ids": 3449,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "chains_with_a_method": 156,
+      "chains_with_a_method": 812,
       "three_layer_chain_methods": [
         "soft:directory",
         "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 4268 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` now reads `resolution_methods`, every hop a resolver ladder took, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 156 chains in all carry one.",
+      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3449 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` now reads `resolution_methods`, every hop a resolver ladder took, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 812 chains in all carry one: the layer 3, 4 and 6 records now carry the two hops from address to machine, and each of those layers roots its chains on the machine where the hops reached one. That is also why there are fewer chains than the 4268 there were: a workstation's flows in an hour are one chain where each flow identifier, or each address a lease reassigned, used to be its own. A machine's chains are still one per layer, because each layer's corpus seals alone; the host evidence report joins them on `host_key`, and the host identity harness seals four layers together to show the chain they make.",
       "three_layer_chain_risk": {
         "0": 13,
         "50": 1,
@@ -481,9 +505,9 @@
       }
     },
     "Binding lookup - L2/L3 refresh": {
-      "expected_rows": 0,
-      "why": "Empty, and the reason is the corpus rather than the search. This search selects binding_table=dhcp_lease, because several binding sources land on the one binding:bucketed sourcetype and a refresh that cannot tell them apart builds the wrong lookup. Of the 131 bucketed rows in binding_bucketed.jsonlines, 124 carry binding_table=mac_table and the other 7 are the layer 1 history's port_inventory intervals. The mac_table rows are the layer 2 forwarding bindings TC2BindingStage closed, keyed on a MAC and resolving to a port, and binding_l2_l3 is keyed on an IP and resolves to a MAC. Nothing here speaks DHCP, so there is no lease to expand and the lookup this search builds stays empty. Pointing a DHCP feed at the pipeline and expanding it with to_bucketed_records(table_name=\"dhcp_lease\") is what fills it; until then a zero here is the honest answer and the previous count of 80 was reading the whole sourcetype rather than the search's filter.",
-      "expected_empty": true
+      "expected_rows": 1505,
+      "expected_empty": false,
+      "why": "One row per desk address and five-minute bucket its lease covers: the campaign DHCP server's acknowledgements for the eleven desk addresses R-C-005's sign-ins come from, closed into leases by TC2BindingStage with each held for the term the server granted, and expanded with to_bucketed_records(key_name=\"ip\", table_name=\"dhcp_lease\"). Each row resolves the address to the workstation's MAC and to the switch and port the DHCP relay saw the request arrive on. The other 131 bucketed rows are the MAC table's and the layer 1 history's, which this search's binding_table=dhcp_lease filter leaves out. The campaign's workstation leases, renewed daily for nine days, go to the same lookup in a deployment and are not rendered here: they carry no port, and at two and a half thousand buckets each they would outnumber every other sample event."
     },
     "Binding lookup - L1 refresh": {
       "expected_rows": 23,

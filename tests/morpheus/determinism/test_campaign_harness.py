@@ -554,11 +554,14 @@ def test_an_address_no_current_lease_names_claims_no_port(result: pd.DataFrame, 
 
 
 @pytest.mark.cpu_mode
-def test_the_expired_lease_did_name_the_address_until_an_hour_before(result: pd.DataFrame):
+def test_the_expired_lease_did_name_the_address_until_an_hour_before(pipeline_config: Config, corpus: dict,
+                                                                     result: pd.DataFrame):
     # What separates the expired lease from the remote address: the address was leased to an Edinburgh desk, and
     # resolving it against the sign-in's own time rather than against what the lease once said is what refuses it.
+    # The lease is the DHCP server's: an acknowledgement whose term the server stated, closed at that term.
     replay = cp_.REPLAYERS[cp_.UMA]
-    leases = cp_.build_lease_table()
+    bindings = cp_.close_lease_bindings(pipeline_config, [corpus[cp_.LEASE_CLASS]])
+    leases = cp_.build_lease_table(bindings)
     second = _second_sign_in(result, cp_.UMA)
     earlier = int(second["event_time"]) - 61 * 60 * 10**9
 
@@ -680,3 +683,23 @@ def test_each_layer_is_stamped_and_keyed_on_its_own_entity(result: pd.DataFrame)
         assert set(rows["osi_layer"].astype(int)) == {layer}, name
         assert list(rows["entity_key"]) == list(rows[entity]), name
         assert rows["lineage_id"].notna().all(), name
+
+
+@pytest.mark.cpu_mode
+def test_every_lease_is_the_dhcp_servers_and_lasts_its_whole_term(pipeline_config: Config, corpus: dict):
+    # The leases used to be a table written into the harness. They are the server's acknowledgements now, closed by
+    # the stage that closes every binding, and each lasts the term the server granted rather than ending a tick after
+    # its acknowledgement -- the difference between a lease that resolves the afternoon's sign-ins and one that
+    # resolves nothing after eight in the morning.
+    # The desks' acknowledgements are the ones the relay placed on a port; the rest are the workstations' daily
+    # renewals, each of which extends its lease rather than starting one.
+    every = corpus[cp_.LEASE_CLASS]
+    acks = every[every["port_id"].notna()]
+    bindings = cp_.close_lease_bindings(pipeline_config, [every]).set_index("ip")
+
+    assert set(bindings.index) == set(every["ip"]) and cp_.REMOTE_ADDRESS not in set(bindings.index)
+    assert len(acks) > 0 and set(acks["ip"]).isdisjoint(set(every.loc[every["port_id"].isna(), "ip"]))
+
+    for (_, ack) in acks.iterrows():
+        assert bindings.loc[ack["ip"], "bind_end"] == ack["event_time"] + ack["lease_seconds"] * 10**9
+        assert bindings.loc[ack["ip"], "port_id"] == ack["port_id"]

@@ -94,6 +94,11 @@ way `mac_address` does, and on to the port and site the switch saw it at, `login
 place a person the way `desk_port_key` does. The journey between a principal's sites, `site_travel_*`, is the
 geolocated journey's twin and a profile on the same reasoning; how each hop resolved is operational.
 
+A record at layers 3, 4, 6 and 7 has its source address resolved the same way, through the DHCP leases to a network
+interface, `mac_address`, and through the EDR inventory to the machine, `host_key`: both address a device, the way
+`hostname` does. The lease and the inventory report each hop rested on, `host_lease_uid` and `host_inventory_uid`,
+are `PSEUDONYMS` as `binding_uid` is, and how each hop resolved is operational.
+
 **The TC-0 context store is personal data of a different kind, and is classified on the same rule.** Department,
 employment status and group membership are organisational facts about an identifiable person rather than behaviour
 this design derived, but they describe the person, so they are `PROFILES`; a manager and an asset's owner are other
@@ -167,6 +172,8 @@ _ADDRESSES = (
     "transfer_triple",  # A host's name as the inventory keys it, at layers 5 and 7.
     "endpoint_host",
     "target_host_key",
+    # The machine a source address resolved to through the leases and the inventory, at layers 3, 4, 6 and 7.
+    "host_key",
 )
 
 _LOCATES = (
@@ -418,6 +425,9 @@ _PSEUDONYMS = (
     "process_guid",
     "row_key",  # The inventory versions a flow's destination context rests on.
     "dst_ctx_version_uids",
+    # The lease and the inventory report a record's machine was resolved through.
+    "host_inventory_uid",
+    "host_lease_uid",
 )
 
 _OPERATIONAL = (
@@ -515,6 +525,8 @@ _OPERATIONAL = (
     "lldp_neighbor_chassis_id_first_seen",
     "login_lease_resolution",
     "login_port_resolution",
+    "host_inventory_resolution",
+    "host_lease_resolution",
     "macs_claiming_sender_ip",
     "macs_claiming_sender_ip_saturated",
     "macs_per_port",

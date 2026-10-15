@@ -839,6 +839,17 @@ def mac_events() -> dict:
     return payload
 
 
+def leases() -> dict:
+    """Two DHCP acknowledgements, the first granting an hour, and a later one that runs the clock past half an hour of
+    the first's silence -- the idle timeout, which only an ungranted binding answers to."""
+    return {
+        "event_time": [0, 600 * SECOND, 4000 * SECOND],
+        "ip": ["10.0.0.5", "10.0.0.6", "10.0.0.6"],
+        "mac_address": ["aa:00:00:00:00:05", "aa:00:00:00:00:06", "aa:00:00:00:00:06"],
+        "lease_seconds": [3600, 3600, 3600],
+    }
+
+
 def mac_snapshots() -> dict:
     """Two walks of one switch's table five minutes apart, then a third: the second no longer lists one address."""
     addresses = ["aa:00:00:00:00:01", "aa:00:00:00:00:02", "aa:00:00:00:00:01", "aa:00:00:00:00:01"]
@@ -1436,6 +1447,14 @@ REGISTRY: dict = {
                      benign=None,
                      extreme=["site_id", "switch_id"],
                      frame=mac_snapshots),
+                Knob("grant_seconds_column",
+                     DIFFERS,
+                     benign=None,
+                     extreme="lease_seconds",
+                     also={
+                         "key_column": "ip", "attribute_columns": ["mac_address"]
+                     },
+                     frame=leases),
             ),
         ),
     "TC5ScoreStage":

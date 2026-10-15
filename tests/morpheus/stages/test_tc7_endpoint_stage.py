@@ -230,3 +230,14 @@ def test_every_spelling_of_a_host_shares_one_history(config: Config):
     assert list(result["endpoint_host"].unique()) == ["fin-01"]
     assert truthy(result["endpoint_mature"].iloc[-1])
     assert truthy(result["endpoint_host_seen"].iloc[-1])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_host_key_is_the_one_the_lower_layers_resolve_to(config: Config):
+    # Layers 3, 4 and 6 name a machine by the inventory's normalized host name, resolved from their source address,
+    # in `host_key`. A process names its machine directly, so its `host_key` is that same key, whatever the EDR spelt.
+    rows = warm("fin-01", None) + [("FIN-01", EXPLORER, CMD, 8, None, "Medium")]
+    result = run(config, processes(rows))
+
+    assert list(result["host_key"]) == list(result["endpoint_host"])
+    assert list(result["host_key"].unique()) == ["fin-01"]

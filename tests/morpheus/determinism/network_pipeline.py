@@ -71,12 +71,14 @@ import random
 import typing
 
 import envelope
+import host_identity
 import pandas as pd
 import stamping
 
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
@@ -581,7 +583,10 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     late = _flow(source=QUIET, destination=QUIET_SERVER, event_time_ns=at(1, 1800), seq=len(frame))
     late["observed_time"] = at(CORPUS_HOURS - 1, 3000)
 
-    return envelope.attach_all({TELEMETRY_CLASS: frame, LATE_DELIVERY_CLASS: pd.DataFrame([late])})
+    # Which machine each client address was: the DHCP server's leases and the EDR agent's inventory, over the span.
+    hosts = host_identity.build(frame["src_ip"], int(frame["event_time"].min()), int(frame["event_time"].max()))
+
+    return envelope.attach_all({TELEMETRY_CLASS: frame, LATE_DELIVERY_CLASS: pd.DataFrame([late]), **hosts})
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -681,6 +686,7 @@ def run_pipeline(config: Config,
     # Validated once per class, ahead of every stage: ingest_time stamped, the envelope checked, untrusted clocks
     # taken out of the stream and kept.
     (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
+    (leases, inventory) = host_identity.tables(config, batches, impose_order)
 
     pipe = LinearPipeline(config)
     # The late delivery arrives after every other record, however the rest were split, because that is when it came.
@@ -700,6 +706,11 @@ def run_pipeline(config: Config,
     for stage in build_stages(config):
         pipe.add_stage(stage)
 
+    # The source address to its interface and its machine, and the chain rooted on the machine where there is one.
+    # A host's baselines stay keyed on its address; what changes is that its story can be told across layers.
+    for stage in host_identity.resolver_stages(config, leases, inventory):
+        pipe.add_stage(stage)
+
     pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(TELEMETRY_CLASS, SETTINGS,
                                                                                 rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))
@@ -708,7 +719,7 @@ def run_pipeline(config: Config,
                         period_seconds=PERIOD_SECONDS,
                         lateness_seconds=LATENESS_SECONDS,
                         order_columns=list(DEFAULT_ORDER_COLUMNS),
-                        entity_key_column="entity_key"))
+                        entity_key_column=DEFAULT_ANCHOR_COLUMN))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()

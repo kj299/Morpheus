@@ -51,12 +51,14 @@ import random
 import typing
 
 import envelope
+import host_identity
 import pandas as pd
 import stamping
 
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
@@ -259,7 +261,13 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     """The seeded corpus, one frame per layer 7 class."""
     rng = random.Random(CORPUS_SEED)
 
-    return envelope.attach_all({DNS_CLASS: _build_dns(rng), HTTP_CLASS: _build_http(rng)})
+    (dns, http) = (_build_dns(rng), _build_http(rng))
+    both = pd.concat([dns, http], ignore_index=True)
+
+    # Which machine each client address was: the DHCP server's leases and the EDR agent's inventory, over the span.
+    hosts = host_identity.build(both["src_ip"], int(both["event_time"].min()), int(both["event_time"].max()))
+
+    return envelope.attach_all({DNS_CLASS: dns, HTTP_CLASS: http, **hosts})
 
 
 def build_pipeline_config(execution_mode=None) -> Config:
@@ -312,8 +320,11 @@ def build_stages(config: Config, telemetry_class: str) -> list:
     raise ValueError(f"no stages for {telemetry_class!r}")
 
 
-def _run_class(config: Config, telemetry_class: str, dataframes: list[pd.DataFrame],
-               impose_order: bool) -> pd.DataFrame:
+def _run_class(config: Config,
+               telemetry_class: str,
+               dataframes: list[pd.DataFrame],
+               impose_order: bool,
+               hosts: tuple = None) -> pd.DataFrame:
     """Source, stamp, total order, the class's stage, determinism stamp, envelope, window seal, sink."""
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
@@ -327,6 +338,12 @@ def _run_class(config: Config, telemetry_class: str, dataframes: list[pd.DataFra
     for stage in build_stages(config, telemetry_class):
         pipe.add_stage(stage)
 
+    # The source address to its interface and its machine, and the chain rooted on the machine where there is one.
+    (leases, inventory) = hosts if hosts is not None else host_identity.tables(config, {})
+
+    for stage in host_identity.resolver_stages(config, leases, inventory):
+        pipe.add_stage(stage)
+
     pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(telemetry_class, SETTINGS,
                                                                                 rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))
@@ -335,7 +352,7 @@ def _run_class(config: Config, telemetry_class: str, dataframes: list[pd.DataFra
                         period_seconds=PERIOD_SECONDS,
                         lateness_seconds=LATENESS_SECONDS,
                         order_columns=list(DEFAULT_ORDER_COLUMNS),
-                        entity_key_column="entity_key"))
+                        entity_key_column=DEFAULT_ANCHOR_COLUMN))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
@@ -372,11 +389,12 @@ def run_pipeline(config: Config,
     # Validated once per class, ahead of every stage: ingest_time stamped, the envelope checked, untrusted clocks
     # taken out of the stream and kept.
     (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
+    hosts = host_identity.tables(config, batches, impose_order)
 
     frames = []
 
     for name in TELEMETRY_CLASSES:
-        frame = _run_class(config, name, batches[name], impose_order)
+        frame = _run_class(config, name, batches[name], impose_order, hosts)
 
         # A class every record of which was quarantined produced nothing, and is absent rather than an empty frame.
         if (len(frame) == 0):

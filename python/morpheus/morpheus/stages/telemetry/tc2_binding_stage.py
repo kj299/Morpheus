@@ -68,6 +68,19 @@ DEFAULT_STOP_VALUES = ["stop", "removed", "release", "deleted", "aged"]
 notification trap's removal or ageing, a DHCP release. Compared case-insensitively."""
 
 
+def _granted_until(event_time_ns: int, seconds: typing.Any) -> typing.Optional[int]:
+    """The end a row's grant reaches: its own time plus the term it states, or nothing when it states none."""
+    if (normalize_text(seconds) is None):
+        return None
+
+    try:
+        term = float(seconds)
+    except (TypeError, ValueError):
+        return None
+
+    return event_time_ns + int(term * NS_PER_SECOND) if term > 0 else None
+
+
 @register_stage("tc2-binding", ignore_args=["attribute_columns", "stop_values", "snapshot_scope_columns"])
 class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
     """
@@ -97,6 +110,8 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
 
     - a switch MAC table walked on a cadence yields `snapshot_absent` in snapshot mode, and `idle_timeout` without;
     - MAC notification traps, RADIUS accounting stops and DHCP releases yield `explicit`, when they arrive;
+    - a DHCP server's acknowledgements, with `grant_seconds_column` naming the lease term, yield `granted` when a
+      lease runs out unrenewed, and `explicit` on a release;
     - a key seen on another port yields `displaced` or `conflict` from any source;
     - and the end of a replay yields `drained`, which says only that the stream stopped.
 
@@ -155,6 +170,13 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         carry no action are read as snapshots of their scope, and a binding a scope's previous snapshot did not list
         is closed as `snapshot_absent` when its next snapshot begins. A scope's snapshot is known to be complete only
         when the next one starts, so the last snapshot of a stream reconciles nothing.
+    grant_seconds_column : str, optional
+        Column holding how long, in seconds from this row's time, the source grants the binding: a DHCP
+        acknowledgement's lease time. A granted binding is not closed for silence while its grant runs -- nothing
+        else is handed the key until it lapses -- and closes at the granted end when no renewal extends it, as
+        `granted`. A row with no value grants nothing. Without the column every binding ends on silence, which for
+        a lease renewed every half-term would end it one tick after its last renewal and leave the rest of the term
+        unresolvable.
     """
 
     def __init__(self,
@@ -169,7 +191,8 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
                  emit_open_bindings: bool = False,
                  action_column: str = None,
                  stop_values: list[str] = None,
-                 snapshot_scope_columns: list[str] = None):
+                 snapshot_scope_columns: list[str] = None,
+                 grant_seconds_column: str = None):
         super().__init__(c)
 
         attribute_columns = list(DEFAULT_ATTRIBUTE_COLUMNS) if attribute_columns is None else list(attribute_columns)
@@ -197,6 +220,7 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         self._action_column = action_column
         self._stop_values = {str(value).strip().lower() for value in stop_values}
         self._snapshot_scope = snapshot_scope_columns
+        self._grant_column = grant_seconds_column
 
         # Per scope, the instant of the snapshot being collected and the keys it has listed so far.
         self._snapshots: dict[tuple, tuple] = {}
@@ -332,6 +356,9 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         source = meta.copy_dataframe()
 
         required = [self._key_column, self._time_column] + self._attribute_columns
+
+        if (self._grant_column is not None):
+            required.append(self._grant_column)
         missing = [column for column in required if column not in source.columns]
 
         if (len(missing) > 0):
@@ -346,6 +373,8 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
             actions = [normalize_text(value) for value in to_host_list(source, self._action_column)]
         else:
             actions = [None] * len(keys)
+
+        grants = to_host_list(source, self._grant_column) if self._grant_column is not None else [None] * len(keys)
 
         closed = []
         opened_keys: list[str] = []
@@ -396,7 +425,8 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
             result = self._closer.observe(str(key),
                                           event_time_ns,
                                           {name: attributes[name][position]
-                                           for name in self._attribute_columns})
+                                           for name in self._attribute_columns},
+                                          granted_until_ns=_granted_until(event_time_ns, grants[position]))
 
             closed.extend(result.closed)
             unordered += int(result.out_of_order)
