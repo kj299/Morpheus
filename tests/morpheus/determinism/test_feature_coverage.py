@@ -23,8 +23,10 @@ either appear in `savedsearches.conf` or be listed in the "Features without a ru
 Part 6 and the app README both carry. A column that is listed and has since found a reader fails too, so the table
 cannot outlive its reasons.
 
-Context and join columns are outside it: `TC0EnrichStage` writes what the inventory holds, and the rules that read it
-name it; `CommunityIdStage` writes a join key, which the connection evidence search reads.
+Context, join and identity columns are outside it: `TC0EnrichStage` writes what the inventory holds, and the rules
+that read it name it; `CommunityIdStage` writes a join key, which the connection evidence search reads; and the
+host resolvers and `ChainAnchorStage` write which machine a row came from and how it was found, which are lineage
+rather than behaviour and are asserted by the host identity harness.
 """
 
 import os
@@ -40,6 +42,8 @@ import network_pipeline  # noqa: E402
 import presentation_pipeline  # noqa: E402
 import transport_pipeline  # noqa: E402
 
+from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage  # noqa: E402
+from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage  # noqa: E402
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage  # noqa: E402
 from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage  # noqa: E402
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage  # noqa: E402
@@ -70,7 +74,10 @@ def _host_stages() -> list:
     stages = (network_pipeline.build_stages(config) + transport_pipeline.build_stages(config) +
               presentation_pipeline.build_stages(config) + [TC7EndpointStage(config)])
 
-    return [stage for stage in stages if not isinstance(stage, (TC0EnrichStage, CommunityIdStage))]
+    return [
+        stage for stage in stages
+        if not isinstance(stage, (TC0EnrichStage, CommunityIdStage, BindingResolverStage, ChainAnchorStage))
+    ]
 
 
 def _emitted() -> dict:

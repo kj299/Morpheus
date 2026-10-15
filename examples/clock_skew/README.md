@@ -89,18 +89,30 @@ are unchanged: every rule that held still holds, and every chain breaks at the s
 poller is a sixth clock in the estate's spread, which moves the ladder's lower rung by a few observations and
 nothing else.
 
+It was run again on 2026-10-15 after step 12 (#63) resolved every layer 3, 4, 6 and 7 row to its machine through
+the DHCP server's leases and an EDR agent's inventory reports. Those are two more collectors in each corpus that
+resolves, so the network, transport and presentation corpora have three clocks where they had one, the application
+corpus four, and the campaign eleven where it had nine. Every rule that held still holds: the sweep moves each lease
+and report against the rows it resolves, which changes the binding identifier a row cites, and no row's machine
+changed at any spread swept. The transport and presentation rules are measured now, as uniform shifts, and
+R-B-L6-001, whose managed-host gate reads the machine, against clocks that disagree. The chains moved, and one moved
+the other way: eleven clocks put each collector at a different fraction of the spread, so every edge is new, and
+R-C-005 now first breaks by losing its attacker rather than by accusing a control.
+
 What a sweep can say depends on the clocks in the corpus, and the forty-nine fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
-| Inputs on clocks that disagree | 28 | A tolerance, or the spread at which the rule changes |
-| Inputs on one clock, in a corpus with several | 11 | Boundary sensitivity under a uniform shift, not a tolerance |
-| Corpus with one clock | 10 | Nothing; reported as not measured |
+| Inputs on clocks that disagree | 29 | A tolerance, or the spread at which the rule changes |
+| Inputs on one clock, in a corpus with several | 18 | Boundary sensitivity under a uniform shift, not a tolerance |
+| Corpus with one clock | 2 | Nothing; reported as not measured |
 
 **Measured against clocks that disagree** -- the estate's six collectors and three switches for layers 1 and 2,
-the campaign's nine collectors for the chains, the network corpus's three routers, each of which stamps its own
-flows, and the endpoint corpus's seven hosts, each of whose agents stamps its own process starts:
+the campaign's eleven collectors for the chains, the network corpus's three routers, each of which stamps its own
+flows, the endpoint corpus's seven hosts, each of whose agents stamps its own process starts, and the presentation
+corpus's inspection point, DHCP server and inventory feed, whose disagreement R-B-L6-001 reads through the machine
+it gates on:
 
 | Rule | Breaking spread |
 | --- | --- |
@@ -108,28 +120,32 @@ flows, and the endpoint corpus's seven hosts, each of whose agents stamps its ow
 | **R-D-L2-004, MAC in two places** | unchanged to 60s on collectors; **changes at 60s on switches** |
 | R-B-L7-004, process ancestry novelty | unchanged to 60s on host clocks |
 | R-B-L3-001, 002, 004, 006 and 007, R-D-L3-003 and 008 | unchanged to 60s on router clocks |
+| R-B-L6-001, new TLS client fingerprint | unchanged to 60s on collector clocks |
 | **R-P-L3-005, fan-out trajectory** | **changes at 30s on router clocks**, losing one of the scanner's twenty rises |
-| **R-C-001, lateral movement chain** | **960s**, gaining a control |
-| **R-C-002, TLS anomaly precedes beaconing** | **1120s**, gaining a control |
-| **R-C-004, staged exfiltration** | **3200s**, gaining a control |
-| **R-C-005, credential replay** | **7201s**, gaining a control |
+| **R-C-001, lateral movement chain** | **800s**, gaining a control |
+| **R-C-002, TLS anomaly precedes beaconing** | **1400s**, gaining a control |
+| **R-C-004, staged exfiltration** | **4000s**, gaining a control |
+| **R-C-005, credential replay** | **7201s**, losing its attacker |
 
 **On one clock in a corpus with several.** The session corpus has three collectors, but every authentication
 comes through the identity provider, so for the eight sign-in rules -- R-D-L5-003, 004, 007, 008 and 009,
 R-B-L5-001 and 002, and R-P-L5-006 -- the sweep moves all their inputs together; R-B-L5-005's session starts and
-ends each come through one collector too. The application corpus has two, one per class, and each of its two rules
-reads one class. For these eleven the sweep is a uniform shift, which measures how close the events sit to a
-window edge and nothing about disagreement. All eleven are unchanged to a minute; R-P-L5-006 used to change at a
+ends each come through one collector too. The application corpus has four, one per class and the DHCP server
+and inventory feed its hosts resolve through, and each of its two rules reads one class. The transport and
+presentation corpora have three each since step 12, but every packet comes through the packet sensor and every
+handshake through the inspection point, so their three layer 4 rules and four of their five layer 6 rules read one
+clock. For these eighteen the sweep is a uniform shift, which measures how close the events sit to a window edge
+and nothing about disagreement. All eighteen are unchanged to a minute; R-P-L5-006 used to change at a
 millisecond, for the reason below.
 
-**On a corpus with one clock.** The transport, presentation and SaaS corpora each arrive through a single
-collector, so a collector sweep gives that one clock no offset and perturbs nothing. Their ten rules -- three at
-layer 4, five at layer 6, R-B-L7-002 and R-P-L7-006 -- are reported as `"one clock"` in the artifact rather than as
-unchanged, because the absence of a measurement is not a tolerance. Measuring them needs the clocks a deployment
-really has, which the corpora do not carry: an exporter per packet capture at layer 4, an inspection point per
-egress at layer 6. Layer 3 was in this group until step 11 named the exporter on every flow; its collector sweep
-still moves nothing, and its router sweep is the measurement. For SaaS the provider's audit log really is one clock, and the second
-clock that matters is the context store's record time, which the sweep does not reach.
+**On a corpus with one clock.** The SaaS corpus arrives through the provider's audit log alone, so a collector
+sweep gives that one clock no offset and perturbs nothing. Its two rules, R-B-L7-002 and R-P-L7-006, are reported
+as `"one clock"` in the artifact rather than as unchanged, because the absence of a measurement is not a
+tolerance. The audit log really is one clock, and the second clock that matters is the context store's record
+time, which the sweep does not reach. Layers 4 and 6 were in this group until step 12 gave their corpora a lease
+and an inventory report per host; what still needs a corpus that carries it is the clock a deployment really has
+at each, an exporter per packet capture and an inspection point per egress. Layer 3 left it when step 11 named the
+exporter on every flow, and its router sweep is the measurement.
 
 ### The spoof rule fails against switches and not against collectors
 
@@ -186,33 +202,40 @@ the spread places the other five a little differently at the same width.
 while an observation inside it has quietly been re-attributed. Counting spans alone would have reported
 everything fine.
 
-### The chains hold far past their tolerance, and fail by accusing a control
+### The chains hold far past their tolerance, and three fail by accusing a control
 
 No chain changes at any spread up to ten minutes, five times its two-minute join tolerance. That is a property of
 the corpus rather than of the tolerance: the closest any chain's steps come to the edge of what it allows is four
 minutes, so a spread wide enough to close that gap is wide enough to say nothing about the two minutes itself.
 A corpus that tests the tolerance has to put two steps within a minute or so of each other on different clocks.
 
-Where the chains do break, each breaks the same way, and it is the worse of the two ways: a second before its edge
-nothing has changed, and at it the chain adds a control the corpus planted for it to stay quiet on, while still
-accusing its attacker. Each edge is arithmetic about which clock stamps which step, because the collectors are
-spread by sorted name, so each sits at a fixed fraction of the spread `M`:
+Where three of the chains break, each breaks the same way, and it is the worse of the two ways: a second before
+its edge nothing has changed, and at it the chain adds a control the corpus planted for it to stay quiet on, while
+still accusing its attacker. Each edge is arithmetic about which clock stamps which step, because the eleven
+collectors are spread by sorted name, so the one at index `i` sits at `-M/2 + i*M/10` of the spread `M`:
 
-- **R-C-001 at 960s.** The login comes through `dc-01` at `-M/2` and the process through `edr-01` at `-M/4`, so
-  they move apart by `M/4`. A control whose novel process ran 360 seconds before its login is admitted once that
-  reaches the 120-second tolerance: `-360 + M/4 >= -120` at `M = 960`.
-- **R-C-002 at 1120s.** The beacon's clock is the middle one and the fingerprint's sits at `+3M/8`, so they close
-  by `3M/8`. A control whose beacon came 4020 seconds after its new fingerprint falls inside the hour at
-  `4020 - 3M/8 <= 3600`, `M = 1120`.
-- **R-C-004 at 3200s.** A control's session ends on `vpn-01` at `+M/2` 1200 seconds before its breach on
-  `pcap-01` at `+M/8`; the end overtakes the breach at `3M/8 >= 1200`. What decided it was the session interval,
+- **R-C-001 at 800s.** The login comes through `dc-01` at `-M/2` and the process through `edr-01` at `-M/5`, so
+  they move apart by `3M/10`. A control whose novel process ran 360 seconds before its login is admitted once that
+  reaches the 120-second tolerance: `-360 + 3M/10 >= -120` at `M = 800`.
+- **R-C-002 at 1400s.** The beacon comes through `netflow-01` at `+M/10` and the fingerprint through
+  `tls-inspect-01` at `+2M/5`, so they close by `3M/10`. A control whose beacon came 4020 seconds after its new
+  fingerprint falls inside the hour at `4020 - 3M/10 <= 3600`, `M = 1400`.
+- **R-C-004 at 4000s.** A control's session ends on `vpn-01` at `+M/2` 1200 seconds before its breach on
+  `pcap-01` at `+M/5`; the end overtakes the breach at `3M/10 >= 1200`. What decided it was the session interval,
   not a join tolerance.
-- **R-C-005 at 7201s.** It has no join tolerance; both sign-ins come through one identity provider. A control
-  signed in an hour after her lease ended, and the lease table is not a collector the sweep moves, so her sign-in
-  falls back inside the lease once its clock moves by more than an hour, at `M > 7200`.
 
-The attackers are lost later, each measured to the second: R-C-001's at 1081 seconds, R-C-002's at 2561,
-R-C-005's at 9601, and R-C-004's not until 12,961, past the three-hour ladder.
+R-C-005 breaks the other way, at 7201 seconds, and the change is step 12's. It has no join tolerance; both
+sign-ins come through one identity provider, and what the sweep moves is each sign-in against the bindings that
+place it. Its control signed in an hour after the lease ended, and while the leases were a table no sweep moved,
+that sign-in fell back inside the lease once its clock moved by more than an hour. The leases now come through the
+DHCP server at `-2M/5`, so the sign-in closes on its lease by only `M/10` and cannot be admitted below
+`M = 36000`. What breaks first instead is the attacker: the first sign-in, at `-M/2`, came an hour after the HQ MAC
+table, the middle clock at `0`, first saw that desk, so past `M = 7200` it precedes the sighting, resolves to no
+port, and the replay has one site rather than two. At its edge the rule stops accusing its attacker and accuses
+nothing new.
+
+The other three attackers are lost later, each measured to the second: R-C-001's at 901 seconds, R-C-002's at
+3201, and R-C-004's not until 16,201, past the three-hour ladder.
 
 ### Quarantine trades a wrong answer for no answer
 
@@ -225,15 +248,18 @@ more than one collector:
 | --- | --- | --- |
 | Estate, layers 1 and 2 | No rule changes to 60s | No change to 1s; at 10s four of the six collectors are held whole -- 2040 records, all but the MAC table's and the RADIUS server's -- and the eight rules reading them lose all eleven accusations; at 30s all six are held and all fifteen rules lose all twenty-six |
 | Session, layer 5 | No rule changes to 60s, on the hour marks or off | No change to 1s; at 10s the identity provider and the RADIUS accounting feed are held and all nine rules lose all twenty-two accusations |
-| Application | No rule changes to 60s | No change to 1s; at 10s both collectors are held, and both rules lose their three accusations |
-| Campaign, the chains | No change below 960s; past it each chain **gains** a control | No change to 1s; from 10s every collector but one is held and all four chains lose their attackers |
+| Network, layer 3 | No rule changes to 60s | No change to 1s; at 10s the flow collector and the DHCP server are held -- 1335 records, all but the inventory feed's at the middle of the spread -- and all eight rules lose all twenty-seven accusations |
+| Transport, layer 4 | No rule changes to 60s | No change to 1s; at 10s the packet sensor and the DHCP server are held, 457 records, and all three rules lose all four accusations |
+| Presentation, layer 6 | No rule changes to 60s | No change to 1s; at 10s the inspection point and the DHCP server are held, 134 records, and all five rules lose all six accusations |
+| Application | No rule changes to 60s | No change to 1s; at 10s all four collectors are held, and both rules lose their three accusations |
+| Campaign, the chains | No change below 800s; past it three chains **gain** a control and R-C-005 loses its attacker | No change to 1s; from 10s every collector but the HQ MAC table is held and all four chains lose their attackers |
 
 Two things are worth reading off it. Inside the bound, quarantine costs nothing: at a second's spread every clock
 is within half a second of true and nothing but the DMZ poller is held, in any corpus. And beyond it, quarantine
 never makes a rule accuse something it should not -- across every run, no rule gained an accusation -- but it takes
 away everything the held collectors carried, at spreads where the uncorrected pipeline still decided correctly. A
 one-second bound is far tighter than any of these rules needs: the single-layer rules held to a minute uncorrected,
-and the chains to sixteen minutes. The bound is a statement about which wrong answer an estate prefers, and the
+and the chains to thirteen minutes. The bound is a statement about which wrong answer an estate prefers, and the
 measurement says it can be set per class from the tolerance above, not globally from the clock source.
 
 The exporter sweep has no quarantine curve. A router stamps its own flows and reports no offset, so nothing in the
@@ -262,11 +288,11 @@ arithmetic against its own sweep times and thresholds.
   "breaking_point": {
     "R-D-L2-004": {"estate_collectors": null, "estate_switches": {"spread": "60s"}},
     "R-P-L5-006": {"session": {"spread": "1ms"}, "session_off_boundary": null},
-    "R-B-L3-001": {"network": "one clock"},
+    "R-P-L7-006": {"saas": "one clock"},
     "R-C-001": {"campaign": {"spread": "1800s"}}
   },
   "chain_breaking_point_to_the_second": {
-    "R-C-001": {"held_at": "959s", "changed_at": "960s", "no_longer_flagged": [], "newly_flagged": ["…"]}
+    "R-C-001": {"held_at": "799s", "changed_at": "800s", "no_longer_flagged": [], "newly_flagged": ["…"]}
   },
   "sweeps": {"estate_collectors": {"clocks": ["…"], "runs": ["…"]}, "…": "…"}
 }

@@ -1086,6 +1086,8 @@ def test_the_validation_document_says_the_same_thing_the_expectation_file_does(e
 
 
 NUMBER_WORDS = {
+    "two": 2,
+    "three": 3,
     "four": 4,
     "five": 5,
     "six": 6,

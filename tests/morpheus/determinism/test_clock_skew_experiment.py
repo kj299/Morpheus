@@ -290,15 +290,26 @@ where it had one, and a collector sweep moves the bindings against the rows they
 still comes through the one collector, so for the rules the sweep is a uniform shift.
 """
 
-CHAIN_EDGES_SECONDS = {"R-C-001": 960, "R-C-002": 1120, "R-C-004": 3200, "R-C-005": 7201}
-"""The narrowest collector spread that changes each chain's accusations, measured to the second.
+CHAIN_EDGES_SECONDS = {"R-C-001": 800, "R-C-002": 1400, "R-C-004": 4000}
+"""The narrowest collector spread that makes each chain accuse a control, measured to the second.
 
-Each is arithmetic about this corpus, written down in the experiment's README: R-C-001 is the login clock moving
-M/2 toward the fan-out and the process clock M/4 away, which first admits a control whose process came 360 seconds
-before its login (-360 + M/4 >= -120 at M = 960); R-C-002 is a beacon 4020 seconds after its fingerprint, inside
-the hour once the two clocks close by 3M/8 (M = 1120); R-C-004 is a session ending 1200 seconds before a breach,
-overtaken at 3M/8 (M = 3200); and R-C-005 is a sign-in an hour after its lease ended, back inside it once its clock
-moves by more than M/2 against the unskewed lease table (M > 7200).
+Each is arithmetic about this corpus, written down in the experiment's README. The campaign has eleven collectors,
+spread by sorted name, so the clock at index `i` sits at `-M/2 + i*M/10`. R-C-001 is the login clock (`dc-01`, at
+-M/2) and the process clock (`edr-01`, at -M/5) moving 3M/10 apart, which first admits a control whose process
+came 360 seconds before its login (-360 + 3M/10 >= -120 at M = 800); R-C-002 is a beacon 4020 seconds after its
+fingerprint, inside the hour once the flow clock (+M/10) and the inspection clock (+2M/5) close by 3M/10
+(M = 1400); and R-C-004 is a session ending on `vpn-01` (+M/2) 1200 seconds before a breach on `pcap-01` (+M/5),
+overtaken at 3M/10 (M = 4000).
+"""
+
+REPLAY_LOST_SECONDS = 7201
+"""The narrowest collector spread at which R-C-005 changes: it stops accusing its attacker, and accuses nothing new.
+
+The attacker's first sign-in, on `dc-01` at -M/2, comes an hour after the first time the HQ MAC table (`hq-mac`,
+the middle of eleven clocks, at 0) saw that desk, so past M = 7200 it precedes that sighting, resolves to no port,
+and the replay has one site rather than two. The control signed in an hour after the lease ended now moves against
+the DHCP server's clock (`dhcp-01`, at -2M/5) rather than an unskewed table, so the two close by only M/10 and the
+control cannot be admitted below M = 36000, far past the ladder's three hours.
 """
 
 
@@ -429,6 +440,23 @@ def test_each_chain_first_breaks_by_accusing_a_control(experiment, rule):
     broken = _chains_at(experiment, corpus, edge)[rule]
 
     assert baseline < broken and len(broken - baseline) == 1
+
+
+@pytest.mark.slow
+@pytest.mark.cpu_mode
+def test_credential_replay_first_breaks_by_losing_its_attacker(experiment):
+    # The one chain that fails the other way. When step 12 put the desk leases on the DHCP server's clock, the control
+    # this rule once admitted stopped moving against a table no sweep touched, and the first thing a spread does to
+    # the rule is take its attacker's first site away.
+    import campaign_pipeline  # pylint: disable=import-outside-toplevel
+
+    corpus = campaign_pipeline.build_corpus()
+    baseline = experiment.rules.chain_decisions(
+        campaign_pipeline.run_pipeline(campaign_pipeline.build_pipeline_config(), corpus))["R-C-005"]
+
+    assert _chains_at(experiment, corpus, REPLAY_LOST_SECONDS - 1)["R-C-005"] == baseline
+    assert _chains_at(experiment, corpus, REPLAY_LOST_SECONDS)["R-C-005"] == set()
+    assert baseline == {(campaign_pipeline.QUIN, )}
 
 
 # --- The corrected curve and the exporter axis --------------------------------------------------------------------
