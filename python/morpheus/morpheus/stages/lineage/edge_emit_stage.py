@@ -272,8 +272,7 @@ class EdgeEmitStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         layers = [_integral(value) for value in frame[self._layer_column]]
         lineages = column(self._lineage_column)
         times = [_integral(value) for value in frame[self._time_column]]
-        communities = column(self._community_column) if self._community_column in frame.columns else [None] * len(
-            frame)
+        communities = column(self._community_column) if self._community_column in frame.columns else [None] * len(frame)
         hops = [(column(method), column(uid), layer) for (method, uid, layer) in self._hops]
         joins = column(self._join_column) if self._join_column else None
         join_method = f"hard:{self._join_column}" if self._join_column else None

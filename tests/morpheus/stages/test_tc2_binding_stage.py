@@ -27,9 +27,9 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
-from morpheus.utils.binding_closer import IDLE_TIMEOUT
 from morpheus.utils.binding_closer import DISPLACED
 from morpheus.utils.binding_closer import DRAINED
+from morpheus.utils.binding_closer import IDLE_TIMEOUT
 from morpheus.utils.binding_closer import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.type_utils import get_df_class
@@ -640,8 +640,8 @@ def test_a_lease_covers_its_whole_term_and_a_release_ends_it(config: Config):
                        action_column="dhcp_message",
                        grant_seconds_column="lease_seconds").set_index("ip")
 
-    assert (result.loc["10.0.0.5", "bind_end"], result.loc["10.0.0.5", "bind_end_reason"]) == (60 * MINUTE_NS,
-                                                                                                "granted")
-    assert (result.loc["10.0.0.6", "bind_end"], result.loc["10.0.0.6", "bind_end_reason"]) == (40 * MINUTE_NS,
-                                                                                                "explicit")
+    assert (result.loc["10.0.0.5", "bind_end"], result.loc["10.0.0.5",
+                                                           "bind_end_reason"]) == (60 * MINUTE_NS, "granted")
+    assert (result.loc["10.0.0.6", "bind_end"], result.loc["10.0.0.6",
+                                                           "bind_end_reason"]) == (40 * MINUTE_NS, "explicit")
     assert result.loc["10.0.0.7", "bind_end"] == 180 * MINUTE_NS

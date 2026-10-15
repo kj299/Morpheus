@@ -113,7 +113,8 @@ def _envelope(rows: list, collector: str, schema: str, origin: str, when: int) -
 def build(addresses: typing.Iterable[str],
           start_ns: int,
           end_ns: int,
-          pools: tuple = (CLIENT_POOL, )) -> dict[str, pd.DataFrame]:
+          pools: tuple = (CLIENT_POOL, ),
+          unmanaged: typing.Iterable[str] = ()) -> dict[str, pd.DataFrame]:
     """
     A DHCP server's acknowledgements and an EDR agent's inventory reports for every client address given.
 
@@ -126,6 +127,9 @@ def build(addresses: typing.Iterable[str],
         The span the corpus covers. Reports start at the day boundary on or before `start_ns` and run to `end_ns`.
     pools : tuple of str, default = (CLIENT_POOL, )
         Address prefixes the DHCP server hands out. Addresses outside them are servers' static addresses.
+    unmanaged : iterable of str, optional
+        Clients that are leased an address and run no EDR agent -- a phone on the corporate wireless. Their address
+        resolves to an interface and to no machine.
 
     Returns
     -------
@@ -138,16 +142,21 @@ def build(addresses: typing.Iterable[str],
     leases: list = []
     reports: list = []
     first = start_ns - start_ns % DAY_NS
+    unmanaged = set(unmanaged)
 
     for day in range(first, end_ns + 1, DAY_NS):
-        for (index, address) in enumerate(clients):
-            # Each client renews a little after midnight, one minute apart, so no two acknowledgements share a time.
-            when = day + (index + 1) * 60 * NS_PER_SECOND
+        for address in clients:
+            # Every client renews at the day boundary, so a lease covers the corpus from its first second. The
+            # acknowledgements share that instant and the server's own sequence orders them.
+            when = day
             lease = _envelope(leases, DHCP_COLLECTOR, "tc3_dhcp.v1", f"{address}>{mac_for(address)}", when)
             lease.update({
                 "ip": address, "mac": mac_for(address), "dhcp_message": "ack", "lease_seconds": GRANT_SECONDS
             })
             leases.append(lease)
+
+            if (address in unmanaged):
+                continue
 
             report = _envelope(reports, INVENTORY_COLLECTOR, "tc7_host_inventory.v1", f"{mac_for(address)}", when)
             report.update({
@@ -183,14 +192,15 @@ def close_leases(config: Config, dataframes: list, impose_order: bool = True) ->
     if (len(dataframes) == 0):
         return pd.DataFrame()
 
-    return _close(config,
-                  dataframes,
-                  TC2BindingStage(config,
-                                  key_column="ip",
-                                  attribute_columns=["mac"],
-                                  action_column="dhcp_message",
-                                  grant_seconds_column="lease_seconds"),
-                  impose_order)
+    return _close(
+        config,
+        dataframes,
+        TC2BindingStage(config,
+                        key_column="ip",
+                        attribute_columns=["mac"],
+                        action_column="dhcp_message",
+                        grant_seconds_column="lease_seconds"),
+        impose_order)
 
 
 def close_inventory(config: Config, dataframes: list, impose_order: bool = True) -> pd.DataFrame:
@@ -198,13 +208,14 @@ def close_inventory(config: Config, dataframes: list, impose_order: bool = True)
     if (len(dataframes) == 0):
         return pd.DataFrame()
 
-    return _close(config,
-                  dataframes,
-                  TC2BindingStage(config,
-                                  key_column="mac",
-                                  attribute_columns=["hostname"],
-                                  grant_seconds_column="report_valid_seconds"),
-                  impose_order)
+    return _close(
+        config,
+        dataframes,
+        TC2BindingStage(config,
+                        key_column="mac",
+                        attribute_columns=["hostname"],
+                        grant_seconds_column="report_valid_seconds"),
+        impose_order)
 
 
 def lease_table(bindings: pd.DataFrame) -> BindingTable:

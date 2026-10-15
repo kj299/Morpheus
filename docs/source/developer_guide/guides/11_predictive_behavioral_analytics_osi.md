@@ -60,8 +60,8 @@ scoring path with frozen arithmetic in the model's slot, control 8's total order
 checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
 request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the card has not yet seen the trees steps 9 and 10 built.
-That is fifty-one stages and forty-one supporting
-modules, covered by 2,182 distinct tests, itemized in
+That is fifty-two stages and forty-one supporting
+modules, covered by 2,223 distinct tests, itemized in
 [Part 6](#provided). Forty-nine of the fifty-three rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -74,7 +74,8 @@ the wire format rather than in a search -- null fields sent as `null`, which Spl
 repaired. On 2026-10-09 the run over the repaired events returned what was written for all forty-eight, and on
 2026-10-10 a run over step 9's events returned what was then written for all fifty-two, a run later that day
 over step 10's returned what was then written for all sixty-two, and a run that night over step 11's
-returned what is written for all sixty-six the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
+returned what was then written for all sixty-six. On 2026-10-15 a run over step 12's returned what is written for all
+seventy-two the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
 scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
 What remains design rather than a running system: four of the fifty-three rules (R-B-L4-001 and
@@ -465,10 +466,11 @@ Output (`stages/output/`): `WriteToKafkaStage`, `WriteToElasticsearchStage`, `Wr
 General (`stages/general/`): `MonitorStage`, `TriggerStage`, `BufferStage`, `DelayStage`,
 `RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, `MultiPortModulesStage`.
 
-Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`, `EnvelopeStampStage`, `ChainAnchorStage`,
-`BindingResolverStage`, `WindowSealStage`, `TotalOrderStage`, `DeterminismStampStage` and `MinimizationStage`. These
-were added to support the design in Parts 4 and 5 and are covered in detail there, beside the thirty-six
-telemetry stages under `stages/telemetry/` and the SIEM wire stage under `stages/output/`.
+Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`, `EnvelopeStampStage`, `EnvelopeValidateStage`,
+`CollectorSequenceStage`, `ChainAnchorStage`, `BindingResolverStage`, `EdgeEmitStage`, `WindowSealStage`,
+`TotalOrderStage`, `DeterminismStampStage`, `PipelineHealthStage` and `MinimizationStage`. These were added to
+support the design in Parts 2, 4 and 5 and are covered in detail there, beside the thirty-eight telemetry stages
+under `stages/telemetry/` and the SIEM wire stage under `stages/output/`.
 
 There is no Splunk sink. Delivery to Splunk goes through Kafka, HTTP Event Collector via
 `HttpClientSinkStage`, or a file drop consumed by a forwarder. Part 4 covers the tradeoffs.
@@ -1172,30 +1174,38 @@ Emit an explicit end record on expiry rather than relying on the next binding's 
 
 {py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage`, over
 {py:mod}`~morpheus.utils.binding_closer`, is where that end comes from, because nothing upstream supplies
-it: a switch MAC table reports what is bound now, accounting stops go missing, and releases are advisory.
-Five things end a binding and only the first is a fact. An **explicit** stop states the end. A
-**displacement** means the key was seen elsewhere later, so the binding ended somewhere between the two
-sightings. A **conflict** means the key was seen elsewhere *at the same instant*, so neither sighting
-precedes the other and the two bindings overlap by one tick. Both of these carry `bind_gap_ns`, the
-interval between the last sighting here and the sighting elsewhere, and that number rather than the
-reason is what tells a spoofed or duplicated MAC from a device that moved: a conflict is the limiting
-case where the gap is zero, and a cross-switch spoof is a displacement whose gap is shorter than any
-real move. Every other reason leaves the gap null, because nothing was seen elsewhere to measure
-against. A **snapshot absence** means a reconciliation pass over a scope no longer
-lists the key. An **idle timeout** is the backstop for the stop record that never arrived. Every emitted
-record carries `bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that
+it: a switch MAC table reports what is bound now, accounting stops go missing, and releases are advisory. Six things
+end a binding and only the first two are facts. An **explicit** stop states the end. A **grant** states it in
+advance: a DHCP server's acknowledgement hands an address to a MAC for a stated term, so the lease lasts until the
+term runs out however long the client stays silent, a renewal extends it, and it ends `granted` when the term runs
+out unrenewed -- unless a release ends it sooner, or the address is handed to another MAC, which ends it at the
+earlier of the term and the new grant. A **displacement** means the key was seen elsewhere later, so the binding
+ended somewhere between the two sightings. A **conflict** means the key was seen elsewhere *at the same instant*, so
+neither sighting precedes the other and the two bindings overlap by one tick. Both of these carry `bind_gap_ns`, the
+interval between the last sighting here and the sighting elsewhere, and that number rather than the reason is what
+tells a spoofed or duplicated MAC from a device that moved: a conflict is the limiting case where the gap is zero,
+and a cross-switch spoof is a displacement whose gap is shorter than any real move. Every other reason leaves the
+gap null, because nothing was seen elsewhere to measure against. A **snapshot absence** means a reconciliation pass
+over a scope no longer lists the key. An **idle timeout** is the backstop for the stop record that never arrived.
+Every emitted record carries `bind_end_reason`, and `bind_end_observed` is true only for the first, so a rule that
 will act on a binding can insist on an end somebody actually reported.
 
-Two inputs let a source say so. With `action_column`, a row whose action is one of `stop_values` -- `stop`,
-`removed`, `release`, `deleted` or `aged` by default -- closes the key's open binding at that row's time as an
-explicit end. With `snapshot_scope_columns`, typically `["site_id", "switch_id"]`, rows carrying no action are read
-as a full-table snapshot of that scope, and when the scope's next snapshot begins every binding the previous one
-no longer listed is closed as a snapshot absence. Which source yields which reason:
+Three inputs let a source say so. With `grant_seconds_column`, a row carrying a positive term grants the binding
+until its own time plus that many seconds, and the binding is not closed for silence before then: a lease is closed
+from a DHCP server's acknowledgements and releases with `key_column="ip"`, `attribute_columns=["mac"]`,
+`action_column="dhcp_message"` and `grant_seconds_column="lease_seconds"`, and an EDR agent's inventory report from
+its MAC, host name and validity the same way. That is the lease stage the ladder's layer 2 to 3 rung lacked; it is
+this stage configured for a source that states its terms, not a new one. With `action_column`, a row whose action is
+one of `stop_values` -- `stop`, `removed`, `release`, `deleted` or `aged` by default -- closes the key's open
+binding at that row's time as an explicit end. With `snapshot_scope_columns`, typically `["site_id", "switch_id"]`,
+rows carrying no action are read as a full-table snapshot of that scope, and when the scope's next snapshot begins
+every binding the previous one no longer listed is closed as a snapshot absence. Which source yields which reason:
 
 | Source | End reasons it yields |
 | --- | --- |
 | A switch MAC table walked on a cadence | `snapshot_absent` in snapshot mode; `idle_timeout` without it |
 | MAC notification traps, RADIUS accounting stops, DHCP releases | `explicit`, when they arrive |
+| DHCP acknowledgements and inventory reports, with `grant_seconds_column` | `granted`, when a term runs out unrenewed |
 | Any source, when the key is seen on another port | `displaced`, or `conflict` at the same instant |
 | The end of a replay | `drained`, which says only that the stream stopped |
 
@@ -2016,9 +2026,10 @@ seeded corpus in `tests/morpheus/determinism/test_presentation_harness.py` toget
 it that must stay quiet. R-B-L6-001 is gated on the host being a managed endpoint, which the shipped rule had
 dropped for want of a TC-0 join at this layer (gap G76): the composed pipeline now enriches each handshake's source
 from the asset inventory, and the rule requires `ctx_found`, so a personal device with as settled a history and as
-new a stack as the managed endpoint stays quiet, and is the corpus's control. Until hosts have an identity across
-layers the inventory is looked up on the source address, which is a departure recorded here rather than a choice:
-an address names a host only for as long as its lease does. R-B-L6-001 is as cheap as this section claims: the layer rides collection points
+new a stack as the managed endpoint stays quiet, and is the corpus's control. The inventory is looked up on the
+machine the source address resolved to through the DHCP leases and the EDR inventory, `host_key`, not on the
+address, which names a host only for as long as its lease does; the personal device holds a lease and runs no EDR
+agent, so it resolves to no machine. R-B-L6-001 is as cheap as this section claims: the layer rides collection points
 layers 3 and 4 already established, and four of the five rules reuse primitives the fork had before layer
 6 existed.
 
@@ -2323,6 +2334,40 @@ L6  ja4_client : certificate_fingerprint
 L7  trace_id : request_id : operation
 ```
 
+Two rungs run beside the ladder rather than along it, and this fork builds both:
+
+```text
+host      L3 ip_address --(DHCP lease)--> L2 mac_address --(EDR inventory)--> host_key
+identity  L5 user_principal --(directory)--> dot1x_identity --(802.1X supplicant binding)--> L1/L2 port_key
+```
+
+The **host rung** is what makes one machine one entity at every layer. A flow, a packet, a handshake and a DNS
+query name a host by its source address, and a process by the name its EDR agent reports. The address resolves
+through the DHCP server's leases to the interface that held it and through the EDR agent's inventory to the
+machine, which every layer then carries as `host_key`: the inventory's normalized host name, the same key
+{py:class}`~morpheus.stages.telemetry.tc7_endpoint_stage.TC7EndpointStage` writes for a process. Both bindings are
+closed by {py:class}`~morpheus.stages.telemetry.tc2_binding_stage.TC2BindingStage` from the servers' own records, a
+lease held for the term the server granted, and
+{py:class}`~morpheus.stages.lineage.chain_anchor_stage.ChainAnchorStage` roots a record's chain on the machine where
+the hops reached one. A static address no lease names resolves to no machine and is rooted on its address, and a
+phone on the corporate wireless resolves to an interface and no machine, because no EDR agent reports it. The
+layer 6 composition looks the asset inventory up on `host_key` rather than on the address, which an address names
+only for as long as its lease does.
+
+The **identity rung** places a person at a port. The directory says which 802.1X identity a principal presents, and
+the records the authenticator keeps, closed into supplicant bindings, say which port that identity was authorized
+on. The estate corpus resolves desk sign-ins through both and writes `desk_identity` and `desk_port_key` with the
+binding behind each. The SIEM holds the same rungs as lookups, refreshed from `binding:bucketed` -- `binding_l2_l3`
+from an address to a MAC, `binding_l2` from a MAC to a port and `binding_l5_l2` from an identity to a port -- and
+the identity walk report walks each sign-in to a port through them, beside the port the pipeline resolved.
+
+The ladder's hard joins are used where the telemetry has them. A TLS handshake and a flow that share a
+`community_id` are one connection, and a packet, a handshake or a SaaS export placed in the session that held its
+source address carries that session's `session_key`; R-C-002 and R-C-004 join on those keys where present, fall
+back on the value joins where not, and say which they used. Every resolution and every carried connection is also
+written as a `morpheus:edge` record by {py:class}`~morpheus.stages.lineage.edge_emit_stage.EdgeEmitStage`, with the
+join method and the chain the child was sealed into.
+
 One naming note before the joins. Layer 1 calls the device `device_id` and layer 2 calls it `switch_id`.
 They are the same identifier under two names: both layers compose the port as `site_id:<device>:port_id`
 through {py:mod}`~morpheus.utils.entity_key`, so the strings are identical, and the Splunk `binding_l1`
@@ -2486,9 +2531,9 @@ pipe.add_stage(CommunityIdStage(config, src_ip_column="src_ip", dst_ip_column="d
 Name the columns your frames actually carry. The stage defaults to `dest_ip` and `dest_port`, which are
 the Splunk CIM spellings; every telemetry class in this fork emits `dst_ip` and `dst_port`, which is why
 each composed pipeline passes them explicitly. Mixing the two is not a syntax error anywhere -- it is a
-null column, and R-C-002 spent several increments grouping on one. The lineage reference corpus and the
-`morpheus:edge` contract still use `dest_ip` and `dest_port`, so a search joining edges to scored events must
-rename one side until the edge producer is aligned.
+null column, and R-C-002 spent several increments grouping on one. The lineage reference corpus still uses
+`dest_ip` and `dest_port`; its flows used to be sent on `morpheus:edge`, which is an edge stream now, and are not
+sent to the SIEM at all.
 
 Leave `seed` at its default of zero. The seed is part of the hash input, so a non-default value produces
 identifiers that no other tool in the estate will agree with, which forfeits the entire benefit.
@@ -2860,7 +2905,7 @@ dispatch.earliest_time = -20m@m
 dispatch.latest_time   = -5m@m
 realtime_schedule    = 0
 search = index=behavior_bindings sourcetype=binding:bucketed binding_table=dhcp_lease \
-| eval _key = ip . "|" . bucket \
+| eval bucket = floor(_time / 300), _key = ip . "|" . bucket \
 | table _key ip bucket mac port_id switch_id binding_uid \
 | outputlookup binding_l2_l3 append=t key_field=_key
 ```
@@ -2932,19 +2977,22 @@ and falls back. Reversing the two, or dropping the history hop for brevity, answ
 question in the present tense and looks exactly the same while doing it.
 
 Full chain assembly from the edge index. This is the query that makes R-C-001 through R-C-005
-expressible. Status: designed, pending an edge producer. The `morpheus:edge` records the fork emits carry
-`community_id` and no parent or child `event_uid`, `join_method`, `osi_layer` or `lineage_id`, so this query
-returns nothing on pipeline output today (gap G43), and the four shipped chained rules join on values instead:
+expressible. {py:class}`~morpheus.stages.lineage.edge_emit_stage.EdgeEmitStage` writes the records it reads: one per
+binding a resolver placed a record through and one per layer a connection was seen at above the first, each with
+the parent and child `event_uid`, the relation, the `join_method`, the layer at each end and the child's
+`lineage_id`. The estate and the campaign emit them, and the sample events hold 2751 (gap G43, closed by #63). An
+edge has a layer at each end rather than one, so the layers are both:
 
 ```spl
 index=behavior_lineage sourcetype=morpheus:edge earliest=-30m
+| eval layer = mvappend(parent_osi_layer, child_osi_layer)
 | stats values(child_event_uid)  AS children
         values(parent_event_uid) AS parents
         values(join_method)      AS methods
-        values(osi_layer)        AS layers
+        values(layer)            AS layers
         min(_time) AS chain_start
         max(_time) AS chain_end
-        dc(osi_layer) AS layer_span
+        dc(layer) AS layer_span
   by lineage_id
 | where layer_span >= 3
 | eval chain_duration = chain_end - chain_start
@@ -2953,19 +3001,23 @@ index=behavior_lineage sourcetype=morpheus:edge earliest=-30m
 To attach the scores, do not reach for `join`. Its subsearch silently truncates at 50,000 rows by
 default, which is the same failure mode this document rejects `transaction` for, and it fails exactly
 when the environment is busy enough to matter. Union the two sources and let a single `stats` do the
-correlation. The scored events carry no parent-child edge, so their method is the one the binding resolver
-recorded when it attributed them, `resolution_method`, rather than an edge's `join_method`:
+correlation. The scored events carry the methods every resolver recorded when it attributed them,
+`resolution_methods`, and the edges carry their own `join_method`; the chain's methods are both. The edges carry no
+`osi_layer` of their own, so the layer span is counted on the scored events alone:
 
 ```spl
 (index=behavior_lineage sourcetype=morpheus:edge) OR (index=behavior_events) earliest=-30m
+| makemv delim=";" resolution_methods
 | stats dc(osi_layer)   AS layer_span
         min(_time)      AS chain_start
         max(_time)      AS chain_end
         max(max_abs_z)  AS peak_z
         sum(risk_score) AS total_risk
         values(rule_id) AS rules
-        values(resolution_method) AS methods
+        values(resolution_methods) AS methods
+        values(join_method)        AS edge_methods
   by lineage_id
+| eval methods = mvdedup(mvappend(methods, edge_methods))
 | where layer_span >= 3
 | where total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)
 | eval chain_duration = chain_end - chain_start
@@ -3953,7 +4005,7 @@ Pass 4 measures each of these and records which the fork reuses.
   {py:class}`~morpheus.stages.lineage.minimization_stage.MinimizationStage`). Every column the reference
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
-  counts are the finding: twelve columns identify a person, twenty-one address their device, seventeen locate
+  counts are the finding: twelve columns identify a person, twenty-two address their device, seventeen locate
   them, and two hundred and eleven are profile, two hundred and one of them behavioural,
   which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
@@ -3986,8 +4038,8 @@ Pass 4 measures each of these and records which the fork reuses.
   It has since been run, and the verdict it rendered is the one recorded at the top of this guide.
   [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
   the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
-  and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Five of the
-  sixty-six searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
+  and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Two of the
+  seventy-two searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
   empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
   is working from a rule that is broken.
 - One rule run end to end offline, from a file to bytes a SIEM parses
@@ -4098,7 +4150,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run held 94 risk records for the 94 rows the detections then returned; with the learned layer 5 models it held 166 risk records for the 166 rows the detections returned, with step 9's host baselines it held 198, and with step 10's network objects it holds 209 risk records for the 209 rows the detections returned. Chain assembly stays empty on the sample events because the two three-layer chains a detection accuses sum 55 and 50 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
 | Clock skew where the corpora cannot measure it | Medium | Step 7's runs are recorded: the search-head run of all forty-eight searches on Splunk 10.2.8 on 2026-10-09 returned what `expected_results.json` says for every one, over events whose wire format the first run, on 2026-10-05, corrected; the conformance runs of 2026-10-09 passed every marked variant on a card, 759 of 759 before step 6 and 760 of 760 after it, the parity test over all twelve corpora among them; both results and the model artifact are committed and the documents' numbers are tested against them; the clock skew experiment decides all forty-nine detections, and did again after steps 9 and 10; the eight step 10 added hold to a minute on collector and switch clocks. What it could not measure remains: eighteen detections whose corpora carry one clock -- layers 3, 4 and 6 and the SaaS pair -- need an exporter, inspection point or context record time per row before skew can be measured on them, and the 120-second join tolerance itself needs a corpus whose chain steps sit within a minute of each other on different clocks. Recorded under #58; correcting the clocks rather than measuring them is #62 |
 | Host baselines at layers 3, 4 and 6 | Medium | Built, in step 9. `TC3BaselineStage` keeps each host's hourly peak fan-out, fan-in and byte asymmetry over fourteen days, with an optional group column so one address in two routing domains is two hosts, and the network corpus gained the fortnight it is measured against. R-B-L3-001 fires on a step above the source's own history with the literal fifty kept as a floor, and a DHCP server's Monday checks, which the literal fired on, are its control; R-B-L3-006 reads fan-in onto a destination the inventory calls a workstation, R-B-L3-007 a first contact more lopsided than the host has ever sent, and R-D-L3-008 a port sweep inside the estate. `community_id` is on layers 3 and 6, and a report joins one connection across layers 3, 4 and 6 on it. `normalize_hostname` keys a host in the endpoint, asset, enrichment and envelope stages and in the layer 5 target, so `FIN-01` and `fin-01` are one host and R-C-001 joins without folding case; the asset record carries `device_role`, `os_family` and `os_version`, R-C-001 requires a server, R-B-L7-004 scales its severity by criticality and carries the owner, and R-B-L6-001 is gated on a managed host again. Every host feature is read by a search or listed under [Features without a rule](#features-without-a-rule), and a test holds the list to the stages. What remains: layer 4 still has no per-host baseline beyond the per-triple envelope, `ja4_client_changed` has no rule because the corpus shows nothing a rule on it would add, R-P-L3-005 now visibly fires on every host's first minutes of the day and wants the same step condition, and the inventory is looked up on the address at layer 6 until hosts have an identity across layers (#63). Tracked in #60 |
-| Host identity across layers, the lease producer and a real edge stream | Large | A host is `src_ip` at layers 3, 6 and 7-DNS, `flow_id` at 4 and `hostname` at 7-endpoint, and nothing bridges them: no time-bounded `hostname`-to-address binding exists, the network, transport, presentation and application corpora run no `BindingResolverStage`, and asset context cannot attach to a network-layer event. The SIEM `binding_l2_l3` refresh selects `binding_table=dhcp_lease` rows nothing produces, `morpheus:edge` carries no `lineage_id`, `osi_layer`, parent or child `uid` or `join_method`, the principal-to-desk rung the estate corpus proves is a Python dict, and only one resolver passes `uid_column`. A lease stage emitting bucketed `dhcp_lease` rows, a `host_inventory` binding and a `host_key` on every layer 3-7 event, an `EdgeEmitStage` behind the resolvers, MAC and 802.1X lookups in the SIEM, and `community_id`/`session_key` joins above layer 3. The DHCP collector itself is not Morpheus. Tracked in #63 |
+| Host identity across layers, the lease producer and a real edge stream | Large | Built, in step 12. `TC2BindingStage` takes a grant column, so a DHCP server's acknowledgements close into leases that last the term the server granted, and an EDR agent's inventory reports into which machine each interface belongs to; the network, transport, presentation and application corpora, and the campaign's layers 3, 4 and 6, resolve each source address through both with `BindingResolverStage` and carry `mac_address`, `host_key` and each hop's binding identifier, with chains rooted on the machine. `TC7EndpointStage` writes the same `host_key` for a process, and a host identity harness seals four layers together and finds one workstation one entity and one chain, with a re-leased address as the control. `EdgeEmitStage` writes `morpheus:edge` records with both ends' identifiers and layers, the relation, the join method and the child's `lineage_id`; every estate and campaign resolver writes its binding's identifier; the SIEM gains `binding_l2` and `binding_l5_l2` with refresh and expiry jobs, a directory lookup the estate supplies, a host evidence report and an identity walk that agrees with the pipeline on all twenty-five sign-ins; and R-C-002 and R-C-004 join on `community_id` and `session_key` where present. Departures: chains stay one per layer in the single-layer corpora, which seal alone, and only the harness seals layers together; the layer 3 and 4 compositions carry `host_key` without the machine's asset context, which the harness attaches; DNS and HTTP are resolved to a machine but not to a session, because the application corpus has no sessions; and the reference corpus's flows are no longer sent to the SIEM, rather than being renamed. The DHCP and EDR collectors themselves are not Morpheus. Gaps G03, G04, G17, G43, G52 and G80 are closed by #63 |
 | Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | Built, in step 10. R-D-L1-002 reads the optical tap step, R-D-L1-003 flap instability with restarts excluded, R-D-L1-006 a neighbour the port has never had, and a `Device restart` report gathers the reboot flags into one row per device. `TC1RateStage` divides each delta by its interval into error, discard and traffic rates and `utilization` against `link_speed_bps`, from the 64-bit octet counters TC-1 now requires, and measures each port's error rate against its own peak (R-B-L1-005) and its traffic against its own peak and trough per UTC hour (R-B-L1-007). `link_key` names a link by its two ends and `Topology - LLDP adjacency` keeps the record; R-B-L2-002 leaves trunk and LAG-member ports out. `ouis_per_vlan` is keyed `site_id:vlan_id`, measured against its own history and read by R-B-L2-006; the four-part key is gone from Part 2. `TC2AuthStage` keeps each port's 99th percentile and R-B-L2-007 and 008 read its two tails. `TC2BindingStage` gains a stop column and a snapshot mode, and the corpus ends one binding `explicit` and one `snapshot_absent`. What remains: a link resolves to one name from both ends only where the LLDP identity and the key the poller builds agree, which needs TC-0's mapping; a restart splits each of its ports' layer 1 bindings for the poll its neighbour is unknown; discards have no baseline; and the hour-of-day history is untested beyond one hour of corpus. Tracked in #61 |
 | Envelope validation, clock quarantine, collector and pipeline health, late-arrival delivery, platform baselines | Medium | Built, in step 11. Every corpus record carries `observed_time`, `ingest_time`, `clock_source`, `clock_offset_ms`, `sampling_policy` and `tenant_id`, and every layer 3 flow `exporter_id`. `EnvelopeValidateStage` stamps `ingest_time`, marks a missing field that has no stated reason, and quarantines a record whose clock is unsynchronized or more than a second out: the telemetry corpus's DMZ poller, three polls at 4500 ms, reaches `morpheus:quarantine` and nothing else. `CollectorSequenceStage` finds the ARP sensor's three undelivered records; `PipelineHealthStage` writes 851 `morpheus:health` records over the sample events, and its per-feed baseline steps on the SaaS corpus's doubling tenant alone. Nine more stateful stages refuse a far-future time; a late flow reaches `morpheus:late` and no detection, and every detection reads `window_complete=true`. Four reports ship with expectations, and Part 2 gains TC-P. What is not built: correcting an event time by the offset a collector reports, and guarding the layer 3 to 7 window stages' clocks |
 | Device telemetry class and R-C-003 | Large | A switch or router exists only as the middle segment of a port key; a reboot surfaces once per port in the pipeline, and only the `Device restart` report in the SIEM gathers it into one row per device; configuration change, route churn and CPU are absent from design and code. R-C-003, the chain that justifies layer 1, has no stanza, corpus actor or harness, and two of its three inputs are absent: OUI novelty is kept per VLAN only and the closed binding carries no `oui`; nothing classifies a management destination. A `tc1_device` sub-class keyed `site_id:device_id` with a stage deriving reboot, `config`-change and route-count features and two rules; per-port OUI novelty, `dst_is_management` and a `vlan_designations` lookup; a rogue-host actor in a corpus holding layers 1, 2 and 3 together. Tracked in #65 |
@@ -4255,8 +4307,8 @@ sample events one detection accuses a three-layer chain -- R-D-L2-003, the addre
 and the other fourteen carry none, so the search returns nothing for a reason the search-head run now records
 rather than infers. Before that change no detection stanza collected, raised a notable or alerted, so
 `risk_score` never landed in any index the chain search read, and three documents called that a deployment step.
-The `morpheus:edge` events still carry no `lineage_id`, because they come from the flow corpus rather than from a
-composed pipeline, so they drop out of the chain's stats.
+The `morpheus:edge` events carry the chain now: `EdgeEmitStage` writes each edge with its child's `lineage_id`, so
+an edge's join method is counted with the chain it belongs to.
 
 One consequence of sealing the union is worth stating because it looks like a change and is not. 129 rows in
 the layer 2 corpus moved from `sealed_by = flush` to `sealed_by = watermark`: the ARP and 802.1X streams end

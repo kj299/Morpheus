@@ -372,14 +372,14 @@ def asset_versions() -> list:
 
 def build_address_store() -> BitemporalStore:
     """The inventory the handshake enrichment reads: every address that holds a session or beacons is a managed
-    workstation, keyed on the address as the layer 6 pipeline looks it up."""
+    workstation, keyed on the host name its address resolves to, as the layer 6 pipeline looks it up."""
     addresses = sorted(set(SESSION_HOLDERS.values()) | set(BEACONERS))
 
     return BitemporalStore(
         "asset",
         [
             make_version("asset",
-                         address,
+                         normalize_hostname(host_identity.hostname_for(address)),
                          0,
                          None,
                          0,
@@ -1018,8 +1018,8 @@ def _stages(config: Config,
     if (telemetry_class == FLOW_CLASS):
         # The source address to its interface and its machine, and the chain rooted on the machine where there is one,
         # as the network corpus does.
-        resolvers = [] if inventory_table is None else host_identity.resolver_stages(config, lease_table,
-                                                                                     inventory_table)
+        resolvers = [] if inventory_table is None else host_identity.resolver_stages(
+            config, lease_table, inventory_table)
 
         return (
             [
@@ -1227,8 +1227,9 @@ EDGE_HOPS = {
         host_identity.LEASE_METHOD_COLUMN,
         host_identity.INVENTORY_METHOD_COLUMN
     ],
-    "hop_uid_columns":
-        [LEASE_UID_COLUMN, PORT_UID_COLUMN, host_identity.LEASE_UID_COLUMN, host_identity.INVENTORY_UID_COLUMN],
+    "hop_uid_columns": [
+        LEASE_UID_COLUMN, PORT_UID_COLUMN, host_identity.LEASE_UID_COLUMN, host_identity.INVENTORY_UID_COLUMN
+    ],
     "hop_layers": [3, 2, 3, 7],
 }
 """The campaign's resolution hops: a sign-in's address through the DHCP leases and its workstation through the MAC
@@ -1394,13 +1395,12 @@ def staged_exfiltration(result: pd.DataFrame,
     `session_bound` off lets a breach from any address count; `in_session` off keeps the address a session of the
     principal's but drops the requirement that it was open at the breach.
     """
-    return {chain: tuple(times) for (chain, (*times, _)) in exfiltration_chains(result,
-                                                                          in_session=in_session,
-                                                                          session_bound=session_bound,
-                                                                          new_issuer=new_issuer,
-                                                                          ordered=ordered,
-                                                                          window_seconds=window_seconds,
-                                                                          tolerance_seconds=tolerance_seconds).items()}
+    return {
+        chain: tuple(times)
+        for (chain, (*times, _)) in exfiltration_chains(
+            result, in_session=in_session, session_bound=session_bound, new_issuer=new_issuer, ordered=ordered,
+            window_seconds=window_seconds, tolerance_seconds=tolerance_seconds).items()
+    }
 
 
 def exfiltration_chains(result: pd.DataFrame,
@@ -1475,8 +1475,7 @@ def exfiltration_chains(result: pd.DataFrame,
                         and handshake_session != breach_session):
                     continue
 
-                hard = all(key is not None
-                           for key in (_key(export, "session_key"), breach_session, handshake_session))
+                hard = all(key is not None for key in (_key(export, "session_key"), breach_session, handshake_session))
                 fired.setdefault((principal, address), (t1, t2, t3, HARD_SESSION if hard else VALUE_ADDRESS))
 
     return fired
@@ -1495,12 +1494,12 @@ def tls_before_beaconing(result: pd.DataFrame,
 
     The beacon is dated when it first matures, which is when R-B-L3-002 would first report it.
     """
-    return {pair: tuple(times) for (pair, (*times, _)) in c2_chains(result,
-                                                              settled=settled,
-                                                              same_destination=same_destination,
-                                                              ordered=ordered,
-                                                              window_seconds=window_seconds,
-                                                              tolerance_seconds=tolerance_seconds).items()}
+    return {
+        pair: tuple(times)
+        for (pair, (*times,
+                    _)) in c2_chains(result, settled=settled, same_destination=same_destination, ordered=ordered,
+                                     window_seconds=window_seconds, tolerance_seconds=tolerance_seconds).items()
+    }
 
 
 def c2_chains(result: pd.DataFrame,

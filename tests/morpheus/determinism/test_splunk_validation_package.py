@@ -1185,11 +1185,12 @@ def test_every_expected_empty_search_says_why(expected: dict):
     #
     # Five of sixty-two after step 10, whose ten searches each arrived with something planted for it to find.
     #
-    # Six after step 12. The L2/L3 refresh left: `TC2BindingStage` closes the campaign DHCP server's
-    # acknowledgements into leases, and their buckets are what the refresh selects. The MAC and 802.1X rungs
-    # arrived with a refresh and an expiry each, and the two expiry jobs join their twins on the list for the
-    # twins' reason: nothing in a fresh corpus is old enough to expire.
-    assert len(empty) == 6
+    # Two after step 12. The L2/L3 refresh left: `TC2BindingStage` closes the campaign DHCP server's
+    # acknowledgements into leases, and their buckets are what the refresh selects. The expiry jobs left with it,
+    # and their reason had been wrong all along: an expiry rewrites the lookup with every row it keeps, and it had
+    # kept none only because each refresh keyed its rows on a bucket counted from 1970. Keyed on the bucket the
+    # row's own time falls in, which a validation run moves to the weeks before it, every row is kept.
+    assert len(empty) == 2
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name
@@ -1744,8 +1745,13 @@ def test_the_edge_stream_is_edges():
     assert len(edges) > 0
 
     for edge in edges:
-        for field in ("link_uid", "parent_event_uid", "child_event_uid", "relation_type", "join_method",
-                      "lineage_id", "child_osi_layer"):
+        for field in ("link_uid",
+                      "parent_event_uid",
+                      "child_event_uid",
+                      "relation_type",
+                      "join_method",
+                      "lineage_id",
+                      "child_osi_layer"):
             assert edge.get(field) is not None, (field, edge)
 
         child = scored[edge["child_event_uid"]]
@@ -1799,8 +1805,8 @@ def _identity_walk() -> list:
 def test_each_binding_refresh_fills_its_lookup(expected: dict):
     # The three rungs Part 4's ladder walks, each fed from the bucketed bindings its refresh selects. The L2/L3
     # refresh was empty for its whole life because nothing produced a lease; the other two did not exist.
-    for (search, table, key) in (("Binding lookup - L2/L3 refresh", "dhcp_lease", "ip"),
-                                 ("Binding lookup - L2 refresh", "mac_table", "key"),
+    for (search, table, key) in (("Binding lookup - L2/L3 refresh", "dhcp_lease",
+                                  "ip"), ("Binding lookup - L2 refresh", "mac_table", "key"),
                                  ("Binding lookup - L5/L2 refresh", "dot1x_supplicant", "dot1x_identity")):
         rows = _bucketed(table)
         entry = expected["searches"][search]

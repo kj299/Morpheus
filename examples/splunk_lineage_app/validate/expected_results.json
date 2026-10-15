@@ -489,7 +489,7 @@
       ]
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 5449,
+      "expected_rows": 5447,
       "expected_empty": false,
       "contributing_rows": 10247,
       "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 10247 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week because only TC5ScoreStage produces `max_abs_z`, and it leaves the session corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1333 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline. The figures grew again when step 9 gave layer 3 a fortnight of ordinary history before its scored hours: the network corpus now contributes 1184 flows where it contributed 411, and the presentation corpus 130 handshakes with a personal device among them; the campaign gained a principal who reaches a workstation and the flows of its exfiltrators' breach connections. And again when step 10 gave the port, the link, the VLAN and the 802.1X exchange behaviour of their own: the layer 1 stream grew from 305 polls of five ports to 793 of thirteen, the MAC table by 45 rows with a camera VLAN, a printer and a guest, and the 802.1X stream by 122 events from two lab benches reauthenticating every two minutes, 655 events in all. And when step 11 gave the SaaS corpus a second tenant whose sync service exports twice a day, 212 operations, and gave the layer 3 corpus one late flow, which goes to morpheus:late, where neither a detection nor the summary reads it."
@@ -497,17 +497,17 @@
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 3449,
+      "distinct_lineage_ids": 3418,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "chains_with_a_method": 1367,
+      "chains_with_a_method": 1336,
       "three_layer_chain_methods": [
         "soft:directory",
         "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3449 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 1367 chains in all carry one: the layer 3, 4 and 6 records now carry the two hops from address to machine, and each of those layers roots its chains on the machine where the hops reached one; the campaign's packets, handshakes and exports carry a third, to the session that held their address. That is also why there are fewer chains than the 4268 there were: a workstation's flows in an hour are one chain where each flow identifier, or each address a lease reassigned, used to be its own. A machine's chains are still one per layer, because each layer's corpus seals alone; the host evidence report joins them on `host_key`, and the host identity harness seals four layers together to show the chain they make.",
+      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3418 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 1336 chains in all carry one: the layer 3, 4 and 6 records now carry the two hops from address to machine, and each of those layers roots its chains on the machine where the hops reached one; the campaign's packets, handshakes and exports carry a third, to the session that held their address. That is also why there are fewer chains than the 4268 there were: a workstation's flows in an hour are one chain where each flow identifier, or each address a lease reassigned, used to be its own. A machine's chains are still one per layer, because each layer's corpus seals alone; the host evidence report joins them on `host_key`, and the host identity harness seals four layers together to show the chain they make.",
       "three_layer_chain_risk": {
         "0": 13,
         "50": 1,
@@ -540,9 +540,9 @@
       "why": "Seven rows, one per port whose binding was ever superseded, and none for the six that never were. Gi1/0/2 and Gi1/0/6 had their optics replaced; Gi1/0/11 was re-patched and Gi1/0/12 had a device inserted in its path; and the restarted switch's three ports each split twice, the neighbour unknown for one poll and then back, which is two superseded intervals per port in the same day bucket. That last is a cost the history pays for a reboot, recorded rather than hidden: the binding stage cannot tell a neighbour not yet relearned from a cable pulled. A number close to the port count would mean the superseded filter had been dropped and the history collection had started carrying the whole estate once per day."
     },
     "Binding lookup - L1 history expiry": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "A maintenance search that deletes day buckets older than the retention window, the layer 1 twin of the L2/L3 expiry job. On a freshly loaded corpus nothing is old enough to expire, so an empty result is the correct one. Note that the current-state binding_l1 collection has no expiry job at all: it holds one row per port, and a decommissioned port's row is the last true thing known about it, so there is nothing there that grows."
+      "expected_rows": 7,
+      "expected_empty": false,
+      "why": "The layer 1 history's maintenance search, on day buckets. It keeps every bucket inside the retention window and rewrites the lookup with them, so it returns what it kept, and every bucket here is inside it: the runner moves the events to the weeks before the run, and the refresh keys each row on the bucket its own time falls in. It was expected empty for as long as the refreshes keyed on the stored ordinal, a bucket counted from 1970 that an expiry measured against now() dropped; that zero was the epoch, not the job. The current-state binding_l1 collection has no expiry job: it holds one row per port, and a decommissioned port's row is the last true thing known about it."
     },
     "Principal watchlist - expiry": {
       "expected_rows": 2,
@@ -550,19 +550,19 @@
       "why": "A maintenance search that keeps only the watchlist entries whose expires has not passed. Its answer depends on how far the events sit behind the clock, and run_search_head.py places them: every timestamp moves by whole weeks so the newest event lands three to ten days before the run. R-P-L7-006 stamps each principal's entry with that principal's latest event, and both of its principals' latest events are the newest in the corpus, so their thirty-day expiries are still ahead and the two entries survive. R-P-L5-006 stamps each principal-day it fired, and the latest layer 5 event is forty-six days before the newest, so its six entries have passed and are dropped. Against the unshifted 1970 events every entry would expire, which is what this note said before the first search-head run showed otherwise. Run it last: run before R-B-L7-002, it empties the list that search reads."
     },
     "Binding lookup - L2/L3 expiry": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "A maintenance search that deletes buckets older than the retention window. On a freshly loaded corpus nothing is old enough to expire, so an empty result is the correct one."
+      "expected_rows": 1505,
+      "expected_empty": false,
+      "why": "The L2/L3 lookup's maintenance search. It keeps every bucket inside the retention window and rewrites the lookup with them, so it returns what it kept, and every bucket here is inside it: the runner moves the events to the weeks before the run, and the refresh keys each row on the bucket its own time falls in. It was expected empty for as long as the refreshes keyed on the stored ordinal, a bucket counted from 1970 that an expiry measured against now() dropped; that zero was the epoch, not the job."
     },
     "Binding lookup - L2 expiry": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "A maintenance search that deletes buckets older than the retention window, the MAC rung's twin of the L2/L3 expiry job. On a freshly loaded corpus nothing is old enough to expire, so an empty result is the correct one."
+      "expected_rows": 927,
+      "expected_empty": false,
+      "why": "The MAC rung's maintenance search. It keeps every bucket inside the retention window and rewrites the lookup with them, so it returns what it kept, and every bucket here is inside it: the runner moves the events to the weeks before the run, and the refresh keys each row on the bucket its own time falls in. It was expected empty for as long as the refreshes keyed on the stored ordinal, a bucket counted from 1970 that an expiry measured against now() dropped; that zero was the epoch, not the job."
     },
     "Binding lookup - L5/L2 expiry": {
-      "expected_rows": 0,
-      "expected_empty": true,
-      "why": "The same job for the 802.1X rung, on the same retention and bucket width. Nothing in a freshly loaded corpus is old enough to expire."
+      "expected_rows": 59,
+      "expected_empty": false,
+      "why": "The 802.1X identity rung's maintenance search. It keeps every bucket inside the retention window and rewrites the lookup with them, so it returns what it kept, and every bucket here is inside it: the runner moves the events to the weeks before the run, and the refresh keys each row on the bucket its own time falls in. It was expected empty for as long as the refreshes keyed on the stored ordinal, a bucket counted from 1970 that an expiry measured against now() dropped; that zero was the epoch, not the job."
     },
     "Binding health - unresolved rate": {
       "expected_rows": 1,

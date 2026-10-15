@@ -225,8 +225,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     frame["collector_seq"] = range(len(frame))
 
     # Which machine each client address was: the DHCP server's leases and the EDR agent's inventory, over the span.
-    hosts = host_identity.build(frame["src_ip"], int(frame["event_time"].min()),
-                                int(frame["event_time"].max()))
+    hosts = host_identity.build(frame["src_ip"], int(frame["event_time"].min()), int(frame["event_time"].max()))
 
     return envelope.attach_all({TELEMETRY_CLASS: frame, **hosts})
 

@@ -424,8 +424,7 @@ _PSEUDONYMS = (
     "parent_process_guid",
     "process_guid",
     "row_key",  # The inventory versions a flow's destination context rests on.
-    "dst_ctx_version_uids",
-    # The lease and the inventory report a record's machine was resolved through.
+    "dst_ctx_version_uids",  # The lease and the inventory report a record's machine was resolved through.
     "host_inventory_uid",
     "host_lease_uid",
     # The bindings a sign-in was resolved to a port through: the directory entry and supplicant binding at the
@@ -433,8 +432,7 @@ _PSEUDONYMS = (
     "desk_binding_uid",
     "desk_identity_uid",
     "login_lease_uid",
-    "login_port_uid",
-    # The session interval a packet, handshake or export was placed in by its source address.
+    "login_port_uid",  # The session interval a packet, handshake or export was placed in by its source address.
     "session_binding_uid",
 )
 

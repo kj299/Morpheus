@@ -39,8 +39,8 @@ from morpheus.utils.personal_data import COLUMNS
 from morpheus.utils.personal_data import IDENTIFIES
 from morpheus.utils.personal_data import LOCATES
 from morpheus.utils.personal_data import OPERATIONAL
-from morpheus.utils.personal_data import PERSONAL_CATEGORIES
 from morpheus.utils.personal_data import PER_ROW
+from morpheus.utils.personal_data import PERSONAL_CATEGORIES
 from morpheus.utils.personal_data import PROFILES
 from morpheus.utils.personal_data import PSEUDONYMS
 from morpheus.utils.personal_data import classify
@@ -160,7 +160,7 @@ def test_the_counts_the_documents_quote_are_the_counts_here():
     # thing in the inventory and a reader takes them at face value. Pinning them here means a reclassification
     # fails a test rather than quietly making two documents wrong.
     assert [len(columns_in(category)) for category in (IDENTIFIES, ADDRESSES, LOCATES, PSEUDONYMS, PROFILES)] == [
-        12, 21, 17, 12, 211
+        12, 22, 17, 19, 211
     ], "the category sizes have moved; README.md and the guide's Part 6 quote them and need the same edit"
 
     for name in ("README.md",

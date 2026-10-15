@@ -42,9 +42,10 @@ That is the same simplification the Python recomputation in `expected_results.js
 The order follows VALIDATION.md: the binding refreshes first, so the lookups exist; the two predictive searches,
 so R-B-L7-002 reads a populated watchlist; every other detection, each writing its rows into `behavior_risk`; the
 summary search, so R-P-L3-005 has something to read; R-P-L3-005; Chain assembly, which sums what the detections
-wrote; and the expiry jobs last, because the events are historical and expiry drops what they wrote. A search
-that reads an index another search wrote is dispatched only once that index holds every row that was written to
-it: `collect` hands its rows to the indexer and returns, and they become searchable a few seconds later.
+wrote; and the expiry jobs last, because each rewrites the lookup it trims and one run earlier could take away
+what a later search reads. A search that reads an index another search wrote is dispatched only once that index
+holds every row that was written to it: `collect` hands its rows to the indexer and returns, and they become
+searchable a few seconds later.
 """
 
 import argparse

@@ -27,9 +27,11 @@ from morpheus.stages.lineage.edge_emit_stage import EdgeEmitStage
 from morpheus.utils.lineage import link_uid
 from morpheus.utils.type_utils import get_df_class
 
-HOPS = {"hop_method_columns": ["host_lease_resolution", "host_inventory_resolution"],
-        "hop_uid_columns": ["host_lease_uid", "host_inventory_uid"],
-        "hop_layers": [3, 7]}
+HOPS = {
+    "hop_method_columns": ["host_lease_resolution", "host_inventory_resolution"],
+    "hop_uid_columns": ["host_lease_uid", "host_inventory_uid"],
+    "hop_layers": [3, 7]
+}
 
 
 def resolved_flows() -> dict:

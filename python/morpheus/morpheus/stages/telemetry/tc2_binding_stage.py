@@ -28,8 +28,6 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stage_schema import StageSchema
 from morpheus.utils.binding_closer import DEFAULT_IDLE_TIMEOUT_NS
-from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import EventClock
 from morpheus.utils.binding_closer import NS_PER_SECOND
 from morpheus.utils.binding_closer import BindingCloser
 from morpheus.utils.binding_table import to_epoch_ns
@@ -38,6 +36,8 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
 
 logger = logging.getLogger(__name__)
 

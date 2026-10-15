@@ -194,8 +194,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     (leases, reports) = (hosts[host_identity.LEASE_CLASS].to_dict("records"),
                          hosts[host_identity.INVENTORY_CLASS].to_dict("records"))
 
-    for (mac, name, message, when) in ((*FIRST_HOLDER, "ack", at(0, 2)),
-                                       (*FIRST_HOLDER, "release", at(HOUR, RELEASE_MINUTE)),
+    for (mac, name, message, when) in ((*FIRST_HOLDER, "ack",
+                                        at(0, 2)), (*FIRST_HOLDER, "release", at(HOUR, RELEASE_MINUTE)),
                                        (*SECOND_HOLDER, "ack", at(HOUR, RELEASE_MINUTE + 1))):
         _row(leases,
              host_identity.DHCP_COLLECTOR,
@@ -236,16 +236,14 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
 def build_host_store() -> BitemporalStore:
     """The asset inventory keyed by host name, the key every layer's machine resolves to."""
-    return BitemporalStore("asset", [
-        make_version("asset",
-                     host,
-                     0,
-                     None,
-                     0,
-                     values={
-                         "device_role": role, "criticality": criticality, "owner": owner
-                     }) for (host, (role, criticality, owner)) in sorted(HOST_CONTEXT.items())
-    ])
+    return BitemporalStore(
+        "asset",
+        [
+            make_version(
+                "asset", host, 0, None, 0, values={
+                    "device_role": role, "criticality": criticality, "owner": owner
+                }) for (host, (role, criticality, owner)) in sorted(HOST_CONTEXT.items())
+        ])
 
 
 def _layer_stages(config: Config, name: str, leases, inventory) -> list:
@@ -259,7 +257,8 @@ def _layer_stages(config: Config, name: str, leases, inventory) -> list:
     elif (name == transport_pipeline.TELEMETRY_CLASS):
         own = transport_pipeline.build_stages(config)
     elif (name == presentation_pipeline.TELEMETRY_CLASS):
-        own = presentation_pipeline.build_stages(config)
+        # The layer 6 composition resolves its sources itself, because its asset context is looked up on the machine.
+        return presentation_pipeline.build_stages(config, hosts=(leases, inventory))
     else:
         own = application_pipeline.build_stages(config, name)
 
@@ -291,8 +290,7 @@ def _run_layer(config: Config, name: str, frame: pd.DataFrame, leases, inventory
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
-    result = pd.concat([to_host_frame(message.copy_dataframe()) for message in sink.get_messages()],
-                       ignore_index=True)
+    result = pd.concat([to_host_frame(message.copy_dataframe()) for message in sink.get_messages()], ignore_index=True)
     result["telemetry_class"] = name
 
     return result
@@ -323,8 +321,7 @@ def _seal(config: Config, union: pd.DataFrame, entity_key_column: str) -> pd.Dat
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
-    return pd.concat([to_host_frame(message.copy_dataframe()) for message in sink.get_messages()],
-                     ignore_index=True)
+    return pd.concat([to_host_frame(message.copy_dataframe()) for message in sink.get_messages()], ignore_index=True)
 
 
 def _python_stages() -> None:
@@ -430,8 +427,11 @@ def test_keyed_by_address_the_two_holders_would_be_one(pipeline_config: Config):
     _python_stages()
     corpus = build_corpus()
     (leases, inventory) = host_identity.tables(pipeline_config, {name: [frame] for (name, frame) in corpus.items()})
-    flows = _run_layer(pipeline_config, network_pipeline.TELEMETRY_CLASS, corpus[network_pipeline.TELEMETRY_CLASS],
-                       leases, inventory)
+    flows = _run_layer(pipeline_config,
+                       network_pipeline.TELEMETRY_CLASS,
+                       corpus[network_pipeline.TELEMETRY_CLASS],
+                       leases,
+                       inventory)
     sealed = _seal(pipeline_config, flows, "src_ip")
     rows = sealed[sealed["src_ip"] == RELEASED]
 

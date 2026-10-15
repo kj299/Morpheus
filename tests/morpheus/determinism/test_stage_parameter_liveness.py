@@ -52,12 +52,12 @@ from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
+from morpheus.stages.lineage.edge_emit_stage import EdgeEmitStage
 from morpheus.stages.lineage.envelope_stamp_stage import EnvelopeStampStage
 from morpheus.stages.lineage.envelope_validate_stage import DEFAULT_REQUIRED_COLUMNS
 from morpheus.stages.lineage.envelope_validate_stage import EnvelopeValidateStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.minimization_stage import MinimizationStage
-from morpheus.stages.lineage.edge_emit_stage import EdgeEmitStage
 from morpheus.stages.lineage.pipeline_health_stage import PipelineHealthStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage

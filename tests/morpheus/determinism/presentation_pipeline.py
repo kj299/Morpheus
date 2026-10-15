@@ -92,6 +92,7 @@ from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
+from morpheus.utils.entity_key import normalize_hostname
 
 PERIOD_SECONDS = 3600
 LATENESS_SECONDS = 900
@@ -187,10 +188,10 @@ def at(hour: int, second: int = 0) -> int:
 
 
 def asset_versions() -> list:
-    """The inventory's record of every managed host, recorded before the corpus begins."""
+    """The inventory's record of every managed host, recorded before the corpus begins, keyed by host name."""
     return [
         make_version("asset",
-                     address,
+                     normalize_hostname(host_identity.hostname_for(address)),
                      0,
                      None,
                      0,
@@ -325,8 +326,12 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     frame["collector_seq"] = range(len(frame))
 
     # Which machine each client address was: the DHCP server's leases and the EDR agent's inventory, over the span.
-    hosts = host_identity.build(frame["src_ip"], int(frame["event_time"].min()),
-                                int(frame["event_time"].max()))
+    # The personal device is leased an address like any client and runs no EDR agent, so its address resolves to
+    # an interface and to no machine -- which is why the inventory has no context for it.
+    hosts = host_identity.build(frame["src_ip"],
+                                int(frame["event_time"].min()),
+                                int(frame["event_time"].max()),
+                                unmanaged=(PERSONAL_DEVICE, ))
 
     return envelope.attach_all({TELEMETRY_CLASS: frame, **hosts})
 
@@ -370,18 +375,29 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def build_stages(config: Config, store: typing.Optional[BitemporalStore] = None) -> list:
-    """The TC-6 stages, in the order a deployment would compose them, and the source's context after them.
+def build_stages(config: Config,
+                 store: typing.Optional[BitemporalStore] = None,
+                 hosts: typing.Optional[tuple] = None) -> list:
+    """The TC-6 stages, in the order a deployment would compose them, then the source's machine and its context.
 
-    The order is not load-bearing -- none of the four reads a column another writes -- so they are composed in
-    the order the rules are numbered, which is the order a reader will look for them in.
+    The order of the four is not load-bearing -- none reads a column another writes -- so they are composed in the
+    order the rules are numbered, which is the order a reader will look for them in. The source address is then
+    resolved to its machine through the leases and the EDR inventory in `hosts`, and the machine is what the asset
+    inventory is looked up on: an address names a host only for as long as its lease does, and a host name for as
+    long as the host does.
     """
+    (leases, inventory) = host_identity.tables(config, {}) if hosts is None else hosts
+
     return [
         TC6FingerprintStage(config),
         TC6CertificateStage(config, min_samples=MIN_SAMPLES),
         TC6CipherStage(config, min_samples=MIN_SAMPLES),
         TC6ContentStage(config),
-        TC0EnrichStage(config, store=build_store() if store is None else store, entity_column="src_ip"),
+        *host_identity.resolver_stages(config, leases, inventory, fallback_anchor="src_ip"),
+        TC0EnrichStage(config,
+                       store=build_store() if store is None else store,
+                       entity_column=host_identity.HOST_KEY_COLUMN,
+                       entity_normalization="hostname"),
     ]
 
 
@@ -441,11 +457,9 @@ def run_pipeline(config: Config,
 
     pipe.add_stage(CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"))
 
-    for stage in build_stages(config, store):
-        pipe.add_stage(stage)
-
-    # The source address to its interface and its machine, and the chain rooted on the machine where there is one.
-    for stage in host_identity.resolver_stages(config, leases, inventory, fallback_anchor="src_ip"):
+    # The handshake stages, the source address to its interface and its machine with the chain rooted on the
+    # machine where there is one, and the machine's context.
+    for stage in build_stages(config, store, (leases, inventory)):
         pipe.add_stage(stage)
 
     if (sessions is not None):

@@ -1,18 +1,18 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-10T22:35:50.718033+00:00",
-  "timestamp_shift_weeks": 2953,
+  "at": "2026-10-15T12:08:00.157976+00:00",
+  "timestamp_shift_weeks": 2954,
   "dispatch_window": {
-    "earliest": 1785888000,
-    "latest": 1791675239
+    "earliest": 1786492800,
+    "latest": 1792069569
   },
   "indexed": {
-    "binding:bucketed": 131,
+    "binding:bucketed": 2498,
     "binding:l1": 23,
     "binding:l2": 19,
     "context:asset": 7,
     "context:identity": 23,
-    "morpheus:edge": 47,
+    "morpheus:edge": 2751,
     "morpheus:health": 851,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
@@ -25,12 +25,12 @@
     "morpheus:score:l7": 4484
   },
   "expected_indexed": {
-    "binding:bucketed": 131,
+    "binding:bucketed": 2498,
     "binding:l1": 23,
     "binding:l2": 19,
     "context:asset": 7,
     "context:identity": 23,
-    "morpheus:edge": 47,
+    "morpheus:edge": 2751,
     "morpheus:health": 851,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
@@ -46,14 +46,22 @@
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-5693646.000000",
-        "min_drift": "-5697248.000000"
+        "max_drift": "-5483176.000000",
+        "min_drift": "-5486778.000000"
       }
     ],
     "binding_tables": [
       {
+        "binding_table": "dhcp_lease",
+        "count": "1505"
+      },
+      {
+        "binding_table": "dot1x_supplicant",
+        "count": "59"
+      },
+      {
         "binding_table": "mac_table",
-        "count": "124"
+        "count": "927"
       },
       {
         "binding_table": "port_inventory",
@@ -287,6 +295,8 @@
   },
   "order": [
     "Binding lookup - L2/L3 refresh",
+    "Binding lookup - L2 refresh",
+    "Binding lookup - L5/L2 refresh",
     "Binding lookup - L1 refresh",
     "Binding lookup - L1 history refresh",
     "R-P-L5-006 - Drift trajectory",
@@ -307,6 +317,8 @@
     "R-D-L2-004 - MAC in two places at once",
     "R-D-L2-005 - Authorization without authentication",
     "Connection evidence - layers 3, 4 and 6",
+    "Host evidence - one machine across layers",
+    "Identity walk - sign-in to switch port",
     "R-B-L3-001 - Fan-out expansion",
     "R-B-L3-002 - Beaconing",
     "R-D-L3-003 - Reserved-range egress",
@@ -350,13 +362,23 @@
     "R-P-L3-005 - Fan-out trajectory",
     "Chain assembly - cross-layer risk",
     "Binding lookup - L2/L3 expiry",
+    "Binding lookup - L2 expiry",
+    "Binding lookup - L5/L2 expiry",
     "Binding lookup - L1 history expiry",
     "Principal watchlist - expiry"
   ],
   "searches": {
     "Binding lookup - L2/L3 refresh": {
       "phase": "refresh",
-      "rows": 0
+      "rows": 1505
+    },
+    "Binding lookup - L2 refresh": {
+      "phase": "refresh",
+      "rows": 927
+    },
+    "Binding lookup - L5/L2 refresh": {
+      "phase": "refresh",
+      "rows": 59
     },
     "Binding lookup - L1 refresh": {
       "phase": "refresh",
@@ -437,6 +459,14 @@
     "Connection evidence - layers 3, 4 and 6": {
       "phase": "search",
       "rows": 1
+    },
+    "Host evidence - one machine across layers": {
+      "phase": "search",
+      "rows": 17
+    },
+    "Identity walk - sign-in to switch port": {
+      "phase": "search",
+      "rows": 25
     },
     "R-B-L3-001 - Fan-out expansion": {
       "phase": "search",
@@ -608,11 +638,19 @@
     },
     "Binding lookup - L2/L3 expiry": {
       "phase": "expiry",
-      "rows": 0
+      "rows": 1505
+    },
+    "Binding lookup - L2 expiry": {
+      "phase": "expiry",
+      "rows": 927
+    },
+    "Binding lookup - L5/L2 expiry": {
+      "phase": "expiry",
+      "rows": 59
     },
     "Binding lookup - L1 history expiry": {
       "phase": "expiry",
-      "rows": 0
+      "rows": 7
     },
     "Principal watchlist - expiry": {
       "phase": "expiry",

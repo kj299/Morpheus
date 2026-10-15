@@ -47,14 +47,25 @@ three-layer chains now carries 50, from the tap on its port, beside the one at 5
 earlier runs differ from what is written now in exactly the searches the models, the host baselines and step 10's
 corpus changed, and the test names them. It is kept in `search_head_runs/`.
 
-`search_head_results.json` holds the eighth, made that night on the same install over the events step 11
-regenerated, when the pipeline began reporting on itself: three more sourcetypes in three more indexes -- 851
-health records, the DMZ poller's three quarantined polls and the layer 3 corpus's one late flow -- and a second SaaS
-tenant whose sync doubles. It returned what is written for all sixty-six over 11,352 indexed events, and the
-detections wrote the same 209 risk records as the seventh: every detection now reads `window_complete=true`, and no
-scored event is incomplete, so the filter changed no answer. The four new searches return one row each -- the DMZ
-poller's refusal rate, the ARP sensor's three missing sequence numbers, the late flow, and the labs tenant's step --
-and the seventh run differs from what is written only in the summary, which groups the second tenant's exports.
+The eighth, made that night on the same install over the events step 11 regenerated, when the pipeline began
+reporting on itself: three more sourcetypes in three more indexes -- 851 health records, the DMZ poller's three
+quarantined polls and the layer 3 corpus's one late flow -- and a second SaaS tenant whose sync doubles. It returned
+what was then written for all sixty-six over 11,352 indexed events, and the detections wrote the same 209 risk
+records as the seventh: every detection now reads `window_complete=true`, and no scored event is incomplete, so the
+filter changed no answer. The four new searches return one row each -- the DMZ poller's refusal rate, the ARP
+sensor's three missing sequence numbers, the late flow, and the labs tenant's step -- and the seventh run differs
+from what is written only in the summary, which groups the second tenant's exports.
+
+`search_head_results.json` holds the ninth, made on 2026-10-15 on the same install over the events step 12
+regenerated, when hosts gained an identity across layers: 1505 lease buckets, 803 more MAC buckets and 59 supplicant
+buckets on `binding:bucketed`, and 2751 edges on `morpheus:edge` in place of 47 flow records. It returned what is
+written for all seventy-two over 16,423 indexed events, with the same 209 risk records: the L2/L3 refresh its first
+rows, 1505; the host evidence report seventeen machines; and the identity walk all twenty-five sign-ins, each to the
+port the pipeline resolved. Its first attempt found the walk empty: the refreshes keyed each row on the bucket
+ordinal the producer wrote, counted from 1970, while the walk computed its bucket from the event's `_time`, which
+the run moves by whole weeks. Every refresh now keys its rows on the bucket its own time falls in, which is the same
+number wherever the time is the one the producer wrote, and the expiry jobs, which had kept nothing only because
+those ordinals were half a century old, keep every row. The eighth run differs from what is written exactly there.
 
 ## Running it
 
@@ -91,14 +102,14 @@ Two adjustments make the run faithful, and both are the runner's rather than the
 The order is the one a schedule would settle into, made explicit: the binding refreshes, so the lookups exist; the
 two predictive searches, so R-B-L7-002 reads a populated watchlist; every other detection, each collecting its rows
 into `behavior_risk`; the behavior summary; R-P-L3-005, which reads the summary; Chain assembly, which sums the
-risk; and the expiry jobs last, because the events are historical and expiry drops what they wrote. `collect`
-hands its rows to the indexer and returns, so a search that reads an index another search wrote is dispatched only
-once that index holds every row written to it. The runner also waits for an ordinary search, not only the
-index-time count, to see every event before the first dispatch: on 2026-10-09 the two disagreed for long enough that
-a summary dispatched in between returned 3,649 rows instead of 4,335. Then it rolls the hot buckets to warm, because
-a count is still not enough: on one run every count reported layer 1's 305 events while R-D-L1-001 could not see the
-one poll it needs, and returned that row a minute later. With the roll, three consecutive runs returned the same row
-count for every search.
+risk; and the expiry jobs last, because each rewrites the lookup it trims and one run earlier could take away what a
+later search reads. `collect` hands its rows to the indexer and returns, so a search that reads an index another
+search wrote is dispatched only once that index holds every row written to it. The runner also waits for an ordinary
+search, not only the index-time count, to see every event before the first dispatch: on 2026-10-09 the two disagreed
+for long enough that a summary dispatched in between returned 3,649 rows instead of 4,335. Then it rolls the hot
+buckets to warm, because a count is still not enough: on one run every count reported layer 1's 305 events while
+R-D-L1-001 could not see the one poll it needs, and returned that row a minute later. With the roll, three
+consecutive runs returned the same row count for every search.
 
 The indexing loop this section used to give by hand would have met both problems: it indexed the 1970 timestamps
 as they were, so every event would have failed the first check below. Nothing in this repository records it
@@ -179,18 +190,18 @@ should return nothing:
 | R-C-004, staged exfiltration | **1** | One chain: a bulk export, twenty-five minutes later a fifty-times breach from the address the exporter's open session held, and twenty minutes after that a connection to a destination whose issuer nobody in the estate had seen. Four actors each do all three with one relation broken and are quiet: another principal's address, a breach after logging off, the corporate issuer, and the export last rather than first. Every step carries the session that held its address, so the chain is joined on the session, `hard:session_key`. |
 | R-C-002, TLS before beaconing | **1** | One chain, and the first this rule has ever returned: it now reads the scored events rather than the two detections' notables. A settled host presents a new stack to a destination and fourteen minutes later its beacon there matures. Four hosts do both halves with one condition broken and are quiet: a beacon already running an hour before, a beacon to another address, a beacon maturing after sixty-seven minutes, and a host with five handshakes behind it. The new stack and the beacon's first flow are one connection, so the pair is joined on its Community ID, `hard:community_id`. |
 | R-C-005, credential replay across the stack | **1** | One principal at two switch ports 534 km apart twenty minutes apart: the leases name the workstations behind both sign-in addresses, and the MAC bindings closed from the two sites' switches put them at headquarters and in Edinburgh. Five others are one step short and quiet -- two ports at the same site, the same journey in three hours, an address no lease names, a lease that had ended an hour before, and a refused second attempt. Nothing here rests on geolocation: both ends of the journey are ports. |
-| Behavior summary, per-layer scores | **5449** | One row per five-minute bin, layer, entity and lineage over the 10247 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5's scored week, because only `TC5ScoreStage` produces `max_abs_z` and it does not score the fortnight the models were trained on. |
-| Chain assembly, cross-layer risk | **0** | Correct, and now because the risk is written and is not enough. Every detection collects its rows into `behavior_risk` and this search sums them per lineage, once each. 15 of the 3449 chains span three layers -- a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there -- and two detections accuse one each: R-D-L2-003 at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, both under the 60 the search needs. The other 13 carry none; the run records all three totals. `methods` reads every hop the resolver ladder took, so the 15 name `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. |
+| Behavior summary, per-layer scores | **5447** | One row per five-minute bin, layer, entity and lineage over the 10247 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5's scored week, because only `TC5ScoreStage` produces `max_abs_z` and it does not score the fortnight the models were trained on. |
+| Chain assembly, cross-layer risk | **0** | Correct, and now because the risk is written and is not enough. Every detection collects its rows into `behavior_risk` and this search sums them per lineage, once each. 15 of the 3418 chains span three layers -- a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there -- and two detections accuse one each: R-D-L2-003 at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, both under the 60 the search needs. The other 13 carry none; the run records all three totals. `methods` reads every hop the resolver ladder took, so the 15 name `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. |
 | Binding lookup, L2/L3 refresh | **1505** | One row per desk address and five-minute bucket its lease covers: the campaign DHCP server's acknowledgements for the eleven addresses R-C-005's sign-ins come from, closed by `TC2BindingStage` into leases held for the term the server granted, each naming the workstation's MAC and the switch port the relay saw. It was empty until the leases had a producer, and for a while before that was credited with 80 rows that were a MAC table under a different name. |
 | Binding lookup, L2 refresh | **927** | One row per MAC and five-minute bucket a MAC table binding covers: the estate's 124 and the campaign's two sites' 803. Each names the port the MAC was behind, the rung between an address's MAC and a port. |
 | Binding lookup, L5/L2 refresh | **59** | One row per 802.1X identity and five-minute bucket a supplicant binding covers, from the estate's authenticator: the port an identity was authorized on, the rung from a person to a port once the estate's directory names the identity they present. |
 | Binding lookup, L1 refresh | **23** | Twenty-three port intervals across thirteen ports: eight that never changed, two on each of the two ports whose optics are swapped and on the re-patched and inserted-into ports, and three on each of the restarted switch's ports, whose neighbour was unknown for one poll. The lookup keys on port and switch with no bucket, so a port's intervals collapse to one row and the latest wins -- it answers what is in a port now, not what was in it then. |
 | Binding lookup, L1 history refresh | **7** | Seven rows, one per port whose binding was ever superseded: the two re-fitted optics, the re-patch, the insertion, and the restarted switch's three ports. The six that never changed are described for all time by the current-state row and cost the history nothing. The restart is a cost the history pays, recorded rather than hidden: the binding stage cannot tell a neighbour not yet relearned from a cable pulled. |
-| Binding lookup, L1 history expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
+| Binding lookup, L1 history expiry | **7** | Keeps every day bucket inside the retention window and rewrites the lookup with them, and every one is inside it here: the refresh keys each row on the day its own time falls in, which the run moves to the weeks before it. Its zero, and the other expiry jobs', was a bucket counted from 1970 measured against `now()`. |
 | Principal watchlist, expiry | **2** | The runner dates the events so the newest lands three to ten days before the run. R-P-L7-006's two entries are stamped with their principals' latest events, which are the newest in the corpus, so they are still inside their thirty days; R-P-L5-006's six are stamped thirty-two days earlier and are dropped. It was written as 0 until the first search-head run showed that only the undated 1970 events expire everything. Run it last: run before R-B-L7-002, it empties the list that search reads. |
-| Binding lookup, L2/L3 expiry | **0** | Correct. Nothing in a freshly loaded corpus is old enough to expire. |
-| Binding lookup, L2 expiry | **0** | Correct, for the same reason. |
-| Binding lookup, L5/L2 expiry | **0** | Correct, for the same reason. |
+| Binding lookup, L2/L3 expiry | **1505** | The same, for the address rung's five-minute buckets: it keeps all of them. |
+| Binding lookup, L2 expiry | **927** | The same, for the MAC rung. |
+| Binding lookup, L5/L2 expiry | **59** | The same, for the 802.1X identity rung. |
 | Binding health, unresolved rate | **1** | The ARP stream, the one class whose records carry a resolution outcome: 180 unresolved of 1,220 (0.148), under the 0.2 that marks a class degraded. It read five while the wire sent null fields: four classes carry `resolution_method` with no value, `resolution_method=*` matched the nulls, and the search reported them as resolving with nothing unresolved. An operational metric; the value matters, not whether it fired. |
 | Pipeline health, refusal rate | **1** | The DMZ poller: three polls reported 4500 ms out on an undisciplined clock, all three quarantined, none delivered -- a refusal rate of 1.0. Every other collector delivered everything. An operational metric. |
 | Collector health | **1** | The ARP sensor, whose sequence skips the three observations it never delivered. No collector repeats a number, every offset is within twenty milliseconds, and every record reached the pipeline two seconds after the sensor saw it. Empty is the healthy answer. |
@@ -198,13 +209,13 @@ should return nothing:
 | Platform baseline step | **1** | The SaaS corpus's second tenant, whose sync doubled for its last two days and held there. The identity provider's one-hour burst to twice its peak does not hold into the next window and is not a step. |
 | R-P-L5-006, drift trajectory | **6** | Two principals, neither of them behaviour, explained in `expected_results.json`: the two whose week repeats their fortnight climb on its last three days by hundredths a day, as the cadence features keep moving after their models were trained, and the rule measures that against a day-to-day spread that is nearly zero. The principals whose week does depart all cross the mean ceiling and leave. Watchlist, never a page: every firing is written to `principal_watchlist`. |
 
-**Six of the seventy-two should return nothing.** That is the point of writing them down. An empty result is
+**Two of the seventy-two should return nothing.** That is the point of writing them down. An empty result is
 this app's characteristic failure, and without a list saying which emptiness is correct, a deployment cannot
 tell a rule that is working from a rule that is broken. The ratio has moved both ways, which is what makes it
 worth stating: it improved as layers 3, 4, 5, 6 and 7 gained producers, and went the other way when the L2/L3 refresh
 was found to have been empty all along under a note that credited it with 80 rows -- it left the list again
-when the DHCP leases gained a producer, and the MAC and 802.1X rungs' expiry jobs joined it -- and again when
-R-P-L3-005
+when the DHCP leases gained a producer, and the expiry jobs left with it once each refresh keyed its rows on
+their own time rather than on a bucket counted from 1970 -- and again when R-P-L3-005
 turned out to have been empty because its own SPL could not fire. R-B-L5-001 and R-B-L5-002 left the list when
 each principal gained a learned model of their own, which is what their gate had been waiting for. Chain assembly is the one worth following,
 because it has now been empty for four different reasons in turn: a missing `osi_layer`, then lineage that never

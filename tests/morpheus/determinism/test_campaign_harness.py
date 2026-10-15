@@ -554,7 +554,8 @@ def test_an_address_no_current_lease_names_claims_no_port(result: pd.DataFrame, 
 
 
 @pytest.mark.cpu_mode
-def test_the_expired_lease_did_name_the_address_until_an_hour_before(pipeline_config: Config, corpus: dict,
+def test_the_expired_lease_did_name_the_address_until_an_hour_before(pipeline_config: Config,
+                                                                     corpus: dict,
                                                                      result: pd.DataFrame):
     # What separates the expired lease from the remote address: the address was leased to an Edinburgh desk, and
     # resolving it against the sign-in's own time rather than against what the lease once said is what refuses it.
@@ -706,8 +707,9 @@ def test_every_lease_is_the_dhcp_servers_and_lasts_its_whole_term(pipeline_confi
 
 
 @pytest.mark.cpu_mode
-def test_each_end_of_the_replay_names_the_lease_and_the_mac_binding_it_rests_on(pipeline_config: Config, corpus: dict,
-                                                                              result: pd.DataFrame):
+def test_each_end_of_the_replay_names_the_lease_and_the_mac_binding_it_rests_on(pipeline_config: Config,
+                                                                                corpus: dict,
+                                                                                result: pd.DataFrame):
     # The port a sign-in is placed at is an inference two bindings deep, and an analyst disputing it needs those two
     # records, not just their conclusion. Each end of the attacker's journey carries the lease its address resolved
     # through and the MAC binding the workstation resolved through, and they are the bindings the tables hold.
@@ -735,8 +737,8 @@ def test_each_end_of_the_replay_names_the_lease_and_the_mac_binding_it_rests_on(
 
 
 @pytest.mark.cpu_mode
-def test_the_breach_connection_is_carried_from_layer_3_to_layer_6_on_its_community_id(pipeline_config: Config,
-                                                                                    result: pd.DataFrame):
+def test_the_breach_connection_is_carried_from_layer_3_to_layer_6_on_its_community_id(
+        pipeline_config: Config, result: pd.DataFrame):
     # The connection the connection evidence report returns, as edges: the packet sensor's records joined to the
     # flow exporter's, and the inspection point's to the packet sensor's.
     edges = cp_.build_edges(pipeline_config, result)
@@ -756,8 +758,7 @@ def test_the_breach_connection_is_carried_from_layer_3_to_layer_6_on_its_communi
 
 
 @pytest.mark.cpu_mode
-def test_every_resolved_record_is_the_child_of_an_edge_from_each_binding(pipeline_config: Config,
-                                                                          result: pd.DataFrame):
+def test_every_resolved_record_is_the_child_of_an_edge_from_each_binding(pipeline_config: Config, result: pd.DataFrame):
     edges = cp_.build_edges(pipeline_config, result)
     resolved = edges[edges["relation_type"] == "resolved_through"]
     lineage = dict(zip(result["event_uid"], result["lineage_id"]))
