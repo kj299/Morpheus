@@ -61,7 +61,7 @@ checks over twelve composed corpora, which run in CPU mode in the fork's own CI 
 request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the card has not yet seen the trees steps 9 and 10 built.
 That is fifty-two stages and forty-one supporting
-modules, covered by 2,223 distinct tests, itemized in
+modules, covered by 2,224 distinct tests, itemized in
 [Part 6](#provided). Forty-nine of the fifty-three rules Part 3 specifies ship as saved searches, four of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a

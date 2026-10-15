@@ -279,8 +279,16 @@ DECIDERS = ("layer_1_decisions",
             "endpoint_decisions",
             "chain_decisions")
 
-SINGLE_CLOCK_CORPORA = ("network", "transport", "presentation", "saas", "endpoint")
+SINGLE_CLOCK_CORPORA = ("saas", "endpoint")
 """Corpora whose every record comes through one collector, so a collector-clock sweep perturbs nothing."""
+
+HOST_RESOLVED_CORPORA = {"network": "tc3", "transport": "tc4", "presentation": "tc6"}
+"""Corpora whose rows resolve to a host through a lease and an inventory report, and the class their rules read.
+
+Step 12 gave each the DHCP server's leases and the inventory feed's reports, so each corpus has three collectors
+where it had one, and a collector sweep moves the bindings against the rows they resolve. Every row a rule reads
+still comes through the one collector, so for the rules the sweep is a uniform shift.
+"""
 
 CHAIN_EDGES_SECONDS = {"R-C-001": 960, "R-C-002": 1120, "R-C-004": 3200, "R-C-005": 7201}
 """The narrowest collector spread that changes each chain's accusations, measured to the second.
@@ -347,6 +355,14 @@ def test_the_corpora_reported_as_unmeasured_have_one_collector(experiment, corpu
     assert len(experiment.sources_in(module.build_corpus(), experiment.COLLECTOR_CLOCKS)) == 1
 
 
+@pytest.mark.parametrize("corpus_name", sorted(HOST_RESOLVED_CORPORA))
+def test_a_host_resolved_corpus_reads_its_rules_inputs_through_one_collector(experiment, corpus_name):
+    corpus = importlib.import_module(f"{corpus_name}_pipeline").build_corpus()
+
+    assert len(experiment.sources_in(corpus, experiment.COLLECTOR_CLOCKS)) == 3
+    assert corpus[HOST_RESOLVED_CORPORA[corpus_name]]["collector_id"].nunique() == 1
+
+
 def test_every_layer_5_sign_in_comes_through_one_collector(experiment):
     # Why the session sweep's "never" for the sign-in rules is a uniform shift rather than a disagreement: the
     # corpus has three collectors, and every authentication comes through one of them.
@@ -361,7 +377,9 @@ def test_each_application_class_has_a_collector_of_its_own(experiment):
 
     corpus = application_pipeline.build_corpus()
 
-    assert len(experiment.sources_in(corpus, experiment.COLLECTOR_CLOCKS)) == 2
+    # Two collectors for the two classes the rules read, and the DHCP server and inventory feed the hosts resolve
+    # through.
+    assert len(experiment.sources_in(corpus, experiment.COLLECTOR_CLOCKS)) == 4
     assert all(frame["collector_id"].nunique() == 1 for frame in corpus.values())
 
 
