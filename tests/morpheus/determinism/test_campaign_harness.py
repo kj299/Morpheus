@@ -772,3 +772,101 @@ def test_every_resolved_record_is_the_child_of_an_edge_from_each_binding(pipelin
 
     assert all(lineage[child] == chain for (child, chain) in zip(edges["child_event_uid"], edges["lineage_id"]))
     assert not edges["link_uid"].duplicated().any()
+
+
+# --- Hard joins: R-C-004 on session_key, R-C-002 on community_id, each with the value join beneath it ---------------
+
+
+def _without_hard_keys(result: pd.DataFrame) -> pd.DataFrame:
+    """The same estate from collectors nothing resolved: no step placed in a session, no connection recorded twice."""
+    stripped = result.copy()
+    stepped = stripped["telemetry_class"] != cp_.SESSION_CLASS
+    stripped.loc[stepped, "session_key"] = None
+    stripped["community_id"] = None
+
+    return stripped
+
+
+@pytest.mark.cpu_mode
+def test_each_exfiltration_step_is_placed_in_the_session_that_held_its_address(result: pd.DataFrame):
+    # The export, the breach and the handshake each carry the session that held their source address when they
+    # happened -- the attacker's own. Nia's breach, twenty minutes after she logged off, is in no session; Lee's,
+    # from Max's address, is in Max's.
+    kim = cp_.EXFILTRATORS[cp_.KIM]
+    steps = result[result["telemetry_class"].isin([cp_.SAAS_CLASS, cp_.TRANSFER_CLASS, cp_.HANDSHAKE_CLASS])]
+    attacker = steps[((steps["telemetry_class"] == cp_.SAAS_CLASS) & (steps["user_principal"] == cp_.KIM))
+                     | (steps["src_ip"] == kim.breach_address)]
+    campaign = attacker[attacker["event_time"].astype("int64") >= cp_.at(cp_.LAST_DAY, cp_.CAMPAIGN_HOUR)]
+
+    assert set(campaign["session_key"]) == {f"{cp_.KIM}:kim-{cp_.LAST_DAY}"}
+    assert set(campaign["session_resolution"]) == {"soft:session"}
+
+    breaches = steps[(steps["telemetry_class"] == cp_.TRANSFER_CLASS) & (steps["src_port"] == cp_.BREACH_PORT)]
+    by_address = dict(zip(breaches["src_ip"], breaches["session_key"]))
+
+    assert pd.isna(by_address[cp_.EXFILTRATORS[cp_.NIA].breach_address])
+    assert by_address[cp_.EXFILTRATORS[cp_.LEE].breach_address] == f"{cp_.MAX}:max-{cp_.LAST_DAY}"
+
+
+@pytest.mark.cpu_mode
+def test_the_exfiltration_chain_is_joined_on_the_session(result: pd.DataFrame):
+    chains = cp_.exfiltration_chains(result)
+
+    assert set(chains) == {(cp_.KIM, cp_.EXFILTRATORS[cp_.KIM].address)}
+    assert {method for (*_, method) in chains.values()} == {cp_.HARD_SESSION}
+
+
+@pytest.mark.cpu_mode
+def test_without_session_keys_the_exfiltration_chain_falls_back_to_the_address(result: pd.DataFrame):
+    # A deployment whose collectors nothing placed in a session gets the same answer, on the address and the
+    # session's interval, and says so; the controls stay quiet on the fallback too.
+    chains = cp_.exfiltration_chains(_without_hard_keys(result))
+
+    assert set(chains) == {(cp_.KIM, cp_.EXFILTRATORS[cp_.KIM].address)}
+    assert {method for (*_, method) in chains.values()} == {cp_.VALUE_ADDRESS}
+    assert {key: times[:3] for (key, times) in chains.items()} == cp_.staged_exfiltration(result)
+
+
+@pytest.mark.cpu_mode
+def test_the_new_stack_and_the_beacon_are_one_connection(result: pd.DataFrame):
+    # The attacker's new fingerprint was presented on the connection the beacon's first flow record closes: one
+    # Community ID at layers 3 and 6. No control's fingerprint shares a connection with any flow.
+    handshakes = result[(result["telemetry_class"] == cp_.HANDSHAKE_CLASS)
+                        & result["ja4_client_first_seen"].map(lambda value: value is True)
+                        & result["src_ip"].isin(set(cp_.BEACONERS))]
+    flows = set(result.loc[result["telemetry_class"] == cp_.FLOW_CLASS, "community_id"])
+    shared = handshakes[handshakes["community_id"].isin(flows)]
+
+    assert list(shared["src_ip"]) == [cp_.C2_ATTACKER]
+
+
+@pytest.mark.cpu_mode
+def test_the_command_and_control_chain_is_joined_on_the_connection(result: pd.DataFrame):
+    chains = cp_.c2_chains(result)
+
+    assert set(chains) == {(cp_.C2_ATTACKER, cp_.BEACONERS[cp_.C2_ATTACKER].beacon_destination)}
+    assert {method for (*_, method) in chains.values()} == {cp_.HARD_CONNECTION}
+
+
+@pytest.mark.cpu_mode
+def test_without_community_ids_the_command_and_control_chain_falls_back_to_the_pair(result: pd.DataFrame):
+    chains = cp_.c2_chains(_without_hard_keys(result))
+
+    assert set(chains) == {(cp_.C2_ATTACKER, cp_.BEACONERS[cp_.C2_ATTACKER].beacon_destination)}
+    assert {method for (*_, method) in chains.values()} == {cp_.VALUE_PAIR}
+    assert {key: times[:2] for (key, times) in chains.items()} == cp_.tls_before_beaconing(result)
+
+
+def test_the_chained_searches_join_on_the_hard_keys_and_fall_back():
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        text = handle.read()
+
+    exfiltration = text.split(f"[{EXFIL_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0]
+    c2 = text.split(f"[{C2_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0]
+
+    assert "link = coalesce(session_key, src_ip)" in exfiltration
+    assert "(isnotnull(breach_session) AND link == session_key) OR (isnull(breach_session) AND link == src_ip" in (
+        exfiltration)
+    assert f'"{cp_.HARD_SESSION}", "{cp_.VALUE_ADDRESS}"' in exfiltration
+    assert "join type=left max=1 community_id" in c2
+    assert f'"{cp_.HARD_CONNECTION}", "{cp_.VALUE_PAIR}"' in c2

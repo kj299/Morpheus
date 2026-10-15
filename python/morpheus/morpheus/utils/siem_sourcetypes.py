@@ -299,6 +299,10 @@ PRODUCED: dict = {
                               "flow_bpp",
                               "flow_bpp_envelope_ratio",
                               "flow_bpp_envelope_breached"),
+            # `session_key` is on the records a deployment resolves to the session holding their source address, and
+            # absent where it does not: R-C-004 joins on it where it is present and on the address where it is not,
+            # so a producer without sessions still satisfies the contract with the empty variant.
+            variant_columns=(("session_key", "session_resolution"), ()),
         ),
     "morpheus:score:l6":
         Sourcetype(
@@ -354,6 +358,8 @@ PRODUCED: dict = {
                               "content_category_detected",
                               "content_category_crossed",
                               "content_category_unclassified"),
+            # As on layer 4: R-C-004 joins a handshake to the session holding its address where one was resolved.
+            variant_columns=(("session_key", "session_resolution"), ()),
         ),
     "morpheus:score:l7":
         Sourcetype(
@@ -413,6 +419,22 @@ PRODUCED: dict = {
                  "ctx_groups",
                  "drift_rising_windows",
                  "week_window_id"),
+                ("user_principal",
+                 "operation",
+                 "target_object_type",
+                 "record_count",
+                 "saas_baseline_mature",
+                 "saas_record_baseline",
+                 "saas_record_ratio",
+                 "saas_object_types_in_week",
+                 "ctx_object_data_classification",
+                 "ctx_object_found",
+                 "ctx_groups",
+                 "drift_rising_windows",
+                 "week_window_id",
+                 "source_ip",
+                 "session_key",
+                 "session_resolution"),
                 ("hostname",
                  "endpoint_host",
                  "host_key",

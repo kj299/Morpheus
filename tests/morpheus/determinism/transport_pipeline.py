@@ -69,6 +69,7 @@ from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc4_envelope_stage import TC4EnvelopeStage
 from morpheus.stages.telemetry.tc4_flow_stage import TC4FlowStage
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.tcp_flags import ACK
@@ -286,7 +287,8 @@ def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
                  impose_order: bool = True,
-                 hosts: typing.Optional[tuple] = None) -> pd.DataFrame:
+                 hosts: typing.Optional[tuple] = None,
+                 sessions: typing.Optional[BindingTable] = None) -> pd.DataFrame:
     """
     Run the TC-4 class through its composed pipeline and return one canonicalized frame.
 
@@ -304,6 +306,9 @@ def run_pipeline(config: Config,
         The lease and inventory tables the source addresses resolve through, from `host_identity.tables`. Defaults
         to the ones this corpus's own DHCP and inventory records close into; a corpus composing this pipeline over
         its own estate passes that estate's.
+    sessions : `morpheus.utils.binding_table.BindingTable`, optional
+        Which principal's session held each address, from `host_identity.session_table`. Given, each packet carries
+        the `session_key` of the session that held its source address; this corpus has no sessions of its own.
 
     Returns
     -------
@@ -333,6 +338,9 @@ def run_pipeline(config: Config,
     # The source address to its interface and its machine, and the chain rooted on the machine where there is one.
     for stage in host_identity.resolver_stages(config, leases, inventory, fallback_anchor="flow_id"):
         pipe.add_stage(stage)
+
+    if (sessions is not None):
+        pipe.add_stage(host_identity.session_resolver(config, sessions))
 
     pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(TELEMETRY_CLASS, SETTINGS,
                                                                                 rules=RULES)))

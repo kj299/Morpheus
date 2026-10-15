@@ -434,6 +434,8 @@ _PSEUDONYMS = (
     "desk_identity_uid",
     "login_lease_uid",
     "login_port_uid",
+    # The session interval a packet, handshake or export was placed in by its source address.
+    "session_binding_uid",
 )
 
 _OPERATIONAL = (
@@ -533,6 +535,7 @@ _OPERATIONAL = (
     "login_port_resolution",
     "host_inventory_resolution",
     "host_lease_resolution",
+    "session_resolution",
     "macs_claiming_sender_ip",
     "macs_claiming_sender_ip_saturated",
     "macs_per_port",

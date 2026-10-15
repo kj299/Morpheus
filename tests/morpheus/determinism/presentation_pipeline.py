@@ -87,6 +87,7 @@ from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
 from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
 from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
@@ -389,7 +390,8 @@ def run_pipeline(config: Config,
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
                  impose_order: bool = True,
                  store: typing.Optional[BitemporalStore] = None,
-                 hosts: typing.Optional[tuple] = None) -> pd.DataFrame:
+                 hosts: typing.Optional[tuple] = None,
+                 sessions: typing.Optional[BindingTable] = None) -> pd.DataFrame:
     """
     Run the TC-6 class through its composed pipeline and return one canonicalized frame.
 
@@ -410,6 +412,10 @@ def run_pipeline(config: Config,
         The lease and inventory tables the source addresses resolve through, from `host_identity.tables`. Defaults
         to the ones this corpus's own DHCP and inventory records close into; a corpus composing this pipeline over
         its own estate passes that estate's.
+    sessions : `morpheus.utils.binding_table.BindingTable`, optional
+        Which principal's session held each address, from `host_identity.session_table`. Given, each handshake
+        carries the `session_key` of the session that held its source address; this corpus has no sessions of its
+        own.
 
     Returns
     -------
@@ -441,6 +447,9 @@ def run_pipeline(config: Config,
     # The source address to its interface and its machine, and the chain rooted on the machine where there is one.
     for stage in host_identity.resolver_stages(config, leases, inventory, fallback_anchor="src_ip"):
         pipe.add_stage(stage)
+
+    if (sessions is not None):
+        pipe.add_stage(host_identity.session_resolver(config, sessions))
 
     pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(TELEMETRY_CLASS, SETTINGS,
                                                                                 rules=RULES)))

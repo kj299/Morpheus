@@ -172,8 +172,8 @@
     "Connection evidence - layers 3, 4 and 6": {
       "expected_rows": 1,
       "expected_empty": false,
-      "connections_seen_at_two_layers": 4,
-      "why": "One connection, the campaign attacker's breach from 10.20.1.5:45000 to the sync server, which the flow exporter, the packet sensor and the inspection point each recorded and each stamped with the same Community ID. The four other exfiltrators' breaches were seen by the flow exporter and the packet sensor only, and the report wants all three. A report rather than a detection: it writes nothing to the risk index.",
+      "connections_seen_at_two_layers": 5,
+      "why": "One connection, the campaign attacker's breach from 10.20.1.5:45000 to the sync server, which the flow exporter, the packet sensor and the inspection point each recorded and each stamped with the same Community ID. The four other exfiltrators' breaches were seen by the flow exporter and the packet sensor only, and R-C-002's attacker's new TLS stack's connection by the inspection point and the flow exporter only; the report wants all three. A report rather than a detection: it writes nothing to the risk index.",
       "key_values": [
         "1:rUtMBUM4kCNnpRae2Ey5iUs2LG0="
       ]
@@ -479,11 +479,12 @@
     "R-C-002 - TLS anomaly precedes beaconing": {
       "expected_rows": 1,
       "expected_empty": false,
-      "why": "One chain, and the first time this rule has returned a row: it used to read the two detections' notables, which only exist once those detections have run, and now reads the scored events. 10.20.2.5, settled on one TLS stack across twenty-four handshakes, presented a new one to 203.0.113.100, and fourteen minutes later its beacon to that address matured. Four others do both halves with one condition broken and are quiet: 10.20.2.6 was already beaconing an hour before its new stack; 10.20.2.7's beacon went to a different address than its new stack; 10.20.2.8's beacon matured sixty-seven minutes later; 10.20.2.9 had five handshakes behind it, so its new stack is only new because the host is. Every one of the five beacons is an R-B-L3-002 notable, and four of the five new stacks are R-B-L6-001 notables, on their own.",
+      "why": "One chain, and the first time this rule has returned a row: it used to read the two detections' notables, which only exist once those detections have run, and now reads the scored events. 10.20.2.5, settled on one TLS stack across twenty-four handshakes, presented a new one to 203.0.113.100, and fourteen minutes later its beacon to that address matured. Four others do both halves with one condition broken and are quiet: 10.20.2.6 was already beaconing an hour before its new stack; 10.20.2.7's beacon went to a different address than its new stack; 10.20.2.8's beacon matured sixty-seven minutes later; 10.20.2.9 had five handshakes behind it, so its new stack is only new because the host is. Every one of the five beacons is an R-B-L3-002 notable, and four of the five new stacks are R-B-L6-001 notables, on their own. The new stack's connection is the one the beacon's first flow record closes, so the two share a Community ID and the pair comes from the flow record: join_method is hard:community_id. No control's fingerprint shares a connection with a flow, and each would be joined on its addresses.",
       "key_values": [
         {
           "src_ip": "10.20.2.5",
-          "dst_ip": "203.0.113.100"
+          "dst_ip": "203.0.113.100",
+          "join_method": "hard:community_id"
         }
       ]
     },
@@ -500,13 +501,13 @@
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "chains_with_a_method": 812,
+      "chains_with_a_method": 1367,
       "three_layer_chain_methods": [
         "soft:directory",
         "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3449 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 812 chains in all carry one: the layer 3, 4 and 6 records now carry the two hops from address to machine, and each of those layers roots its chains on the machine where the hops reached one. That is also why there are fewer chains than the 4268 there were: a workstation's flows in an hour are one chain where each flow identifier, or each address a lease reassigned, used to be its own. A machine's chains are still one per layer, because each layer's corpus seals alone; the host evidence report joins them on `host_key`, and the host identity harness seals four layers together to show the chain they make.",
+      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3449 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 1367 chains in all carry one: the layer 3, 4 and 6 records now carry the two hops from address to machine, and each of those layers roots its chains on the machine where the hops reached one; the campaign's packets, handshakes and exports carry a third, to the session that held their address. That is also why there are fewer chains than the 4268 there were: a workstation's flows in an hour are one chain where each flow identifier, or each address a lease reassigned, used to be its own. A machine's chains are still one per layer, because each layer's corpus seals alone; the host evidence report joins them on `host_key`, and the host identity harness seals four layers together to show the chain they make.",
       "three_layer_chain_risk": {
         "0": 13,
         "50": 1,
@@ -771,11 +772,12 @@
     "R-C-004 - Staged exfiltration": {
       "expected_rows": 1,
       "expected_empty": false,
-      "why": "One chain. kim@example.com exported 5000 records, eighty times their own baseline; twenty-five minutes later the address kim's session held open, 10.20.1.5, sent 60000 bytes to its sync server, fifty times that triple's envelope; and twenty minutes after that it connected to a destination presenting an issuer nobody in the estate had seen in thirty days. Four others each do all three with one relation broken, and are quiet: lee's breach and connection came from the address max's session held; nia's came twenty minutes after nia logged off; oto's connection presented the corporate issuer every host sees daily; pia's breach and connection happened before the export. Every one of the five exports is an R-B-L7-002 notable and every breach an R-B-L4-005 notable on its own. kim@example.com's sessions come from a domain controller that says logon and logoff, and the chain still fires because the search reads session_lifecycle, which TC5SessionStage normalizes to start and end.",
+      "why": "One chain. kim@example.com exported 5000 records, eighty times their own baseline; twenty-five minutes later the address kim's session held open, 10.20.1.5, sent 60000 bytes to its sync server, fifty times that triple's envelope; and twenty minutes after that it connected to a destination presenting an issuer nobody in the estate had seen in thirty days. Four others each do all three with one relation broken, and are quiet: lee's breach and connection came from the address max's session held; nia's came twenty minutes after nia logged off; oto's connection presented the corporate issuer every host sees daily; pia's breach and connection happened before the export. Every one of the five exports is an R-B-L7-002 notable and every breach an R-B-L4-005 notable on its own. kim@example.com's sessions come from a domain controller that says logon and logoff, and the chain still fires because the search reads session_lifecycle, which TC5SessionStage normalizes to start and end. Each of the three steps carries the session_key of the session that held its address, resolved through the session intervals, so the chain is joined on kim's session rather than on the address: join_method is hard:session_key, and a deployment whose collectors carry no session key gets the same chain on the address.",
       "key_values": [
         {
           "user_principal": "kim@example.com",
-          "src_ip": "10.20.1.5"
+          "src_ip": "10.20.1.5",
+          "join_method": "hard:session_key"
         }
       ]
     },

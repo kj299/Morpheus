@@ -727,9 +727,11 @@ def test_the_staged_exfiltration_chain_returns_exactly_what_is_written(expected:
     stamps = pd.to_datetime(frame["event_time"].str.replace("UTC", "", regex=False), utc=True)
     frame["event_time"] = (stamps - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(nanoseconds=1)
 
+    # The join method as the search reports it: a session's own key where every step carried one, the address
+    # otherwise.
     chains = sorted(({
-        "user_principal": principal, "src_ip": address
-    } for (principal, address) in campaign_pipeline.staged_exfiltration(frame)),
+        "user_principal": principal, "src_ip": address, "join_method": method
+    } for ((principal, address), (*_, method)) in campaign_pipeline.exfiltration_chains(frame).items()),
                     key=lambda row: (row["user_principal"], row["src_ip"]))
     entry = expected["searches"]["R-C-004 - Staged exfiltration"]
 
@@ -840,8 +842,8 @@ def test_the_command_and_control_chain_returns_exactly_what_is_written(expected:
     frame["event_time"] = (stamps - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(nanoseconds=1)
 
     chains = sorted(({
-        "src_ip": source, "dst_ip": destination
-    } for (source, destination) in campaign_pipeline.tls_before_beaconing(frame)),
+        "src_ip": source, "dst_ip": destination, "join_method": method
+    } for ((source, destination), (*_, method)) in campaign_pipeline.c2_chains(frame).items()),
                     key=lambda row: (row["src_ip"], row["dst_ip"]))
     entry = expected["searches"]["R-C-002 - TLS anomaly precedes beaconing"]
 

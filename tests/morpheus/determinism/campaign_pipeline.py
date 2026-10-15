@@ -315,6 +315,10 @@ class Beaconer(typing.NamedTuple):
     """Minutes after the campaign hour starts; negative for the hour before."""
 
 
+C2_PORT = 47000
+"""The attacker's new stack's connection: the handshake that showed the new fingerprint, and the beacon's first flow
+record, which the flow exporter writes when that connection ends. One connection at two layers, one Community ID."""
+
 C2_ATTACKER = "10.20.2.5"
 BEACON_FIRST = "10.20.2.6"
 OTHER_DESTINATION = "10.20.2.7"
@@ -529,10 +533,12 @@ def _handshake(rows: list,
     rows.append(record)
 
 
-def _export(rows: list, principal: str, records: int, when: int):
+def _export(rows: list, principal: str, records: int, when: int, source: str):
     record = _envelope(rows, "saas-audit-01", "tc7_saas.v1", f"{principal}>export@{records}", when)
     record.update({
         "user_principal": principal,
+        # The client address the audit log records, which is what places the export in a session.
+        "source_ip": source,
         "operation": saas_pipeline.EXPORT,
         "target_object": "customer-list",
         "target_object_type": "Account",
@@ -564,7 +570,11 @@ def _build_exfiltration(sessions: list, packets: list, handshakes: list, exports
     for (index, actor) in enumerate(EXFILTRATORS.values()):
         # A long, even history of exports, ending the day before, so the baseline is mature and small.
         for count in range(PRIOR_EXPORTS):
-            _export(exports, actor.principal, 40 + (count * 4) % 21, at(0, 12, index) + count * 90 * 60 * NS_PER_SECOND)
+            _export(exports,
+                    actor.principal,
+                    40 + (count * 4) % 21,
+                    at(0, 12, index) + count * 90 * 60 * NS_PER_SECOND,
+                    actor.address)
 
         # The breach address's regular uploads to the sync server, inside the envelope's eight-hour window.
         for count in range(PRIOR_TRANSFERS):
@@ -575,7 +585,7 @@ def _build_exfiltration(sessions: list, packets: list, handshakes: list, exports
                     1200,
                     at(LAST_DAY, 3, index) + count * 3 * 60 * NS_PER_SECOND)
 
-        _export(exports, actor.principal, 5000, at(LAST_DAY, CAMPAIGN_HOUR, actor.export_minute))
+        _export(exports, actor.principal, 5000, at(LAST_DAY, CAMPAIGN_HOUR, actor.export_minute), actor.address)
         breach = at(LAST_DAY, CAMPAIGN_HOUR, actor.breach_minute)
         _packet(packets, actor.breach_address, BREACH_PORT, SYNC_SERVER, 60000, breach)
 
@@ -607,12 +617,16 @@ def _build_command_and_control(flows: list, handshakes: list):
         for count in range(actor.history):
             _handshake(handshakes, actor.host, PORTAL, PORTAL_ISSUER, at(LAST_DAY, 8, 2 * count, index))
 
+        # Only the attacker's beacon runs over the connection the new stack opened. The controls' fingerprints and
+        # beacons are separate connections, so R-C-002 joins them on their addresses, as it always did.
+        shared = actor.host == C2_ATTACKER
         _handshake(handshakes,
                    actor.host,
                    actor.fingerprint_destination,
                    PUBLIC_ISSUER,
                    at(LAST_DAY, CAMPAIGN_HOUR, actor.fingerprint_minute, index),
-                   fingerprint=presentation_pipeline.NEW_STACK)
+                   fingerprint=presentation_pipeline.NEW_STACK,
+                   src_port=C2_PORT if shared else None)
 
         for count in range(BEACON_FLOWS):
             when = at(LAST_DAY, CAMPAIGN_HOUR, actor.beacon_start_minute,
@@ -620,7 +634,7 @@ def _build_command_and_control(flows: list, handshakes: list):
             record = _envelope(flows, "netflow-01", "tc3.v1", f"{actor.host}->{actor.beacon_destination}", when)
             record.update({
                 "src_ip": actor.host,
-                "src_port": _ephemeral_port(flows),
+                "src_port": C2_PORT if (shared and count == 0) else _ephemeral_port(flows),
                 "dst_ip": actor.beacon_destination,
                 "dst_port": 443,
                 "protocol": "tcp",
@@ -1168,9 +1182,12 @@ def run_pipeline(config: Config,
     inventory_table = host_identity.inventory_table(
         host_identity.close_inventory(config, batches.get(INVENTORY_CLASS, []), impose_order=impose_order))
     resolved = {"hosts": (lease_table, inventory_table)}
+    # Which principal's session held each address. Built from the sessions class's output once it has run; a
+    # sessions collector every record of which was quarantined leaves nothing to resolve through.
+    sessions = host_identity.session_table(pd.DataFrame(), 0)
 
     # The handshakes' sources are enriched from this estate's inventory, not from the layer 6 corpus's.
-    stores = {HANDSHAKE_CLASS: {"store": build_address_store(), **resolved}, TRANSFER_CLASS: resolved}
+    stores = {HANDSHAKE_CLASS: {"store": build_address_store(), **resolved}, TRANSFER_CLASS: resolved, SAAS_CLASS: {}}
 
     for name in CLASSES:
         # A collector every record of which was quarantined delivered nothing for its class to run over.
@@ -1178,9 +1195,12 @@ def run_pipeline(config: Config,
             continue
 
         if (name in delegated):
+            # The packets, handshakes and exports run after the sessions, and carry the session that held their
+            # source address -- the key R-C-004 joins its steps on where it is present.
             frames.append(delegated[name].run_pipeline(config, {name: batches[name][0]},
                                                        batches={name: batches[name]},
                                                        impose_order=impose_order,
+                                                       sessions=sessions,
                                                        **stores.get(name, {})))
         else:
             frames.append(
@@ -1191,6 +1211,9 @@ def run_pipeline(config: Config,
                           mac_table=mac_table,
                           lease_table=lease_table,
                           inventory_table=inventory_table))
+
+            if (name == SESSION_CLASS and len(frames[-1]) > 0):
+                sessions = host_identity.session_table(session_intervals(frames[-1]), at(LAST_DAY + 1))
 
     return canonicalize(envelope.with_quarantine(pd.concat(frames, ignore_index=True), quarantined),
                         key_columns=KEY_COLUMNS,
@@ -1347,6 +1370,18 @@ def session_intervals(result: pd.DataFrame) -> pd.DataFrame:
     return starts.reset_index().merge(ends.reset_index(), on="session_key", how="left")
 
 
+HARD_SESSION = "hard:session_key"
+VALUE_ADDRESS = "value:source_ip"
+HARD_CONNECTION = "hard:community_id"
+VALUE_PAIR = "value:src_ip,dst_ip"
+
+
+def _key(row: pd.Series, column: str) -> typing.Optional[str]:
+    value = row.get(column)
+
+    return None if value is None or pd.isna(value) else value
+
+
 def staged_exfiltration(result: pd.DataFrame,
                         in_session: bool = True,
                         session_bound: bool = True,
@@ -1358,6 +1393,30 @@ def staged_exfiltration(result: pd.DataFrame,
 
     `session_bound` off lets a breach from any address count; `in_session` off keeps the address a session of the
     principal's but drops the requirement that it was open at the breach.
+    """
+    return {chain: tuple(times) for (chain, (*times, _)) in exfiltration_chains(result,
+                                                                          in_session=in_session,
+                                                                          session_bound=session_bound,
+                                                                          new_issuer=new_issuer,
+                                                                          ordered=ordered,
+                                                                          window_seconds=window_seconds,
+                                                                          tolerance_seconds=tolerance_seconds).items()}
+
+
+def exfiltration_chains(result: pd.DataFrame,
+                        in_session: bool = True,
+                        session_bound: bool = True,
+                        new_issuer: bool = True,
+                        ordered: bool = True,
+                        window_seconds: typing.Optional[int] = EXFIL_WINDOW_SECONDS,
+                        tolerance_seconds: int = JOIN_TOLERANCE_SECONDS) -> dict:
+    """
+    `staged_exfiltration`, with how each chain's steps were joined: the three step times and the join method.
+
+    Where a step carries the `session_key` of the session that held its source address, it is joined to the
+    principal's session on that key, `hard:session_key`. Where it carries none -- a collector nothing resolved -- it
+    is joined on the address, and a breach only while the session holding that address was open, as the rule
+    always did, `value:source_ip`. A chain is hard only if every step was.
     """
     tolerance_ns = tolerance_seconds * NS_PER_SECOND
     window_ns = None if window_seconds is None else window_seconds * NS_PER_SECOND
@@ -1381,29 +1440,44 @@ def staged_exfiltration(result: pd.DataFrame,
         t1 = int(export["event_time"])
         own = sessions[sessions["user_principal"] == principal]
 
+        # An export placed in a session is joined to that session alone.
+        if (_key(export, "session_key") is not None):
+            own = own[own["session_key"] == export["session_key"]]
+
         for (_, breach) in breaches.iterrows():
             t2 = int(breach["event_time"])
             address = breach["src_ip"]
+            breach_session = _key(breach, "session_key")
 
             if (ordered and t2 < t1 - tolerance_ns) or (window_ns is not None and t2 - t1 > window_ns):
                 continue
 
             if (session_bound):
-                held = own[own["source_ip"] == address]
+                if (breach_session is not None and in_session):
+                    held = own[own["session_key"] == breach_session]
+                else:
+                    held = own[own["source_ip"] == address]
 
-                if (in_session):
-                    held = held[(held["opened"] <= t2) & (held["closed"].isna() | (held["closed"] >= t2))]
+                    if (in_session):
+                        held = held[(held["opened"] <= t2) & (held["closed"].isna() | (held["closed"] >= t2))]
 
                 if (len(held) == 0):
                     continue
 
             for (_, handshake) in handshakes[handshakes["src_ip"] == address].iterrows():
                 t3 = int(handshake["event_time"])
+                handshake_session = _key(handshake, "session_key")
 
                 if (ordered and t3 < t2 - tolerance_ns) or (window_ns is not None and t3 - t1 > window_ns):
                     continue
 
-                fired.setdefault((principal, address), (t1, t2, t3))
+                if (session_bound and in_session and breach_session is not None and handshake_session is not None
+                        and handshake_session != breach_session):
+                    continue
+
+                hard = all(key is not None
+                           for key in (_key(export, "session_key"), breach_session, handshake_session))
+                fired.setdefault((principal, address), (t1, t2, t3, HARD_SESSION if hard else VALUE_ADDRESS))
 
     return fired
 
@@ -1421,6 +1495,27 @@ def tls_before_beaconing(result: pd.DataFrame,
 
     The beacon is dated when it first matures, which is when R-B-L3-002 would first report it.
     """
+    return {pair: tuple(times) for (pair, (*times, _)) in c2_chains(result,
+                                                              settled=settled,
+                                                              same_destination=same_destination,
+                                                              ordered=ordered,
+                                                              window_seconds=window_seconds,
+                                                              tolerance_seconds=tolerance_seconds).items()}
+
+
+def c2_chains(result: pd.DataFrame,
+              settled: bool = True,
+              same_destination: bool = True,
+              ordered: bool = True,
+              window_seconds: typing.Optional[int] = C2_WINDOW_SECONDS,
+              tolerance_seconds: int = JOIN_TOLERANCE_SECONDS) -> dict:
+    """
+    `tls_before_beaconing`, with how each pair's fingerprint was joined to the flows: the two times and the method.
+
+    A fingerprint whose connection the flow exporter also recorded -- one Community ID at layers 3 and 6 -- takes its
+    host and destination from that flow record, `hard:community_id`. One whose connection no flow record carries is
+    joined on its own addresses, `value:src_ip,dst_ip`, as the rule always did.
+    """
     tolerance_ns = tolerance_seconds * NS_PER_SECOND
     fingerprints = result[(result["telemetry_class"] == HANDSHAKE_CLASS) & result["ja4_client_first_seen"].map(_truthy)]
 
@@ -1430,13 +1525,21 @@ def tls_before_beaconing(result: pd.DataFrame,
     flows = result[(result["telemetry_class"] == FLOW_CLASS) & result["flow_regularity_mature"].map(_truthy)]
     flows = flows[(flows["flow_interval_cv"].astype(float) < 0.15) & (flows["flow_size_cv"].astype(float) < 0.15)]
     beacons = flows.groupby(["src_ip", "dst_ip"])["event_time"].min().astype("int64")
+    carried = result[(result["telemetry_class"] == FLOW_CLASS) & result["community_id"].notna()]
+    carried = carried.drop_duplicates("community_id").set_index("community_id")[["src_ip", "dst_ip"]]
     fired: dict = {}
 
     for (_, fingerprint) in fingerprints.iterrows():
         t1 = int(fingerprint["event_time"])
+        connection = _key(fingerprint, "community_id")
+
+        if (connection is not None and connection in carried.index):
+            (host, reached, method) = (*carried.loc[connection], HARD_CONNECTION)
+        else:
+            (host, reached, method) = (fingerprint["src_ip"], fingerprint["dst_ip"], VALUE_PAIR)
 
         for ((source, destination), t2) in beacons.items():
-            if (source != fingerprint["src_ip"]) or (same_destination and destination != fingerprint["dst_ip"]):
+            if (source != host) or (same_destination and destination != reached):
                 continue
 
             if (ordered and t2 < t1 - tolerance_ns):
@@ -1445,7 +1548,7 @@ def tls_before_beaconing(result: pd.DataFrame,
             if (window_seconds is not None and t2 - t1 > window_seconds * NS_PER_SECOND):
                 continue
 
-            fired.setdefault((source, destination), (t1, int(t2)))
+            fired.setdefault((source, destination), (t1, int(t2), method))
 
     return fired
 

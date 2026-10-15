@@ -78,6 +78,10 @@ INVENTORY_UID_COLUMN = "host_inventory_uid"
 LEASE_METHOD_COLUMN = "host_lease_resolution"
 INVENTORY_METHOD_COLUMN = "host_inventory_resolution"
 
+SESSION_KEY_COLUMN = "session_key"
+SESSION_METHOD_COLUMN = "session_resolution"
+SESSION_UID_COLUMN = "session_binding_uid"
+
 ID_COLUMNS = ["collector_id", "schema_version", "origin_hash", "collector_seq"]
 
 
@@ -238,6 +242,42 @@ def tables(config: Config, batches: dict, impose_order: bool = True) -> tuple[Bi
     inventory = close_inventory(config, batches.get(INVENTORY_CLASS, []), impose_order)
 
     return (lease_table(leases), inventory_table(inventory))
+
+
+def session_table(intervals: pd.DataFrame, end_ns: int) -> BindingTable:
+    """
+    Which session held each address, and when: a principal's sessions as `TC5SessionStage` keyed them.
+
+    Parameters
+    ----------
+    intervals : `pandas.DataFrame`
+        One row per session: `session_key`, `source_ip`, `opened` and `closed`, the last null for a session that
+        never ended.
+    end_ns : int
+        Where a session that never ended is taken to end: the end of what the corpus covers, not forever.
+    """
+    if (len(intervals) == 0):
+        return BindingTable(name="session", value_columns=[SESSION_KEY_COLUMN], bindings=[])
+
+    rows = intervals.assign(bind_start=intervals["opened"].astype("int64"),
+                            bind_end=intervals["closed"].fillna(end_ns).astype("int64"))
+
+    return BindingTable.from_dataframe(rows,
+                                       name="session",
+                                       key_column="source_ip",
+                                       value_columns=[SESSION_KEY_COLUMN],
+                                       start_column="bind_start",
+                                       end_column="bind_end")
+
+
+def session_resolver(config: Config, sessions: BindingTable, address_column: str = "src_ip") -> BindingResolverStage:
+    """The session that held a record's source address when the record happened, as `session_key`."""
+    return BindingResolverStage(config,
+                                binding_table=sessions,
+                                key_column=address_column,
+                                output_columns={SESSION_KEY_COLUMN: SESSION_KEY_COLUMN},
+                                method_column=SESSION_METHOD_COLUMN,
+                                uid_column=SESSION_UID_COLUMN)
 
 
 def resolver_stages(config: Config,

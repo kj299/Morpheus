@@ -59,6 +59,7 @@ and tenant, which is what the 'Platform baseline step' search reads.
 import typing
 
 import envelope
+import host_identity
 import pandas as pd
 import stamping
 
@@ -79,6 +80,7 @@ from morpheus.stages.telemetry.tc7_saas_stage import WEEK_SECONDS
 from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage
 from morpheus.utils import bitemporal
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
@@ -449,7 +451,8 @@ def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
                  impose_order: bool = True,
-                 knowledge: str = "event") -> pd.DataFrame:
+                 knowledge: str = "event",
+                 sessions: typing.Optional[BindingTable] = None) -> pd.DataFrame:
     """
     Source, stamp, total order, enrich twice, measure, envelope, seal hourly, seal weekly, trajectory, sink.
 
@@ -465,6 +468,10 @@ def run_pipeline(config: Config,
         Place `TotalOrderStage` ahead of the stateful stages.
     knowledge : str, default = "event"
         What the enrichment knows: the context as recorded by each operation's time, or everything.
+    sessions : `morpheus.utils.binding_table.BindingTable`, optional
+        Which principal's session held each address, from `host_identity.session_table`. Given, each operation
+        carries the `session_key` of the session that held the address it came from, its `source_ip`; this corpus
+        records no address and has no sessions.
 
     Returns
     -------
@@ -493,6 +500,10 @@ def run_pipeline(config: Config,
     pipe.add_stage(
         TC0EnrichStage(config, store=asset, entity_column="target_object", knowledge=knowledge, prefix="ctx_object_"))
     pipe.add_stage(TC7SaasStage(config))
+
+    if (sessions is not None):
+        pipe.add_stage(host_identity.session_resolver(config, sessions, address_column="source_ip"))
+
     settings = {**SETTINGS, "knowledge": knowledge}
     pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(SAAS_CLASS, settings, rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))
