@@ -274,8 +274,22 @@ def main() -> int:
     leases = campaign_pipeline.build_lease_table(campaign_pipeline.close_lease_bindings(
         campaign_config, [desks])).to_bucketed_frame(key_name="ip", table_name="dhcp_lease")
 
+    # The campaign's two sites' MAC bindings, the rows the L2 refresh builds `binding_l2` from: a workstation's MAC
+    # and the port it was plugged into. With the leases above they are the walk from a sign-in's address to a port.
+    macs = campaign_pipeline.build_mac_table(campaign_pipeline.close_mac_bindings(
+        campaign_config, [campaign_corpus[campaign_pipeline.MAC_CLASS]])).to_bucketed_frame(table_name="mac_table")
+
+    # The estate's 802.1X supplicant bindings, the rows the L5/L2 refresh builds `binding_l5_l2` from: an identity
+    # and the port it was authorized on. The estate's desk sign-ins carry the identity the directory gave them.
+    supplicants = ep.build_supplicant_table(
+        ep.close_supplicant_bindings(ep.build_pipeline_config(),
+                                     [telemetry[telemetry["telemetry_class"] == "tc2_auth"].copy()
+                                      ])).to_bucketed_frame(key_name="dot1x_identity", table_name="dot1x_supplicant")
+
     rendered = _render(bucketed, "binding:bucketed")
     rendered.extend(_render(leases, "binding:bucketed"))
+    rendered.extend(_render(macs, "binding:bucketed"))
+    rendered.extend(_render(supplicants, "binding:bucketed"))
 
     if (len(port_history) > 0):
         rendered.extend(_render(port_history, "binding:bucketed"))

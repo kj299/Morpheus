@@ -1134,6 +1134,7 @@ NUMBER_WORDS = {
     "sixty-one": 61,
     "sixty-two": 62,
     "sixty-six": 66,
+    "seventy-two": 72,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -1182,9 +1183,11 @@ def test_every_expected_empty_search_says_why(expected: dict):
     #
     # Five of sixty-two after step 10, whose ten searches each arrived with something planted for it to find.
     #
-    # Four after step 12, and the one that left is the L2/L3 refresh: `TC2BindingStage` closes the campaign DHCP
-    # server's acknowledgements into leases, and their buckets are what the refresh selects.
-    assert len(empty) == 4
+    # Six after step 12. The L2/L3 refresh left: `TC2BindingStage` closes the campaign DHCP server's
+    # acknowledgements into leases, and their buckets are what the refresh selects. The MAC and 802.1X rungs
+    # arrived with a refresh and an expiry each, and the two expiry jobs join their twins on the list for the
+    # twins' reason: nothing in a fresh corpus is old enough to expire.
+    assert len(empty) == 6
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name
@@ -1750,3 +1753,74 @@ def test_the_edge_stream_is_edges():
 
     assert {edge["relation_type"] for edge in edges} == {"resolved_through", "carried_by"}
     assert {edge["join_method"] for edge in edges if edge["relation_type"] == "carried_by"} == {"hard:community_id"}
+
+
+def _bucketed(table: str) -> list:
+    with open(os.path.join(EVENTS, "binding_bucketed.jsonlines"), encoding="utf-8") as handle:
+        return [row for row in (json.loads(line) for line in handle if line.strip()) if row["binding_table"] == table]
+
+
+def _identity_walk() -> list:
+    """
+    'Identity walk - sign-in to switch port' over the sample events, with the three lookups built the way their
+    refreshes build them: one row per key and bucket, keyed as the search keys them.
+    """
+    leases = {(row["ip"], row["bucket"]): row["mac"] for row in _bucketed("dhcp_lease")}
+    macs = {(row["key"], row["bucket"]): row["port_key"] for row in _bucketed("mac_table")}
+    identities = {(row["dot1x_identity"], row["bucket"]): row["auth_port_key"] for row in _bucketed("dot1x_supplicant")}
+    walked = []
+
+    for event in _scored_events():
+        if (event.get("osi_layer") != 5 or event.get("window_complete") is not True):
+            continue
+
+        if (not event.get("desk_identity") and not event.get("login_port_key")):
+            continue
+
+        bucket = _five_minute_bin(event["event_time"]) // 300
+        by_identity = identities.get((event.get("desk_identity"), bucket))
+        mac = leases.get((event.get("source_ip"), bucket))
+        by_address = macs.get((mac, bucket))
+        port = by_identity if by_identity is not None else by_address
+
+        if (port is not None):
+            walked.append({
+                "user_principal": event["user_principal"],
+                "rung": "dot1x_identity" if by_identity is not None else "address",
+                "walked_port_key": port,
+                "resolved_port_key": event.get("desk_port_key") or event.get("login_port_key"),
+            })
+
+    return walked
+
+
+def test_each_binding_refresh_fills_its_lookup(expected: dict):
+    # The three rungs Part 4's ladder walks, each fed from the bucketed bindings its refresh selects. The L2/L3
+    # refresh was empty for its whole life because nothing produced a lease; the other two did not exist.
+    for (search, table, key) in (("Binding lookup - L2/L3 refresh", "dhcp_lease", "ip"),
+                                 ("Binding lookup - L2 refresh", "mac_table", "key"),
+                                 ("Binding lookup - L5/L2 refresh", "dot1x_supplicant", "dot1x_identity")):
+        rows = _bucketed(table)
+        entry = expected["searches"][search]
+
+        assert len(rows) > 0, table
+        assert len({(row[key], row["bucket"]) for row in rows}) == len(rows), f"{table}: one row per key and bucket"
+        assert entry["expected_rows"] == len(rows) and entry["expected_empty"] is False, search
+
+        stanza = _search_text(search)
+
+        assert f"binding_table={table}" in stanza and "key_field=_key" in stanza, search
+
+
+def test_the_identity_walk_reaches_the_port_the_pipeline_resolved(expected: dict):
+    # Part 4's ladder walked twice: by the pipeline, which wrote the port on each sign-in, and by the SIEM through
+    # the lookups. A desk sign-in walks by its 802.1X identity; a host login by its address to a MAC and the MAC
+    # to a port. The two must land on the same port for every sign-in either reaches.
+    walked = _identity_walk()
+    entry = expected["searches"]["Identity walk - sign-in to switch port"]
+
+    assert len(walked) > 0
+    assert all(row["walked_port_key"] == row["resolved_port_key"] for row in walked)
+    assert {row["rung"] for row in walked} == {"dot1x_identity", "address"}
+    assert entry["expected_rows"] == len(walked)
+    assert entry["walked_by_rung"] == dict(sorted(collections.Counter(row["rung"] for row in walked).items()))

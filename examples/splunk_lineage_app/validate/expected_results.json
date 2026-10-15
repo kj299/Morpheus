@@ -202,6 +202,15 @@
         "ws-2-9"
       ]
     },
+    "Identity walk - sign-in to switch port": {
+      "expected_rows": 25,
+      "expected_empty": false,
+      "walked_by_rung": {
+        "address": 10,
+        "dot1x_identity": 15
+      },
+      "why": "Twenty-five sign-ins walked to a switch port through the lookups, every one to the port the pipeline resolved. Fifteen are the estate's desk sign-ins, walked by the 802.1X identity the directory gave each principal through binding_l5_l2. Ten are the campaign's host logins from leased desk addresses, walked by address to a MAC through binding_l2_l3 and the MAC to a port through binding_l2: R-C-005's attacker at both ends of the journey, and the controls whose addresses a lease named at the time. The sign-in from an address no lease names, and the one an hour after its lease ended, are walked to nothing, as the pipeline resolved them to nothing. Run after the three refreshes, or every lookup is empty and so is this."
+    },
     "R-D-L4-002 - SYN without completion": {
       "expected_rows": 1,
       "expected_empty": false,
@@ -509,6 +518,16 @@
       "expected_empty": false,
       "why": "One row per desk address and five-minute bucket its lease covers: the campaign DHCP server's acknowledgements for the eleven desk addresses R-C-005's sign-ins come from, closed into leases by TC2BindingStage with each held for the term the server granted, and expanded with to_bucketed_records(key_name=\"ip\", table_name=\"dhcp_lease\"). Each row resolves the address to the workstation's MAC and to the switch and port the DHCP relay saw the request arrive on. The other 131 bucketed rows are the MAC table's and the layer 1 history's, which this search's binding_table=dhcp_lease filter leaves out. The campaign's workstation leases, renewed daily for nine days, go to the same lookup in a deployment and are not rendered here: they carry no port, and at two and a half thousand buckets each they would outnumber every other sample event."
     },
+    "Binding lookup - L2 refresh": {
+      "expected_rows": 927,
+      "expected_empty": false,
+      "why": "One row per MAC address and five-minute bucket a MAC table binding covers: the estate's 124, from the forwarding entries TC2BindingStage closed on the layer 1 and 2 switch, and the campaign's 803, from the two sites' MAC tables the R-C-005 sign-ins resolve through. Each row names the port the MAC was behind; the refresh selects binding_table=mac_table and keys the lookup on the MAC the producer wrote as `key`."
+    },
+    "Binding lookup - L5/L2 refresh": {
+      "expected_rows": 59,
+      "expected_empty": false,
+      "why": "One row per 802.1X identity and five-minute bucket a supplicant binding covers: the estate authenticator's records, closed by TC2BindingStage keyed on the identity, for the three desk workstations, the two lab benches, the desk phone and workstation sharing one port, the MAC-authenticated device and the unknown supplicant. Each row names the port the identity was authorized on, which is the rung from a person to a port once the estate's directory has said which identity the person presents."
+    },
     "Binding lookup - L1 refresh": {
       "expected_rows": 23,
       "expected_empty": false,
@@ -533,6 +552,16 @@
       "expected_rows": 0,
       "expected_empty": true,
       "why": "A maintenance search that deletes buckets older than the retention window. On a freshly loaded corpus nothing is old enough to expire, so an empty result is the correct one."
+    },
+    "Binding lookup - L2 expiry": {
+      "expected_rows": 0,
+      "expected_empty": true,
+      "why": "A maintenance search that deletes buckets older than the retention window, the MAC rung's twin of the L2/L3 expiry job. On a freshly loaded corpus nothing is old enough to expire, so an empty result is the correct one."
+    },
+    "Binding lookup - L5/L2 expiry": {
+      "expected_rows": 0,
+      "expected_empty": true,
+      "why": "The same job for the 802.1X rung, on the same retention and bucket width. Nothing in a freshly loaded corpus is old enough to expire."
     },
     "Binding health - unresolved rate": {
       "expected_rows": 1,

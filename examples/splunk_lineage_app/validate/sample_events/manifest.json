@@ -1,6 +1,6 @@
 {
   "events_per_sourcetype": {
-    "binding:bucketed": 1636,
+    "binding:bucketed": 2498,
     "binding:l1": 23,
     "binding:l2": 19,
     "context:asset": 7,

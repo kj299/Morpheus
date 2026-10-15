@@ -95,6 +95,8 @@ def test_each_expiry_job_uses_the_width_of_the_lookup_it_trims():
     # at 300 against a day-bucketed collection the cutoff lands 288 times too high and empties the lookup.
     expected = {
         "binding_l2_l3": DEFAULT_BUCKET_SECONDS,
+        "binding_l2": DEFAULT_BUCKET_SECONDS,
+        "binding_l5_l2": DEFAULT_BUCKET_SECONDS,
         "binding_l1_history": DEFAULT_L1_BUCKET_SECONDS,
     }
 
@@ -211,6 +213,7 @@ def test_the_app_readme_states_the_number_of_searches_it_ships():
         "sixty-one": 61,
         "sixty-two": 62,
         "sixty-six": 66,
+        "seventy-two": 72,
     }
 
     assert words.get(match.group(1).lower()) == shipped, (
@@ -252,7 +255,7 @@ def test_kvstore_lookups_expose_the_key_they_are_written_by():
     transforms = configparser.ConfigParser(interpolation=None)
     transforms.read(os.path.join(APP_ROOT, "default", "transforms.conf"))
 
-    for lookup in ("binding_l2_l3", "binding_l1", "binding_l1_history"):
+    for lookup in ("binding_l2_l3", "binding_l2", "binding_l5_l2", "binding_l1", "binding_l1_history"):
         fields = [field.strip() for field in transforms[lookup]["fields_list"].split(",")]
 
         assert "_key" in fields, f"{lookup} cannot be written by key without _key in fields_list"
@@ -264,7 +267,9 @@ def test_kvstore_lookups_expose_the_key_they_are_written_by():
 
     writes = re.findall(r"outputlookup\s+binding_\S+(.*)", searches)
 
-    assert len(writes) == 5, writes
+    # Five refreshes and four expiry jobs: L2/L3, L2 and L5/L2 a refresh and an expiry each, L1 a refresh, and the
+    # L1 history a refresh and an expiry.
+    assert len(writes) == 9, writes
 
     for tail in writes:
         assert "key_field=_key" in tail, f"a lookup is written without a key: {tail!r}"

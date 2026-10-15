@@ -249,6 +249,19 @@ def build_supplicant_table(bindings: pd.DataFrame) -> BindingTable:
                                        end_column="bind_end")
 
 
+def close_supplicant_bindings(config: Config, dataframes: list, impose_order: bool = True) -> pd.DataFrame:
+    """
+    The authenticator's 802.1X records, closed into which port each identity was authorized on and for how long.
+
+    The rows the supplicant hop resolves through, and the rows the SIEM's `binding_l5_l2` lookup is built from,
+    rendered with `to_bucketed_records(key_name="dot1x_identity", table_name="dot1x_supplicant")`.
+    """
+    return _run_class(config,
+                      dataframes,
+                      [TC2BindingStage(config, key_column="dot1x_identity", attribute_columns=["auth_port_key"])],
+                      impose_order)
+
+
 def build_pipeline_config(execution_mode=None) -> Config:
     """A pipeline configuration, defaulting to CPU mode and importable without a GPU."""
     return tp.build_pipeline_config(execution_mode)
@@ -391,10 +404,7 @@ def run_pipeline(config: Config,
     # The 802.1X exchanges, closed into identity bindings by the stage that closes MAC ones. Keyed on the
     # identity rather than the address, because the address is the asset and the identity is the person's half of
     # the exchange -- and the directory can only bind a principal to the half a person actually presents.
-    identity_bindings = _run_class(
-        config, [telemetry["tc2_auth"].copy()],
-        [TC2BindingStage(config, key_column="dot1x_identity", attribute_columns=["auth_port_key"])],
-        impose_order)
+    identity_bindings = close_supplicant_bindings(config, [telemetry["tc2_auth"].copy()], impose_order)
 
     outputs[AUTH_CLASS] = _run_class(
         config,

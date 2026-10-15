@@ -491,6 +491,9 @@ PRODUCED: dict = {
             # records carry the address it came from, which R-C-004 binds a transfer to, and the lifecycle in two
             # words whatever the collector said. An identity provider's sessions enriched with the principal's
             # identity context carry each session's duration against the principal's own, which R-B-L5-005 reads.
+            # A desk sign-in in the estate carries the 802.1X identity the directory names its principal by and the
+            # port that identity was authorized on, each with the binding it rests on, which the identity walk reads
+            # beside a host login's address and port.
             required_columns=("event_uid",
                               "user_principal",
                               "lineage_id",
@@ -543,6 +546,7 @@ PRODUCED: dict = {
                  "site_travel_status",
                  "site_travel_kmh",
                  "site_travel_elapsed_ns"),
+                ("auth_result", "desk_identity", "desk_port_key", "desk_identity_uid", "desk_binding_uid"),
                 ("source_ip", "session_key", "session_action", "session_lifecycle"),
                 ("session_key",
                  "session_lifecycle",
@@ -649,13 +653,15 @@ PRODUCED: dict = {
             producer="`morpheus.utils.binding_table.BindingTable.to_bucketed_records`, which renders `bucket_start` "
             "itself rather than relying on a sink to do it.",
             required_columns=("binding_table", "bucket", "binding_uid"),
-            # One variant per table the lookups read: the port inventory the L1 refreshes bucket, the MAC table,
-            # and the DHCP leases the L2/L3 refresh selects, which `TC2BindingStage` closes from a DHCP server's
-            # acknowledgements and releases, each lease held for the term the server granted.
+            # One variant per table the lookups read: the port inventory the L1 refreshes bucket; the MAC table the
+            # L2 refresh selects; the DHCP leases the L2/L3 refresh selects, which `TC2BindingStage` closes from a
+            # DHCP server's acknowledgements and releases, each lease held for the term the server granted; and the
+            # 802.1X supplicant bindings the L5/L2 refresh selects, which it closes from an authenticator's records.
             variant_columns=(
                 ("port_id", "switch_id", "site_id", "transceiver_serial", "lldp_neighbor_chassis_id"),
                 ("key", "port_key"),
                 ("ip", "mac", "port_id", "switch_id"),
+                ("dot1x_identity", "auth_port_key"),
             ),
         ),
     "binding:l1":
