@@ -57,6 +57,7 @@ from morpheus.stages.lineage.envelope_validate_stage import DEFAULT_REQUIRED_COL
 from morpheus.stages.lineage.envelope_validate_stage import EnvelopeValidateStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.minimization_stage import MinimizationStage
+from morpheus.stages.lineage.edge_emit_stage import EdgeEmitStage
 from morpheus.stages.lineage.pipeline_health_stage import PipelineHealthStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
@@ -918,6 +919,21 @@ def _ingest_after(seconds: int) -> typing.Callable:
 def sequences() -> dict:
     """Two collectors; the first skips two numbers."""
     return {"collector_id": ["poller-1", "poller-1", "poller-1", "poller-2"], "collector_seq": [1, 2, 5, 1]}
+
+
+def joined_rows() -> dict:
+    """Two connections seen at layers 3 and 4, interleaved, with each record resolved through two hops."""
+    return {
+        "event_uid": ["flow-a", "flow-b", "packet-a", "packet-b"],
+        "osi_layer": [3, 3, 4, 4],
+        "lineage_id": ["la", "lb", "la4", "lb4"],
+        "event_time": [1 * SECOND, 2 * SECOND, 3 * SECOND, 4 * SECOND],
+        "community_id": ["1:a", "1:b", "1:a", "1:b"],
+        "lease_method": ["soft:dhcp_lease"] * 4,
+        "lease_uid": ["lease-a", "lease-b", "lease-a", "lease-b"],
+        "inventory_method": ["soft:host_inventory", "unresolved", "soft:host_inventory", "unresolved"],
+        "inventory_uid": ["report-a", None, "report-a", None],
+    }
 
 
 def sealed_windows() -> dict:
@@ -1911,6 +1927,36 @@ REGISTRY: dict = {
                 Knob("unclassified_columns", DIFFERS, benign=["session_unclassified"], extreme=[]),
                 Knob("out_of_order_columns", DIFFERS, benign=["sample_out_of_order"], extreme=[]),
                 Knob("fallback_columns", DIFFERS, benign=["model_fallback_used"], extreme=[]),
+            ),
+        ),
+    "EdgeEmitStage":
+        Scenario(
+            stage=EdgeEmitStage,
+            frame=joined_rows,
+            base={
+                "hop_method_columns": ["lease_method", "inventory_method"],
+                "hop_uid_columns": ["lease_uid", "inventory_uid"],
+                "hop_layers": [3, 7],
+                "join_column": "community_id",
+            },
+            knobs=(
+                Knob("hop_method_columns",
+                     DIFFERS,
+                     benign=["lease_method", "inventory_method"],
+                     extreme=["lease_method", "lease_method"]),
+                Knob("hop_uid_columns",
+                     DIFFERS,
+                     benign=["lease_uid", "inventory_uid"],
+                     extreme=["inventory_uid", "lease_uid"]),
+                Knob("hop_layers", DIFFERS, benign=[3, 7], extreme=[2, 2]),
+                Knob("join_column", DIFFERS, benign="community_id", extreme=None),
+                Knob("uid_column", INPUT_COLUMN, benign="event_uid"),
+                Knob("layer_column", INPUT_COLUMN, benign="osi_layer"),
+                Knob("lineage_column", INPUT_COLUMN, benign="lineage_id"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("community_column", DIFFERS, benign="community_id", extreme="lineage_id"),
+                # The two connections interleave, so remembering one value forgets the first before its packet.
+                Knob("max_keys", DIFFERS, benign=1000000, extreme=1),
             ),
         ),
     "TotalOrderStage":

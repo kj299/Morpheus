@@ -428,6 +428,12 @@ _PSEUDONYMS = (
     # The lease and the inventory report a record's machine was resolved through.
     "host_inventory_uid",
     "host_lease_uid",
+    # The bindings a sign-in was resolved to a port through: the directory entry and supplicant binding at the
+    # estate's desks, the lease and MAC binding behind R-C-005's logins.
+    "desk_binding_uid",
+    "desk_identity_uid",
+    "login_lease_uid",
+    "login_port_uid",
 )
 
 _OPERATIONAL = (

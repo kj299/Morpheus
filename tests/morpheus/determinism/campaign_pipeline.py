@@ -87,6 +87,7 @@ The attacker signs in at headquarters and, twenty minutes later, in Edinburgh. F
 
 import typing
 
+import edge_stream
 import envelope
 import host_identity
 import pandas as pd
@@ -966,6 +967,10 @@ def build_pipeline_config(execution_mode=None) -> Config:
 
 LEASE_METHOD_COLUMN = "login_lease_resolution"
 PORT_METHOD_COLUMN = "login_port_resolution"
+LEASE_UID_COLUMN = "login_lease_uid"
+"""The DHCP lease a sign-in's source address was resolved to a workstation through."""
+PORT_UID_COLUMN = "login_port_uid"
+"""The MAC binding the workstation was resolved to a switch port through."""
 
 
 def _login_ladder(config: Config, mac_table: BindingTable, lease_table: BindingTable) -> list:
@@ -976,14 +981,16 @@ def _login_ladder(config: Config, mac_table: BindingTable, lease_table: BindingT
                              binding_table=lease_table,
                              key_column="source_ip",
                              output_columns={"mac": "login_mac"},
-                             method_column=LEASE_METHOD_COLUMN),
+                             method_column=LEASE_METHOD_COLUMN,
+                             uid_column=LEASE_UID_COLUMN),
         BindingResolverStage(config,
                              binding_table=mac_table,
                              key_column="login_mac",
                              output_columns={
                                  "port_key": "login_port_key", "site_id": "login_site_id"
                              },
-                             method_column=PORT_METHOD_COLUMN),
+                             method_column=PORT_METHOD_COLUMN,
+                             uid_column=PORT_UID_COLUMN),
         TC5TravelStage(config, column_prefix="site_travel", location_column="login_site_id", locations=SITE_LOCATIONS),
     ]
 
@@ -1188,6 +1195,30 @@ def run_pipeline(config: Config,
     return canonicalize(envelope.with_quarantine(pd.concat(frames, ignore_index=True), quarantined),
                         key_columns=KEY_COLUMNS,
                         ignore_columns=IGNORE_COLUMNS)
+
+
+EDGE_HOPS = {
+    "hop_method_columns": [
+        LEASE_METHOD_COLUMN,
+        PORT_METHOD_COLUMN,
+        host_identity.LEASE_METHOD_COLUMN,
+        host_identity.INVENTORY_METHOD_COLUMN
+    ],
+    "hop_uid_columns":
+        [LEASE_UID_COLUMN, PORT_UID_COLUMN, host_identity.LEASE_UID_COLUMN, host_identity.INVENTORY_UID_COLUMN],
+    "hop_layers": [3, 2, 3, 7],
+}
+"""The campaign's resolution hops: a sign-in's address through the DHCP leases and its workstation through the MAC
+bindings, and a flow's, packet's or handshake's address through the leases and its interface through the EDR
+inventory. The end of each edge is the layer of the collector the binding was closed from."""
+
+
+def build_edges(config: Config, result: pd.DataFrame) -> pd.DataFrame:
+    """
+    The campaign's `morpheus:edge` records: one per hop a record was resolved through, and one per layer a
+    connection was seen at above the first, joined on the Community ID every layer stamped.
+    """
+    return edge_stream.emit(config, result, join_column="community_id", **EDGE_HOPS)
 
 
 def render(result: pd.DataFrame) -> str:

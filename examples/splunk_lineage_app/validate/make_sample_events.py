@@ -150,8 +150,8 @@ def main() -> int:
     import context_pipeline  # pylint: disable=import-outside-toplevel
     import endpoint_pipeline  # pylint: disable=import-outside-toplevel
     import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
-    import lineage_pipeline  # pylint: disable=import-outside-toplevel
     import network_pipeline  # pylint: disable=import-outside-toplevel
+    import pandas as pd  # pylint: disable=import-outside-toplevel
     import presentation_pipeline  # pylint: disable=import-outside-toplevel
     import saas_pipeline  # pylint: disable=import-outside-toplevel
     import session_pipeline as sp  # pylint: disable=import-outside-toplevel
@@ -189,8 +189,9 @@ def main() -> int:
 
     _health(by_sourcetype, sp, sessions)
 
-    lineage = lineage_pipeline.run_pipeline(lineage_pipeline.build_pipeline_config(), [lineage_pipeline.build_corpus()])
-    by_sourcetype["morpheus:edge"] = _render(lineage, "morpheus:edge")
+    # The edge stream: one record per hop a record was resolved through and per layer a connection was seen at
+    # above the first, written by EdgeEmitStage over the estate's sealed rows here and the campaign's below.
+    estate_edges = ep.build_edges(ep.build_pipeline_config(), telemetry)
 
     # Layer 3 comes from its own corpus and its own pipeline, as layer 5 does. Its records share no entity with
     # the estate's -- an address is not a port and not a principal -- so they carry their own chains and the
@@ -241,6 +242,8 @@ def main() -> int:
         _scored(by_sourcetype, rows.dropna(axis=1, how="all"), sourcetype)
 
     _health(by_sourcetype, campaign_pipeline, campaign)
+    edges = pd.concat([estate_edges, campaign_pipeline.build_edges(campaign_config, campaign)], ignore_index=True)
+    by_sourcetype["morpheus:edge"] = _render(edges, "morpheus:edge")
 
     # The TC-0 context store: every version the two producers recorded, refused ones included, because a count of
     # refusals is something an estate should be able to see on its search head. The probes are the harness's own

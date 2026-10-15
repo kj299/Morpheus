@@ -536,6 +536,8 @@ PRODUCED: dict = {
                  "auth_result",
                  "login_port_key",
                  "login_site_id",
+                 "login_lease_uid",
+                 "login_port_uid",
                  "resolution_method",
                  "resolution_methods",
                  "site_travel_status",
@@ -624,9 +626,20 @@ PRODUCED: dict = {
             name="morpheus:edge",
             time_column="event_time",
             time_columns=("event_time", ),
-            producer="`morpheus.stages.lineage.community_id_stage.CommunityIdStage` behind WindowSealStage; the "
-            "reference pipeline in `tests/morpheus/determinism/lineage_pipeline.py`.",
-            required_columns=("event_uid", "community_id", "src_ip", "dest_ip"),
+            producer="`morpheus.stages.lineage.edge_emit_stage.EdgeEmitStage` behind the resolvers and "
+            "WindowSealStage, one record per resolution hop and per layer a connection was seen at above the first; "
+            "`build_edges` in `tests/morpheus/determinism/estate_pipeline.py` and `campaign_pipeline.py`.",
+            # Chain assembly reads the chain and how it was joined. The rest is what makes an edge an edge: the
+            # two records it joins, what kind of relation it is, and the layer at each end. `community_id` is on
+            # the records whose child carried one and is not required, because a resolution hop of a sign-in has
+            # none to carry.
+            required_columns=("link_uid",
+                              "parent_event_uid",
+                              "child_event_uid",
+                              "relation_type",
+                              "join_method",
+                              "child_osi_layer",
+                              "lineage_id"),
         ),
     "binding:bucketed":
         Sourcetype(

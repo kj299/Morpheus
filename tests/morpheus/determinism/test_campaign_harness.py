@@ -703,3 +703,72 @@ def test_every_lease_is_the_dhcp_servers_and_lasts_its_whole_term(pipeline_confi
     for (_, ack) in acks.iterrows():
         assert bindings.loc[ack["ip"], "bind_end"] == ack["event_time"] + ack["lease_seconds"] * 10**9
         assert bindings.loc[ack["ip"], "port_id"] == ack["port_id"]
+
+
+@pytest.mark.cpu_mode
+def test_each_end_of_the_replay_names_the_lease_and_the_mac_binding_it_rests_on(pipeline_config: Config, corpus: dict,
+                                                                              result: pd.DataFrame):
+    # The port a sign-in is placed at is an inference two bindings deep, and an analyst disputing it needs those two
+    # records, not just their conclusion. Each end of the attacker's journey carries the lease its address resolved
+    # through and the MAC binding the workstation resolved through, and they are the bindings the tables hold.
+    leases = cp_.build_lease_table(cp_.close_lease_bindings(pipeline_config, [corpus[cp_.LEASE_CLASS]]))
+    macs = cp_.build_mac_table(cp_.close_mac_bindings(pipeline_config, [corpus[cp_.MAC_CLASS]]))
+    logins = result[(result["telemetry_class"] == cp_.AUTH_CLASS) & (result["user_principal"] == cp_.QUIN)
+                    & result["login_port_key"].notna()]
+
+    assert len(logins) >= 2
+
+    for (_, row) in logins.iterrows():
+        when = int(row["event_time"])
+
+        assert row[cp_.LEASE_UID_COLUMN] == leases.resolve(row["source_ip"], when).uid
+        assert row[cp_.PORT_UID_COLUMN] == macs.resolve(row["login_mac"], when).uid
+
+    # And a sign-in no lease names carries neither.
+    remote = result[(result["telemetry_class"] == cp_.AUTH_CLASS) & (result["source_ip"] == cp_.REMOTE_ADDRESS)]
+
+    assert len(remote) > 0
+    assert remote[cp_.LEASE_UID_COLUMN].isna().all() and remote[cp_.PORT_UID_COLUMN].isna().all()
+
+
+# --- The edge stream ------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_the_breach_connection_is_carried_from_layer_3_to_layer_6_on_its_community_id(pipeline_config: Config,
+                                                                                    result: pd.DataFrame):
+    # The connection the connection evidence report returns, as edges: the packet sensor's records joined to the
+    # flow exporter's, and the inspection point's to the packet sensor's.
+    edges = cp_.build_edges(pipeline_config, result)
+    carried = edges[edges["relation_type"] == "carried_by"]
+    [rows] = cp_.connections_across_layers(result).values()
+    [community] = set(rows["community_id"])
+    attacker = carried[carried["community_id"] == community]
+
+    assert set(attacker["join_method"]) == {"hard:community_id"}
+    assert set(zip(attacker["parent_osi_layer"], attacker["child_osi_layer"])) == {(3, 4), (4, 6)}
+
+    # The other breaches were seen at layers 3 and 4 only: one edge each, and none reaching layer 6.
+    others = carried[carried["community_id"] != community]
+
+    assert len(others) == len(cp_.EXFILTRATORS) - 1
+    assert set(zip(others["parent_osi_layer"], others["child_osi_layer"])) == {(3, 4)}
+
+
+@pytest.mark.cpu_mode
+def test_every_resolved_record_is_the_child_of_an_edge_from_each_binding(pipeline_config: Config,
+                                                                          result: pd.DataFrame):
+    edges = cp_.build_edges(pipeline_config, result)
+    resolved = edges[edges["relation_type"] == "resolved_through"]
+    lineage = dict(zip(result["event_uid"], result["lineage_id"]))
+
+    for (method, uid) in zip(cp_.EDGE_HOPS["hop_method_columns"], cp_.EDGE_HOPS["hop_uid_columns"]):
+        rows = result[result[uid].notna()]
+        parents = resolved[resolved["parent_event_uid"].isin(set(rows[uid]))]
+
+        assert len(rows) > 0, method
+        assert set(zip(rows[uid], rows["event_uid"])) <= set(zip(parents["parent_event_uid"],
+                                                                   parents["child_event_uid"])), method
+
+    assert all(lineage[child] == chain for (child, chain) in zip(edges["child_event_uid"], edges["lineage_id"]))
+    assert not edges["link_uid"].duplicated().any()

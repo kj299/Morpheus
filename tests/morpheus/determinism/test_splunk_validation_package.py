@@ -982,6 +982,7 @@ def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(
         edges = [json.loads(line) for line in handle if line.strip()]
 
     method_field = re.search(r"values\((\w+)\)\s+AS\s+methods", chain).group(1)
+    edge_field = re.search(r"values\((\w+)\)\s+AS\s+edge_methods", chain).group(1)
     risk_threshold = float(re.search(r"total_risk\s*>=\s*([\d.]+)", chain).group(1))
     layers = collections.defaultdict(set)
     methods = collections.defaultdict(set)
@@ -990,9 +991,12 @@ def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(
         if (event.get("lineage_id") is not None):
             layers[event["lineage_id"]].add(event.get("osi_layer"))
 
-            # `makemv delim=";"` before the stats: one value per hop the ladder took.
+            # `makemv delim=";"` before the stats: one value per hop the ladder took. An edge names its one join.
             if (event.get(method_field) is not None):
                 methods[event["lineage_id"]].update(event[method_field].split(";"))
+
+            if (event.get(edge_field) is not None):
+                methods[event["lineage_id"]].add(event[edge_field])
 
     spans = {lineage: len(seen - {None}) for (lineage, seen) in layers.items()}
     three_layer = {lineage for (lineage, span) in spans.items() if span >= 3}
@@ -1721,3 +1725,28 @@ def test_the_platform_step_is_the_doubling_tenant_alone(expected: dict):
                                                                int(row["previous_baseline"]),
                                                                int(row["previous_rows"]),
                                                                int(row["rows"])) for (_, row) in steps.iterrows()]
+
+
+def test_the_edge_stream_is_edges():
+    # `morpheus:edge` carried the reference corpus's flow records for its whole life: no parent, no child, no join
+    # method and no chain, so chain assembly's read of `lineage_id` from it was hollow. Every record is now an edge
+    # `EdgeEmitStage` wrote, and each names the two records it joins, how, and the chain the child was sealed into.
+    with open(os.path.join(EVENTS, "morpheus_edge.jsonlines"), encoding="utf-8") as handle:
+        edges = [json.loads(line) for line in handle if line.strip()]
+
+    scored = {event["event_uid"]: event for event in _scored_events()}
+
+    assert len(edges) > 0
+
+    for edge in edges:
+        for field in ("link_uid", "parent_event_uid", "child_event_uid", "relation_type", "join_method",
+                      "lineage_id", "child_osi_layer"):
+            assert edge.get(field) is not None, (field, edge)
+
+        child = scored[edge["child_event_uid"]]
+
+        assert child["lineage_id"] == edge["lineage_id"]
+        assert child["osi_layer"] == edge["child_osi_layer"]
+
+    assert {edge["relation_type"] for edge in edges} == {"resolved_through", "carried_by"}
+    assert {edge["join_method"] for edge in edges if edge["relation_type"] == "carried_by"} == {"hard:community_id"}

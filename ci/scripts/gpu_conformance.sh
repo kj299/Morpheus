@@ -77,6 +77,7 @@ TARGETS=(
     tests/morpheus/stages/test_chain_anchor_stage.py
     tests/morpheus/stages/test_collector_sequence_stage.py
     tests/morpheus/stages/test_determinism_stamp_stage.py
+    tests/morpheus/stages/test_edge_emit_stage.py
     tests/morpheus/stages/test_envelope_stamp_stage.py
     tests/morpheus/stages/test_envelope_validate_stage.py
     tests/morpheus/stages/test_community_id_stage.py
