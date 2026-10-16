@@ -161,3 +161,34 @@ def test_a_host_is_found_however_the_edr_spells_it(config: Config):
 def test_an_unknown_normalization_is_refused(config: Config):
     with pytest.raises(ValueError, match="entity_normalization"):
         TC0EnrichStage(config, store=asset_store(), entity_normalization="upper")
+
+
+def application_store() -> BitemporalStore:
+    return BitemporalStore("application", [
+        make_version("application", "10.0.2.50:8443", 0, None, 0, values={"name": "billing"}),
+    ])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_entity_can_be_composed_of_two_columns(config: Config):
+    payload = {"dst_ip": ["10.0.2.50", "10.0.2.50", None], "dst_port": [8443, 443, 8443], "event_time": [DAY] * 3}
+    result = run(config, payload, store=application_store(), entity_columns=["dst_ip", "dst_port"], prefix="app_")
+
+    assert [cell(value) for value in result["app_name"]] == ["billing", None, None]
+    assert [bool(value) for value in result["app_found"]] == [True, False, False]
+
+
+@pytest.mark.cpu_mode
+def test_a_composed_entity_names_a_missing_part(config: Config):
+    with pytest.raises(KeyError, match="dst_port"):
+        run(config, {
+            "dst_ip": ["10.0.2.50"], "event_time": [DAY]
+        },
+            store=application_store(),
+            entity_columns=["dst_ip", "dst_port"])
+
+
+@pytest.mark.cpu_mode
+def test_an_empty_list_of_entity_columns_is_refused(config: Config):
+    with pytest.raises(ValueError, match="entity_columns"):
+        TC0EnrichStage(config, store=application_store(), entity_columns=[])

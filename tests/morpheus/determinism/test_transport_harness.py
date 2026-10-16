@@ -24,11 +24,11 @@ side of a triple is sending. A corpus that carried only one direction would let 
 wrong one, so the responses here travel the way a capture sees them, and each rule is asserted against the case
 beside it that must stay quiet.
 
-Two of the five rules cannot be asserted here and are not pretended to be. R-B-L4-001 is the shipped
-`abp-pcap-xgb` model behind Triton, so what this fork owes it is the thirteen features under the names it was
-trained on, which `MODEL_FEATURES` carries and `test_the_model_feature_list_is_complete` pins. R-B-L4-004 needs
-`tcp_options_order` on the flow and the layer 7 `user_agent` joined to it on a shared flow identifier; TC4FlowStage
-emits neither the options nor a key another layer carries, so the rule waits on both.
+One of the five rules cannot be asserted here and is not pretended to be: R-B-L4-001 is the shipped `abp-pcap-xgb`
+model behind Triton, so what this fork owes it is the thirteen features under the names it was trained on, which
+`MODEL_FEATURES` carries and `test_the_model_feature_list_is_complete` pins. R-B-L4-004 joins this layer's stack
+fingerprint to the application corpus's user agents on `host_key`, so it is asserted where both are in reach: the
+stack half here, and the join in `test_splunk_validation_package.py`, over the events the app is fed.
 """
 
 import os
@@ -480,3 +480,47 @@ def test_the_envelope_is_kept_for_the_triple_and_not_for_the_flow(result: pd.Dat
 
     assert backup["flow_id"].nunique() == len(backup)
     assert set(backup["transfer_triple"]) == {f"{tp_.BACKUP_CLIENT}:{tp_.BACKUP_SERVER}:445"}
+
+
+# --- The stack fingerprint R-B-L4-004 reads -----------------------------------------------------------------------
+
+
+def _syns(result: pd.DataFrame) -> pd.DataFrame:
+    return result[result["stack_fingerprint"].notna()]
+
+
+@pytest.mark.cpu_mode
+def test_each_syn_says_which_stack_sent_it(result: pd.DataFrame):
+    # Only a SYN carries options, so only a SYN carries a fingerprint; and the family is read off the order alone.
+    syns = _syns(result)
+    families = syns.groupby("src_ip")["stack_os_family"].agg(lambda values: set(values))
+
+    assert families.to_dict() == {
+        tp_.WORKSTATION: {"windows"}, tp_.SECOND_STACK: {"windows", "linux"}, tp_.TOOL_HOST: {"linux"}
+    }
+    assert (syns["flow_syn"].astype("Int64") >= 1).all()
+    assert result[result["stack_fingerprint"].isna()]["stack_os_family"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_only_the_second_stack_is_new_to_its_host(result: pd.DataFrame):
+    # A host's first SYN is new to nothing; every later one is new only when the host has never presented its stack.
+    syns = _syns(result).sort_values("event_time", kind="mergesort")
+    novel = syns[_truth(syns, "stack_fingerprint_first_seen")]
+
+    assert list(zip(novel["src_ip"], novel["stack_os_family"])) == [(tp_.SECOND_STACK, "linux")]
+    assert syns.groupby("src_ip").head(1)["stack_fingerprint_first_seen"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_every_packet_to_a_mapped_port_carries_its_application(result: pd.DataFrame):
+    # The CMDB maps the file server's two shares and the backup and order services; the enrichment reads it on
+    # dst_ip:dst_port, so the file server's SSH port, which no application owns, is found by nothing.
+    packets = result[result["telemetry_class"] == tp_.TELEMETRY_CLASS]
+    to_files = packets[packets["dst_ip"] == tp_.FILE_SERVER]
+    named = to_files.groupby(to_files["dst_port"].astype(int))["ctx_application_name"].agg(lambda values: set(values))
+
+    assert named[445] == {"file-shares"}
+    assert named[443] == {"file-shares-web"}
+    assert not _truth(to_files[to_files["dst_port"].astype(int) == 22], "ctx_application_found").any()
+    assert set(packets[packets["dst_ip"] == tp_.BACKUP_SERVER]["ctx_application_service_account"]) == {"svc-backup"}

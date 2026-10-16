@@ -31,6 +31,11 @@ reports, and a detection that uses it is a detection that can change its mind ab
 Every row gets `ctx_found`, and the identifiers of the versions its answer rests on, so an analyst can tell a
 principal the store has never heard of from one with nothing to say, and can trace any attached value to the record
 behind it.
+
+**An entity can be composed of several columns.** An application is keyed on the server's address and port, and an
+event names those as two columns; `entity_columns` composes them the way
+{py:func}`~morpheus.utils.entity_key.compose_key` composed the fact's key, so a connection to `10.0.2.10` on `443`
+finds the application recorded at `10.0.2.10:443`. A row missing either part finds nothing rather than half a key.
 """
 
 import logging
@@ -55,6 +60,7 @@ from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
 
@@ -74,7 +80,7 @@ VERSION_UIDS = "version_uids"
 KNOWLEDGE = "knowledge"
 
 
-@register_stage("tc0-enrich", ignore_args=["store", "set_kinds"])
+@register_stage("tc0-enrich", ignore_args=["store", "set_kinds", "entity_columns"])
 class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Attach the context that held for each row's principal or asset at the row's event time.
@@ -108,6 +114,9 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     set_kinds : dict, optional
         Kinds whose facts are collected into a set, mapped to the attribute that names each member and the output
         column. Defaults to collecting memberships by `group_name` into `groups`, when the store holds any.
+    entity_columns : list of str, optional
+        Columns composing the entity, in place of `entity_column`, for a store keyed on a composite such as an
+        application's `address:port`. Each part is rendered as text.
     """
 
     def __init__(self,
@@ -119,7 +128,8 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  knowledge: str = "event",
                  prefix: str = "ctx_",
                  set_kinds: dict = None,
-                 entity_normalization: str = "text"):
+                 entity_normalization: str = "text",
+                 entity_columns: list[str] = None):
         super().__init__(c)
 
         if (store is None):
@@ -127,6 +137,9 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         if (not entity_column):
             raise ValueError("entity_column is required")
+
+        if (entity_columns is not None and len(entity_columns) == 0):
+            raise ValueError("entity_columns must name at least one column when given")
 
         if (knowledge not in KNOWLEDGE_MODES):
             raise ValueError(f"knowledge must be one of {KNOWLEDGE_MODES}, received {knowledge!r}")
@@ -144,6 +157,7 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         self._store = store
         self._entity_column = entity_column
+        self._entity_columns = None if entity_columns is None else list(entity_columns)
         self._time_column = time_column
         self._time_unit = time_unit
         self._knowledge = knowledge
@@ -219,13 +233,18 @@ class TC0EnrichStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             return message
 
         with meta.mutable_dataframe() as df:
-            missing = [column for column in (self._entity_column, self._time_column) if column not in df.columns]
+            entity_columns = [self._entity_column] if self._entity_columns is None else self._entity_columns
+            missing = [column for column in entity_columns + [self._time_column] if column not in df.columns]
 
             if (len(missing) > 0):
                 raise KeyError(f"TC0EnrichStage requires columns {missing} which are not present in the DataFrame. "
                                f"Available columns: {sorted(df.columns)}")
 
-            entities = [self._normalize(entity) for entity in to_host_list(df, self._entity_column)]
+            if (self._entity_columns is None):
+                entities = [self._normalize(entity) for entity in to_host_list(df, self._entity_column)]
+            else:
+                parts = [to_host_list(df, column) for column in self._entity_columns]
+                entities = [compose_key(list(values)) for values in zip(*parts)]
             raw_times = to_host_list(df, self._time_column)
 
             attributes = {name: [] for name in self._attributes}

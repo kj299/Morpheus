@@ -100,13 +100,14 @@ def test_an_unproduced_sourcetype_says_what_is_missing(name: str):
 
 
 def test_the_unproduced_count_is_pinned():
-    # None of the seventeen stanzas is configuration for a producer this fork has not built any longer; the TC-0
+    # None of the eighteen stanzas is configuration for a producer this fork has not built any longer; the TC-0
     # context store was the last. Pinned rather than merely recorded, so that landing a producer is a deliberate
     # edit here and not a silent drift in what the app appears to support -- which is exactly what this assertion
     # caught when layer 5 gained one, again when `TC1BindingStage` gave `binding:l1` one, as each of layers 3, 4, 6
-    # and 7 gained theirs, and when the context store did. Seventeen since the quarantine, health and late streams.
+    # and 7 gained theirs, and when the context store did. Seventeen since the quarantine, health and late streams;
+    # eighteen since the application kind of the context store.
     assert len(UNPRODUCED) == 0
-    assert len(PRODUCED) == 17
+    assert len(PRODUCED) == 18
 
 
 NUMBER_WORDS = {
@@ -129,6 +130,7 @@ NUMBER_WORDS = {
     "fifteen": 15,
     "sixteen": 16,
     "seventeen": 17,
+    "eighteen": 18,
 }
 
 GUIDE = os.path.join(REPO_ROOT,

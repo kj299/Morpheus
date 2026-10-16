@@ -179,14 +179,16 @@
       ]
     },
     "Host evidence - one machine across layers": {
-      "expected_rows": 17,
+      "expected_rows": 19,
       "expected_empty": false,
-      "why": "Seventeen machines seen at two layers or more under one host_key. Ten are the campaign's workstations, resolved at layers 3, 4 and 6 through the campaign DHCP server's daily leases and the EDR inventory; the five R-C-004's breaches and handshakes come from were seen at all three, and R-C-002's five beaconers at layers 3 and 6. The other seven are client addresses the network and transport corpora both carry: both corpora resolve their clients through leases and inventory built the same way, so the same address in the two is the same workstation, seen at layer 3 in one and layer 4 in the other. The campaign's servers are on static addresses no lease names, so their flows carry no host_key and their processes, which do, are seen at layer 7 alone. A report rather than a detection: it writes nothing to the risk index.",
+      "why": "Nineteen machines seen at two layers or more under one host_key. Ten are the campaign's workstations, resolved at layers 3, 4 and 6 through the campaign DHCP server's daily leases and the EDR inventory; the five R-C-004's breaches and handshakes come from were seen at all three, and R-C-002's five beaconers at layers 3 and 6. The other seven are client addresses the network and transport corpora both carry: both corpora resolve their clients through leases and inventory built the same way, so the same address in the two is the same workstation, seen at layer 3 in one and layer 4 in the other. The last two are the transport corpus's stack hosts, whose packets and HTTP requests both resolve to them, at layers 4 and 7; the first of the three, ws-0-60, is one of the seven, so it is seen at layers 3, 4 and 7. The campaign's servers are on static addresses no lease names, so their flows carry no host_key and their processes, which do, are seen at layer 7 alone. A report rather than a detection: it writes nothing to the risk index.",
       "key_values": [
         "ws-0-110",
         "ws-0-120",
         "ws-0-50",
         "ws-0-60",
+        "ws-0-61",
+        "ws-0-62",
         "ws-0-70",
         "ws-0-80",
         "ws-0-90",
@@ -241,6 +243,26 @@
         }
       ]
     },
+    "R-B-L4-004 - Stack fingerprint mismatch": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "why": "One notable, for ws-0-61: its HTTP requests claim Chrome on Windows, and in its second hour its SYNs carry the option order of a Linux stack, new to that host. A browser's User-Agent is whatever the software writes; the option order is whatever the kernel writes, and a Windows workstation emitting Linux SYNs is running a second stack -- a virtual machine, a tunnel endpoint or a tool with its own. The joins are on host_key, which is the one entity the two layers share, and not on a flow: the stack is read off the SYN at layer 4 and the claim off the request at layer 7, and a request rides a flow whose SYN may have been seen in another hour. ws-0-60 is the control: the same Chrome on Windows, over a Windows stack throughout. 10.0.0.62 runs curl over Linux and claims no operating system at all, so there is nothing for its stack to contradict.",
+      "key_values": {
+        "host_key": "ws-0-61",
+        "stack_os_family": "linux",
+        "claimed_stack": "windows",
+        "stack_fingerprints": [
+          "mss,sok,ts,nop,ws|1460|29200"
+        ],
+        "stack_new_to_host": 1,
+        "claimed_os": [
+          "windows"
+        ],
+        "user_agent_families": [
+          "chrome"
+        ]
+      }
+    },
     "R-B-L4-005 - Transfer envelope breach": {
       "expected_rows": 6,
       "expected_empty": false,
@@ -266,19 +288,24 @@
       }
     },
     "R-D-L6-002 - Certificate issuer anomaly": {
-      "expected_rows": 2,
+      "expected_rows": 3,
       "expected_empty": false,
-      "contributing_rows": 2,
-      "why": "Two notables, and the second is the interesting one. 93.184.216.34 presented a proxy's authority after a corpus of one corporate authority, which is interception. 93.184.216.36 migrated authorities legitimately, and the rule reports that once: the single-issuer gate closes on the next handshake, because the destination has now demonstrably presented two. The control is 93.184.216.35, a delivery host rotating among four authorities, which differs from its own mode on 19 handshakes and is removed entirely by the same gate.",
+      "contributing_rows": 3,
+      "why": "Three notables, grouped on the TLS destination -- the address and the server name together where the handshake carries one. 93.184.216.34 presented a proxy's authority for portal.example.com after a corpus of one corporate authority, which is interception. 93.184.216.36 migrated authorities legitimately, and the rule reports that once: the single-issuer gate closes on the next handshake, because the destination has now demonstrably presented two. 93.184.216.38 is a shared host fronting shop.example-hosting.net under a public authority and a mail service under a hosting provider's, alternating; the proxy's authority then appears for the shop. Keyed on the address alone, that host has presented two authorities from the start, the single-issuer gate never opens on it, and the interception goes unseen -- which is why the reference is kept per name. The control is 93.184.216.35, a delivery host rotating among four authorities, which differs from its own mode on 19 handshakes and is removed entirely by the same gate.",
       "key_values": [
         {
-          "dst_ip": "93.184.216.34",
+          "tls_destination_key": "93.184.216.34:portal.example.com",
           "presented_issuer": "CN=Inspection Proxy, O=Unknown",
           "established_issuer": "CN=Corp Issuing CA, O=Example, C=GB"
         },
         {
-          "dst_ip": "93.184.216.36",
+          "tls_destination_key": "93.184.216.36:updates.example.org",
           "presented_issuer": "CN=Public Trust CA G3, O=Trust Services, C=US",
+          "established_issuer": "CN=Public Trust CA G2, O=Trust Services, C=US"
+        },
+        {
+          "tls_destination_key": "93.184.216.38:shop.example-hosting.net",
+          "presented_issuer": "CN=Inspection Proxy, O=Unknown",
           "established_issuer": "CN=Public Trust CA G2, O=Trust Services, C=US"
         }
       ]
@@ -333,12 +360,15 @@
     "R-B-L7-001 - DNS tunneling": {
       "expected_rows": 1,
       "expected_empty": false,
-      "contributing_rows": 130,
-      "candidate_rows_clearing_entropy_and_length": 160,
-      "why": "One notable, for evil-tunnel.com: 130 distinct subdomains, every one of them random and long-labelled, from one client. Each of the rule's three conditions has a control in this corpus that it alone keeps quiet. cdn-assets.net clears entropy and the count and fails only on label length -- the guide's own warning that entropy alone flags every content delivery network. tenant-saas.com clears entropy and length on all 30 of its queries and fails only on the count, because it is one hostname asked for repeatedly; those 30 rows are why 160 rows clear the per-query conditions and only 130 contribute. saas-provider.com has 130 ordinary subdomains and fails both per-query conditions. The count is taken over qualifying queries in the search rather than read off the row, so all three conditions hold for the same traffic.",
+      "contributing_rows": 129,
+      "candidate_rows_clearing_entropy_and_length": 980,
+      "candidate_rows_clearing_the_baseline": 859,
+      "why": "One notable, for evil-tunnel.com in its event hour: 129 distinct subdomains, every one random and long-labelled, from one client whose busiest day before it held one. The 130th query is the hour's first, when the client had asked for one subdomain and stood at once its busiest day, so the baseline condition holds it back. Each condition has a control that it alone keeps quiet. cdn-assets.net clears entropy and the count and fails only on label length -- the guide's own warning that entropy alone flags every content delivery network. tenant-saas.com clears entropy and length on all 30 of its queries and fails only on the count, because it is one hostname asked for repeatedly. saas-provider.com has 130 ordinary subdomains and fails both per-query conditions. filerep-av.net is a reputation agent looking up file hashes as random, long subdomains: 100 an hour every day for a week, which is the floor and not above it, and 120 on the event day, which clears the floor and is 1.2 times its busiest day -- the baseline condition alone keeps it quiet, and the 820 rows it puts through the per-query conditions are most of the 980. Its first week is held to the literal alone, because a client with fewer than seven days of history has no baseline to be measured against. The count is taken per domain and hour over qualifying queries in the search rather than read off the row, so all four conditions hold for the same traffic.",
       "key_values": {
         "dns_registered_domain": "evil-tunnel.com",
-        "qualifying_subdomains": 130,
+        "window_id": 168,
+        "qualifying_subdomains": 129,
+        "times_busiest_day": 130.0,
         "clients": 1
       }
     },
@@ -346,21 +376,61 @@
       "expected_rows": 2,
       "expected_empty": false,
       "contributing_rows": 40,
-      "why": "Two notables. 10.0.0.40 requested 220 distinct paths and was refused on nine in ten. 10.0.0.41 requested as many and was refused on every one, so its 4xx:2xx ratio is undefined on every row -- it appears only because the search tests 4xx > 0.7 * 2xx rather than thresholding the ratio column, and a search written the other way would lose the client the rule is most for. The crawler requests as many distinct paths and is refused on one in twenty; the broken client is refused on every request but asks for one path. Each fails exactly one condition.",
+      "candidate_rows_before_the_baseline": 60,
+      "why": "Two notables. 10.0.0.40 requested 220 distinct paths and was refused on nine in ten, with curl, after a week of requesting a few paths a day as Chrome -- 22 times its busiest day. 10.0.0.41 requested as many and was refused on every one, so its 4xx:2xx ratio is undefined on every row -- it appears only because the search tests 4xx > 0.7 * 2xx rather than thresholding the ratio column, and a search written the other way would lose the client the rule is most for. It has no history, so the literal alone holds it. The crawler requests as many distinct paths and is refused on one in twenty; the broken client is refused on every request but asks for one path. 10.0.0.45 is an authorized scanner that requests 200 paths a day and is refused on most: on the event day it requests 220, clearing the literal and the refusal condition, and is 1.1 times its busiest day, so the baseline condition alone keeps its 20 rows out. Each control fails exactly one condition.",
       "key_values": [
         {
           "src_ip": "10.0.0.40",
           "distinct_paths": 220,
           "refusals": 198,
-          "successes": 22
+          "successes": 22,
+          "user_agent_families": [
+            "curl"
+          ]
         },
         {
           "src_ip": "10.0.0.41",
           "distinct_paths": 220,
           "refusals": 220,
-          "successes": 0
+          "successes": 0,
+          "user_agent_families": [
+            "curl"
+          ]
         }
       ]
+    },
+    "R-B-L7-007 - Service reached by new clients": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 15,
+      "why": "One notable, for payroll-api.corp.example:443 in the event hour: three application servers reach it every day, and in that hour fifteen clients do -- five times its busiest day -- one of them presenting a client fingerprint the service has never seen. It sits behind the reverse proxy at 10.0.2.10:443, so the service key is its name and the application context is the proxy's: corp-edge-proxy, owned by platform. Each control fails one condition. wiki.corp.example shares that address and port and grows from ten readers to twenty-five, 2.5 times its busiest day, all on the browsers it always sees; keyed on the address, the two names would be one service and the wiki's growth would read as the payroll's. 10.0.2.20:8443 carries no name, so it is keyed on its address: twelve agents a day and twelve on the event day, one of them upgraded to a new fingerprint. ci.corp.example goes from two clients to five with a new tool, which is 2.5 times its busiest day but fewer than ten clients. newapp.corp.example is reached by fifteen clients on its first day, and with no week of history it has no baseline -- the rule requires one, because a service's first day is its own change.",
+      "key_values": {
+        "service_key": "payroll-api.corp.example:443",
+        "service_key_source": "sni",
+        "window_id": 177,
+        "clients": 15,
+        "busiest_day": 3,
+        "times_busiest_day": 5.0,
+        "new_fingerprints": 1,
+        "new_client_software": [
+          "t13d0912h1_c866b44c5a26_b0c3d6c5e2a1"
+        ],
+        "application": "corp-edge-proxy",
+        "owning_team": "platform"
+      }
+    },
+    "R-B-L7-008 - Domain generation": {
+      "expected_rows": 1,
+      "expected_empty": false,
+      "contributing_rows": 30,
+      "why": "One notable, for 10.0.0.36: 80 registered domains in an hour, nine in ten of them answered NXDOMAIN, after a week of six a day -- 13.3 times its busiest day. A domain generation algorithm walks a list of names of which only the few its operator registered resolve, so many distinct domains and mostly non-existent answers together are its shape. The controls fail one condition each. 10.0.0.38 is a busy browser reaching 70 domains, every one of which resolves. 10.0.0.39 is a link checker that tries 50 domains a day and finds most dead: on the event day it tries 60 with 78 percent NXDOMAIN, clearing both literals, and is 1.2 times its busiest day, so the baseline condition alone keeps it quiet. The NXDOMAIN share is read only once a client has asked twenty questions in the window, so a client whose first two lookups fail is not a 100 percent failure rate.",
+      "key_values": {
+        "src_ip": "10.0.0.36",
+        "registered_domains": 80,
+        "times_busiest_day": 13.3333,
+        "nxdomain_share": 0.9,
+        "nxdomain_answers": 72
+      }
     },
     "R-D-L5-003 - Impossible travel": {
       "expected_rows": 2,
@@ -489,25 +559,25 @@
       ]
     },
     "Behavior summary - per-layer scores": {
-      "expected_rows": 5447,
+      "expected_rows": 5743,
       "expected_empty": false,
-      "contributing_rows": 10247,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 10247 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week because only TC5ScoreStage produces `max_abs_z`, and it leaves the session corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1333 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline. The figures grew again when step 9 gave layer 3 a fortnight of ordinary history before its scored hours: the network corpus now contributes 1184 flows where it contributed 411, and the presentation corpus 130 handshakes with a personal device among them; the campaign gained a principal who reaches a workstation and the flows of its exfiltrators' breach connections. And again when step 10 gave the port, the link, the VLAN and the 802.1X exchange behaviour of their own: the layer 1 stream grew from 305 polls of five ports to 793 of thirteen, the MAC table by 45 rows with a camera VLAN, a printer and a guest, and the 802.1X stream by 122 events from two lab benches reauthenticating every two minutes, 655 events in all. And when step 11 gave the SaaS corpus a second tenant whose sync service exports twice a day, 212 operations, and gave the layer 3 corpus one late flow, which goes to morpheus:late, where neither a detection nor the summary reads it."
+      "contributing_rows": 13910,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 13910 scored events on `morpheus:score:l1` through `l7`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week because only TC5ScoreStage produces `max_abs_z`, and it leaves the session corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1333 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline. The figures grew again when step 9 gave layer 3 a fortnight of ordinary history before its scored hours: the network corpus now contributes 1184 flows where it contributed 411, and the presentation corpus 130 handshakes with a personal device among them; the campaign gained a principal who reaches a workstation and the flows of its exfiltrators' breach connections. And again when step 10 gave the port, the link, the VLAN and the 802.1X exchange behaviour of their own: the layer 1 stream grew from 305 polls of five ports to 793 of thirteen, the MAC table by 45 rows with a camera VLAN, a printer and a guest, and the 802.1X stream by 122 events from two lab benches reauthenticating every two minutes, 655 events in all. And when step 11 gave the SaaS corpus a second tenant whose sync service exports twice a day, 212 operations, and gave the layer 3 corpus one late flow, which goes to morpheus:late, where neither a detection nor the summary reads it. And when step 13 gave the application corpus a week of per-client history before its event day, so each client's DNS and HTTP rows are measured against its own busiest day: DNS queries grew from 440 to 1984 and HTTP requests from 740 to 2515, and the service class adds 303 connections keyed on the services they reached. Layer 4 gained 24 packets from the hosts whose stacks R-B-L4-004 compares with their browsers' claims, and layer 6 17 handshakes from the address that fronts two names."
     },
     "Chain assembly - cross-layer risk": {
       "expected_rows": 0,
       "expected_empty": true,
-      "distinct_lineage_ids": 3418,
+      "distinct_lineage_ids": 3533,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "chains_with_a_method": 1336,
+      "chains_with_a_method": 1451,
       "three_layer_chain_methods": [
         "soft:directory",
         "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3418 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 1336 chains in all carry one: the layer 3, 4 and 6 records now carry the two hops from address to machine, and each of those layers roots its chains on the machine where the hops reached one; the campaign's packets, handshakes and exports carry a third, to the session that held their address. That is also why there are fewer chains than the 4268 there were: a workstation's flows in an hour are one chain where each flow identifier, or each address a lease reassigned, used to be its own. A machine's chains are still one per layer, because each layer's corpus seals alone; the host evidence report joins them on `host_key`, and the host identity harness seals four layers together to show the chain they make.",
+      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3533 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 1451 chains in all carry one: the layer 3, 4 and 6 records now carry the two hops from address to machine, and each of those layers roots its chains on the machine where the hops reached one; the campaign's packets, handshakes and exports carry a third, to the session that held their address. That is also why there are fewer chains than the 4268 there were: a workstation's flows in an hour are one chain where each flow identifier, or each address a lease reassigned, used to be its own. A machine's chains are still one per layer, because each layer's corpus seals alone; the host evidence report joins them on `host_key`, and the host identity harness seals four layers together to show the chain they make.",
       "three_layer_chain_risk": {
         "0": 13,
         "50": 1,

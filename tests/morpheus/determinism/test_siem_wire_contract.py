@@ -310,8 +310,9 @@ def test_the_campaign_pipelines_produce_a_parsable_timestamp(wire_config: Config
 
 
 @pytest.mark.gpu_and_cpu_mode
-@pytest.mark.parametrize("stanza, telemetry_class", [("context:identity", "tc0_identity"),
-                                                     ("context:asset", "tc0_asset")])
+@pytest.mark.parametrize("stanza, telemetry_class",
+                         [("context:identity", "tc0_identity"), ("context:asset", "tc0_asset"),
+                          ("context:application", "tc0_application")])
 def test_the_context_pipeline_produces_a_parsable_timestamp(wire_config: Config,
                                                             context: pd.DataFrame,
                                                             stanza: str,
@@ -409,6 +410,7 @@ def test_every_produced_sourcetype_is_covered_here():
         "morpheus:score:l7",
         "context:identity",
         "context:asset",
+        "context:application",
         "morpheus:quarantine",
         "morpheus:late",
         "morpheus:health",

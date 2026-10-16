@@ -192,3 +192,37 @@ def test_a_handshake_without_an_issuer_teaches_the_reference_nothing(config: Con
 def test_a_missing_column_is_refused(config: Config):
     with pytest.raises(KeyError, match="certificate_issuer"):
         run(config, {"dst_ip": [EXTERNAL], "event_time": [START]})
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_destination_is_the_name_at_the_address_where_the_handshake_has_one(config: Config):
+    payload = handshakes(["CN=A", "CN=B", "CN=C"])
+    payload["sni"] = ["shop.example.net", "Mail.Example.net", None]
+    result = run(config, payload)
+
+    assert list(
+        result["tls_destination_key"]) == [f"{EXTERNAL}:shop.example.net", f"{EXTERNAL}:mail.example.net", EXTERNAL]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_two_names_on_one_address_keep_two_references(config: Config):
+    # Each name has presented one authority. Keyed on the address the two alternate, and every visit differs from
+    # an established issuer half the time; keyed on the name, neither ever differs.
+    issuers = ["CN=Shop CA", "CN=Mail CA"] * 6
+    payload = handshakes(issuers)
+    payload["sni"] = ["shop.example.net", "mail.example.net"] * 6
+
+    by_name = run(config, payload, min_samples=2)
+    by_address = run(config, payload, min_samples=2, key_columns=["dst_ip"])
+
+    assert not by_name["cert_issuer_differs"].fillna(False).astype(bool).any()
+    assert by_address["cert_issuer_differs"].fillna(False).astype(bool).any()
+    assert set(by_address["tls_destination_key"]) == {EXTERNAL}
+
+
+@pytest.mark.cpu_mode
+def test_an_explicit_key_ignores_the_name(config: Config):
+    payload = handshakes(["CN=A"])
+    payload["sni"] = ["shop.example.net"]
+
+    assert list(run(config, payload, key_columns=["dst_ip"])["tls_destination_key"]) == [EXTERNAL]

@@ -110,7 +110,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 72
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 75
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
@@ -126,7 +126,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     # the trajectory rule reads it.
     writers = [name for name in names if runner.writes_risk(name)]
 
-    assert len(writers) == 49
+    assert len(writers) == 52
     assert max(position[name] for name in writers) < position[runner.CHAIN]
     assert position[runner.SUMMARY] < position[runner.TRAJECTORY] < position[runner.CHAIN]
     assert min(position[name] for name in expiries) > max(position[name] for name in names if name not in expiries)
@@ -255,6 +255,26 @@ nothing, because its refresh keyed each row on a day counted from 1970, which th
 retention window. Every refresh now keys its rows on the bucket their own time falls in.
 """
 
+BEFORE_THE_SERVICES = {
+    "R-D-L6-002 - Certificate issuer anomaly": 2,
+    "Host evidence - one machine across layers": 17,
+    "Behavior summary - per-layer scores": 5447,
+}
+"""What every run before step 13's services and applications found where they changed the answer.
+
+The issuer anomaly is grouped on the address and server name together, so an interception of one name on a shared
+address is a third notable; two of R-B-L4-004's hosts are seen at layers 4 and 7, which the host evidence report
+counts; and the summary groups the week of DNS and HTTP history and the service connections. The three searches step
+13 added are absent from the earlier runs and are not compared, and neither is the host evidence report in a run
+older than it.
+"""
+
+
+def _present(changes: dict, run: dict) -> dict:
+    """The changes a later step made, restricted to the searches this run dispatched."""
+    return {name: rows for (name, rows) in changes.items() if name in run["searches"]}
+
+
 FIRST_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-05T0114Z.json")
 """The first search-head run, kept because it is the evidence for the two changes it caused."""
 
@@ -283,6 +303,7 @@ def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it
     }
 
     assert differing == {
+        **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS,
         **BEFORE_THE_HOST_BASELINES,
@@ -319,6 +340,7 @@ def test_the_second_run_differed_from_what_is_written_only_where_the_trajectory_
     }
 
     assert differing == {
+        **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS,
         **BEFORE_THE_HOST_BASELINES,
@@ -378,7 +400,11 @@ def test_the_fourth_run_differs_from_what_is_written_only_where_the_learned_mode
     }
 
     assert differing == {
-        **BEFORE_THE_LEASES, **BEFORE_THE_NETWORK_OBJECTS, **BEFORE_THE_HOST_BASELINES, **BEFORE_THE_MODELS
+        **_present(BEFORE_THE_SERVICES, run),
+        **BEFORE_THE_LEASES,
+        **BEFORE_THE_NETWORK_OBJECTS,
+        **BEFORE_THE_HOST_BASELINES,
+        **BEFORE_THE_MODELS,
     }
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 94
 
@@ -401,7 +427,12 @@ def test_the_fifth_run_differs_from_what_is_written_only_where_the_host_baseline
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**BEFORE_THE_LEASES, **BEFORE_THE_NETWORK_OBJECTS, **BEFORE_THE_HOST_BASELINES}
+    assert differing == {
+        **_present(BEFORE_THE_SERVICES, run),
+        **BEFORE_THE_LEASES,
+        **BEFORE_THE_NETWORK_OBJECTS,
+        **BEFORE_THE_HOST_BASELINES,
+    }
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 166
 
 
@@ -424,8 +455,8 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**BEFORE_THE_LEASES, **BEFORE_THE_NETWORK_OBJECTS}
-    assert len(run["searches"]) == 52 and len(expected) == 72
+    assert differing == {**_present(BEFORE_THE_SERVICES, run), **BEFORE_THE_LEASES, **BEFORE_THE_NETWORK_OBJECTS}
+    assert len(run["searches"]) == 52 and len(expected) == 75
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
 
 
@@ -457,8 +488,8 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**BEFORE_THE_LEASES, **BEFORE_THE_PLATFORM}
-    assert len(run["searches"]) == 62 and len(expected) == 72
+    assert differing == {**_present(BEFORE_THE_SERVICES, run), **BEFORE_THE_LEASES, **BEFORE_THE_PLATFORM}
+    assert len(run["searches"]) == 62 and len(expected) == 75
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -482,6 +513,31 @@ def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arriv
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_LEASES
-    assert len(run["searches"]) == 66 and len(expected) == 72
+    assert differing == {**_present(BEFORE_THE_SERVICES, run), **BEFORE_THE_LEASES}
+    assert len(run["searches"]) == 66 and len(expected) == 75
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
+
+
+NINTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-15T1208Z.json")
+"""The run over step 12's events, which matched every expectation then written."""
+
+
+def test_the_ninth_run_differs_from_what_is_written_only_where_the_services_arrived():
+    # Made on 2026-10-15 when hosts gained an identity across layers: all seventy-two then matched, with 209 risk
+    # records. Against step 13's events it differs in the issuer anomaly, now grouped per server name, the host
+    # evidence report, which gained two of R-B-L4-004's hosts, and the summary; it has none of the three searches
+    # step 13 added.
+    with open(NINTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_SERVICES
+    assert len(run["searches"]) == 72 and len(expected) == 75
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209

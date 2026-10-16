@@ -34,6 +34,20 @@ about whether the path exists. Every request, whatever its status, counts toward
 
 **The client is keyed by source address by default**, because the guide gives HTTP no entity key of its own and
 the source is what behaves. An estate with a reliable identity at its proxy should key on the principal.
+
+**The distinct path count is also measured against the client's own history.** Two hundred paths in ten minutes is
+an enumerator from a workstation and an ordinary morning for the vulnerability scanner that walks the web estate
+every day. The stage keeps each client's busiest ten minutes of every day, through
+{py:mod}`~morpheus.utils.bucket_peak`, and writes the highest of them as `http_distinct_paths_baseline` and this
+row's count as a multiple of it as `http_distinct_paths_ratio`. R-D-L7-005 keeps two hundred as a floor and
+requires twice the client's busiest day above it; a client with less than a week of days has no baseline, and is
+held to the floor alone, which is the rule as the guide wrote it.
+
+**What client software sent the request is a feature of its own.** `http_ua_family` is the `User-Agent` reduced to
+its family by {py:mod}`~morpheus.utils.user_agent`, `http_ua_os` the operating system it claims, and
+`http_ua_family_first_seen` whether this client has sent this family before -- `None` on its first request, which is
+not novel to anything. The operating system is what R-B-L4-004 sets against the stack fingerprint the client's
+connections carry.
 """
 
 import logging
@@ -52,6 +66,9 @@ from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.bucket_peak import BucketPeakTracker
+from morpheus.utils.bucket_peak import measure_rows
+from morpheus.utils.bucket_peak import ratios_to_reference
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
@@ -61,11 +78,23 @@ from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.ratio_window import RatioWindowTracker
+from morpheus.utils.user_agent import user_agent_family
+from morpheus.utils.user_agent import user_agent_os
+from morpheus.utils.value_novelty import ValueNoveltyTracker
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_WINDOW_SECONDS = 600
 """Trailing window both measurements are taken over. Ten minutes, which is what R-D-L7-005 names."""
+
+DEFAULT_BASELINE_BUCKET_SECONDS = 86400
+"""The period a client's busiest window is kept per. A day."""
+
+DEFAULT_BASELINE_WINDOW_SECONDS = 30 * 86400
+"""How far back a client's days reach."""
+
+DEFAULT_BASELINE_MIN_DAYS = 7
+"""Days of history a client needs before it has a baseline. A week, so a weekly rhythm is in it."""
 
 CLIENT_KEY = "http_client_key"
 STATUS_CLASS = "http_status_class"
@@ -74,6 +103,13 @@ SUCCESSES = "http_2xx_in_window"
 ERROR_RATIO = "http_4xx_to_2xx_ratio"
 DISTINCT_PATHS = "http_distinct_paths"
 WINDOW_SATURATED = "http_window_saturated"
+DISTINCT_PATHS_BASELINE = "http_distinct_paths_baseline"
+DISTINCT_PATHS_BASELINE_DAYS = "http_distinct_paths_baseline_days"
+DISTINCT_PATHS_BASELINE_MATURE = "http_distinct_paths_baseline_mature"
+DISTINCT_PATHS_RATIO = "http_distinct_paths_ratio"
+UA_FAMILY = "http_ua_family"
+UA_OS = "http_ua_os"
+UA_FAMILY_FIRST_SEEN = "http_ua_family_first_seen"
 
 
 @register_stage("tc7-http", ignore_args=["key_columns"])
@@ -94,6 +130,9 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Column holding the HTTP response status.
     path_column : str, default = "url_path"
         Column holding the requested path, without its query string.
+    user_agent_column : str, default = "user_agent"
+        Column holding the request's `User-Agent` header. The column may be absent, in which case the user-agent
+        columns are null.
     time_column : str, default = "event_time"
         Column holding the request's event time. Event time, never ingest time.
     time_unit : str, default = "ns"
@@ -104,6 +143,12 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Requests retained per client regardless of the window.
     max_entities : int, default = 500000
         Clients tracked before the least recently seen is forgotten.
+    baseline_bucket_seconds : int, default = 86400
+        The period a client's busiest window of distinct paths is kept per.
+    baseline_window_seconds : int, default = 2592000
+        How far back those periods reach.
+    baseline_min_days : int, default = 7
+        Periods of history a client needs before `http_distinct_paths_baseline` is published.
     """
 
     def __init__(self,
@@ -111,11 +156,15 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  key_columns: list[str] = None,
                  status_column: str = "status_code",
                  path_column: str = "url_path",
+                 user_agent_column: str = "user_agent",
                  time_column: str = "event_time",
                  time_unit: str = "ns",
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  max_samples: int = 4096,
-                 max_entities: int = 500_000):
+                 max_entities: int = 500_000,
+                 baseline_bucket_seconds: int = DEFAULT_BASELINE_BUCKET_SECONDS,
+                 baseline_window_seconds: int = DEFAULT_BASELINE_WINDOW_SECONDS,
+                 baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS):
         super().__init__(c)
 
         if (window_seconds <= 0):
@@ -129,6 +178,7 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._key_columns = key_columns
         self._status_column = status_column
         self._path_column = path_column
+        self._user_agent_column = user_agent_column
         self._time_column = time_column
         self._time_unit = time_unit
 
@@ -141,6 +191,12 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                                              max_samples=max_samples,
                                              max_entities=max_entities)
         self._paths = DistinctWindowTracker(window_ns=window_ns, max_samples=max_samples, max_entities=max_entities)
+        self._baseline = BucketPeakTracker(bucket_ns=baseline_bucket_seconds * NS_PER_SECOND,
+                                           window_ns=baseline_window_seconds * NS_PER_SECOND,
+                                           min_buckets=baseline_min_days,
+                                           max_entities=max_entities)
+        # A client opens a dozen connections in one second, so requests at one instant are measured, not refused.
+        self._agents = ValueNoveltyTracker([UA_FAMILY], max_entities=max_entities, simultaneous=True)
 
         self._needed_columns[CLIENT_KEY] = TypeId.STRING
         self._needed_columns[STATUS_CLASS] = TypeId.STRING
@@ -149,6 +205,13 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._needed_columns[ERROR_RATIO] = TypeId.FLOAT64
         self._needed_columns[DISTINCT_PATHS] = TypeId.INT64
         self._needed_columns[WINDOW_SATURATED] = TypeId.BOOL8
+        self._needed_columns[DISTINCT_PATHS_BASELINE] = TypeId.INT64
+        self._needed_columns[DISTINCT_PATHS_BASELINE_DAYS] = TypeId.INT64
+        self._needed_columns[DISTINCT_PATHS_BASELINE_MATURE] = TypeId.BOOL8
+        self._needed_columns[DISTINCT_PATHS_RATIO] = TypeId.FLOAT64
+        self._needed_columns[UA_FAMILY] = TypeId.STRING
+        self._needed_columns[UA_OS] = TypeId.STRING
+        self._needed_columns[UA_FAMILY_FIRST_SEEN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -223,6 +286,8 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             statuses = to_host_list(df, self._status_column)
             paths = to_host_list(df, self._path_column)
             raw_times = to_host_list(df, self._time_column)
+            agents = (to_host_list(df, self._user_agent_column) if self._user_agent_column in df.columns else [None] *
+                      len(statuses))
 
             keys: list = []
             classes: list = []
@@ -231,6 +296,10 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             ratios: list = []
             distinct: list = []
             saturated: list = []
+            times: list = []
+            families: list = []
+            systems: list = []
+            first_seen: list = []
             unusable = 0
             unordered = 0
 
@@ -246,6 +315,18 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
                 keys.append(key)
                 classes.append(status_class)
+                times.append(event_time_ns)
+
+                family = user_agent_family(agents[position])
+                families.append(family)
+                systems.append(user_agent_os(agents[position]))
+
+                # A request with no header says nothing about the client's software, so it is not a sample of it.
+                if (key is None or event_time_ns is None or family is None):
+                    first_seen.append(None)
+                else:
+                    novelty = self._agents.observe(key, event_time_ns, {UA_FAMILY: family})
+                    first_seen.append(novelty.first_seen[UA_FAMILY])
 
                 if (key is None or event_time_ns is None):
                     unusable += 1
@@ -294,6 +375,17 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             assign_nullable_float_column(df, ERROR_RATIO, ratios)
             assign_nullable_int_column(df, DISTINCT_PATHS, distinct)
             assign_nullable_bool_column(df, WINDOW_SATURATED, saturated)
+
+            # The day's busiest window per client, after the window counts so each row is measured as it was counted.
+            measured = measure_rows(self._baseline, keys, distinct, times)
+
+            assign_nullable_int_column(df, DISTINCT_PATHS_BASELINE, measured.references)
+            assign_nullable_int_column(df, DISTINCT_PATHS_BASELINE_DAYS, measured.buckets)
+            assign_nullable_bool_column(df, DISTINCT_PATHS_BASELINE_MATURE, measured.mature)
+            assign_nullable_float_column(df, DISTINCT_PATHS_RATIO, ratios_to_reference(measured, distinct))
+            assign_str_column(df, UA_FAMILY, families)
+            assign_str_column(df, UA_OS, systems)
+            assign_nullable_bool_column(df, UA_FAMILY_FIRST_SEEN, first_seen)
 
             if (unusable > 0):
                 logger.warning(

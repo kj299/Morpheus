@@ -220,3 +220,43 @@ def test_a_missing_address_column_is_refused(config: Config):
 def test_a_non_positive_bin_is_refused(config: Config):
     with pytest.raises(ValueError, match="bin_seconds"):
         TC4FlowStage(config, bin_seconds=0)
+
+
+WINDOWS = ("mss,nop,ws,nop,nop,sok", 1460, 64240)
+LINUX = ("MSS,SACK_PERM,TS,NOP,WS", 1460, 29200)
+
+
+def with_stacks(payload: dict, stacks: list) -> dict:
+    payload["tcp_options_order"] = [None if stack is None else stack[0] for stack in stacks]
+    payload["tcp_mss"] = [None if stack is None else stack[1] for stack in stacks]
+    payload["tcp_window_initial"] = [None if stack is None else stack[2] for stack in stacks]
+
+    return payload
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_syn_carries_its_stack_and_its_family(config: Config):
+    result = run(config, with_stacks(records([SYN, SYN_ACK]), [WINDOWS, None]))
+
+    assert list(result["stack_fingerprint"])[0] == "mss,nop,ws,nop,nop,sok|1460|64240"
+    assert list(result["stack_os_family"])[0] == "windows"
+    assert pd.isna(result["stack_fingerprint"].iloc[1])
+    assert pd.isna(result["stack_os_family"].iloc[1])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_host_s_second_stack_is_new_to_it_and_its_first_is_new_to_nothing(config: Config):
+    result = run(config, with_stacks(records([SYN, SYN, SYN, SYN]), [WINDOWS, WINDOWS, LINUX, LINUX]))
+    first_seen = list(result["stack_fingerprint_first_seen"])
+
+    assert pd.isna(first_seen[0])
+    assert [bool(value) for value in first_seen[1:]] == [False, True, False]
+    assert list(result["stack_os_family"]) == ["windows", "windows", "linux", "linux"]
+
+
+@pytest.mark.cpu_mode
+def test_without_option_columns_the_stack_columns_are_null(config: Config):
+    result = run(config, records([SYN]))
+
+    assert result["stack_fingerprint"].isna().all()
+    assert result["stack_fingerprint_first_seen"].isna().all()

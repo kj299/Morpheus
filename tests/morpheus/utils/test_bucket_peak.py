@@ -208,3 +208,16 @@ def test_constructor_validation():
 
     with pytest.raises(ValueError, match="max_entities"):
         tracker(max_entities=0)
+
+
+def test_a_ratio_is_the_value_over_the_reference_it_was_measured_against():
+    from morpheus.utils.bucket_peak import MeasuredRows  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.bucket_peak import ratios_to_reference  # pylint: disable=import-outside-toplevel
+
+    measured = MeasuredRows(references=[4, None, 0, 2],
+                            buckets=[1, 0, 1, 1],
+                            mature=[True, False, True, True],
+                            steps=[0, None, 3, None])
+
+    # A reference below one is read as one, rather than divided by.
+    assert ratios_to_reference(measured, [8, 5, 3, None]) == [2.0, None, 3.0, None]

@@ -216,9 +216,9 @@ def main() -> int:
     _scored(by_sourcetype, handshakes, "morpheus:score:l6")
     _health(by_sourcetype, presentation_pipeline, handshakes)
 
-    # Layer 7's DNS, HTTP, SaaS and endpoint classes share one sourcetype, as layer 2's classes do. The SaaS and
-    # endpoint classes come from their own pipelines, because they read the TC-0 context store -- and the SaaS one
-    # seals weekly windows besides.
+    # Layer 7's DNS, HTTP, service, SaaS and endpoint classes share one sourcetype, as layer 2's classes do. The
+    # SaaS and endpoint classes come from their own pipelines, because they read the TC-0 context store -- and the
+    # SaaS one seals weekly windows besides.
     requests = application_pipeline.run_pipeline(application_pipeline.build_pipeline_config(),
                                                  application_pipeline.build_corpus())
     operations = saas_pipeline.run_pipeline(saas_pipeline.build_pipeline_config(), saas_pipeline.build_corpus())
@@ -245,13 +245,18 @@ def main() -> int:
     edges = pd.concat([estate_edges, campaign_pipeline.build_edges(campaign_config, campaign)], ignore_index=True)
     by_sourcetype["morpheus:edge"] = _render(edges, "morpheus:edge")
 
-    # The TC-0 context store: every version the two producers recorded, refused ones included, because a count of
+    # The TC-0 context store: every version the three producers recorded, refused ones included, because a count of
     # refusals is something an estate should be able to see on its search head. The probes are the harness's own
     # and are not sent anywhere.
     context = context_pipeline.run_pipeline(context_pipeline.build_pipeline_config(), context_pipeline.build_corpus())
 
-    for (name, sourcetype) in ((context_pipeline.IDENTITY_CLASS, "context:identity"), (context_pipeline.ASSET_CLASS,
-                                                                                       "context:asset")):
+    context_sourcetypes = [
+        (context_pipeline.IDENTITY_CLASS, "context:identity"),
+        (context_pipeline.ASSET_CLASS, "context:asset"),
+        (context_pipeline.APPLICATION_CLASS, "context:application"),
+    ]
+
+    for (name, sourcetype) in context_sourcetypes:
         rows = context[context["telemetry_class"] == name]
         by_sourcetype[sourcetype] = _render(rows.dropna(axis=1, how="all"), sourcetype)
 

@@ -62,6 +62,7 @@ from morpheus.stages.lineage.pipeline_health_stage import PipelineHealthStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
+from morpheus.stages.telemetry.tc0_application_stage import TC0ApplicationStage
 from morpheus.stages.telemetry.tc0_asset_stage import TC0AssetStage
 from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
 from morpheus.stages.telemetry.tc0_identity_stage import TC0IdentityStage
@@ -100,6 +101,7 @@ from morpheus.stages.telemetry.tc7_dns_stage import TC7DnsStage
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
 from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage
+from morpheus.stages.telemetry.tc7_service_stage import TC7ServiceStage
 from morpheus.utils.binding_table import Binding
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.bitemporal import MEMBERSHIP
@@ -412,7 +414,7 @@ def packets() -> dict:
 
     rows.sort()
 
-    return {
+    return _with_stacks({
         "src_ip": [row[1] for row in rows],
         "src_port": [row[2] for row in rows],
         "dst_ip": [row[3] for row in rows],
@@ -420,7 +422,35 @@ def packets() -> dict:
         "tcp_flags": [row[5] for row in rows],
         "data_len": [row[6] for row in rows],
         "event_time": [row[0] for row in rows],
-    }
+    })
+
+
+WINDOWS_SYN = ("mss,nop,ws,nop,nop,sok", 1460, 64240)
+
+
+def _with_stacks(frame: dict) -> dict:
+    """The options, segment size and window of every SYN in the frame; nothing on any other packet."""
+    syns = [bool(flags & SYN) and not flags & ACK for flags in frame["tcp_flags"]]
+    frame["tcp_options_order"] = [WINDOWS_SYN[0] if syn else None for syn in syns]
+    frame["tcp_mss"] = [WINDOWS_SYN[1] if syn else None for syn in syns]
+    frame["tcp_window_initial"] = [WINDOWS_SYN[2] if syn else None for syn in syns]
+
+    return frame
+
+
+def _two_stacks() -> dict:
+    """One host's SYN, another's, then the first again: a cap of one host forgets the first in between."""
+    sources = ["10.0.0.5", "10.0.0.6", "10.0.0.5"]
+
+    return _with_stacks({
+        "src_ip": sources,
+        "src_port": [50000, 50001, 50002],
+        "dst_ip": ["10.0.0.9"] * 3,
+        "dst_port": [443] * 3,
+        "tcp_flags": [SYN] * 3,
+        "data_len": [0] * 3,
+        "event_time": [10**18 + index * SECOND for index in range(3)],
+    })
 
 
 def dns_queries() -> dict:
@@ -428,7 +458,9 @@ def dns_queries() -> dict:
     names = [f"chunk{index}x9q2k7m4v8b3n6c1z5p0w.evil.com" for index in range(10)]
 
     return {
+        "src_ip": ["10.0.0.5"] * 10,
         "query_name": names,
+        "response_code": ["NXDOMAIN" if index % 2 else "NOERROR" for index in range(10)],
         "event_time": [10**18 + index * 120 * SECOND for index in range(10)],
     }
 
@@ -443,7 +475,27 @@ def _two_domains() -> dict:
         names.append(f"b{index}x9q2k7m4v8b3n6c1z5p0w.other.com")
         times.extend([10**18 + index * 60 * SECOND, 10**18 + index * 60 * SECOND + SECOND])
 
-    return {"query_name": names, "event_time": times}
+    return {"src_ip": ["10.0.0.5"] * len(names), "query_name": names, "event_time": times}
+
+
+def _dns_days() -> dict:
+    """One client's queries on eight days, two hours apart each day, so a baseline has days to mature over and
+    an hourly bucket has more periods than a daily one."""
+    names = []
+    times = []
+
+    for day in range(8):
+        for (hour, count) in ((9, 3), (11, 2)):
+            for index in range(count):
+                names.append(f"d{day}h{hour}q{index}.example.com")
+                times.append(day * DAY + hour * HOUR + index * MINUTE)
+
+    return {
+        "src_ip": ["10.0.0.5"] * len(names),
+        "query_name": names,
+        "response_code": ["NOERROR"] * len(names),
+        "event_time": times,
+    }
 
 
 def http_requests() -> dict:
@@ -455,8 +507,8 @@ def http_requests() -> dict:
 
     for index in range(10):
         base = 10**18 + index * 120 * SECOND
-        rows.append((base, "10.0.0.5", f"/p{index}", 404 if index % 3 else 200))
-        rows.append((base + 5 * SECOND, "10.0.0.6", f"/q{index}", 200))
+        rows.append((base, "10.0.0.5", f"/p{index}", 404 if index % 3 else 200, BROWSER if index < 5 else "curl/8.4.0"))
+        rows.append((base + 5 * SECOND, "10.0.0.6", f"/q{index}", 200, BROWSER))
 
     rows.sort()
 
@@ -465,10 +517,115 @@ def http_requests() -> dict:
         "src_ip": [row[1] for row in rows],
         "url_path": [row[2] for row in rows],
         "status_code": [row[3] for row in rows],
+        "user_agent": [row[4] for row in rows],
+    }
+
+
+BROWSER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+
+def _http_days() -> dict:
+    """One client's requests on eight days, in two hours of each, for the same reason as `_dns_days`."""
+    rows = []
+
+    for day in range(8):
+        for (hour, count) in ((9, 3), (11, 2)):
+            for index in range(count):
+                rows.append((day * DAY + hour * HOUR + index * MINUTE, f"/d{day}/h{hour}/{index}"))
+
+    return {
+        "event_time": [row[0] for row in rows],
+        "src_ip": ["10.0.0.5"] * len(rows),
+        "url_path": [row[1] for row in rows],
+        "status_code": [200] * len(rows),
+        "user_agent": [BROWSER] * len(rows),
     }
 
 
 DAY = 24 * HOUR
+
+
+def service_connections() -> dict:
+    """Two services interleaved: a named one on a shared proxy reached by three clients, one of them on a second
+    client fingerprint, and an unnamed one reached by one. Interleaved for the entity cap, as everywhere else."""
+    rows = []
+
+    for index in range(6):
+        base = 10**18 + index * 120 * SECOND
+        client = f"10.0.0.{5 + index % 3}"
+        fingerprint = "t13d1516h2_8daaf6152771_b186095e22b6" if index < 4 else "t13d0000h0_aaaa_bbbb"
+        rows.append((base, client, "10.0.2.10", 443, "Wiki.Corp.Example", 1000 * (index + 1), fingerprint))
+        rows.append(
+            (base + 5 * SECOND, "10.0.0.9", "10.0.2.20", 8443, None, 50, "t13d0312h2_55b375c5d22e_cd85d2d88918"))
+
+    rows.sort(key=lambda row: row[0])
+
+    return {
+        "event_time": [row[0] for row in rows],
+        "src_ip": [row[1] for row in rows],
+        "dst_ip": [row[2] for row in rows],
+        "dst_port": [row[3] for row in rows],
+        "sni": [row[4] for row in rows],
+        "bytes_total": [row[5] for row in rows],
+        "ja4_client": [row[6] for row in rows],
+    }
+
+
+def _service_days() -> dict:
+    """One service reached by two clients a day for seven days, then by four, in two hours of each day."""
+    rows = []
+
+    for day in range(8):
+        clients = 4 if day == 7 else 2
+
+        for hour in (9, 11):
+            for index in range(clients):
+                rows.append((day * DAY + hour * HOUR + index * MINUTE, f"10.0.0.{5 + index}"))
+
+    return {
+        "event_time": [row[0] for row in rows],
+        "src_ip": [row[1] for row in rows],
+        "dst_ip": ["10.0.2.10"] * len(rows),
+        "dst_port": [443] * len(rows),
+        "sni": ["wiki.corp.example"] * len(rows),
+        "bytes_total": [100] * len(rows),
+        "ja4_client": ["t13d1516h2_8daaf6152771_b186095e22b6"] * len(rows),
+    }
+
+
+def application_records() -> dict:
+    """A server's two ports, one of them reassigned to another application and recorded two days late."""
+    return {
+        "server_address": ["10.0.2.50", "10.0.2.50", "10.0.2.50"],
+        "server_port": [8443, 8443, 443],
+        "name": ["billing", "reporting", "billing-web"],
+        "owning_team": ["finance-it", "analytics", "finance-it"],
+        "service_account": ["svc-billing", "svc-reporting", "svc-billing"],
+        "criticality": ["high", "medium", "high"],
+        "data_classification": ["confidential", "internal", "confidential"],
+        "valid_from": [0, 10 * DAY, 0],
+        "valid_to": [None, None, None],
+        "recorded_at": [0, 12 * DAY, 0],
+        "change": ["assert", "assert", "retract"],
+    }
+
+
+def _application_store() -> BitemporalStore:
+    return BitemporalStore("application",
+                           [
+                               make_version("application", "10.0.2.50:8443", 0, None, 0, values={"name": "billing"}),
+                               make_version("application", "10.0.2.50:443", 0, None, 0, values={"name": "billing-web"}),
+                           ])
+
+
+def application_probes() -> dict:
+    """Connections to the two ports of one server: an application is keyed on both columns, not either."""
+    return {
+        "user_principal": ["alice", "bob"],
+        "dst_ip": ["10.0.2.50", "10.0.2.50"],
+        "dst_port": [8443, 443],
+        "event_time": [DAY, DAY],
+    }
 
 
 def identity_records() -> dict:
@@ -653,6 +810,7 @@ def handshakes() -> dict:
         "content_type_detected": [row[8] for row in rows],
         "certificate_not_before": [row[0] - 10 * 86400 * SECOND for row in rows],
         "certificate_not_after": [row[0] + 80 * 86400 * SECOND for row in rows],
+        "sni": ["Shop.Example" if row[2] == "93.184.216.34" else None for row in rows],
     }
 
 
@@ -1559,6 +1717,10 @@ REGISTRY: dict = {
                      Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
                      Knob("bin_seconds", DIFFERS, benign=60, extreme=600),
                      Knob("max_flows", DIFFERS, benign=500000, extreme=1),
+                     Knob("options_column", INPUT_COLUMN, benign="tcp_options_order"),
+                     Knob("mss_column", INPUT_COLUMN, benign="tcp_mss"),
+                     Knob("window_column", INPUT_COLUMN, benign="tcp_window_initial"),
+                     Knob("max_hosts", DIFFERS, benign=100000, extreme=1, frame=_two_stacks),
                  )),
     "TC4EnvelopeStage":
         Scenario(stage=TC4EnvelopeStage,
@@ -1596,11 +1758,12 @@ REGISTRY: dict = {
             base={"min_samples": 3},
             knobs=(
                 Knob("key_columns", DIFFERS, benign=["dst_ip"], extreme=["dst_ip", "src_ip"]),
+                Knob("name_column", INPUT_COLUMN, benign="sni"),
                 Knob("issuer_column", INPUT_COLUMN, benign="certificate_issuer"),
                 Knob("validation_column", INPUT_COLUMN, benign="validation_result"),
-                # The reference is keyed on the destination by default, so renaming the destination
-                # column has to move the key with it or the two runs are keyed on different things.
-                Knob("destination_column", INPUT_COLUMN, benign="dst_ip", also={"key_columns": ["renamed_dst_ip"]}),
+                # The default key is read from the destination column itself, so renaming it moves the key with
+                # it; an explicit `key_columns` would replace the name-qualified key and compare different things.
+                Knob("destination_column", INPUT_COLUMN, benign="dst_ip"),
                 Knob("not_before_column", INPUT_COLUMN, benign="certificate_not_before"),
                 Knob("not_after_column", INPUT_COLUMN, benign="certificate_not_after"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
@@ -1685,6 +1848,28 @@ REGISTRY: dict = {
                      also={
                          "store": _host_store(), "entity_column": "hostname"
                      }),
+                Knob("entity_columns",
+                     DIFFERS,
+                     benign=["dst_ip", "dst_port"],
+                     extreme=["dst_ip"],
+                     frame=application_probes,
+                     also={"store": _application_store()}),
+            ),
+        ),
+    "TC0ApplicationStage":
+        Scenario(
+            stage=TC0ApplicationStage,
+            frame=application_records,
+            base={},
+            knobs=(
+                Knob("address_column", INPUT_COLUMN, benign="server_address"),
+                Knob("port_column", INPUT_COLUMN, benign="server_port"),
+                Knob("application_columns", DIFFERS, benign=None, extreme=["service_account"]),
+                Knob("valid_from_column", DIFFERS, benign="valid_from", extreme="recorded_at"),
+                Knob("valid_to_column", DIFFERS, benign="valid_to", extreme="valid_from"),
+                Knob("recorded_column", DIFFERS, benign="recorded_at", extreme="valid_from"),
+                Knob("change_column", DIFFERS, benign="change", extreme="no_such_column"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
             ),
         ),
     "TC7DnsStage":
@@ -1692,12 +1877,23 @@ REGISTRY: dict = {
                  frame=dns_queries,
                  base={},
                  knobs=(
+                     Knob("key_columns", DIFFERS, benign=["src_ip"], extreme=["query_name"]),
                      Knob("query_column", INPUT_COLUMN, benign="query_name"),
+                     Knob("response_column", INPUT_COLUMN, benign="response_code"),
                      Knob("time_column", INPUT_COLUMN, benign="event_time"),
                      Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
                      Knob("window_seconds", DIFFERS, benign=3600, extreme=300),
                      Knob("max_samples", DIFFERS, benign=4096, extreme=3),
                      Knob("max_entities", DIFFERS, benign=500000, extreme=1, frame=_two_domains),
+                     Knob("min_queries", DIFFERS, benign=20, extreme=2),
+                     Knob("baseline_bucket_seconds", DIFFERS, benign=86400, extreme=3600, frame=_dns_days),
+                     Knob("baseline_window_seconds",
+                          DIFFERS,
+                          benign=2592000,
+                          extreme=2 * 86400,
+                          frame=_dns_days,
+                          also={"baseline_min_days": 1}),
+                     Knob("baseline_min_days", DIFFERS, benign=7, extreme=1, frame=_dns_days),
                  )),
     "TC7HttpStage":
         Scenario(stage=TC7HttpStage,
@@ -1707,11 +1903,45 @@ REGISTRY: dict = {
                      Knob("key_columns", DIFFERS, benign=["src_ip"], extreme=["url_path"]),
                      Knob("status_column", INPUT_COLUMN, benign="status_code"),
                      Knob("path_column", INPUT_COLUMN, benign="url_path"),
+                     Knob("user_agent_column", INPUT_COLUMN, benign="user_agent"),
                      Knob("time_column", INPUT_COLUMN, benign="event_time"),
                      Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
                      Knob("window_seconds", DIFFERS, benign=600, extreme=60),
                      Knob("max_samples", DIFFERS, benign=4096, extreme=2),
                      Knob("max_entities", DIFFERS, benign=500000, extreme=1),
+                     Knob("baseline_bucket_seconds", DIFFERS, benign=86400, extreme=3600, frame=_http_days),
+                     Knob("baseline_window_seconds",
+                          DIFFERS,
+                          benign=2592000,
+                          extreme=2 * 86400,
+                          frame=_http_days,
+                          also={"baseline_min_days": 1}),
+                     Knob("baseline_min_days", DIFFERS, benign=7, extreme=1, frame=_http_days),
+                 )),
+    "TC7ServiceStage":
+        Scenario(stage=TC7ServiceStage,
+                 frame=service_connections,
+                 base={},
+                 knobs=(
+                     Knob("client_column", INPUT_COLUMN, benign="src_ip"),
+                     Knob("address_column", INPUT_COLUMN, benign="dst_ip"),
+                     Knob("port_column", INPUT_COLUMN, benign="dst_port"),
+                     Knob("name_column", INPUT_COLUMN, benign="sni"),
+                     Knob("bytes_column", INPUT_COLUMN, benign="bytes_total"),
+                     Knob("fingerprint_column", INPUT_COLUMN, benign="ja4_client"),
+                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                     Knob("window_seconds", DIFFERS, benign=3600, extreme=300),
+                     Knob("max_samples", DIFFERS, benign=4096, extreme=2),
+                     Knob("max_entities", DIFFERS, benign=100000, extreme=1),
+                     Knob("baseline_bucket_seconds", DIFFERS, benign=86400, extreme=3600, frame=_service_days),
+                     Knob("baseline_window_seconds",
+                          DIFFERS,
+                          benign=2592000,
+                          extreme=2 * 86400,
+                          frame=_service_days,
+                          also={"baseline_min_days": 1}),
+                     Knob("baseline_min_days", DIFFERS, benign=7, extreme=1, frame=_service_days),
                  )),
     "TC7SaasStage":
         Scenario(

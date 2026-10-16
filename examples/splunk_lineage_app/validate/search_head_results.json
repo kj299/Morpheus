@@ -1,53 +1,55 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-15T12:08:00.157976+00:00",
+  "at": "2026-10-16T18:41:36.320758+00:00",
   "timestamp_shift_weeks": 2954,
   "dispatch_window": {
     "earliest": 1786492800,
-    "latest": 1792069569
+    "latest": 1792179561
   },
   "indexed": {
     "binding:bucketed": 2498,
     "binding:l1": 23,
     "binding:l2": 19,
+    "context:application": 3,
     "context:asset": 7,
     "context:identity": 23,
     "morpheus:edge": 2751,
-    "morpheus:health": 851,
+    "morpheus:health": 889,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
     "morpheus:score:l1": 793,
     "morpheus:score:l2": 1501,
     "morpheus:score:l3": 1525,
-    "morpheus:score:l4": 987,
+    "morpheus:score:l4": 1011,
     "morpheus:score:l5": 661,
-    "morpheus:score:l6": 296,
-    "morpheus:score:l7": 4484
+    "morpheus:score:l6": 313,
+    "morpheus:score:l7": 8106
   },
   "expected_indexed": {
     "binding:bucketed": 2498,
     "binding:l1": 23,
     "binding:l2": 19,
+    "context:application": 3,
     "context:asset": 7,
     "context:identity": 23,
     "morpheus:edge": 2751,
-    "morpheus:health": 851,
+    "morpheus:health": 889,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
     "morpheus:score:l1": 793,
     "morpheus:score:l2": 1501,
     "morpheus:score:l3": 1525,
-    "morpheus:score:l4": 987,
+    "morpheus:score:l4": 1011,
     "morpheus:score:l5": 661,
-    "morpheus:score:l6": 296,
-    "morpheus:score:l7": 4484
+    "morpheus:score:l6": 313,
+    "morpheus:score:l7": 8106
   },
   "btool_check": "",
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-5483176.000000",
-        "min_drift": "-5486778.000000"
+        "max_drift": "-5593173.000000",
+        "min_drift": "-5596775.000000"
       }
     ],
     "binding_tables": [
@@ -95,8 +97,8 @@
       }
     ],
     "risk_records": {
-      "written": 209,
-      "indexed": 209,
+      "written": 213,
+      "indexed": 213,
       "by_rule": [
         {
           "rule_id": "R-B-L1-005",
@@ -143,6 +145,10 @@
           "count": "1"
         },
         {
+          "rule_id": "R-B-L4-004",
+          "count": "1"
+        },
+        {
           "rule_id": "R-B-L4-005",
           "count": "6"
         },
@@ -177,6 +183,14 @@
         {
           "rule_id": "R-B-L7-004",
           "count": "11"
+        },
+        {
+          "rule_id": "R-B-L7-007",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L7-008",
+          "count": "1"
         },
         {
           "rule_id": "R-C-001",
@@ -260,7 +274,7 @@
         },
         {
           "rule_id": "R-D-L6-002",
-          "count": "2"
+          "count": "3"
         },
         {
           "rule_id": "R-D-L6-003",
@@ -329,6 +343,7 @@
     "R-D-L4-002 - SYN without completion",
     "R-D-L4-003 - RST ratio",
     "R-B-L4-005 - Transfer envelope breach",
+    "R-B-L4-004 - Stack fingerprint mismatch",
     "R-B-L6-001 - New TLS client fingerprint",
     "R-D-L6-002 - Certificate issuer anomaly",
     "R-D-L6-003 - Self-signed to external destination",
@@ -337,6 +352,8 @@
     "TLS table coverage - unrecognized values",
     "R-B-L7-001 - DNS tunneling",
     "R-D-L7-005 - Enumeration",
+    "R-B-L7-007 - Service reached by new clients",
+    "R-B-L7-008 - Domain generation",
     "R-B-L7-002 - Bulk data access",
     "R-B-L7-004 - Process ancestry novelty",
     "R-D-L2-001 - MAC address count exceeded on an access port",
@@ -462,7 +479,7 @@
     },
     "Host evidence - one machine across layers": {
       "phase": "search",
-      "rows": 17
+      "rows": 19
     },
     "Identity walk - sign-in to switch port": {
       "phase": "search",
@@ -508,13 +525,17 @@
       "phase": "search",
       "rows": 6
     },
+    "R-B-L4-004 - Stack fingerprint mismatch": {
+      "phase": "search",
+      "rows": 1
+    },
     "R-B-L6-001 - New TLS client fingerprint": {
       "phase": "search",
       "rows": 5
     },
     "R-D-L6-002 - Certificate issuer anomaly": {
       "phase": "search",
-      "rows": 2
+      "rows": 3
     },
     "R-D-L6-003 - Self-signed to external destination": {
       "phase": "search",
@@ -539,6 +560,14 @@
     "R-D-L7-005 - Enumeration": {
       "phase": "search",
       "rows": 2
+    },
+    "R-B-L7-007 - Service reached by new clients": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L7-008 - Domain generation": {
+      "phase": "search",
+      "rows": 1
     },
     "R-B-L7-002 - Bulk data access": {
       "phase": "search",
@@ -626,7 +655,7 @@
     },
     "Behavior summary - per-layer scores": {
       "phase": "summary",
-      "rows": 5447
+      "rows": 5743
     },
     "R-P-L3-005 - Fan-out trajectory": {
       "phase": "trajectory",

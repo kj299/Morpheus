@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-The TC-0 context store, its two producers, and the point-in-time join, for the determinism harness.
+The TC-0 context store, its three producers, and the point-in-time join, for the determinism harness.
 
 TC-0 is not an OSI layer and has no rules of its own. What it has is a requirement the guide calls hard: every record
 bitemporal, so that "was this user in Finance on March 3rd" can be answered both as it is understood now and as it was
@@ -35,6 +35,9 @@ with a single time axis, so this one is built from the cases where the two axes 
 - a **peer group change recorded late**: a workstation that followed its owner into Finance a day before the
   inventory noticed;
 - a **decommissioned host**, absent from a snapshot the way the departed contractor is;
+- a **server reassigned and recorded late**: a billing service's port handed to a reporting service on day nine and
+  the CMDB updated on day ten, so a connection on day nine was to billing as anyone knew then and to reporting as is
+  now understood;
 - and two records the store must refuse: one with no instant of recording, and one whose interval ends before it
   begins.
 
@@ -53,6 +56,9 @@ from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
+from morpheus.stages.telemetry.tc0_application_stage import APPLICATION
+from morpheus.stages.telemetry.tc0_application_stage import DEFAULT_APPLICATION_COLUMNS
+from morpheus.stages.telemetry.tc0_application_stage import TC0ApplicationStage
 from morpheus.stages.telemetry.tc0_asset_stage import ASSET
 from morpheus.stages.telemetry.tc0_asset_stage import DEFAULT_ASSET_COLUMNS
 from morpheus.stages.telemetry.tc0_asset_stage import TC0AssetStage
@@ -66,6 +72,7 @@ from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import canonicalize
+from morpheus.utils.entity_key import compose_key
 
 DAY_SECONDS = 86400
 
@@ -74,14 +81,20 @@ IGNORE_COLUMNS: list[str] = []
 
 IDENTITY_CLASS = "tc0_identity"
 ASSET_CLASS = "tc0_asset"
+APPLICATION_CLASS = "tc0_application"
 IDENTITY_PROBES = "tc0_identity_probes"
 ASSET_PROBES = "tc0_asset_probes"
+APPLICATION_PROBES = "tc0_application_probes"
 
-PRODUCER_CLASSES = (IDENTITY_CLASS, ASSET_CLASS)
-PROBE_CLASSES = (IDENTITY_PROBES, ASSET_PROBES)
+PRODUCER_CLASSES = (IDENTITY_CLASS, ASSET_CLASS, APPLICATION_CLASS)
+PROBE_CLASSES = (IDENTITY_PROBES, ASSET_PROBES, APPLICATION_PROBES)
 CORPUS_CLASSES = PRODUCER_CLASSES + PROBE_CLASSES
 
-SETTINGS = {"profile_columns": list(DEFAULT_PROFILE_COLUMNS), "asset_columns": list(DEFAULT_ASSET_COLUMNS)}
+SETTINGS = {
+    "profile_columns": list(DEFAULT_PROFILE_COLUMNS),
+    "asset_columns": list(DEFAULT_ASSET_COLUMNS),
+    "application_columns": list(DEFAULT_APPLICATION_COLUMNS),
+}
 """The settings that decide the producers' output; a probe class adds the knowledge mode it was enriched under."""
 
 # Principals.
@@ -130,6 +143,23 @@ RECLASSIFIED_RECORDED_DAY = 7
 
 PEER_MOVE_RECORDED_DAY = 11
 """Bob's workstation joins the Finance peer group from day ten; the inventory notices on day eleven."""
+
+# Servers, as the CMDB keys them: an address and a port.
+BILLING_SERVER = ("10.0.2.50", 8443)
+LEDGER_API = ("10.0.2.51", 443)
+
+REASSIGN_DAY = 9
+REASSIGN_RECORDED_DAY = 10
+"""The billing service's port is handed to the reporting service on day nine; the CMDB is updated on day ten."""
+
+APPLICATIONS = {
+    "billing": ("finance-apps", "svc-billing", "high", "confidential"),
+    "reporting": ("analytics", "svc-reports", "medium", "internal"),
+    "ledger-api": ("finance-apps", "svc-ledger", "high", "restricted"),
+}
+"""Each application's owning team, service account, criticality and data classification."""
+
+PREFIX_APPLICATION = "ctx_application_"
 
 
 def at(day: float, hour: float = 0) -> int:
@@ -194,6 +224,25 @@ def _asset(host, owner, team, criticality, classification, peer, valid_from, rec
             "device_role": role,
             "os_family": os_family,
             "os_version": os_version,
+        })
+
+
+def _application(server, name, valid_from, recorded, change=bitemporal.ASSERT):
+    (team, account, criticality, classification) = APPLICATIONS[name]
+
+    return make_version(
+        APPLICATION,
+        compose_key(list(server)),
+        valid_from,
+        None,
+        recorded,
+        change,
+        {
+            "name": name,
+            "owning_team": team,
+            "service_account": account,
+            "criticality": criticality,
+            "data_classification": classification,
         })
 
 
@@ -313,6 +362,34 @@ def asset_log() -> list:
     return log
 
 
+def application_log() -> list:
+    """Every application-to-server version the CMDB records, in the order it records them."""
+    day0 = at(0, SNAPSHOT_HOUR)
+    log = [_application(BILLING_SERVER, "billing", at(0), day0), _application(LEDGER_API, "ledger-api", at(0), day0)]
+    log += [_application(BILLING_SERVER, "reporting", at(REASSIGN_DAY), at(REASSIGN_RECORDED_DAY, DELTA_HOUR))]
+
+    return log
+
+
+def _application_rows(log: list) -> list:
+    """The CMDB's records as its export states them: the server's address and port in two columns."""
+    rows = []
+
+    for version in log:
+        (address, port) = version.entity.rsplit(":", 1)
+        row = {"server_address": address, "server_port": int(port)}
+        row.update({name: version.attributes.get(name) for name in DEFAULT_APPLICATION_COLUMNS})
+        row.update({
+            bitemporal.VALID_FROM: version.valid_from_ns,
+            bitemporal.VALID_TO: version.valid_to_ns,
+            bitemporal.RECORDED_AT: version.recorded_ns,
+            bitemporal.CHANGE: version.change,
+        })
+        rows.append(row)
+
+    return rows
+
+
 def _rows(log: list, entity_column: str, columns: typing.Sequence[str], group_column: str = None) -> list:
     rows = []
 
@@ -377,6 +454,14 @@ INVERTED_ROW = {
 """A membership that ends before it begins. Refused."""
 
 
+def _server_probes(probes: list) -> pd.DataFrame:
+    frame = pd.DataFrame([{
+        "probe_id": probe_id, "dst_ip": server[0], "dst_port": server[1], "event_time": event_time
+    } for (probe_id, server, event_time) in probes])
+
+    return frame.sort_values("event_time", kind="mergesort").reset_index(drop=True)
+
+
 def _probes(entity_column: str, probes: list) -> pd.DataFrame:
     frame = pd.DataFrame([{
         "probe_id": probe_id, entity_column: entity, "event_time": event_time
@@ -407,9 +492,17 @@ ASSET_PROBE_EVENTS = [
     ("builder-after-decommission", BUILDER, at(16, 12)),
 ]
 
+APPLICATION_PROBE_EVENTS = [
+    ("billing-before-reassignment", BILLING_SERVER, at(5, 12)),
+    ("billing-port-unrecorded-reassignment", BILLING_SERVER, at(REASSIGN_DAY, 12)),
+    ("billing-port-after-recording", BILLING_SERVER, at(12, 12)),
+    ("ledger-api-day3", LEDGER_API, at(3, 12)),
+    ("unmapped-server", ("10.0.2.99", 443), at(3, 12)),
+]
+
 
 def build_corpus() -> dict[str, pd.DataFrame]:
-    """The fixed corpus: the identity and asset source records, and the probe events for each."""
+    """The fixed corpus: the identity, asset and application source records, and the probe events for each."""
     identity_rows = _rows(identity_log(), "user_principal", DEFAULT_PROFILE_COLUMNS, group_column="group_name")
     identity_rows += [dict(UNRECORDED_ROW), dict(INVERTED_ROW)]
 
@@ -418,6 +511,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
         ASSET_CLASS: _frame(_rows(asset_log(), "hostname", DEFAULT_ASSET_COLUMNS)),
         IDENTITY_PROBES: _probes("user_principal", IDENTITY_PROBE_EVENTS),
         ASSET_PROBES: _probes("hostname", ASSET_PROBE_EVENTS),
+        APPLICATION_CLASS: _frame(_application_rows(application_log())),
+        APPLICATION_PROBES: _server_probes(APPLICATION_PROBE_EVENTS),
     }
 
     # A context record is bitemporal: its valid time and its recording time are its clock, and it has no sensor or
@@ -496,7 +591,7 @@ def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None) -> pd.DataFrame:
     """
-    Run both producers, rebuild both stores from what they emitted, and enrich the probes against each twice.
+    Run the three producers, rebuild each store from what it emitted, and enrich the probes against each twice.
 
     Parameters
     ----------
@@ -518,15 +613,25 @@ def run_pipeline(config: Config,
 
     identity = _run(config, TC0IdentityStage(config), batches[IDENTITY_CLASS], IDENTITY_CLASS)
     asset = _run(config, TC0AssetStage(config), batches[ASSET_CLASS], ASSET_CLASS)
+    application = _run(config, TC0ApplicationStage(config), batches[APPLICATION_CLASS], APPLICATION_CLASS)
 
+    # Each probe class's store and how its probes name the entity: a principal, a host, or a server's address and
+    # port, which the application kind is keyed on.
     stores = {
-        IDENTITY_PROBES: (build_store("identity", identity), "user_principal"),
-        ASSET_PROBES: (build_store("asset", asset), "hostname"),
+        IDENTITY_PROBES: (build_store("identity", identity), {
+            "entity_column": "user_principal"
+        }),
+        ASSET_PROBES: (build_store("asset", asset), {
+            "entity_column": "hostname"
+        }),
+        APPLICATION_PROBES: (build_store("application", application), {
+            "entity_columns": ["dst_ip", "dst_port"], "prefix": PREFIX_APPLICATION, "set_kinds": {}
+        }),
     }
 
     frames = []
 
-    for (name, produced) in ((IDENTITY_CLASS, identity), (ASSET_CLASS, asset)):
+    for (name, produced) in ((IDENTITY_CLASS, identity), (ASSET_CLASS, asset), (APPLICATION_CLASS, application)):
         produced["telemetry_class"] = name
         # A refused row has no identifier of its own, so it is keyed by its position in the source instead.
         produced["row_key"] = [
@@ -536,12 +641,12 @@ def run_pipeline(config: Config,
         frames.append(produced)
 
     for name in PROBE_CLASSES:
-        (store, entity_column) = stores[name]
+        (store, lookup) = stores[name]
 
         for knowledge in KNOWLEDGE_MODES:
             settings = {**SETTINGS, "knowledge": knowledge}
             enriched = _run(config,
-                            TC0EnrichStage(config, store=store, entity_column=entity_column, knowledge=knowledge),
+                            TC0EnrichStage(config, store=store, knowledge=knowledge, **lookup),
                             [frame.copy() for frame in batches[name]],
                             name,
                             settings=settings)

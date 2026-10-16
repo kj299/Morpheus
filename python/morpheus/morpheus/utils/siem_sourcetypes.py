@@ -271,7 +271,9 @@ PRODUCED: dict = {
             # ratio columns are not, because a running ratio is not monotone and a search that summarizes a bin
             # has to divide the counts' maxima rather than aggregate the ratio -- see `tc4_flow_stage`.
             # `community_id` is the connection evidence report's join to layers 3 and 6. `host_key` and
-            # `mac_address` are the host evidence report's, as on layer 3.
+            # `mac_address` are the host evidence report's, as on layer 3. R-B-L4-004 reads the stack a SYN carried,
+            # its family and its novelty to the host, and joins them on `host_key` to the user agents layer 7 saw; the
+            # application the CMDB maps the destination port to rides on every record.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -298,7 +300,12 @@ PRODUCED: dict = {
                               "flow_data_len_envelope_mature",
                               "flow_bpp",
                               "flow_bpp_envelope_ratio",
-                              "flow_bpp_envelope_breached"),
+                              "flow_bpp_envelope_breached",
+                              "stack_fingerprint",
+                              "stack_os_family",
+                              "stack_fingerprint_first_seen",
+                              "ctx_application_found",
+                              "ctx_application_name"),
             # `session_key` is on the records a deployment resolves to the session holding their source address, and
             # absent where it does not: R-C-004 joins on it where it is present and on the address where it is not,
             # so a producer without sessions still satisfies the contract with the empty variant.
@@ -317,7 +324,9 @@ PRODUCED: dict = {
             # estate has just started seeing, and an issuer difference alone fires on every delivery host behind
             # more than one authority. The context columns are here because R-B-L6-001 fires only on a host the
             # inventory knows, and carries its criticality and owner; `community_id` is the connection evidence
-            # report's join to layers 3 and 4, and `host_key` and `mac_address` the host evidence report's.
+            # report's join to layers 3 and 4, and `host_key` and `mac_address` the host evidence report's. `sni` is
+            # what the issuer reference is kept per, with the address, and is null where the inspection point recorded
+            # no name; the application behind the destination port rides on every record.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -326,10 +335,14 @@ PRODUCED: dict = {
                               *ENVELOPE_COLUMNS,
                               "src_ip",
                               "dst_ip",
+                              "sni",
+                              "tls_destination_key",
                               "community_id",
                               "host_key",
                               "mac_address",
                               "ctx_found",
+                              "ctx_application_found",
+                              "ctx_application_name",
                               "ctx_criticality",
                               "ctx_owner",
                               "ja4_client",
@@ -366,8 +379,9 @@ PRODUCED: dict = {
             name="morpheus:score:l7",
             time_column="event_time",
             time_columns=ENVELOPE_TIME_COLUMNS,
-            producer="The TC-7 DNS and HTTP stages behind WindowSealStage, the `tc7_dns` and `tc7_http` classes of "
-            "`tests/morpheus/determinism/application_pipeline.py`; and TC7SaasStage, enriched by TC0EnrichStage and "
+            producer="The TC-7 DNS, HTTP and service stages behind WindowSealStage, the `tc7_dns`, `tc7_http` and "
+            "`tc7_service` classes of `tests/morpheus/determinism/application_pipeline.py`, the last two enriched by "
+            "TC0EnrichStage with the CMDB's application; and TC7SaasStage, enriched by TC0EnrichStage and "
             "followed by a weekly TC5DriftStage, the `tc7_saas` class of "
             "`tests/morpheus/determinism/saas_pipeline.py`; and TC7EndpointStage, enriched by TC0EnrichStage with the "
             "host's asset record, the `tc7_endpoint` class of `tests/morpheus/determinism/endpoint_pipeline.py`.",
@@ -380,6 +394,9 @@ PRODUCED: dict = {
             # the host's role, because a lateral movement chain ends on a server. The host evidence report reads
             # `host_key` off DNS, HTTP and endpoint records alike: the machine a query's or request's source address
             # resolved to, and the machine a process ran on, under the one name layers 3, 4 and 6 use for it.
+            # R-B-L7-001, R-D-L7-005 and R-B-L7-008 read each client's baseline beside its count, and R-B-L4-004 the
+            # operating system a request's user agent claims. R-B-L7-007 reads the service sub-class: a service's
+            # clients against its busiest day, the client software new to it, and the application that answered.
             required_columns=("event_uid",
                               "entity_key",
                               "lineage_id",
@@ -396,7 +413,15 @@ PRODUCED: dict = {
                  "dns_subdomain",
                  "dns_subdomain_entropy",
                  "dns_mean_label_length",
-                 "dns_subdomains_per_domain"),
+                 "dns_subdomains_per_domain",
+                 "dns_subdomains_per_domain_baseline_mature",
+                 "dns_subdomains_per_domain_ratio",
+                 "dns_client_key",
+                 "dns_domains_per_client",
+                 "dns_domains_per_client_baseline_mature",
+                 "dns_domains_per_client_ratio",
+                 "dns_nxdomain_in_window",
+                 "dns_nxdomain_ratio"),
                 ("src_ip",
                  "host_key",
                  "mac_address",
@@ -405,7 +430,16 @@ PRODUCED: dict = {
                  "http_4xx_in_window",
                  "http_2xx_in_window",
                  "http_4xx_to_2xx_ratio",
-                 "http_distinct_paths"),
+                 "http_distinct_paths",
+                 "http_distinct_paths_baseline_mature",
+                 "http_distinct_paths_ratio",
+                 "http_ua_family",
+                 "http_ua_os",
+                 "http_ua_family_first_seen",
+                 "dst_ip",
+                 "dst_port",
+                 "ctx_application_found",
+                 "ctx_application_name"),
                 ("user_principal",
                  "operation",
                  "target_object_type",
@@ -447,6 +481,24 @@ PRODUCED: dict = {
                  "endpoint_peer_group",
                  "endpoint_host_only",
                  "signature_status"),
+                ("src_ip",
+                 "host_key",
+                 "dst_ip",
+                 "dst_port",
+                 "sni",
+                 "ja4_client",
+                 "service_key",
+                 "service_key_source",
+                 "service_connections_in_window",
+                 "service_bytes_in_window",
+                 "service_clients_in_window",
+                 "service_clients_baseline",
+                 "service_clients_baseline_mature",
+                 "service_clients_ratio",
+                 "service_client_fingerprint_first_seen",
+                 "ctx_application_found",
+                 "ctx_application_name",
+                 "ctx_application_owning_team"),
             ),
         ),
     "morpheus:score:l2":
@@ -762,6 +814,31 @@ PRODUCED: dict = {
                               "device_role",
                               "os_family",
                               "os_version"),
+        ),
+    "context:application":
+        Sourcetype(
+            name="context:application",
+            time_column="valid_from",
+            time_columns=("valid_from", "valid_to", "recorded_at"),
+            producer="`morpheus.stages.telemetry.tc0_application_stage.TC0ApplicationStage`, one record per version of "
+            "an application-to-server mapping; the `tc0_application` class of "
+            "`tests/morpheus/determinism/context_pipeline.py`.",
+            # Keyed on the server's address and port, which is what an event carries. The service account and the
+            # owning team are here because the guide's TC-0 contents name both, and an application record is where a
+            # CMDB holds them; R-B-L7-007 reads the name and the team off the enriched events, and these are their
+            # source.
+            required_columns=("context_uid",
+                              "context_kind",
+                              "context_entity",
+                              "context_key",
+                              "context_attributes",
+                              "change",
+                              "server_address",
+                              "server_port",
+                              "name",
+                              "owning_team",
+                              "service_account",
+                              "criticality"),
         ),
 }
 """Sourcetypes something in this fork emits, keyed by stanza name."""
