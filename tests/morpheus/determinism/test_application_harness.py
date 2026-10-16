@@ -14,10 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Control 13's six checks against the first two layer 7 classes, and both rules' predicates over their corpus.
+Control 13's six checks against the DNS, HTTP and service classes, and their four rules' predicates over the corpus.
 
-Both rules here are conjunctions, and a conjunction is only tested when each of its conditions is shown to be the one
-that matters. A corpus that proved R-B-L7-001 only against ordinary browsing would pass with any of its three
+Every rule here is a conjunction, and a conjunction is only tested when each of its conditions is shown to be the one
+that matters. A corpus that proved R-B-L7-001 only against ordinary browsing would pass with any of its four
 conditions deleted, and the guide's own warning -- entropy alone flags every content delivery network -- would be a
 sentence rather than an assertion. So the checks below are counterfactual: for each benign actor, they assert the
 rule would have fired had the one condition that stops it been removed. That is what makes each condition
@@ -26,7 +26,12 @@ load-bearing rather than decorative.
 The predicates are evaluated the way the shipped searches evaluate them, and the search for R-B-L7-001 does
 something the stage's own count does not: it keeps only the queries that clear entropy and label length and counts
 distinct subdomains among those. Counting every subdomain would let a SaaS domain with a hundred ordinary tenant
-names and one random hostname satisfy all three conditions on different traffic.
+names and one random hostname satisfy all three conditions on different traffic. The count is taken per hour, as the
+search groups it, so a week of an agent's ordinary hours never adds up to one.
+
+Three of the rules also measure a client or a service against its own days, through a baseline the stages publish.
+Each has a control that clears every other condition every day of its life and that its own history alone keeps quiet,
+and each has an actor too new to have a history, held to the rule's floor alone.
 """
 
 import os
@@ -84,10 +89,27 @@ def _http(result: pd.DataFrame) -> pd.DataFrame:
     return result[result["telemetry_class"] == ap_.HTTP_CLASS]
 
 
-def _tunnelling(dns: pd.DataFrame, entropy: bool = True, length: bool = True) -> pd.Series:
-    """Distinct qualifying subdomains per registered domain, the way R-B-L7-001's search counts them.
+def _service(result: pd.DataFrame) -> pd.DataFrame:
+    return result[result["telemetry_class"] == ap_.SERVICE_CLASS]
 
-    Either per-query condition can be switched off, which is how the counterfactual checks ask what a control would
+
+def _true(frame: pd.DataFrame, column: str) -> pd.Series:
+    return frame[column].astype("boolean").fillna(False).astype(bool)
+
+
+def _measured(frame: pd.DataFrame, column: str) -> pd.Series:
+    """Rows a baseline condition admits: a client with no week of days, or one at least twice its busiest day."""
+    unmeasured = ~_true(frame, f"{column}_baseline_mature")
+    far_beyond = frame[f"{column}_ratio"].astype("Float64").fillna(0) >= ap_.BASELINE_MULTIPLE
+
+    return unmeasured | far_beyond
+
+
+def _tunnelling(dns: pd.DataFrame, entropy: bool = True, length: bool = True, baseline: bool = True) -> pd.Series:
+    """Distinct qualifying subdomains per registered domain, in its busiest hour, the way R-B-L7-001's search counts
+    them.
+
+    Any per-query condition can be switched off, which is how the counterfactual checks ask what a control would
     have done without the condition that stops it.
     """
     keep = pd.Series(True, index=dns.index)
@@ -98,7 +120,12 @@ def _tunnelling(dns: pd.DataFrame, entropy: bool = True, length: bool = True) ->
     if (length):
         keep &= dns["dns_mean_label_length"].astype("Float64").fillna(0) > ap_.LABEL_LENGTH_THRESHOLD
 
-    return dns[keep].groupby("dns_registered_domain")["dns_subdomain"].nunique()
+    if (baseline):
+        keep &= _measured(dns, "dns_subdomains_per_domain")
+
+    hourly = dns[keep].groupby(["dns_registered_domain", "window_id"])["dns_subdomain"].nunique()
+
+    return hourly.groupby(level=0).max()
 
 
 def _fires_dns(dns: pd.DataFrame, **conditions) -> set:
@@ -107,10 +134,10 @@ def _fires_dns(dns: pd.DataFrame, **conditions) -> set:
     return set(counts[counts > ap_.SUBDOMAIN_THRESHOLD].index)
 
 
-def _enumerating(http: pd.DataFrame, paths: bool = True, ratio: bool = True) -> set:
+def _enumerating(http: pd.DataFrame, paths: bool = True, ratio: bool = True, baseline: bool = True) -> set:
     """Clients satisfying R-D-L7-005 on some row, the way its search reads them.
 
-    Both conditions are read off the same row, so they held over the same ten-minute window. The ratio is tested as a
+    Every condition is read off the same row, so they held over the same ten-minute window. The ratio is tested as a
     multiplication, which is true for a client with refusals and no successes.
     """
     keep = pd.Series(True, index=http.index)
@@ -123,7 +150,63 @@ def _enumerating(http: pd.DataFrame, paths: bool = True, ratio: bool = True) -> 
         successes = http["http_2xx_in_window"].astype("Float64")
         keep &= (errors > ap_.ERROR_RATIO_THRESHOLD * successes).fillna(False)
 
+    if (baseline):
+        keep &= _measured(http, "http_distinct_paths")
+
     return set(http[keep]["src_ip"])
+
+
+def _generating(dns: pd.DataFrame, domains: bool = True, refused: bool = True, baseline: bool = True) -> set:
+    """Clients satisfying R-B-L7-008 on some row, the way its search reads them."""
+    keep = pd.Series(True, index=dns.index)
+
+    if (domains):
+        keep &= dns["dns_domains_per_client"].astype("Int64").fillna(0) > ap_.DGA_DOMAIN_THRESHOLD
+
+    if (refused):
+        keep &= dns["dns_nxdomain_ratio"].astype("Float64").fillna(0) > ap_.NXDOMAIN_THRESHOLD
+
+    if (baseline):
+        keep &= _measured(dns, "dns_domains_per_client")
+
+    return set(dns[keep]["src_ip"])
+
+
+def _service_hours(service: pd.DataFrame) -> pd.DataFrame:
+    """Each service's hours, reduced the way R-B-L7-007's search reduces them."""
+    frame = service.assign(clients=service["service_clients_in_window"].astype("Int64"),
+                           ratio=service["service_clients_ratio"].astype("Float64"),
+                           novel=_true(service, "service_client_fingerprint_first_seen").astype(int),
+                           mature=_true(service, "service_clients_baseline_mature").astype(int))
+
+    return frame.groupby(["service_key", "window_id"]).agg(clients=("clients", "max"),
+                                                           ratio=("ratio", "max"),
+                                                           novel=("novel", "sum"),
+                                                           mature=("mature", "max"))
+
+
+def _serving(service: pd.DataFrame,
+             floor: bool = True,
+             ratio: bool = True,
+             novel: bool = True,
+             mature: bool = True) -> set:
+    """Services satisfying R-B-L7-007 in some hour."""
+    hours = _service_hours(service)
+    keep = pd.Series(True, index=hours.index)
+
+    if (mature):
+        keep &= hours["mature"] > 0
+
+    if (floor):
+        keep &= hours["clients"].fillna(0) >= ap_.SERVICE_CLIENT_FLOOR
+
+    if (ratio):
+        keep &= hours["ratio"].fillna(0) >= ap_.BASELINE_MULTIPLE
+
+    if (novel):
+        keep &= hours["novel"] > 0
+
+    return set(hours[keep].index.get_level_values(0))
 
 
 def _split(frame: pd.DataFrame, parts: int) -> list:
@@ -163,6 +246,9 @@ def test_corpus_is_shaped_like_a_resolver_and_a_proxy(corpus: dict[str, pd.DataF
 
     for column in ("src_ip", "dst_ip", "http_method", "url_path", "status_code", "user_agent"):
         assert column in corpus[ap_.HTTP_CLASS].columns, column
+
+    for column in ("src_ip", "dst_ip", "dst_port", "sni", "bytes_total", "ja4_client"):
+        assert column in corpus[ap_.SERVICE_CLASS].columns, column
 
     for frame in corpus.values():
         assert set(ap_.ID_COLUMNS) <= set(frame.columns)
@@ -246,8 +332,42 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
 
 
 @pytest.mark.cpu_mode
-def test_the_tunnel_is_the_only_domain_that_clears_all_three(result: pd.DataFrame):
-    assert _fires_dns(_dns(result)) == {ap_.TUNNEL_DOMAIN}
+def test_the_tunnel_is_the_only_domain_that_clears_all_four(result: pd.DataFrame):
+    dns = _dns(result)
+    tunnel = dns[dns["dns_registered_domain"] == ap_.TUNNEL_DOMAIN]
+
+    assert _fires_dns(dns) == {ap_.TUNNEL_DOMAIN}
+    # Through its baseline, not around it: the tunneller has a week of ordinary days, and the tunnel is a hundred
+    # and thirty times the busiest of them.
+    assert _true(tunnel, "dns_subdomains_per_domain_baseline_mature").all()
+    assert tunnel["dns_subdomains_per_domain_ratio"].astype("Float64").max() > 100
+
+
+@pytest.mark.cpu_mode
+def test_the_reputation_agent_is_stopped_by_its_own_history_alone(result: pd.DataFrame):
+    # The case the baseline exists for. Every one of its lookups clears entropy and label length, and on the day the
+    # rules are read it clears the hundred too; it is no busier than any day of its life, and that is all that keeps
+    # it out.
+    dns = _dns(result)
+    today = dns[(dns["src_ip"] == ap_.HASH_LOOKUP) & _true(dns, "dns_subdomains_per_domain_baseline_mature")]
+
+    assert ap_.REPUTATION_DOMAIN not in _fires_dns(dns)
+    assert ap_.REPUTATION_DOMAIN in _fires_dns(dns, baseline=False)
+    assert _tunnelling(dns, baseline=False)[ap_.REPUTATION_DOMAIN] == ap_.REPUTATION_TODAY
+    assert today["dns_subdomains_per_domain_ratio"].astype("Float64").max() < ap_.BASELINE_MULTIPLE
+
+
+@pytest.mark.cpu_mode
+def test_a_client_with_no_week_of_days_is_held_to_the_floor_alone(result: pd.DataFrame):
+    # The content delivery network, the tenant and the SaaS provider are new to the estate on the day the rules are
+    # read. They have no baseline, so the baseline admits them, and each is stopped by the condition it always was.
+    dns = _dns(result)
+
+    for client in (ap_.CDN_CLIENT, ap_.TENANT_CLIENT, ap_.SAAS_CLIENT):
+        rows = dns[dns["src_ip"] == client]
+
+        assert not _true(rows, "dns_subdomains_per_domain_baseline_mature").any(), client
+        assert rows["dns_subdomains_per_domain_baseline"].isna().all(), client
 
 
 @pytest.mark.cpu_mode
@@ -295,7 +415,7 @@ def test_counting_every_subdomain_rather_than_qualifying_ones_would_merge_differ
     # the stage's figure is what a search would reach for if nothing said otherwise.
     dns = _dns(result)
     everything = dns.groupby("dns_registered_domain")["dns_subdomains_per_domain"].max()
-    qualifying = _tunnelling(dns)
+    qualifying = _tunnelling(dns, baseline=False)
 
     assert everything[ap_.CDN_DOMAIN] > ap_.SUBDOMAIN_THRESHOLD
     assert qualifying.get(ap_.CDN_DOMAIN, 0) == 0
@@ -316,6 +436,30 @@ def test_ordinary_browsing_clears_nothing(result: pd.DataFrame):
 @pytest.mark.cpu_mode
 def test_both_enumerators_fire_and_nothing_else_does(result: pd.DataFrame):
     assert _enumerating(_http(result)) == {ap_.ENUMERATOR, ap_.EMPTY_HANDED}
+
+
+@pytest.mark.cpu_mode
+def test_the_scanner_is_stopped_by_its_own_history_alone(result: pd.DataFrame):
+    # An enumerator by every other measure, every morning of its life.
+    http = _http(result)
+    today = http[(http["src_ip"] == ap_.SCANNER) & _true(http, "http_distinct_paths_baseline_mature")]
+
+    assert ap_.SCANNER not in _enumerating(http)
+    assert ap_.SCANNER in _enumerating(http, baseline=False)
+    assert today["http_distinct_paths_baseline"].astype("Int64").max() == ap_.SCANNER_HISTORY
+
+
+@pytest.mark.cpu_mode
+def test_the_enumerator_fires_through_its_baseline_and_the_new_one_on_the_floor(result: pd.DataFrame):
+    # The enumerator read the news in its browser all week, so it is measured, and it is twenty times its busiest
+    # day. The one that found nothing is new to the estate, and is held to the two hundred alone.
+    http = _http(result)
+    seasoned = http[(http["src_ip"] == ap_.ENUMERATOR) & (http["http_distinct_paths"].astype("Int64") > 200)]
+    newcomer = http[http["src_ip"] == ap_.EMPTY_HANDED]
+
+    assert _true(seasoned, "http_distinct_paths_baseline_mature").all()
+    assert seasoned["http_distinct_paths_ratio"].astype("Float64").min() > 10 * ap_.BASELINE_MULTIPLE
+    assert not _true(newcomer, "http_distinct_paths_baseline_mature").any()
 
 
 @pytest.mark.cpu_mode
@@ -362,6 +506,116 @@ def test_redirects_stay_out_of_the_ratio(result: pd.DataFrame):
 
     assert len(redirects) > 0
     assert redirects["http_4xx_in_window"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_only_the_enumerator_brings_client_software_it_has_never_run(result: pd.DataFrame):
+    # User-agent novelty per client: the enumerator browsed in Chrome all week and enumerates with curl. Every other
+    # client sends what it always has, and a client's first request is novel to nothing.
+    http = _http(result)
+    novel = http[_true(http, "http_ua_family_first_seen")]
+
+    assert set(zip(novel["src_ip"], novel["http_ua_family"])) == {(ap_.ENUMERATOR, "curl")}
+
+    first = http.sort_values("event_time", kind="mergesort").groupby("src_ip").head(1)
+
+    assert first["http_ua_family_first_seen"].isna().all()
+
+
+# --- R-B-L7-008: the generator, and one control per condition ----------------------------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_the_generator_is_the_only_client_that_clears_all_three(result: pd.DataFrame):
+    dns = _dns(result)
+    generator = dns[(dns["src_ip"] == ap_.GENERATOR) & dns["dns_nxdomain_ratio"].notna()]
+
+    assert _generating(dns) == {ap_.GENERATOR}
+    assert generator["dns_nxdomain_ratio"].astype("Float64").max() > 0.8
+
+
+@pytest.mark.cpu_mode
+def test_the_stale_suffix_is_stopped_by_the_domain_count_alone(result: pd.DataFrame):
+    # Told no about one domain all hour.
+    dns = _dns(result)
+
+    assert ap_.STALE_SUFFIX not in _generating(dns)
+    assert ap_.STALE_SUFFIX in _generating(dns, domains=False)
+
+
+@pytest.mark.cpu_mode
+def test_the_busy_browser_is_stopped_by_the_nxdomain_share_alone(result: pd.DataFrame):
+    dns = _dns(result)
+
+    assert ap_.BUSY_BROWSER not in _generating(dns)
+    assert ap_.BUSY_BROWSER in _generating(dns, refused=False)
+
+
+@pytest.mark.cpu_mode
+def test_the_link_checker_is_stopped_by_its_own_history_alone(result: pd.DataFrame):
+    dns = _dns(result)
+
+    assert ap_.LINK_CHECKER not in _generating(dns)
+    assert ap_.LINK_CHECKER in _generating(dns, baseline=False)
+
+
+# --- R-B-L7-007: the service, and one control per condition ------------------------------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_the_payroll_api_is_the_only_service_that_clears_all_four(result: pd.DataFrame):
+    assert _serving(_service(result)) == {f"{ap_.PAYROLL}:443"}
+
+
+@pytest.mark.cpu_mode
+def test_one_address_terminating_two_names_is_two_services(result: pd.DataFrame):
+    # The payroll API and the wiki share an address and a port, which is why a service is the name where there is
+    # one. Keyed on the address they would be one service whose readers and new client both doubled.
+    service = _service(result)
+    behind_the_proxy = service[service["dst_ip"] == ap_.EDGE_PROXY]
+
+    assert set(behind_the_proxy["service_key"]) == {f"{ap_.PAYROLL}:443", f"{ap_.WIKI}:443"}
+    assert set(behind_the_proxy["service_key_source"]) == {"sni"}
+    assert set(service[service["dst_ip"] == ap_.METRICS_SERVER]["service_key"]) == {
+        f"{ap_.METRICS_SERVER}:{ap_.METRICS_PORT}"
+    }
+
+
+@pytest.mark.cpu_mode
+@pytest.mark.parametrize(("name", "condition"),
+                         [(f"{ap_.WIKI}:443", "novel"), (f"{ap_.METRICS_SERVER}:{ap_.METRICS_PORT}", "ratio"),
+                          (f"{ap_.CI}:443", "floor")])
+def test_each_quiet_service_is_stopped_by_one_condition_alone(result: pd.DataFrame, name: str, condition: str):
+    # The wiki's readers doubled in the browser it knows; one of the metrics collector's usual agents upgraded; a new
+    # build tool reached the CI server from a handful of machines.
+    service = _service(result)
+
+    assert name not in _serving(service)
+    assert name in _serving(service, **{condition: False})
+
+
+@pytest.mark.cpu_mode
+def test_a_service_deployed_this_morning_has_no_days_to_change_from(result: pd.DataFrame):
+    service = _service(result)
+    new = service[service["service_key"] == f"{ap_.NEW_APP}:443"]
+
+    assert f"{ap_.NEW_APP}:443" not in _serving(service)
+    assert new["service_clients_ratio"].isna().all()
+    assert new["service_clients_in_window"].astype("Int64").max() == ap_.NEW_APP_CLIENTS
+    assert _true(new, "service_client_fingerprint_first_seen").any()
+
+
+@pytest.mark.cpu_mode
+def test_a_request_and_a_connection_carry_the_application_that_answered(result: pd.DataFrame):
+    # The CMDB maps a server's port to an application; the enrichment reads it on dst_ip:dst_port at the event's
+    # time. A service the CMDB has never heard of is found by nothing, and says so.
+    http = _http(result)
+    service = _service(result)
+
+    assert set(http["ctx_application_name"]) == {"intranet-web"}
+    assert set(service[service["dst_ip"] == ap_.EDGE_PROXY]["ctx_application_name"]) == {"corp-edge-proxy"}
+    assert set(service[service["dst_ip"] == ap_.EDGE_PROXY]["ctx_application_service_account"]) == {"svc-edge"}
+    assert not _true(service[service["dst_ip"] == ap_.NEW_SERVER], "ctx_application_found").any()
 
 
 # --- Minimization: the sensitive columns neither rule needs at the wire -----------------------------------------
@@ -417,11 +671,16 @@ def test_the_enumeration_rule_never_reads_the_path_itself():
 
 
 @pytest.mark.cpu_mode
-def test_every_row_is_stamped_at_layer_seven_and_keyed_on_its_client(result: pd.DataFrame):
-    # Both classes seal on the client. For DNS that is a choice the guide leaves open -- its `hostname` could be
-    # the host that asked or the name it asked for -- and the host that asked is what behaves.
+def test_every_row_is_stamped_at_layer_seven_and_keyed_on_its_subject(result: pd.DataFrame):
+    # DNS and HTTP seal on the client. For DNS that is a choice the guide leaves open -- its `hostname` could be the
+    # host that asked or the name it asked for -- and the host that asked is what behaves. A service seals on itself.
+    clients = result[result["telemetry_class"] != ap_.SERVICE_CLASS]
+    service = _service(result)
+
     assert set(result["osi_layer"]) == {ap_.OSI_LAYER}
     assert set(result["telemetry_class"]) == set(ap_.TELEMETRY_CLASSES)
-    assert list(result["entity_key"]) == list(result["src_ip"])
+    assert list(clients["entity_key"]) == list(clients["src_ip"])
+    assert list(service["entity_key"]) == list(service["service_key"])
+    assert list(service["chain_anchor"]) == list(service["service_key"])
     assert result["lineage_id"].notna().all()
     assert result["window_id"].notna().all()

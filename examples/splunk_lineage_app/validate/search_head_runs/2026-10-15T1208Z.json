@@ -1,0 +1,661 @@
+{
+  "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
+  "at": "2026-10-15T12:08:00.157976+00:00",
+  "timestamp_shift_weeks": 2954,
+  "dispatch_window": {
+    "earliest": 1786492800,
+    "latest": 1792069569
+  },
+  "indexed": {
+    "binding:bucketed": 2498,
+    "binding:l1": 23,
+    "binding:l2": 19,
+    "context:asset": 7,
+    "context:identity": 23,
+    "morpheus:edge": 2751,
+    "morpheus:health": 851,
+    "morpheus:late": 1,
+    "morpheus:quarantine": 3,
+    "morpheus:score:l1": 793,
+    "morpheus:score:l2": 1501,
+    "morpheus:score:l3": 1525,
+    "morpheus:score:l4": 987,
+    "morpheus:score:l5": 661,
+    "morpheus:score:l6": 296,
+    "morpheus:score:l7": 4484
+  },
+  "expected_indexed": {
+    "binding:bucketed": 2498,
+    "binding:l1": 23,
+    "binding:l2": 19,
+    "context:asset": 7,
+    "context:identity": 23,
+    "morpheus:edge": 2751,
+    "morpheus:health": 851,
+    "morpheus:late": 1,
+    "morpheus:quarantine": 3,
+    "morpheus:score:l1": 793,
+    "morpheus:score:l2": 1501,
+    "morpheus:score:l3": 1525,
+    "morpheus:score:l4": 987,
+    "morpheus:score:l5": 661,
+    "morpheus:score:l6": 296,
+    "morpheus:score:l7": 4484
+  },
+  "btool_check": "",
+  "checks": {
+    "time_drift_seconds": [
+      {
+        "max_drift": "-5483176.000000",
+        "min_drift": "-5486778.000000"
+      }
+    ],
+    "binding_tables": [
+      {
+        "binding_table": "dhcp_lease",
+        "count": "1505"
+      },
+      {
+        "binding_table": "dot1x_supplicant",
+        "count": "59"
+      },
+      {
+        "binding_table": "mac_table",
+        "count": "927"
+      },
+      {
+        "binding_table": "port_inventory",
+        "count": "7"
+      }
+    ],
+    "principal_watchlist": [
+      {
+        "rule_id": "R-P-L5-006",
+        "reason": "drift-trajectory",
+        "count": "6"
+      },
+      {
+        "rule_id": "R-P-L7-006",
+        "reason": "access-breadth",
+        "count": "2"
+      }
+    ],
+    "three_layer_chain_risk": [
+      {
+        "total_risk": "0",
+        "count": "13"
+      },
+      {
+        "total_risk": "50",
+        "count": "1"
+      },
+      {
+        "total_risk": "55",
+        "count": "1"
+      }
+    ],
+    "risk_records": {
+      "written": 209,
+      "indexed": 209,
+      "by_rule": [
+        {
+          "rule_id": "R-B-L1-005",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L1-007",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-B-L2-002",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-B-L2-006",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-B-L2-007",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L2-008",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L3-001",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L3-002",
+          "count": "6"
+        },
+        {
+          "rule_id": "R-B-L3-004",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L3-006",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L3-007",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L4-005",
+          "count": "6"
+        },
+        {
+          "rule_id": "R-B-L5-001",
+          "count": "42"
+        },
+        {
+          "rule_id": "R-B-L5-002",
+          "count": "28"
+        },
+        {
+          "rule_id": "R-B-L5-005",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L6-001",
+          "count": "5"
+        },
+        {
+          "rule_id": "R-B-L6-004",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L7-001",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-B-L7-002",
+          "count": "8"
+        },
+        {
+          "rule_id": "R-B-L7-004",
+          "count": "11"
+        },
+        {
+          "rule_id": "R-C-001",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-C-002",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-C-004",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-C-005",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L1-001",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L1-002",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L1-003",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L1-006",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-D-L2-003",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L2-004",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-D-L2-005",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-D-L3-003",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L3-008",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L4-002",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L4-003",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-D-L5-003",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-D-L5-004",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L5-007",
+          "count": "4"
+        },
+        {
+          "rule_id": "R-D-L5-008",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-D-L5-009",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L6-002",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-D-L6-003",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L6-005",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-D-L7-005",
+          "count": "2"
+        },
+        {
+          "rule_id": "R-P-L1-004",
+          "count": "1"
+        },
+        {
+          "rule_id": "R-P-L3-005",
+          "count": "43"
+        },
+        {
+          "rule_id": "R-P-L5-006",
+          "count": "6"
+        },
+        {
+          "rule_id": "R-P-L7-006",
+          "count": "2"
+        }
+      ]
+    }
+  },
+  "order": [
+    "Binding lookup - L2/L3 refresh",
+    "Binding lookup - L2 refresh",
+    "Binding lookup - L5/L2 refresh",
+    "Binding lookup - L1 refresh",
+    "Binding lookup - L1 history refresh",
+    "R-P-L5-006 - Drift trajectory",
+    "R-P-L7-006 - Access breadth trajectory",
+    "Topology - LLDP adjacency",
+    "R-C-002 - TLS anomaly precedes beaconing",
+    "R-C-001 - Lateral movement chain",
+    "R-C-004 - Staged exfiltration",
+    "R-C-005 - Credential replay across the stack",
+    "R-D-L1-001 - Transceiver substitution",
+    "R-P-L1-004 - Optical degradation forecast",
+    "R-D-L1-002 - Optical tap step",
+    "R-D-L1-003 - Link flap instability",
+    "Device restart",
+    "R-B-L1-005 - Error rate step",
+    "R-D-L1-006 - LLDP neighbor change",
+    "R-B-L1-007 - Interface volume departure",
+    "R-D-L2-004 - MAC in two places at once",
+    "R-D-L2-005 - Authorization without authentication",
+    "Connection evidence - layers 3, 4 and 6",
+    "Host evidence - one machine across layers",
+    "Identity walk - sign-in to switch port",
+    "R-B-L3-001 - Fan-out expansion",
+    "R-B-L3-002 - Beaconing",
+    "R-D-L3-003 - Reserved-range egress",
+    "R-B-L3-004 - TTL fingerprint shift",
+    "R-B-L3-006 - Fan-in onto a workstation",
+    "R-B-L3-007 - First-contact upload",
+    "R-D-L3-008 - Port sweep",
+    "R-D-L4-002 - SYN without completion",
+    "R-D-L4-003 - RST ratio",
+    "R-B-L4-005 - Transfer envelope breach",
+    "R-B-L6-001 - New TLS client fingerprint",
+    "R-D-L6-002 - Certificate issuer anomaly",
+    "R-D-L6-003 - Self-signed to external destination",
+    "R-B-L6-004 - Cipher downgrade",
+    "R-D-L6-005 - Content type mismatch",
+    "TLS table coverage - unrecognized values",
+    "R-B-L7-001 - DNS tunneling",
+    "R-D-L7-005 - Enumeration",
+    "R-B-L7-002 - Bulk data access",
+    "R-B-L7-004 - Process ancestry novelty",
+    "R-D-L2-001 - MAC address count exceeded on an access port",
+    "R-B-L2-002 - Port-to-MAC binding novelty",
+    "R-D-L2-003 - ARP anomaly",
+    "R-B-L2-006 - New vendor on a VLAN",
+    "R-B-L2-007 - Slow 802.1X authorization",
+    "R-B-L2-008 - Instant 802.1X authorization",
+    "Binding health - unresolved rate",
+    "Pipeline health - refusal rate",
+    "Collector health",
+    "Late arrivals by class",
+    "Platform baseline step",
+    "R-D-L5-003 - Impossible travel",
+    "R-D-L5-004 - Multi-factor fatigue",
+    "R-D-L5-007 - Off-hours authentication",
+    "R-D-L5-008 - New authentication location or device",
+    "R-D-L5-009 - Failed authentication run ending in success",
+    "R-B-L5-001 - Composite authentication anomaly",
+    "R-B-L5-002 - Location novelty anomaly",
+    "R-B-L5-005 - Session duration anomaly",
+    "Behavior summary - per-layer scores",
+    "R-P-L3-005 - Fan-out trajectory",
+    "Chain assembly - cross-layer risk",
+    "Binding lookup - L2/L3 expiry",
+    "Binding lookup - L2 expiry",
+    "Binding lookup - L5/L2 expiry",
+    "Binding lookup - L1 history expiry",
+    "Principal watchlist - expiry"
+  ],
+  "searches": {
+    "Binding lookup - L2/L3 refresh": {
+      "phase": "refresh",
+      "rows": 1505
+    },
+    "Binding lookup - L2 refresh": {
+      "phase": "refresh",
+      "rows": 927
+    },
+    "Binding lookup - L5/L2 refresh": {
+      "phase": "refresh",
+      "rows": 59
+    },
+    "Binding lookup - L1 refresh": {
+      "phase": "refresh",
+      "rows": 23
+    },
+    "Binding lookup - L1 history refresh": {
+      "phase": "refresh",
+      "rows": 7
+    },
+    "R-P-L5-006 - Drift trajectory": {
+      "phase": "predictive",
+      "rows": 6
+    },
+    "R-P-L7-006 - Access breadth trajectory": {
+      "phase": "predictive",
+      "rows": 2
+    },
+    "Topology - LLDP adjacency": {
+      "phase": "search",
+      "rows": 15
+    },
+    "R-C-002 - TLS anomaly precedes beaconing": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-C-001 - Lateral movement chain": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-C-004 - Staged exfiltration": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-C-005 - Credential replay across the stack": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L1-001 - Transceiver substitution": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-P-L1-004 - Optical degradation forecast": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L1-002 - Optical tap step": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L1-003 - Link flap instability": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Device restart": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L1-005 - Error rate step": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L1-006 - LLDP neighbor change": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-B-L1-007 - Interface volume departure": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L2-004 - MAC in two places at once": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L2-005 - Authorization without authentication": {
+      "phase": "search",
+      "rows": 2
+    },
+    "Connection evidence - layers 3, 4 and 6": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Host evidence - one machine across layers": {
+      "phase": "search",
+      "rows": 17
+    },
+    "Identity walk - sign-in to switch port": {
+      "phase": "search",
+      "rows": 25
+    },
+    "R-B-L3-001 - Fan-out expansion": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L3-002 - Beaconing": {
+      "phase": "search",
+      "rows": 6
+    },
+    "R-D-L3-003 - Reserved-range egress": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L3-004 - TTL fingerprint shift": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L3-006 - Fan-in onto a workstation": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L3-007 - First-contact upload": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L3-008 - Port sweep": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L4-002 - SYN without completion": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L4-003 - RST ratio": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-B-L4-005 - Transfer envelope breach": {
+      "phase": "search",
+      "rows": 6
+    },
+    "R-B-L6-001 - New TLS client fingerprint": {
+      "phase": "search",
+      "rows": 5
+    },
+    "R-D-L6-002 - Certificate issuer anomaly": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L6-003 - Self-signed to external destination": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L6-004 - Cipher downgrade": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L6-005 - Content type mismatch": {
+      "phase": "search",
+      "rows": 1
+    },
+    "TLS table coverage - unrecognized values": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L7-001 - DNS tunneling": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L7-005 - Enumeration": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-B-L7-002 - Bulk data access": {
+      "phase": "search",
+      "rows": 8
+    },
+    "R-B-L7-004 - Process ancestry novelty": {
+      "phase": "search",
+      "rows": 11
+    },
+    "R-D-L2-001 - MAC address count exceeded on an access port": {
+      "phase": "search",
+      "rows": 0
+    },
+    "R-B-L2-002 - Port-to-MAC binding novelty": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L2-003 - ARP anomaly": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L2-006 - New vendor on a VLAN": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-B-L2-007 - Slow 802.1X authorization": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L2-008 - Instant 802.1X authorization": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Binding health - unresolved rate": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Pipeline health - refusal rate": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Collector health": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Late arrivals by class": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Platform baseline step": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L5-003 - Impossible travel": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L5-004 - Multi-factor fatigue": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-D-L5-007 - Off-hours authentication": {
+      "phase": "search",
+      "rows": 4
+    },
+    "R-D-L5-008 - New authentication location or device": {
+      "phase": "search",
+      "rows": 2
+    },
+    "R-D-L5-009 - Failed authentication run ending in success": {
+      "phase": "search",
+      "rows": 1
+    },
+    "R-B-L5-001 - Composite authentication anomaly": {
+      "phase": "search",
+      "rows": 42
+    },
+    "R-B-L5-002 - Location novelty anomaly": {
+      "phase": "search",
+      "rows": 28
+    },
+    "R-B-L5-005 - Session duration anomaly": {
+      "phase": "search",
+      "rows": 1
+    },
+    "Behavior summary - per-layer scores": {
+      "phase": "summary",
+      "rows": 5447
+    },
+    "R-P-L3-005 - Fan-out trajectory": {
+      "phase": "trajectory",
+      "rows": 43
+    },
+    "Chain assembly - cross-layer risk": {
+      "phase": "assembly",
+      "rows": 0
+    },
+    "Binding lookup - L2/L3 expiry": {
+      "phase": "expiry",
+      "rows": 1505
+    },
+    "Binding lookup - L2 expiry": {
+      "phase": "expiry",
+      "rows": 927
+    },
+    "Binding lookup - L5/L2 expiry": {
+      "phase": "expiry",
+      "rows": 59
+    },
+    "Binding lookup - L1 history expiry": {
+      "phase": "expiry",
+      "rows": 7
+    },
+    "Principal watchlist - expiry": {
+      "phase": "expiry",
+      "rows": 2
+    }
+  },
+  "measures": "what each shipped saved search returns on one Splunk instance over the checked-in sample events, with every timestamp moved by a whole number of weeks and each search dispatched over all of them at once. A row count per search, not the rows themselves."
+}

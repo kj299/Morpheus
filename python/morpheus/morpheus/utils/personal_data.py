@@ -99,6 +99,17 @@ interface, `mac_address`, and through the EDR inventory to the machine, `host_ke
 `hostname` does. The lease and the inventory report each hop rested on, `host_lease_uid` and `host_inventory_uid`,
 are `PSEUDONYMS` as `binding_uid` is, and how each hop resolved is operational.
 
+What a client's software and stack say about it are `PROFILES`: the user-agent family and the operating system it
+claims, the SYN's options, segment size and window, and the fingerprint they make, describe a person's device the
+way `ja4_client` does. The operating system a header claims and the family a stack betrays have a handful of
+values each, so both are in `BOUNDED_DOMAIN`. Each client's DNS and HTTP baselines are profiles beside the counts
+they measure; the days they are taken over, and whether there are enough, are the trackers' bookkeeping. The name a
+client asked a server for, `sni`, is browsing history as `dns_registered_domain` is. A service, by contrast, is not
+a person: its window counts, its client novelty and its baseline aggregate everyone who reached it, and are
+`OPERATIONAL`, while its key addresses it as `tls_destination_key` addresses a destination. The CMDB's application
+behind a server's port is about the application, except the account it runs as, which `IDENTIFIES` that account as
+`user_principal` identifies a person's.
+
 **The TC-0 context store is personal data of a different kind, and is classified on the same rule.** Department,
 employment status and group membership are organisational facts about an identifiable person rather than behaviour
 this design derived, but they describe the person, so they are `PROFILES`; a manager and an asset's owner are other
@@ -147,7 +158,9 @@ _IDENTIFIES = (
     "session_id",
     "session_key",
     "user_principal",  # The owner of the host a flow reached, from the inventory.
-    "dst_ctx_owner",
+    "dst_ctx_owner",  # The account an application runs as, from the CMDB, and as it rides on an event.
+    "service_account",
+    "ctx_application_service_account",
 )
 
 _ADDRESSES = (
@@ -173,7 +186,10 @@ _ADDRESSES = (
     "endpoint_host",
     "target_host_key",
     # The machine a source address resolved to through the leases and the inventory, at layers 3, 4, 6 and 7.
-    "host_key",
+    "host_key",  # A DNS client, the service a connection reached, and a server the CMDB maps.
+    "dns_client_key",
+    "service_key",
+    "server_address",
 )
 
 _LOCATES = (
@@ -236,6 +252,27 @@ _PROFILES = (
     "dns_subdomain",
     "dns_subdomain_entropy",
     "dns_subdomains_per_domain",
+    "dns_subdomains_per_domain_baseline",
+    "dns_subdomains_per_domain_ratio",
+    "dns_domains_per_client",
+    "dns_domains_per_client_baseline",
+    "dns_domains_per_client_ratio",
+    "dns_nxdomain_in_window",
+    "dns_answered_in_window",
+    "dns_nxdomain_ratio",
+    "http_distinct_paths_baseline",
+    "http_distinct_paths_ratio",
+    "http_ua_family",
+    "http_ua_os",
+    "http_ua_family_first_seen",
+    "sni",
+    "bytes_total",
+    "tcp_options_order",
+    "tcp_mss",
+    "tcp_window_initial",
+    "stack_fingerprint",
+    "stack_os_family",
+    "stack_fingerprint_first_seen",
     "dot1x_result",
     "drift_acceleration",
     "drift_baseline_sigma",
@@ -433,10 +470,42 @@ _PSEUDONYMS = (
     "desk_identity_uid",
     "login_lease_uid",
     "login_port_uid",  # The session interval a packet, handshake or export was placed in by its source address.
-    "session_binding_uid",
+    "session_binding_uid",  # The CMDB versions an event's application rests on.
+    "ctx_application_version_uids",
 )
 
 _OPERATIONAL = (
+    # A service's own window, novelty and baseline, which aggregate its clients rather than describing any one; how
+    # its key was chosen; and the application the CMDB maps a server's port to, which is about the application.
+    "service_bytes_in_window",
+    "service_client_fingerprint_first_seen",
+    "service_client_fingerprints",
+    "service_clients_baseline",
+    "service_clients_baseline_days",
+    "service_clients_baseline_mature",
+    "service_clients_in_window",
+    "service_clients_ratio",
+    "service_clients_saturated",
+    "service_connections_in_window",
+    "service_key_source",
+    "ctx_application_criticality",
+    "ctx_application_data_classification",
+    "ctx_application_found",
+    "ctx_application_knowledge",
+    "ctx_application_name",
+    "ctx_application_owning_team",
+    "ctx_application_recorded_at",
+    "name",
+    "server_port",
+    # A resolver's answer, as a proxy's status code is; and the trackers' bookkeeping, as for every other baseline.
+    "response_code",
+    "dns_domains_saturated",
+    "dns_subdomains_per_domain_baseline_days",
+    "dns_subdomains_per_domain_baseline_mature",
+    "dns_domains_per_client_baseline_days",
+    "dns_domains_per_client_baseline_mature",
+    "http_distinct_paths_baseline_days",
+    "http_distinct_paths_baseline_mature",
     "arp_count_in_window",
     "arp_is_gratuitous",
     "arp_operation",
@@ -712,10 +781,10 @@ AMBIGUOUS: dict[str, dict[str, str]] = {
         "tc5_session": IDENTIFIES,
     },
     "context_entity": {
-        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES
+        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES, "tc0_application": ADDRESSES
     },
     "context_key": {
-        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES
+        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES, "tc0_application": ADDRESSES
     },
 }
 """Column names whose meaning depends on which telemetry class the row belongs to.
@@ -740,6 +809,8 @@ it is caught the same way.
 """
 
 BOUNDED_DOMAIN = frozenset({
+    "http_ua_os",
+    "stack_os_family",
     "arp_operation",
     "auth_result",
     "cipher_floor",

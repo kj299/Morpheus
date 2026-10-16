@@ -546,13 +546,25 @@ def test_the_layer_4_detections_return_exactly_what_is_written(expected: dict):
     assert entry["key_values"]["volume_ratio"] == breached[0]["flow_data_len_envelope_ratio"]
 
 
-TUNNEL_ENTROPY = 4.0
-TUNNEL_LABEL_LENGTH = 30
-TUNNEL_SUBDOMAINS = 100
-ENUMERATION_PATHS = 200
-ENUMERATION_RATIO = 0.7
-"""The layer 7 searches' own thresholds, repeated here so the predicates this file evaluates are the ones the
-app ships."""
+TUNNEL = "R-B-L7-001 - DNS tunneling"
+ENUMERATION = "R-D-L7-005 - Enumeration"
+SERVICE = "R-B-L7-007 - Service reached by new clients"
+GENERATION = "R-B-L7-008 - Domain generation"
+STACK = "R-B-L4-004 - Stack fingerprint mismatch"
+TUNNEL_ENTROPY = threshold(TUNNEL, r"dns_subdomain_entropy\s*>\s*([\d.]+)")
+TUNNEL_LABEL_LENGTH = threshold(TUNNEL, r"dns_mean_label_length\s*>\s*([\d.]+)")
+TUNNEL_SUBDOMAINS = threshold(TUNNEL, r"qualifying_subdomains\s*>\s*([\d.]+)")
+TUNNEL_MULTIPLE = threshold(TUNNEL, r"dns_subdomains_per_domain_ratio\s*>=\s*([\d.]+)")
+ENUMERATION_PATHS = threshold(ENUMERATION, r"http_distinct_paths\s*>\s*([\d.]+)")
+ENUMERATION_RATIO = threshold(ENUMERATION, r"http_4xx_in_window\s*>\s*([\d.]+)\s*\*")
+ENUMERATION_MULTIPLE = threshold(ENUMERATION, r"http_distinct_paths_ratio\s*>=\s*([\d.]+)")
+SERVICE_CLIENTS = threshold(SERVICE, r"clients\s*>=\s*([\d.]+)")
+SERVICE_MULTIPLE = threshold(SERVICE, r"times_busiest_day\s*>=\s*([\d.]+)")
+GENERATION_DOMAINS = threshold(GENERATION, r"dns_domains_per_client\s*>\s*([\d.]+)")
+GENERATION_NXDOMAIN = threshold(GENERATION, r"dns_nxdomain_ratio\s*>\s*([\d.]+)")
+GENERATION_MULTIPLE = threshold(GENERATION, r"dns_domains_per_client_ratio\s*>=\s*([\d.]+)")
+"""The layer 7 searches' own thresholds, read from the stanzas so the predicates this file evaluates are the ones
+the app ships."""
 
 
 def _layer_7_events() -> list:
@@ -561,64 +573,202 @@ def _layer_7_events() -> list:
         return [json.loads(line) for line in handle if line.strip()]
 
 
+def _beyond_baseline(event: dict, column: str, multiple: float) -> bool:
+    """`(<column>_baseline_mature=false OR <column>_ratio>=multiple)`: a client with a week of history is held to a
+    multiple of its own busiest day, and one without is held to the literal alone."""
+    return event.get(f"{column}_baseline_mature") is False or (_number(event, f"{column}_ratio") or 0.0) >= multiple
+
+
 def test_the_layer_7_detections_return_exactly_what_is_written(expected: dict):
     # Evaluated over the events the app is fed rather than the frame the pipeline produced. For R-B-L7-001 this is
     # not a formality: the search computes its own count, of distinct subdomains among queries clearing the other
-    # two conditions, which is a different figure from the stage's count of every subdomain. Only the search's
-    # version holds all three conditions to the same traffic, and this is the place it is computed as the search
-    # computes it.
+    # conditions, which is a different figure from the stage's count of every subdomain. Only the search's
+    # version holds all four conditions to the same traffic, and this is the place it is computed as the search
+    # computes it -- per domain and hour, because a reputation agent's every day clears the literal over a week.
     events = _layer_7_events()
     searches = expected["searches"]
 
-    qualifying = [
+    candidates = [
         event for event in events if (event.get("dns_subdomain_entropy") or 0) > TUNNEL_ENTROPY and (
             event.get("dns_mean_label_length") or 0) > TUNNEL_LABEL_LENGTH
     ]
-    subdomains: dict = collections.defaultdict(set)
-    clients: dict = collections.defaultdict(set)
+    qualifying = [
+        event for event in candidates if _beyond_baseline(event, "dns_subdomains_per_domain", TUNNEL_MULTIPLE)
+    ]
+    hours: dict = collections.defaultdict(list)
 
     for event in qualifying:
-        subdomains[event["dns_registered_domain"]].add(event["dns_subdomain"])
-        clients[event["dns_registered_domain"]].add(event["src_ip"])
+        hours[(event["dns_registered_domain"], event["window_id"])].append(event)
 
-    tunnels = {domain: names for (domain, names) in subdomains.items() if len(names) > TUNNEL_SUBDOMAINS}
-    entry = searches["R-B-L7-001 - DNS tunneling"]
+    tunnels = {
+        key: rows
+        for (key, rows) in hours.items() if len({event["dns_subdomain"]
+                                                 for event in rows}) > TUNNEL_SUBDOMAINS
+    }
+    entry = searches[TUNNEL]
 
-    assert entry["candidate_rows_clearing_entropy_and_length"] == len(qualifying)
+    assert entry["candidate_rows_clearing_entropy_and_length"] == len(candidates)
+    assert entry["candidate_rows_clearing_the_baseline"] == len(qualifying)
     assert entry["expected_rows"] == len(tunnels)
-    assert entry["key_values"]["dns_registered_domain"] in tunnels
 
-    domain = entry["key_values"]["dns_registered_domain"]
+    key = (entry["key_values"]["dns_registered_domain"], entry["key_values"]["window_id"])
+    rows = tunnels[key]
 
-    assert entry["key_values"]["qualifying_subdomains"] == len(tunnels[domain])
-    assert entry["contributing_rows"] == sum(1 for event in qualifying if event["dns_registered_domain"] == domain)
-    assert entry["key_values"]["clients"] == len(clients[domain])
+    assert entry["key_values"]["qualifying_subdomains"] == len({event["dns_subdomain"] for event in rows})
+    assert entry["key_values"]["times_busiest_day"] == max(event["dns_subdomains_per_domain_ratio"] for event in rows)
+    assert entry["contributing_rows"] == len(rows)
+    assert entry["key_values"]["clients"] == len({event["src_ip"] for event in rows})
+
+    # The reputation agent is the control the baseline exists for: it reaches the subdomain count on its event
+    # day and is quiet only because that day is not twice its busiest.
+    lookups = [event for event in candidates if event["dns_registered_domain"] == "filerep-av.net"]
+
+    assert max(event["dns_subdomains_per_domain"] for event in lookups) > TUNNEL_SUBDOMAINS
+    assert "filerep-av.net" not in {domain for (domain, _) in tunnels}
 
     # R-D-L7-005, read off the same row the way the search reads it, the ratio as a multiplication.
-    enumerating = [
+    refused = [
         event for event in events
         if (event.get("http_distinct_paths") or 0) > ENUMERATION_PATHS and event.get("http_4xx_in_window") is not None
         and event["http_4xx_in_window"] > ENUMERATION_RATIO * event["http_2xx_in_window"]
     ]
+    enumerating = [event for event in refused if _beyond_baseline(event, "http_distinct_paths", ENUMERATION_MULTIPLE)]
     by_client: dict = collections.defaultdict(list)
 
     for event in enumerating:
         by_client[event["src_ip"]].append(event)
 
-    entry = searches["R-D-L7-005 - Enumeration"]
+    entry = searches[ENUMERATION]
 
+    assert entry["candidate_rows_before_the_baseline"] == len(refused)
     assert entry["contributing_rows"] == len(enumerating)
     assert entry["expected_rows"] == len(by_client)
 
-    written = {row["src_ip"]: (row["distinct_paths"], row["refusals"], row["successes"]) for row in entry["key_values"]}
+    written = {
+        row["src_ip"]: (row["distinct_paths"], row["refusals"], row["successes"], tuple(row["user_agent_families"]))
+        for row in entry["key_values"]
+    }
     derived = {
         client: (max(event["http_distinct_paths"] for event in rows),
                  max(event["http_4xx_in_window"] for event in rows),
-                 max(event["http_2xx_in_window"] for event in rows))
+                 max(event["http_2xx_in_window"] for event in rows),
+                 tuple(sorted({event["http_ua_family"]
+                               for event in rows})))
         for (client, rows) in by_client.items()
     }
 
     assert written == derived
+
+
+def test_the_service_and_generation_detections_return_exactly_what_is_written(expected: dict):
+    # R-B-L7-007 aggregates per service and hour and then thresholds the aggregate, so the predicate is evaluated
+    # on the groups; R-B-L7-008 is a row predicate and a `stats ... BY src_ip`.
+    events = _layer_7_events()
+    searches = expected["searches"]
+    services: dict = collections.defaultdict(list)
+
+    for event in events:
+        if (event.get("service_key") and event.get("service_clients_baseline_mature") is True):
+            services[(event["service_key"], event["window_id"])].append(event)
+
+    def new_fingerprints(rows: list) -> list:
+        return [event for event in rows if event.get("service_client_fingerprint_first_seen") is True]
+
+    reached = {
+        key: rows
+        for (key, rows) in services.items()
+        if max(event["service_clients_in_window"] for event in rows) >= SERVICE_CLIENTS and max(
+            event["service_clients_ratio"] for event in rows) >= SERVICE_MULTIPLE and len(new_fingerprints(rows)) > 0
+    }
+    entry = searches[SERVICE]
+    written = entry["key_values"]
+    rows = reached[(written["service_key"], written["window_id"])]
+
+    assert entry["expected_rows"] == len(reached)
+    assert entry["contributing_rows"] == len(rows)
+    assert written["clients"] == max(event["service_clients_in_window"] for event in rows)
+    assert written["busiest_day"] == max(event["service_clients_baseline"] for event in rows)
+    assert written["times_busiest_day"] == max(event["service_clients_ratio"] for event in rows)
+    assert written["new_fingerprints"] == len(new_fingerprints(rows))
+    assert written["new_client_software"] == sorted({event["ja4_client"] for event in new_fingerprints(rows)})
+    assert {written["service_key_source"]} == {event["service_key_source"] for event in rows}
+    assert {written["application"]} == {event["ctx_application_name"] for event in rows}
+    assert {written["owning_team"]} == {event["ctx_application_owning_team"] for event in rows}
+
+    generating = [
+        event for event in events
+        if (event.get("dns_domains_per_client") or 0) > GENERATION_DOMAINS and (event.get("dns_nxdomain_ratio") or 0) >
+        GENERATION_NXDOMAIN and _beyond_baseline(event, "dns_domains_per_client", GENERATION_MULTIPLE)
+    ]
+    entry = searches[GENERATION]
+    written = entry["key_values"]
+
+    assert entry["contributing_rows"] == len(generating)
+    assert entry["expected_rows"] == len({event["src_ip"] for event in generating})
+
+    rows = [event for event in generating if event["src_ip"] == written["src_ip"]]
+
+    assert written["registered_domains"] == max(event["dns_domains_per_client"] for event in rows)
+    assert written["times_busiest_day"] == max(event["dns_domains_per_client_ratio"] for event in rows)
+    assert written["nxdomain_share"] == max(event["dns_nxdomain_ratio"] for event in rows)
+    assert written["nxdomain_answers"] == max(event["dns_nxdomain_in_window"] for event in rows)
+
+
+STACK_FAMILIES = {
+    "windows": "windows", "macos": "darwin", "ios": "darwin", "linux": "linux", "android": "linux", "chromeos": "linux"
+}
+"""R-B-L4-004's `case()`: the stack family each operating system a User-Agent can claim runs."""
+
+
+def test_the_stack_mismatch_returns_exactly_what_is_written(expected: dict):
+    # The search's two `stats ... BY` and its inner join on host_key, evaluated over the two sourcetypes it reads.
+    stacks: dict = collections.defaultdict(list)
+    claims: dict = collections.defaultdict(list)
+
+    for event in _events_of("morpheus_score_l4.jsonlines"):
+        if (event.get("host_key") and event.get("stack_os_family")):
+            stacks[(event["host_key"], event["stack_os_family"])].append(event)
+
+    for event in _layer_7_events():
+        if (event.get("host_key") and event.get("http_ua_os")):
+            claims[(event["host_key"], STACK_FAMILIES.get(event["http_ua_os"]))].append(event)
+
+    mismatches = {
+        (host, family, claimed): (rows, claims[(claimed_host, claimed)])
+        for ((host, family), rows) in stacks.items()
+        for (claimed_host, claimed) in claims if claimed_host == host and claimed is not None and claimed != family
+    }
+    entry = expected["searches"][STACK]
+    written = entry["key_values"]
+
+    assert entry["expected_rows"] == len(mismatches)
+
+    (rows, requests) = mismatches[(written["host_key"], written["stack_os_family"], written["claimed_stack"])]
+
+    assert written["stack_fingerprints"] == sorted({event["stack_fingerprint"] for event in rows})
+    assert written["stack_new_to_host"] == max(int(event.get("stack_fingerprint_first_seen") is True) for event in rows)
+    assert written["claimed_os"] == sorted({event["http_ua_os"] for event in requests})
+    assert written["user_agent_families"] == sorted({event["http_ua_family"] for event in requests})
+
+
+def test_the_issuer_anomaly_returns_exactly_what_is_written(expected: dict):
+    # Grouped on the TLS destination, so an interception of one name on a shared address is its own notable.
+    intercepted = [
+        event for event in _events_of("morpheus_score_l6.jsonlines") if event.get("cert_issuer_differs") is True
+        and event.get("cert_issuer_mature") is True and event.get("cert_issuer_distinct") == 1
+    ]
+    grouped: dict = collections.defaultdict(list)
+
+    for event in intercepted:
+        grouped[event["tls_destination_key"]].append(event)
+
+    entry = expected["searches"]["R-D-L6-002 - Certificate issuer anomaly"]
+
+    assert entry["contributing_rows"] == len(intercepted)
+    assert entry["expected_rows"] == len(grouped)
+    assert {(row["tls_destination_key"], row["presented_issuer"], row["established_issuer"])
+            for row in entry["key_values"]} == {(key, rows[0]["certificate_issuer"], rows[0]["cert_issuer_established"])
+                                                for (key, rows) in grouped.items()}
 
 
 def test_the_saas_detections_return_exactly_what_is_written(expected: dict):
@@ -830,6 +980,27 @@ def test_the_connection_evidence_report_returns_exactly_what_is_written(expected
     assert entry["expected_rows"] == len(joined)
     assert entry["key_values"] == joined
     assert entry["connections_seen_at_two_layers"] == sum(1 for seen in layers.values() if len(seen) == 2)
+
+
+def test_the_host_evidence_report_returns_exactly_what_is_written(expected: dict):
+    # Every scored record on layers 3, 4, 6 and 7 that resolved to a machine, grouped on it, kept where two layers
+    # or more saw the machine. Written as seventeen through a step that added two machines at layers 4 and 7; the
+    # search head counted nineteen, and nothing here had derived it.
+    layers: dict = collections.defaultdict(set)
+
+    for sourcetype_file in ("morpheus_score_l3.jsonlines",
+                            "morpheus_score_l4.jsonlines",
+                            "morpheus_score_l6.jsonlines",
+                            "morpheus_score_l7.jsonlines"):
+        for event in _events_of(sourcetype_file):
+            if (event.get("host_key") and event.get("window_complete") is True):
+                layers[event["host_key"]].add(event["osi_layer"])
+
+    machines = sorted(host for (host, seen) in layers.items() if len(seen) >= 2)
+    entry = expected["searches"]["Host evidence - one machine across layers"]
+
+    assert entry["expected_rows"] == len(machines)
+    assert entry["key_values"] == machines
 
 
 def test_the_command_and_control_chain_returns_exactly_what_is_written(expected: dict):
@@ -1139,6 +1310,7 @@ NUMBER_WORDS = {
     "sixty-two": 62,
     "sixty-six": 66,
     "seventy-two": 72,
+    "seventy-five": 75,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""

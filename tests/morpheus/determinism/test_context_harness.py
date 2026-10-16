@@ -40,6 +40,7 @@ from morpheus.utils import bitemporal
 from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
+from morpheus.utils.entity_key import compose_key
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -131,6 +132,9 @@ def test_corpus_is_shaped_like_an_hr_export_and_an_inventory(corpus: dict[str, p
 
     for column in ("hostname", "owner", "owning_team", "criticality", "data_classification", "peer_group"):
         assert column in corpus[cp.ASSET_CLASS].columns, column
+
+    for column in ("server_address", "server_port", "name", "owning_team", "service_account", "criticality"):
+        assert column in corpus[cp.APPLICATION_CLASS].columns, column
 
     for name in cp.PRODUCER_CLASSES:
         frame = corpus[name]
@@ -302,6 +306,28 @@ def test_the_inventory_says_what_each_host_is(result: pd.DataFrame):
 
 
 @pytest.mark.cpu_mode
+def test_a_server_reassigned_and_recorded_late_splits_the_two_views(result: pd.DataFrame):
+    # The billing port went to the reporting service on day nine and the CMDB heard on day ten. On day nine the
+    # connection was to billing as anyone could have known, and to reporting as is now understood -- and the service
+    # account a detection on that day would have named is the one that was recorded then.
+    assert _pair(result, "billing-before-reassignment", "application_name") == ("billing", "billing")
+    assert _pair(result, "billing-port-unrecorded-reassignment", "application_name") == ("billing", "reporting")
+    assert _pair(result, "billing-port-unrecorded-reassignment",
+                 "application_service_account") == ("svc-billing", "svc-reports")
+    assert _pair(result, "billing-port-after-recording", "application_name") == ("reporting", "reporting")
+    assert _pair(result, "ledger-api-day3", "application_owning_team") == ("finance-apps", "finance-apps")
+
+
+@pytest.mark.cpu_mode
+def test_a_server_the_cmdb_never_mapped_is_not_found(result: pd.DataFrame):
+    for knowledge in cp.KNOWLEDGE_MODES:
+        row = _probe(result, "unmapped-server", knowledge)
+
+        assert not bool(row["ctx_application_found"])
+        assert pd.isna(row["ctx_application_name"])
+
+
+@pytest.mark.cpu_mode
 def test_a_decommissioned_host_is_not_found(result: pd.DataFrame):
     assert _pair(result, "builder-after-decommission", "criticality") == (None, None)
     assert not _probe(result, "builder-after-decommission", "event")["ctx_found"]
@@ -377,11 +403,13 @@ def test_event_knowledge_does_not_change_as_the_store_grows():
     # The property that makes the default reproducible. Asked with the event-time horizon, the full store gives
     # exactly what a store holding only what had been recorded by then would give -- so recording a correction
     # tomorrow cannot change what an enrichment of today's events said.
-    full = BitemporalStore("full", cp.identity_log() + cp.asset_log())
+    log = cp.identity_log() + cp.asset_log() + cp.application_log()
+    full = BitemporalStore("full", log)
+    servers = [(probe, compose_key(list(server)), event_time)
+               for (probe, server, event_time) in cp.APPLICATION_PROBE_EVENTS]
 
-    for (_, entity, event_time) in cp.IDENTITY_PROBE_EVENTS + cp.ASSET_PROBE_EVENTS:
-        then = BitemporalStore(
-            "then", [version for version in cp.identity_log() + cp.asset_log() if version.recorded_ns <= event_time])
+    for (_, entity, event_time) in cp.IDENTITY_PROBE_EVENTS + cp.ASSET_PROBE_EVENTS + servers:
+        then = BitemporalStore("then", [version for version in log if version.recorded_ns <= event_time])
 
         assert full.facts_about(entity, event_time, known_ns=event_time) == then.facts_about(entity, event_time), entity
 
@@ -395,7 +423,7 @@ def test_the_store_rebuilt_from_the_wire_is_the_one_that_was_recorded(result: pd
     for name in cp.PRODUCER_CLASSES:
         produced |= set(_producer(result, name)[bitemporal.CONTEXT_UID].dropna())
 
-    assert produced == {version.uid for version in cp.identity_log() + cp.asset_log()}
+    assert produced == {version.uid for version in cp.identity_log() + cp.asset_log() + cp.application_log()}
 
 
 @pytest.mark.cpu_mode
@@ -406,7 +434,8 @@ def test_every_attached_value_traces_to_a_recorded_version(result: pd.DataFrame)
         produced |= set(_producer(result, name)[bitemporal.CONTEXT_UID].dropna())
 
     probes = result[result["telemetry_class"].isin(cp.PROBE_CLASSES)]
-    cited = {uid for cell in probes["ctx_version_uids"].dropna() for uid in cell.split("|")}
+    cells = list(probes["ctx_version_uids"].dropna()) + list(probes["ctx_application_version_uids"].dropna())
+    cited = {uid for cell in cells for uid in cell.split("|")}
 
     assert len(cited) > 0
     assert cited <= produced
@@ -415,6 +444,7 @@ def test_every_attached_value_traces_to_a_recorded_version(result: pd.DataFrame)
 def test_the_corpus_never_contradicts_itself():
     assert BitemporalStore("identity", cp.identity_log()).contradictions() == 0
     assert BitemporalStore("asset", cp.asset_log()).contradictions() == 0
+    assert BitemporalStore("application", cp.application_log()).contradictions() == 0
 
 
 @pytest.mark.cpu_mode

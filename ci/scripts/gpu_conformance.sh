@@ -100,6 +100,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc2_binding_stage.py
     tests/morpheus/stages/test_tc2_cardinality_stage.py
     tests/morpheus/stages/test_tc3_beacon_stage.py
+    tests/morpheus/stages/test_tc0_application_stage.py
     tests/morpheus/stages/test_tc0_asset_stage.py
     tests/morpheus/stages/test_tc0_enrich_stage.py
     tests/morpheus/stages/test_tc0_identity_stage.py
@@ -116,6 +117,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc7_endpoint_stage.py
     tests/morpheus/stages/test_tc7_http_stage.py
     tests/morpheus/stages/test_tc7_saas_stage.py
+    tests/morpheus/stages/test_tc7_service_stage.py
     tests/morpheus/stages/test_tc5_cadence_stage.py
     tests/morpheus/stages/test_tc5_drift_stage.py
     tests/morpheus/stages/test_tc5_novelty_stage.py
@@ -186,7 +188,9 @@ UNMARKED=(
     tests/morpheus/utils/test_siem_wire.py
     tests/morpheus/utils/test_splunk_app_contracts.py
     tests/morpheus/utils/test_splunk_field_contracts.py
+    tests/morpheus/utils/test_stack_fingerprint.py
     tests/morpheus/utils/test_ttl_profile.py
+    tests/morpheus/utils/test_user_agent.py
     tests/morpheus/utils/test_value_novelty.py
     tests/morpheus/utils/test_window_seal.py
 )

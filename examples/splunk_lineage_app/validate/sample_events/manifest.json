@@ -3,18 +3,19 @@
     "binding:bucketed": 2498,
     "binding:l1": 23,
     "binding:l2": 19,
+    "context:application": 3,
     "context:asset": 7,
     "context:identity": 23,
     "morpheus:edge": 2751,
-    "morpheus:health": 851,
+    "morpheus:health": 889,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
     "morpheus:score:l1": 793,
     "morpheus:score:l2": 1501,
     "morpheus:score:l3": 1525,
-    "morpheus:score:l4": 987,
+    "morpheus:score:l4": 1011,
     "morpheus:score:l5": 661,
-    "morpheus:score:l6": 296,
-    "morpheus:score:l7": 4484
+    "morpheus:score:l6": 313,
+    "morpheus:score:l7": 8106
   }
 }

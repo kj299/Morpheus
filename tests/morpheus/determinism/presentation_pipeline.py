@@ -39,8 +39,11 @@ quiet:
   has never heard of: the guide's argument for this rule is that there are few innocent ways for a managed endpoint
   to acquire a stack, and a phone updating its browser is one of the many for a device nobody manages;
 - an **interception**, a destination presenting an issuer it never has before, which is R-D-L6-002, against a
-  content delivery host legitimately behind four authorities and against a destination whose authority genuinely
-  rotates and then settles, which must stop being reported once it is the destination's new normal;
+  content delivery host legitimately behind four authorities, against a destination whose authority genuinely
+  rotates and then settles, which must stop being reported once it is the destination's new normal, and against a
+  **shared host** -- one address terminating two names whose certificates come from two authorities -- which is two
+  destinations, because a destination is the name the client asked for at the address that answered, and whose
+  shop is then intercepted: keyed on the address, the second name's authority would hide it;
 - a **self-signed certificate on a connection leaving the estate**, which is R-D-L6-003, against the internal
   appliance whose self-signed certificate is ordinary;
 - a **cipher downgrade**, a pair landing on a broken suite it has never negotiated, which is R-B-L6-004, against
@@ -52,9 +55,10 @@ Three of the five rules need a reference and two do not, which the corpus makes 
 content rules fire on a destination's first handshake, while the issuer and cipher rules stay quiet until their
 entity has a history. "The rule is quiet" means different things in those two cases and the harness asserts both.
 
-Each handshake's source is enriched from the TC-0 asset inventory, keyed on the address until hosts have an identity
-of their own across layers, and carries its Community ID, so a handshake joins the flow and the packets of the same
-connection by equality.
+Each handshake's source is enriched from the TC-0 asset inventory, through the machine its address resolved to, and its
+destination from the CMDB's application-to-server mapping on `dst_ip:dst_port`; and each carries its Community ID, so a
+handshake joins the flow and the packets of the same connection by equality. Every handshake but the internal
+appliance's names the server it asked for in `sni`.
 
 Every stateful stage is preceded by `TotalOrderStage`, which is determinism control 8 as a stage. Three of the
 four TC-6 stages are cumulative -- a novelty set, a mode and a running minimum are all functions of what came
@@ -64,6 +68,7 @@ before -- so the permutation check has something to catch.
 import hashlib
 import typing
 
+import application_context
 import envelope
 import host_identity
 import pandas as pd
@@ -140,6 +145,19 @@ CDN = "93.184.216.35"
 ROTATED = "93.184.216.36"
 ATTACKER = "93.184.216.37"
 APPLIANCE = "10.0.1.50"
+SHARED = "93.184.216.38"
+"""A hosting provider's address, terminating two customers' names."""
+
+SHOP = "shop.example-hosting.net"
+MAIL = "mail.example-hosting.net"
+
+NAMES = {
+    PORTAL: "portal.example.com",
+    CDN: "static.example-delivery.net",
+    ROTATED: "updates.example.org",
+    ATTACKER: "cdn-sync.example.net",
+}
+"""The server name each destination's handshakes ask for. The internal appliance is reached by its address."""
 
 # Fingerprints. The shape JA4 produces, which is what a reader will be comparing against their own feed.
 CHROME = "t13d1516h2_8daaf6152771_b186095e22b6"
@@ -150,6 +168,7 @@ NEW_STACK = "t13d3104h1_9b1e5a0f4c22_7e0fd1a83b55"
 CORP_CA = "CN=Corp Issuing CA, O=Example, C=GB"
 PUBLIC_CA = "CN=Public Trust CA G2, O=Trust Services, C=US"
 ROTATED_CA = "CN=Public Trust CA G3, O=Trust Services, C=US"
+HOSTING_CA = "CN=Hosting Mail CA, O=Hosting"
 PROXY_CA = "CN=Inspection Proxy, O=Unknown"
 SELF_CA = "CN=appliance.local, O=self"
 
@@ -231,7 +250,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
             validation=VALID,
             validity_days=CORP_VALIDITY_DAYS,
             declared=None,
-            detected=None):
+            detected=None,
+            sni=None):
         rows.append({
             "collector_id": COLLECTOR,
             "schema_version": SCHEMA_VERSION,
@@ -242,6 +262,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
             "src_port": 49152 + len(rows),
             "dst_ip": dst,
             "dst_port": 443,
+            "sni": sni if sni is not None else NAMES.get(dst),
             "protocol": "tcp",
             "tls_version": "TLSv1.3" if suite.startswith("TLS_AES") or suite.startswith("TLS_CHACHA") else "TLSv1.2",
             "ja4_client": fingerprint,
@@ -289,6 +310,15 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
     for index in range(16):
         add(MANAGED, ROTATED, CHROME, ROTATED_CA, MODERN_SUITE, at(1, 45 + index * 180))
+
+    # The shared host: two names on one address, each with its own authority, visited in turn -- and then the shop
+    # intercepted. Keyed on the address alone this is a destination with two authorities already, and the third is
+    # one more among several rather than the first the shop has ever presented.
+    for index in range(16):
+        (name, issuer) = (SHOP, PUBLIC_CA) if index % 2 == 0 else (MAIL, HOSTING_CA)
+        add(MANAGED, SHARED, CHROME, issuer, MODERN_SUITE, at(0, 100 + index * 400), sni=name)
+
+    add(MANAGED, SHARED, CHROME, PROXY_CA, MODERN_SUITE, at(2, 700), sni=SHOP)
 
     # The self-signed pair: one certificate leaving the estate, one staying inside it. Both fire the same flag
     # and only one of them is a finding, which is the whole of R-D-L6-003.
@@ -377,16 +407,19 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
 
 def build_stages(config: Config,
                  store: typing.Optional[BitemporalStore] = None,
-                 hosts: typing.Optional[tuple] = None) -> list:
-    """The TC-6 stages, in the order a deployment would compose them, then the source's machine and its context.
+                 hosts: typing.Optional[tuple] = None,
+                 applications: typing.Optional[BitemporalStore] = None) -> list:
+    """The TC-6 stages, in the order a deployment would compose them, then the source's machine and its context, and
+    the application the destination's port belongs to.
 
     The order of the four is not load-bearing -- none reads a column another writes -- so they are composed in the
     order the rules are numbered, which is the order a reader will look for them in. The source address is then
     resolved to its machine through the leases and the EDR inventory in `hosts`, and the machine is what the asset
     inventory is looked up on: an address names a host only for as long as its lease does, and a host name for as
-    long as the host does.
+    long as the host does. `applications` is the CMDB's store, defaulting to the estate's.
     """
     (leases, inventory) = host_identity.tables(config, {}) if hosts is None else hosts
+    applications = application_context.store(config) if applications is None else applications
 
     return [
         TC6FingerprintStage(config),
@@ -398,6 +431,7 @@ def build_stages(config: Config,
                        store=build_store() if store is None else store,
                        entity_column=host_identity.HOST_KEY_COLUMN,
                        entity_normalization="hostname"),
+        application_context.enrich_stage(config, applications),
     ]
 
 

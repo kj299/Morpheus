@@ -214,6 +214,7 @@ def test_the_app_readme_states_the_number_of_searches_it_ships():
         "sixty-two": 62,
         "sixty-six": 66,
         "seventy-two": 72,
+        "seventy-five": 75,
     }
 
     assert words.get(match.group(1).lower()) == shipped, (
@@ -320,7 +321,7 @@ def test_every_detection_writes_its_rows_to_the_risk_index():
     # searches summed a risk_score nothing stored. Every detection now ends by collecting what it returned.
     detections = _detections()
 
-    assert len(detections) == 49
+    assert len(detections) == 52
     assert read_text(SAVEDSEARCHES_PATH).count("| collect index=behavior_risk") == len(detections)
 
     for (name, stanza) in detections.items():

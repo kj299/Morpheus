@@ -10,6 +10,7 @@ R-B-L3-002,R-B-L3-002 - Beaconing,flow_pair_key,1h,none
 R-B-L3-004,R-B-L3-004 - TTL fingerprint shift,src_ip,1h,none
 R-B-L3-006,R-B-L3-006 - Fan-in onto a workstation,dst_ip,1h,none
 R-B-L3-007,R-B-L3-007 - First-contact upload,"src_ip,bgp_as_dst",1h,none
+R-B-L4-004,R-B-L4-004 - Stack fingerprint mismatch,host_key,1h,none
 R-B-L4-005,R-B-L4-005 - Transfer envelope breach,transfer_triple,1h,none
 R-B-L5-001,R-B-L5-001 - Composite authentication anomaly,"user_principal,window_id",1h,none
 R-B-L5-002,R-B-L5-002 - Location novelty anomaly,"user_principal,window_id",1h,none
@@ -19,6 +20,8 @@ R-B-L6-004,R-B-L6-004 - Cipher downgrade,tls_pair_key,1h,none
 R-B-L7-001,R-B-L7-001 - DNS tunneling,dns_registered_domain,1h,none
 R-B-L7-002,R-B-L7-002 - Bulk data access,"user_principal,operation",1h,none
 R-B-L7-004,R-B-L7-004 - Process ancestry novelty,"endpoint_host,endpoint_pair",1h,none
+R-B-L7-007,R-B-L7-007 - Service reached by new clients,service_key,1h,none
+R-B-L7-008,R-B-L7-008 - Domain generation,src_ip,1h,none
 R-C-001,R-C-001 - Lateral movement chain,"src_ip,user_principal,target",3h,none
 R-C-002,R-C-002 - TLS anomaly precedes beaconing,"src_ip,dst_ip",3h,none
 R-C-004,R-C-004 - Staged exfiltration,"user_principal,src_ip",12h,none
@@ -40,7 +43,7 @@ R-D-L5-004,R-D-L5-004 - Multi-factor fatigue,"user_principal,window_id",1h,none
 R-D-L5-007,R-D-L5-007 - Off-hours authentication,"user_principal,window_id",1h,none
 R-D-L5-008,R-D-L5-008 - New authentication location or device,"user_principal,window_id",1h,none
 R-D-L5-009,R-D-L5-009 - Failed authentication run ending in success,"user_principal,window_id",1h,none
-R-D-L6-002,R-D-L6-002 - Certificate issuer anomaly,dst_ip,1h,none
+R-D-L6-002,R-D-L6-002 - Certificate issuer anomaly,tls_destination_key,1h,none
 R-D-L6-003,R-D-L6-003 - Self-signed to external destination,dst_ip,1h,none
 R-D-L6-005,R-D-L6-005 - Content type mismatch,"src_ip,dst_ip",1h,none
 R-D-L7-005,R-D-L7-005 - Enumeration,src_ip,1h,none

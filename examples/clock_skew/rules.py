@@ -35,6 +35,7 @@ import configparser
 import csv
 import os
 import re
+import typing
 
 import pandas as pd
 
@@ -416,10 +417,44 @@ def _flow_bins(tc4: pd.DataFrame) -> pd.DataFrame:
                                  flags=("flow_all", "max")).reset_index()
 
 
-def layer_4_decisions(result: pd.DataFrame) -> dict:
+STACK = "R-B-L4-004 - Stack fingerprint mismatch"
+requires(STACK, r"where stack_os_family != claimed_stack")
+CLAIMED_STACKS = {
+    "windows": "windows", "macos": "darwin", "ios": "darwin", "linux": "linux", "android": "linux", "chromeos": "linux"
+}
+"""The stack each operating system a user agent can claim runs, as R-B-L4-004's `case` maps it."""
+for system in CLAIMED_STACKS:
+    requires(STACK, rf'http_ua_os="{system}"')
+
+
+def claims(result: pd.DataFrame) -> pd.DataFrame:
+    """The stack each machine's requests claim, from layer 7, which R-B-L4-004 joins the layer 4 stacks to."""
+    http = rows(result, "tc7_http")
+    http = http[http["host_key"].notna() & http["http_ua_os"].notna()] if len(http) > 0 else http
+
+    if (len(http) == 0):
+        return pd.DataFrame(columns=["host_key", "claimed_stack"])
+
+    return pd.DataFrame({"host_key": http["host_key"], "claimed_stack": http["http_ua_os"].map(CLAIMED_STACKS)})
+
+
+def _stack_mismatches(tc4: pd.DataFrame, claimed: typing.Optional[pd.DataFrame]) -> set:
+    """R-B-L4-004: a machine's stack families joined to the stacks its requests claim, where the two differ."""
+    if (claimed is None or len(claimed) == 0 or "stack_os_family" not in tc4.columns):
+        return set()
+
+    stacks = tc4[tc4["host_key"].notna() & tc4["stack_os_family"].notna()][["host_key", "stack_os_family"]]
+    joined = stacks.drop_duplicates().merge(claimed.dropna().drop_duplicates(), on="host_key")
+
+    return keys(joined[joined["stack_os_family"] != joined["claimed_stack"]], ["host_key"])
+
+
+def layer_4_decisions(result: pd.DataFrame, claimed: typing.Optional[pd.DataFrame] = None) -> dict:
     """
-    The three layer 4 rules. R-D-L4-002 and R-D-L4-003 group by `rollup_time_ns`, the bin, so a scan the skew
-    splits across two bins is a different accusation -- which is what an analyst would see.
+    The four layer 4 rules. R-D-L4-002 and R-D-L4-003 group by `rollup_time_ns`, the bin, so a scan the skew
+    splits across two bins is a different accusation -- which is what an analyst would see. R-B-L4-004 joins this
+    corpus's stacks to the operating systems another corpus's requests claim, from `claims`; without them it has
+    nothing to join and accuses nothing.
     """
     tc4 = rows(result, "tc4")
     bins = _flow_bins(tc4)
@@ -451,6 +486,7 @@ def layer_4_decisions(result: pd.DataFrame) -> dict:
         "R-D-L4-002": keys(reach[reach["dst_port"] > SCAN_PORTS], ["src_ip", "rollup_time_ns"]),
         "R-D-L4-003": refusals,
         "R-B-L4-005": keys(breached, ["transfer_triple"]),
+        "R-B-L4-004": _stack_mismatches(tc4, claimed),
     }
 
 
@@ -473,7 +509,7 @@ def layer_6_decisions(result: pd.DataFrame) -> dict:
         "R-B-L6-001":
             keys(new_stack, ["src_ip"]),
         "R-D-L6-002":
-            keys(intercepted, ["dst_ip"]),
+            keys(intercepted, ["tls_destination_key"]),
         "R-D-L6-003":
             keys(tc6[true(tc6, "cert_self_signed_external")], ["dst_ip"]),
         "R-B-L6-004":
@@ -559,8 +595,19 @@ ANCESTRY = "R-B-L7-004 - Process ancestry novelty"
 TUNNEL_ENTROPY = threshold(TUNNEL, r"dns_subdomain_entropy\s*>\s*([\d.]+)")
 TUNNEL_LABEL_LENGTH = threshold(TUNNEL, r"dns_mean_label_length\s*>\s*([\d.]+)")
 TUNNEL_SUBDOMAINS = threshold(TUNNEL, r"qualifying_subdomains\s*>\s*([\d.]+)")
+TUNNEL_MULTIPLE = threshold(TUNNEL, r"dns_subdomains_per_domain_ratio\s*>=\s*([\d.]+)")
 ENUMERATION_PATHS = threshold(ENUMERATION, r"http_distinct_paths\s*>\s*([\d.]+)")
 ENUMERATION_RATIO = threshold(ENUMERATION, r"http_4xx_in_window\s*>\s*([\d.]+)\s*\*\s*http_2xx_in_window")
+ENUMERATION_MULTIPLE = threshold(ENUMERATION, r"http_distinct_paths_ratio\s*>=\s*([\d.]+)")
+SERVICE = "R-B-L7-007 - Service reached by new clients"
+GENERATION = "R-B-L7-008 - Domain generation"
+SERVICE_FLOOR = threshold(SERVICE, r"clients\s*>=\s*([\d.]+)\s*AND")
+SERVICE_MULTIPLE = threshold(SERVICE, r"times_busiest_day\s*>=\s*([\d.]+)")
+requires(SERVICE, r"service_clients_baseline_mature=true")
+requires(SERVICE, r"new_fingerprints > 0")
+GENERATION_DOMAINS = threshold(GENERATION, r"dns_domains_per_client\s*>\s*([\d.]+)")
+GENERATION_NXDOMAIN = threshold(GENERATION, r"dns_nxdomain_ratio\s*>\s*([\d.]+)")
+GENERATION_MULTIPLE = threshold(GENERATION, r"dns_domains_per_client_ratio\s*>=\s*([\d.]+)")
 BULK_RATIO = threshold(BULK, r"saas_record_ratio\s*>\s*([\d.]+)")
 BREADTH_RISING_WEEKS = threshold(BREADTH, r"rising_weeks\s*>=\s*([\d.]+)")
 BREADTH_ROLE_VERSIONS = threshold(BREADTH, r"role_versions\s*=\s*([\d.]+)")
@@ -572,21 +619,47 @@ requires(BREADTH, r"saas_object_types_in_week=\*")
 requires(BREADTH, r'coalesce\(ctx_groups,\s*"none"\)')
 
 
+def _measured(frame: pd.DataFrame, column: str, multiple: float) -> pd.Series:
+    """`(<column>_baseline_mature=false OR <column>_ratio>=multiple)`: a client too new to measure, or one beyond."""
+    return ~true(frame, f"{column}_baseline_mature") | (number(frame, f"{column}_ratio") >= multiple)
+
+
 def application_decisions(result: pd.DataFrame) -> dict:
-    """R-B-L7-001 over DNS and R-D-L7-005 over HTTP."""
+    """R-B-L7-001 and R-B-L7-008 over DNS, R-D-L7-005 over HTTP and R-B-L7-007 over the services."""
     dns = rows(result, "tc7_dns")
     http = rows(result, "tc7_http")
+    services = rows(result, "tc7_service")
 
     qualifying = dns[(number(dns, "dns_subdomain_entropy") > TUNNEL_ENTROPY)
-                     & (number(dns, "dns_mean_label_length") > TUNNEL_LABEL_LENGTH)]
-    counts = qualifying.groupby("dns_registered_domain")["dns_subdomain"].nunique()
+                     & (number(dns, "dns_mean_label_length") > TUNNEL_LABEL_LENGTH)
+                     & _measured(dns, "dns_subdomains_per_domain", TUNNEL_MULTIPLE)]
+    counts = qualifying.groupby(["dns_registered_domain", "window_id"])["dns_subdomain"].nunique()
     enumerating = http[(number(http, "http_distinct_paths") > ENUMERATION_PATHS)
+                       & _measured(http, "http_distinct_paths", ENUMERATION_MULTIPLE)
                        & (number(http, "http_4xx_in_window") > ENUMERATION_RATIO * number(http, "http_2xx_in_window"))]
+    generating = dns[(number(dns, "dns_domains_per_client") > GENERATION_DOMAINS)
+                     & (number(dns, "dns_nxdomain_ratio") > GENERATION_NXDOMAIN)
+                     & _measured(dns, "dns_domains_per_client", GENERATION_MULTIPLE)]
+
+    reached = set()
+    measured = services[true(services, "service_clients_baseline_mature")] if len(services) > 0 else services
+
+    if (len(measured) > 0):
+        hours = measured.assign(clients=number(measured, "service_clients_in_window"),
+                                ratio=number(measured, "service_clients_ratio"),
+                                novel=true(measured, "service_client_fingerprint_first_seen").astype(int))
+        hours = hours.groupby(["service_key", "window_id"]).agg(clients=("clients", "max"),
+                                                                ratio=("ratio", "max"),
+                                                                novel=("novel", "sum"))
+        fired = hours[(hours["clients"] >= SERVICE_FLOOR) & (hours["ratio"] >= SERVICE_MULTIPLE) & (hours["novel"] > 0)]
+        reached = {(str(service), str(window)) for (service, window) in fired.index}
 
     return {
-        "R-B-L7-001": {(str(domain), )
-                       for domain in counts[counts > TUNNEL_SUBDOMAINS].index},
+        "R-B-L7-001": {(str(domain), str(window))
+                       for (domain, window) in counts[counts > TUNNEL_SUBDOMAINS].index},
         "R-D-L7-005": keys(enumerating, ["src_ip"]),
+        "R-B-L7-007": reached,
+        "R-B-L7-008": keys(generating, ["src_ip"]),
     }
 
 

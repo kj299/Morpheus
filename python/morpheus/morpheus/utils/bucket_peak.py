@@ -316,3 +316,30 @@ def measure_rows(tracker: BucketPeakTracker, keys: list, values: list, event_tim
         measured.unordered += int(result.out_of_order)
 
     return measured
+
+
+def ratios_to_reference(measured: MeasuredRows, values: list) -> list:
+    """
+    Each row's value as a multiple of the reference it was measured against.
+
+    The step says whether an entity has gone further than ever; the ratio says how much further, which is what a rule
+    with a floor needs -- "twice the busiest day this client has had, and above the literal" is a ratio and a count,
+    and neither alone. A reference below one is read as one, so a client whose busiest day carried nothing is
+    measured against a single unit rather than divided by zero.
+
+    Parameters
+    ----------
+    measured : `MeasuredRows`
+        What `measure_rows` returned for the batch.
+    values : list
+        The values it was shown, in the same order.
+
+    Returns
+    -------
+    list
+        Floats, or `None` for a row with no reference or no value.
+    """
+    return [
+        None if (reference is None or value is None) else float(value) / max(float(reference), 1.0)
+        for (reference, value) in zip(measured.references, values)
+    ]

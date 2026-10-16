@@ -49,6 +49,13 @@ per minute" is really records per bin and "bytes per packet" is bytes per record
 that emits one record per packet and wrong for a flow exporter that emits one record per flow, where `ppm` would
 count flows. The assumption is the reference's and is kept, because the model was trained under it; a deployment
 feeding flow records rather than packet records is feeding the model something other than what it learned.
+
+**A SYN carries the stack that sent it.** Where the record has `tcp_options_order`, the stage writes the fingerprint
+the options, `tcp_mss` and `tcp_window_initial` make together, the operating system family whose stock stack writes
+those options in that order, and whether the source has presented this fingerprint before, through
+{py:mod}`~morpheus.utils.stack_fingerprint` and {py:mod}`~morpheus.utils.value_novelty`. Only a SYN carries options,
+so every other record's three columns are null rather than empty. R-B-L4-004 sets the family against the operating
+system the same machine's `User-Agent` claims.
 """
 
 import logging
@@ -67,13 +74,17 @@ from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.lineage import window_id_from_timestamp
+from morpheus.utils.stack_fingerprint import stack_family
+from morpheus.utils.stack_fingerprint import stack_fingerprint
 from morpheus.utils.tcp_flags import FLAG_NAMES
 from morpheus.utils.tcp_flags import flags_from_byte
+from morpheus.utils.value_novelty import ValueNoveltyTracker
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +105,10 @@ SYN_RATIO = "flow_syn_ratio"
 FIN_RATIO = "flow_fin_ratio"
 
 RATIOS = (ACKPUSH_RATIO, RST_RATIO, SYN_RATIO, FIN_RATIO)
+
+STACK_FINGERPRINT = "stack_fingerprint"
+STACK_OS_FAMILY = "stack_os_family"
+STACK_FINGERPRINT_FIRST_SEEN = "stack_fingerprint_first_seen"
 
 MODEL_FEATURES = {
     "ack": "flow_ack",
@@ -150,6 +165,15 @@ class TC4FlowStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Bin width, anchored on the Unix epoch and half-open.
     max_flows : int, default = 500000
         Flows holding a partial bin before the least recently seen is dropped.
+    options_column : str, default = "tcp_options_order"
+        Column holding a SYN's TCP options, in the order the stack wrote them. The column may be absent, in which
+        case the stack columns are null.
+    mss_column : str, default = "tcp_mss"
+        Column holding the maximum segment size the SYN advertised. The column may be absent.
+    window_column : str, default = "tcp_window_initial"
+        Column holding the SYN's initial receive window. The column may be absent.
+    max_hosts : int, default = 100000
+        Sources whose stack fingerprints are remembered before the least recently seen is dropped.
     """
 
     def __init__(self,
@@ -163,7 +187,11 @@ class TC4FlowStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_column: str = "event_time",
                  time_unit: str = "ns",
                  bin_seconds: int = DEFAULT_BIN_SECONDS,
-                 max_flows: int = 500_000):
+                 max_flows: int = 500_000,
+                 options_column: str = "tcp_options_order",
+                 mss_column: str = "tcp_mss",
+                 window_column: str = "tcp_window_initial",
+                 max_hosts: int = 100_000):
         super().__init__(c)
 
         if (bin_seconds <= 0):
@@ -182,6 +210,12 @@ class TC4FlowStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._time_unit = time_unit
         self._bin_ns = bin_seconds * NS_PER_SECOND
         self._max_flows = max_flows
+        self._options_column = options_column
+        self._mss_column = mss_column
+        self._window_column = window_column
+
+        # A host opens many connections in one second, so SYNs at one instant are measured rather than refused.
+        self._stacks = ValueNoveltyTracker([STACK_FINGERPRINT], max_entities=max_hosts, simultaneous=True)
 
         # One partial bin per flow. Bounded by the flow count rather than by the stream, and reset rather than
         # accumulated when a flow's next record lands in a later bin.
@@ -195,6 +229,10 @@ class TC4FlowStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         for column in (BPP, ) + RATIOS:
             self._needed_columns[column] = TypeId.FLOAT64
+
+        self._needed_columns[STACK_FINGERPRINT] = TypeId.STRING
+        self._needed_columns[STACK_OS_FAMILY] = TypeId.STRING
+        self._needed_columns[STACK_FINGERPRINT_FIRST_SEEN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -418,6 +456,8 @@ class TC4FlowStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             for column in RATIOS:
                 df[column] = ratios[column]
 
+            self._write_stacks(df, src_ips, raw_times)
+
             if (unusable > 0):
                 logger.warning(
                     "TC4FlowStage left %d of %d records out of their flow's bin for want of an identifier, a "
@@ -434,6 +474,42 @@ class TC4FlowStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                     rows)
 
         return message
+
+    def _write_stacks(self, df, src_ips: list, raw_times: list) -> None:
+        """Each SYN's stack fingerprint, its family, and whether its source has presented it before."""
+        rows = len(src_ips)
+
+        def column(name: str) -> list:
+            return to_host_list(df, name) if name in df.columns else [None] * rows
+
+        (options, segments,
+         windows) = (column(self._options_column), column(self._mss_column), column(self._window_column))
+        fingerprints: list = []
+        families: list = []
+        first_seen: list = []
+
+        for position in range(rows):
+            fingerprint = stack_fingerprint(options[position], segments[position], windows[position])
+            host = normalize_text(src_ips[position])
+
+            fingerprints.append(fingerprint)
+            families.append(stack_family(options[position]))
+
+            try:
+                event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
+            except ValueError:
+                event_time_ns = None
+
+            if (fingerprint is None or host is None or event_time_ns is None):
+                first_seen.append(None)
+                continue
+
+            novelty = self._stacks.observe(host, event_time_ns, {STACK_FINGERPRINT: fingerprint})
+            first_seen.append(novelty.first_seen[STACK_FINGERPRINT])
+
+        assign_str_column(df, STACK_FINGERPRINT, fingerprints)
+        assign_str_column(df, STACK_OS_FAMILY, families)
+        assign_nullable_bool_column(df, STACK_FINGERPRINT_FIRST_SEEN, first_seen)
 
     @staticmethod
     def _flow_id(src_ip: typing.Any, src_port: typing.Any, dst_ip: typing.Any, dst_port: typing.Any):

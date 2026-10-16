@@ -35,6 +35,8 @@ import pandas as pd
 import pytest
 
 from morpheus.config import Config
+from morpheus.messages import MessageMeta
+from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
 from morpheus.utils.determinism import permute_within_contiguous_groups
@@ -308,6 +310,47 @@ def test_an_interception_differs_and_a_delivery_host_behind_four_authorities_doe
 
     assert list(interception["certificate_issuer"]) == [pp_.PROXY_CA]
     assert list(interception["cert_issuer_established"]) == [pp_.CORP_CA]
+
+
+@pytest.mark.cpu_mode
+def test_one_address_terminating_two_names_is_two_destinations(result: pd.DataFrame):
+    # A destination is the name the client asked for at the address that answered. Each of the shared host's names
+    # has presented one authority, so neither differs until the shop is intercepted -- and then the shop has.
+    shared = result[result["dst_ip"] == pp_.SHARED]
+
+    assert set(shared["tls_destination_key"]) == {f"{pp_.SHARED}:{pp_.SHOP}", f"{pp_.SHARED}:{pp_.MAIL}"}
+
+    differs = shared[_truth(shared, "cert_issuer_differs")]
+
+    assert list(differs["sni"]) == [pp_.SHOP]
+    assert list(differs["certificate_issuer"]) == [pp_.PROXY_CA]
+    assert list(differs["cert_issuer_distinct"]) == [SINGLE_ISSUER]
+
+
+@pytest.mark.cpu_mode
+def test_keyed_on_the_address_alone_the_second_name_hides_the_interception(corpus: dict[str, pd.DataFrame]):
+    # The counterfactual: the same handshakes through the stage keyed on dst_ip, as it was before it read sni. The
+    # shared address has presented two authorities from its second handshake, so the proxy's is one more among
+    # several, and R-D-L6-002's single-authority condition never holds on it.
+    config = pp_.build_pipeline_config()
+    handshakes = corpus[pp_.TELEMETRY_CLASS].sort_values("event_time", kind="mergesort").reset_index(drop=True)
+    stage = TC6CertificateStage(config, key_columns=["dst_ip"], min_samples=pp_.MIN_SAMPLES)
+    keyed = stage.on_data(MessageMeta(handshakes.copy())).copy_dataframe()
+    proxied = keyed[(keyed["dst_ip"] == pp_.SHARED) & (keyed["certificate_issuer"] == pp_.PROXY_CA)]
+
+    assert len(proxied) == 1
+    assert bool(proxied["cert_issuer_differs"].iloc[0])
+    assert int(proxied["cert_issuer_distinct"].iloc[0]) > SINGLE_ISSUER
+
+
+@pytest.mark.cpu_mode
+def test_a_destination_port_the_cmdb_maps_carries_its_application(result: pd.DataFrame):
+    # The badge controller is the only internal destination here; every other is on the internet and in no CMDB.
+    appliance = result[result["dst_ip"] == pp_.APPLIANCE]
+    elsewhere = result[result["dst_ip"] != pp_.APPLIANCE]
+
+    assert set(appliance["ctx_application_name"]) == {"badge-controller"}
+    assert not _truth(elsewhere, "ctx_application_found").any()
 
 
 @pytest.mark.cpu_mode

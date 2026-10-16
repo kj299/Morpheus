@@ -43,15 +43,19 @@ def run(config: Config, payload: dict, **kwargs) -> pd.DataFrame:
     return df.to_pandas() if hasattr(df, "to_pandas") else df
 
 
-def requests(statuses, paths=None, sources=None, times=None) -> dict:
+def requests(statuses, paths=None, sources=None, times=None, agents=None) -> dict:
     count = len(statuses)
-
-    return {
+    payload = {
         "src_ip": list(sources) if sources is not None else ["10.0.0.5"] * count,
         "status_code": list(statuses),
         "url_path": list(paths) if paths is not None else [f"/p{index}" for index in range(count)],
         "event_time": list(times) if times is not None else [START + index * SECOND for index in range(count)],
     }
+
+    if (agents is not None):
+        payload["user_agent"] = list(agents)
+
+    return payload
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -156,3 +160,43 @@ def test_a_missing_column_is_refused(config: Config):
 def test_an_empty_key_list_is_refused(config: Config):
     with pytest.raises(ValueError, match="key_columns"):
         TC7HttpStage(config, key_columns=[])
+
+
+DAY = 86400 * SECOND
+CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_client_s_new_software_is_novel_and_its_first_request_is_not(config: Config):
+    agents = [CHROME, CHROME, "curl/8.5.0", "curl/8.5.0", None]
+    result = run(config, requests([200] * 5, agents=agents))
+
+    assert list(result["http_ua_family"])[:4] == ["chrome", "chrome", "curl", "curl"]
+    assert list(result["http_ua_os"])[:2] == ["windows", "windows"]
+    assert pd.isna(result["http_ua_os"].iloc[2])
+    assert pd.isna(result["http_ua_family_first_seen"].iloc[0])
+    assert [truthy(value) for value in result["http_ua_family_first_seen"]][1:4] == [False, True, False]
+    # No header says nothing about the client's software.
+    assert pd.isna(result["http_ua_family_first_seen"].iloc[4])
+
+
+@pytest.mark.cpu_mode
+def test_without_a_user_agent_column_the_agent_columns_are_null(config: Config):
+    result = run(config, requests([200, 200]))
+
+    assert result["http_ua_family"].isna().all()
+    assert result["http_ua_family_first_seen"].isna().all()
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_client_s_paths_are_measured_against_its_own_busiest_day(config: Config):
+    times = [START + day * DAY + index * SECOND for day in range(3) for index in range(3)]
+    times += [START + 3 * DAY + index * SECOND for index in range(9)]
+    paths = [f"/d{position}" for position in range(len(times))]
+    result = run(config, requests([200] * len(times), paths=paths, times=times), baseline_min_days=3)
+    today = result.iloc[-1]
+
+    assert not truthy(result["http_distinct_paths_baseline_mature"].iloc[8])
+    assert truthy(today["http_distinct_paths_baseline_mature"])
+    assert today["http_distinct_paths_baseline"] == 3
+    assert today["http_distinct_paths_ratio"] == pytest.approx(3.0)

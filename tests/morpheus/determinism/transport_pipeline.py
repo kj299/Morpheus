@@ -36,6 +36,12 @@ quiet:
   is R-B-L4-005;
 - and a **busy but bounded** triple whose transfers vary by a factor of two, which must not breach.
 
+The handshakes carry the TCP options their SYN advertised, which is the stack fingerprint R-B-L4-004 reads. The
+ordinary workstation's are Windows's throughout; a **second workstation** presents Windows's for an hour and then a
+Linux stack it has never presented, under a browser that still says Windows in the application corpus's proxy log;
+and a **tool host** presents Linux's throughout under `curl`, which claims no operating system. Every SYN to the file
+server lands on a port the CMDB maps to an application, which `TC0EnrichStage` attaches as `ctx_application_*`.
+
 **The exfiltration triple is given a hundred and twenty prior transfers on purpose.** A 99th percentile by
 nearest rank over fewer than a hundred samples is simply the maximum, so a corpus that gave the triple twenty
 transfers would be demonstrating "three times the largest ever seen" while the rule and its documentation both
@@ -49,6 +55,7 @@ catch.
 import random
 import typing
 
+import application_context
 import envelope
 import host_identity
 import pandas as pd
@@ -101,7 +108,7 @@ SETTINGS = {
     "envelope_window_seconds": CORPUS_SECONDS * 4,
 }
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-D-L4-002", "R-D-L4-003", "R-B-L4-005")
+RULES = ("R-D-L4-002", "R-D-L4-003", "R-B-L4-005", "R-B-L4-004")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 COLLECTOR = "pcap-01"
@@ -109,6 +116,10 @@ SCHEMA_VERSION = "tc4.v1"
 
 SCANNER = "10.0.0.50"
 WORKSTATION = "10.0.0.60"
+SECOND_STACK = "10.0.0.61"
+"""A workstation that starts presenting a stack it has never presented, under the same browser."""
+TOOL_HOST = "10.0.0.62"
+"""A Linux machine whose requests come from `curl`, which says nothing about an operating system."""
 SWEEPER = "10.0.0.70"
 BACKUP_CLIENT = "10.0.0.80"
 BUSY_CLIENT = "10.0.0.90"
@@ -135,6 +146,10 @@ BACKUP_BYTES = 1200
 EXFIL_BYTES = 60000
 BUSY_BYTES = (400, 900)
 
+WINDOWS_STACK = ("mss,nop,ws,nop,nop,sok", 1460, 64240)
+LINUX_STACK = ("mss,sok,ts,nop,ws", 1460, 29200)
+"""The SYN options, maximum segment size and initial window of current Windows and Linux stacks."""
+
 SYN_ACK = SYN | ACK
 PSH_ACK = PSH | ACK
 FIN_ACK = FIN | ACK
@@ -151,7 +166,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     rng = random.Random(CORPUS_SEED)
     rows: list[dict] = []
 
-    def add(src, sport, dst, dport, flags, event_time_ns, data_len=0):
+    def add(src, sport, dst, dport, flags, event_time_ns, data_len=0, stack=None):
+        (options, mss, window) = stack if stack is not None else (None, None, None)
         rows.append({
             "collector_id": COLLECTOR,
             "schema_version": SCHEMA_VERSION,
@@ -165,6 +181,9 @@ def build_corpus() -> dict[str, pd.DataFrame]:
             "protocol": "tcp",
             "tcp_flags": flags,
             "data_len": data_len,
+            "tcp_options_order": options,
+            "tcp_mss": mss,
+            "tcp_window_initial": window,
         })
 
     def respond(src, sport, dst, dport, flags, event_time_ns, data_len=0):
@@ -181,17 +200,36 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     for index in range(SCAN_PORTS):
         add(SCANNER, 40000 + index, TARGET, 1000 + index, SYN, at(0, SCAN_AT_MINUTE * 60 + index // 2))
 
+    def handshake(client, sport, port, base, stack):
+        add(client, sport, FILE_SERVER, port, SYN, base, stack=stack)
+        respond(client, sport, FILE_SERVER, port, SYN_ACK, base + NS_PER_SECOND)
+        add(client, sport, FILE_SERVER, port, PSH_ACK, base + 2 * NS_PER_SECOND, data_len=1400)
+        add(client, sport, FILE_SERVER, port, FIN_ACK, base + 3 * NS_PER_SECOND)
+
     # The workstation: complete handshakes, which is what `syn/all` alone would flag and what must not be.
     for hour in range(CORPUS_HOURS):
         for (index, port) in enumerate((443, 445, 22)):
             base = at(hour, 600 + index * 120)
             sport = 51000 + index
 
-            add(WORKSTATION, sport, FILE_SERVER, port, SYN, base)
+            add(WORKSTATION, sport, FILE_SERVER, port, SYN, base, stack=WINDOWS_STACK)
             respond(WORKSTATION, sport, FILE_SERVER, port, SYN_ACK, base + NS_PER_SECOND)
             add(WORKSTATION, sport, FILE_SERVER, port, PSH_ACK, base + 2 * NS_PER_SECOND, data_len=1400)
             add(WORKSTATION, sport, FILE_SERVER, port, PSH_ACK, base + 3 * NS_PER_SECOND, data_len=900)
             add(WORKSTATION, sport, FILE_SERVER, port, FIN_ACK, base + 4 * NS_PER_SECOND)
+
+    # The second workstation: Windows's stack for an hour, then a Linux one it has never presented.
+    for hour in range(CORPUS_HOURS):
+        for (index, port) in enumerate((443, 445)):
+            handshake(SECOND_STACK,
+                      52000 + hour * 10 + index,
+                      port,
+                      at(hour, 900 + index * 120),
+                      WINDOWS_STACK if hour == 0 else LINUX_STACK)
+
+    # The tool host: Linux's stack throughout.
+    for hour in range(CORPUS_HOURS):
+        handshake(TOOL_HOST, 53000 + hour, 443, at(hour, 1100), LINUX_STACK)
 
     # The closed-port sweep: one source, many destinations, all refusing.
     for index in range(SWEEP_TARGETS):
@@ -269,16 +307,20 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def build_stages(config: Config) -> list:
+def build_stages(config: Config, applications=None) -> list:
     """The TC-4 stages, in the order a deployment would compose them.
 
     The flow rollup first, because the envelope reads the magnitudes it produces; `community_id` beside them,
-    computed from the five-tuple the records already carry.
+    computed from the five-tuple the records already carry; and the application the destination port belongs to, from
+    the CMDB. `applications` is the store, defaulting to the estate's.
     """
+    store = application_context.store(config) if applications is None else applications
+
     return [
         TC4FlowStage(config, bin_seconds=BIN_SECONDS),
         TC4EnvelopeStage(config, window_seconds=CORPUS_SECONDS * 4),
         CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"),
+        application_context.enrich_stage(config, store),
     ]
 
 

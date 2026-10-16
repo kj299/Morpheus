@@ -21,6 +21,12 @@ has no single correct answer. R-D-L6-003 is absolute: a self-signed certificate 
 estate is almost always either a misconfiguration or attacker infrastructure, and needs no history at all --
 which is why it fires on the first observation while the issuer rule waits for a reference.
 
+**A destination is the name the client asked for at the address that answered.** One address terminating two names
+-- a shared host, a reverse proxy, a CDN edge -- presents each name's own certificate, often from different
+authorities, and a reference kept per address would read the two alternating as an interception every time the
+second name was visited. By default the key is therefore `dst_ip:sni` where the handshake carries a name and
+`dst_ip` where it carries none; `key_columns` replaces the rule with an explicit list.
+
 **The reference is a mode over the destination's own prior handshakes**, taken through
 {py:mod}`~morpheus.utils.established_value`. A mode rather than a set, because a destination behind a load
 balancer with one certificate rotated early presents two issuers legitimately and the commoner one is the
@@ -125,9 +131,13 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     c : `morpheus.config.Config`
         Pipeline configuration instance.
     key_columns : list of str, optional
-        Columns composing the destination the issuer reference is kept for. Defaults to `["dst_ip"]`. An estate
-        terminating many names on one address should add `sni`, so a reference is per name rather than per
-        address and a shared host stops looking like an estate with a dozen issuers.
+        Columns composing the destination the issuer reference is kept for. By default the destination is
+        `destination_column` and `name_column` together where the handshake carries a name, and
+        `destination_column` alone where it does not, so a shared host is one destination per name rather than an
+        address with a dozen issuers. Given, every row is keyed on exactly these columns.
+    name_column : str, default = "sni"
+        Column holding the server name the client asked for, read when `key_columns` is not given. The column may
+        be absent.
     issuer_column : str, default = "certificate_issuer"
         Column holding the issuing authority's distinguished name.
     validation_column : str, default = "validation_result"
@@ -156,6 +166,7 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     def __init__(self,
                  c: Config,
                  key_columns: list[str] = None,
+                 name_column: str = "sni",
                  issuer_column: str = "certificate_issuer",
                  validation_column: str = "validation_result",
                  destination_column: str = "dst_ip",
@@ -172,12 +183,11 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
 
-        key_columns = ["dst_ip"] if key_columns is None else list(key_columns)
-
-        if (len(key_columns) == 0):
+        if (key_columns is not None and len(key_columns) == 0):
             raise ValueError("key_columns must name at least one column")
 
-        self._key_columns = key_columns
+        self._key_columns = None if key_columns is None else list(key_columns)
+        self._name_column = name_column
         self._issuer_column = issuer_column
         self._validation_column = validation_column
         self._destination_column = destination_column
@@ -230,6 +240,19 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         """Whether this stage supports a C++ node."""
         return False
 
+    def _destination_key(self, key_parts: dict, names: list, position: int) -> typing.Optional[str]:
+        """The destination a handshake's reference is kept for: the explicit key, or the address and the name."""
+        if (self._key_columns is not None):
+            return compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
+
+        address = normalize_text(key_parts[self._destination_column][position])
+        name = normalize_text(names[position])
+
+        if (address is None):
+            return None
+
+        return compose_key([address, name.lower()]) if name is not None else address
+
     @staticmethod
     def _is_self_signed(value: typing.Any) -> typing.Optional[bool]:
         """Whether a validation outcome says the certificate vouches for itself, or `None` where none was given."""
@@ -278,17 +301,20 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             return message
 
         with meta.mutable_dataframe() as df:
-            required = list(self._key_columns) + [self._issuer_column, self._time_column]
+            key_columns = [self._destination_column] if self._key_columns is None else self._key_columns
+            required = list(key_columns) + [self._issuer_column, self._time_column]
             missing = [column for column in required if column not in df.columns]
 
             if (len(missing) > 0):
                 raise KeyError(f"TC6CertificateStage requires columns {missing} which are not present in the "
                                f"DataFrame. Available columns: {sorted(df.columns)}")
 
-            key_parts = {name: to_host_list(df, name) for name in self._key_columns}
+            key_parts = {name: to_host_list(df, name) for name in key_columns}
             issuers = to_host_list(df, self._issuer_column)
             raw_times = to_host_list(df, self._time_column)
             rows = len(issuers)
+            names = (to_host_list(df, self._name_column)
+                     if self._key_columns is None and self._name_column in df.columns else [None] * rows)
 
             validations = (to_host_list(df, self._validation_column)
                            if self._validation_column in df.columns else [None] * rows)
@@ -313,7 +339,7 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             unordered = 0
 
             for position in range(rows):
-                key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
+                key = self._destination_key(key_parts, names, position)
                 issuer = normalize_text(issuers[position])
 
                 try:

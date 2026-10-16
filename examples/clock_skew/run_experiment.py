@@ -498,6 +498,15 @@ def main() -> int:
     def estate(result) -> dict:
         return {**rules.layer_1_decisions(result), **rules.layer_2_decisions(result, single_host)}
 
+    # R-B-L4-004 joins the transport corpus's stacks to the operating systems the application corpus's requests
+    # claim. The transport sweep moves the stacks' clocks and holds the claims as they were recorded.
+    claimed = rules.claims(
+        application_pipeline.run_pipeline(application_pipeline.build_pipeline_config(),
+                                          application_pipeline.build_corpus()))
+
+    def transport(result) -> dict:
+        return rules.layer_4_decisions(result, claimed)
+
     def spec(label, module, decisions, extra=lambda _: {}, columns=COLLECTOR_CLOCKS, **kwargs) -> dict:
         return {"label": label, "module": module, "decisions": decisions, "extra": extra, "columns": columns, **kwargs}
 
@@ -525,11 +534,13 @@ def main() -> int:
                  rules.layer_3_decisions,
                  columns="exporter_id"),
         "transport":
-            spec("transport, collector clocks: layer 4", transport_pipeline, rules.layer_4_decisions),
+            spec("transport, collector clocks: layer 4", transport_pipeline, transport),
         "presentation":
             spec("presentation, collector clocks: layer 6", presentation_pipeline, rules.layer_6_decisions),
         "application":
-            spec("application, collector clocks: DNS and HTTP", application_pipeline, rules.application_decisions),
+            spec("application, collector clocks: DNS, HTTP and services",
+                 application_pipeline,
+                 rules.application_decisions),
         "saas":
             spec("saas, collector clocks: the provider's audit log", saas_pipeline, rules.saas_decisions),
         "endpoint":

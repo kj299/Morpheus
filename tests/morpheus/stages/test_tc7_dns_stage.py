@@ -46,11 +46,18 @@ def run(config: Config, payload: dict, **kwargs) -> pd.DataFrame:
 TUNNEL_LABEL = "iqqieph543y4e2zq7ehmpxib4sehknfcb4fq2bgdn3ma44pa"
 
 
-def queries(names, times=None) -> dict:
-    return {
+def queries(names, times=None, sources=None, responses=None) -> dict:
+    count = len(names)
+    payload = {
+        "src_ip": list(sources) if sources is not None else ["10.0.0.5"] * count,
         "query_name": list(names),
-        "event_time": list(times) if times is not None else [START + index * SECOND for index in range(len(names))],
+        "event_time": list(times) if times is not None else [START + index * SECOND for index in range(count)],
     }
+
+    if (responses is not None):
+        payload["response_code"] = list(responses)
+
+    return payload
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -137,3 +144,70 @@ def test_a_missing_column_is_refused(config: Config):
 def test_a_non_positive_window_is_refused(config: Config):
     with pytest.raises(ValueError, match="window_seconds"):
         TC7DnsStage(config, window_seconds=0)
+
+
+DAY = 86400 * SECOND
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_client_counts_the_registered_domains_it_asked_for(config: Config):
+    names = ["a.one.com", "b.one.com", "a.two.com", "a.three.org"]
+    result = run(config, queries(names, sources=["10.0.0.5", "10.0.0.5", "10.0.0.5", "10.0.0.6"]))
+
+    assert list(result["dns_client_key"]) == ["10.0.0.5", "10.0.0.5", "10.0.0.5", "10.0.0.6"]
+    assert list(result["dns_domains_per_client"]) == [1, 1, 2, 1]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_nxdomain_share_waits_for_enough_answers(config: Config):
+    names = [f"x{index}.example.com" for index in range(4)]
+    result = run(config, queries(names, responses=["NXDOMAIN", "NOERROR", "nxdomain", None]), min_queries=3)
+
+    assert list(result["dns_nxdomain_in_window"])[:3] == [1, 1, 2]
+    assert list(result["dns_answered_in_window"])[:3] == [1, 2, 3]
+    assert pd.isna(result["dns_nxdomain_ratio"].iloc[1])
+    assert result["dns_nxdomain_ratio"].iloc[2] == pytest.approx(2 / 3)
+    # A query the record has no answer for is neither a refusal nor an answer.
+    assert pd.isna(result["dns_answered_in_window"].iloc[3])
+
+
+@pytest.mark.cpu_mode
+def test_without_a_response_column_the_share_is_null(config: Config):
+    result = run(config, queries(["a.example.com", "b.example.com"]))
+
+    assert result["dns_nxdomain_ratio"].isna().all()
+    assert result["dns_answered_in_window"].isna().all()
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_client_is_measured_against_its_own_busiest_day(config: Config):
+    # Two subdomains a day for three days, then eight in a day: four times the busiest day the client has had.
+    names = []
+    times = []
+
+    for day in range(3):
+        for index in range(2):
+            names.append(f"d{day}n{index}.example.com")
+            times.append(START + day * DAY + index * SECOND)
+
+    for index in range(8):
+        names.append(f"today{index}.example.com")
+        times.append(START + 3 * DAY + index * SECOND)
+
+    result = run(config, queries(names, times=times), baseline_min_days=3)
+    today = result.iloc[-1]
+
+    assert not truthy(result["dns_subdomains_per_domain_baseline_mature"].iloc[5])
+    assert truthy(today["dns_subdomains_per_domain_baseline_mature"])
+    assert today["dns_subdomains_per_domain_baseline"] == 2
+    assert today["dns_subdomains_per_domain_ratio"] == pytest.approx(4.0)
+    assert today["dns_domains_per_client_baseline"] == 1
+
+
+@pytest.mark.cpu_mode
+def test_a_missing_client_column_is_refused(config: Config):
+    payload = queries(["a.example.com"])
+    del payload["src_ip"]
+
+    with pytest.raises(KeyError, match="src_ip"):
+        run(config, payload)
