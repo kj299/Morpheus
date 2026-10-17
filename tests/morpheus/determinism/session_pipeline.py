@@ -83,10 +83,14 @@ import typing
 import envelope as universal_envelope
 import pandas as pd
 import stamping
-
 from resumable import ResumableLinearPipeline
+from shard_split import ShardSplitStage
+from shard_split import shard_key_fn
+
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
+from morpheus.pipeline import Pipeline
+from morpheus.stages.general.router_stage import RouterStage
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
@@ -115,6 +119,7 @@ from morpheus.utils.determinism import canonicalize
 from morpheus.utils.dfencoder_scorer import DfencoderScorer
 from morpheus.utils.dfencoder_scorer import load_models
 from morpheus.utils.model_manifest import ModelManifest
+from morpheus.utils.sharding import shard_names
 
 CORPUS_SEED = 20260906
 
@@ -733,15 +738,22 @@ RULES = ("R-D-L5-003",
 
 def _run_class(config: Config,
                dataframes: list[pd.DataFrame],
-               stages: list,
+               stages: typing.Callable[[], list],
                impose_order: bool,
                anchor: str,
                envelope: tuple = None,
-               daily: list = None,
+               daily: typing.Callable[[], list] = None,
                telemetry_class: str = None,
-               manifest: ModelManifest = None) -> pd.DataFrame:
+               manifest: ModelManifest = None,
+               shards: int = None,
+               shard_column: str = "user_principal") -> pd.DataFrame:
     """Source → stamp → (total order) → the class's stages → determinism stamp → (envelope) → window seal →
     (daily seal → daily stages) → sink, as one frame.
+
+    `stages` and `daily` are factories rather than lists because a sharded run needs one instance of every
+    stateful stage per branch. With `shards`, the stream is cut on `shard_column` after the collector sequence
+    and everything from the class's stages to the sink runs once per shard (control 4); the frames the sinks
+    collect are concatenated, and canonicalization puts them in the one order.
 
     The determinism stamp carries `manifest` on the scored class, so every scored row names the model version it
     was scored against and whether that was a fallback; on the other class the model columns are null.
@@ -752,53 +764,93 @@ def _run_class(config: Config,
     measured: R-P-L5-006 asks about four consecutive daily windows, and a day is not something an hourly window
     knows about.
     """
-    pipe = ResumableLinearPipeline(config)
-    pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
-    pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
-
-    if (impose_order):
-        pipe.add_stage(TotalOrderStage(config))
-
-    pipe.add_stage(CollectorSequenceStage(config))
-
-    for stage in stages:
-        pipe.add_stage(stage)
-
     if (telemetry_class is None):
         raise ValueError("every class is stamped with the determinism envelope, and the envelope names the class")
 
-    pipe.add_stage(
-        DeterminismStampStage(config,
-                              envelope=stamping.envelope_for(telemetry_class, SETTINGS, rules=RULES),
-                              manifest=manifest,
-                              entity_column="user_principal"))
+    def branch() -> list:
+        """The class's stages through the seals, as a deployment composes them behind the shared prefix."""
+        built = list(stages())
+        built.append(
+            DeterminismStampStage(config,
+                                  envelope=stamping.envelope_for(telemetry_class, SETTINGS, rules=RULES),
+                                  manifest=manifest,
+                                  entity_column="user_principal"))
 
-    if (envelope is not None):
-        (osi_layer, entity_columns) = envelope
-        pipe.add_stage(EnvelopeStampStage(config, osi_layer=osi_layer, entity_columns=entity_columns))
+        if (envelope is not None):
+            (osi_layer, entity_columns) = envelope
+            built.append(EnvelopeStampStage(config, osi_layer=osi_layer, entity_columns=entity_columns))
 
-    pipe.add_stage(
-        WindowSealStage(config,
-                        period_seconds=PERIOD_SECONDS,
-                        lateness_seconds=LATENESS_SECONDS,
-                        order_columns=list(DEFAULT_ORDER_COLUMNS),
-                        entity_key_column=anchor))
-
-    if (daily is not None):
-        pipe.add_stage(
+        built.append(
             WindowSealStage(config,
-                            period_seconds=DAY_S,
+                            period_seconds=PERIOD_SECONDS,
                             lateness_seconds=LATENESS_SECONDS,
                             order_columns=list(DEFAULT_ORDER_COLUMNS),
-                            column_prefix=DRIFT_PREFIX))
+                            entity_key_column=anchor))
 
-        for stage in daily:
+        if (daily is not None):
+            built.append(
+                WindowSealStage(config,
+                                period_seconds=DAY_S,
+                                lateness_seconds=LATENESS_SECONDS,
+                                order_columns=list(DEFAULT_ORDER_COLUMNS),
+                                column_prefix=DRIFT_PREFIX))
+            built.extend(daily())
+
+        return built
+
+    if (shards is None):
+        pipe = ResumableLinearPipeline(config)
+        pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
+        pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
+
+        if (impose_order):
+            pipe.add_stage(TotalOrderStage(config))
+
+        pipe.add_stage(CollectorSequenceStage(config))
+
+        for stage in branch():
             pipe.add_stage(stage)
 
-    sink = pipe.add_stage(InMemorySinkStage(config))
-    pipe.run()
+        sink = pipe.add_stage(InMemorySinkStage(config))
+        pipe.run()
 
-    return _collect(sink)
+        return _collect(sink)
+
+    # Control 4: the shared prefix, then a router over the stable hash of the entity key, then one branch per
+    # shard holding its own instances of every stateful stage, and one sink per branch.
+    pipe = Pipeline(config)
+    previous = pipe.add_stage(InMemorySourceStage(config, dataframes=dataframes))
+    prefix = [LineageStampStage(config, id_columns=ID_COLUMNS)]
+
+    if (impose_order):
+        prefix.append(TotalOrderStage(config))
+
+    prefix += [CollectorSequenceStage(config), ShardSplitStage(config, key_column=shard_column, shards=shards)]
+
+    for stage in prefix:
+        pipe.add_stage(stage)
+        pipe.add_edge(previous, stage)
+        previous = stage
+
+    router = pipe.add_stage(RouterStage(config, keys=shard_names(shards), key_fn=shard_key_fn(shard_column, shards)))
+    pipe.add_edge(previous, router)
+    sinks = []
+
+    for (index, port) in enumerate(router.output_ports):
+        previous = port
+
+        for stage in branch():
+            pipe.add_stage(stage)
+            pipe.add_edge(previous, stage)
+            previous = stage
+
+        sinks.append(pipe.add_stage(InMemorySinkStage(config)))
+        pipe.add_edge(previous, sinks[index])
+
+    pipe.run()
+    frames = [_collect(sink) for sink in sinks]
+
+    return pd.concat([frame for frame in frames if len(frame) > 0], ignore_index=True)
 
 
 SCORED_FEATURES = [
@@ -981,7 +1033,9 @@ def run_pipeline(config: Config,
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
                  impose_order: bool = True,
                  scorer: typing.Optional[Scorer] = None,
-                 manifest: typing.Optional[ModelManifest] = None) -> pd.DataFrame:
+                 manifest: typing.Optional[ModelManifest] = None,
+                 shards: typing.Optional[int] = None,
+                 shard_column: str = "user_principal") -> pd.DataFrame:
     """
     Run every layer 5 telemetry class through its pipeline and return one canonicalized frame.
 
@@ -1004,6 +1058,13 @@ def run_pipeline(config: Config,
     manifest : `morpheus.utils.model_manifest.ModelManifest`, optional
         What pins each principal to a version. Defaults to the committed manifest from `scoring_manifest`.
         Passed together with `scorer`, or the versions one resolves are ones the other does not hold.
+    shards : int, optional
+        Run each class's stages on this many branches, routed by the stable hash of `shard_column` (control 4),
+        rather than on one. The output is the same frame; the harness asserts it.
+    shard_column : str, default = "user_principal"
+        The entity key the shards are decided on. Both classes are keyed on the principal, so a principal's
+        authentications and sessions share a branch. The harness's negative control shards on a column that
+        splits a principal and shows the output change.
 
     Returns
     -------
@@ -1028,34 +1089,34 @@ def run_pipeline(config: Config,
 
     outputs["tc5_auth"] = _run_class(
         config,
-        batches["tc5_auth"],
-        [
+        batches["tc5_auth"], lambda: [
             TC0EnrichStage(config, store=build_identity_store(), entity_column="user_principal"),
             TC5NoveltyStage(config),
             TC5CadenceStage(config, min_samples=CADENCE_MIN_SAMPLES),
             TC5TravelStage(config, excluded_source_networks=(VPN_EGRESS_NETWORK, )),
             TC5RiskStage(config, min_denominator=1),
-            TC5ScoreStage(config, scorer=scorer, manifest=manifest, feature_columns=SCORED_FEATURES),
-        ],
+            TC5ScoreStage(config, scorer=scorer, manifest=manifest, feature_columns=SCORED_FEATURES), ],
         impose_order,
         anchor=CHAIN_ANCHORS["tc5_auth"],
         envelope=CLASS_ENVELOPE["tc5_auth"],
-        daily=[TC5DriftStage(config, window_column=f"{DRIFT_PREFIX}window_id", aggregate="mean")],
+        daily=lambda: [TC5DriftStage(config, window_column=f"{DRIFT_PREFIX}window_id", aggregate="mean")],
         telemetry_class="tc5_auth",
-        manifest=manifest)
+        manifest=manifest,
+        shards=shards,
+        shard_column=shard_column)
 
     outputs["tc5_session"] = _run_class(
         config,
-        batches["tc5_session"],
-        [
+        batches["tc5_session"], lambda: [
             TC0EnrichStage(config, store=build_identity_store(), entity_column="user_principal"),
-            TC5SessionStage(
-                config, timeout_seconds=SESSION_TIMEOUT_SECONDS, baseline_min_samples=SESSION_BASELINE_MIN_SAMPLES),
-        ],
+            TC5SessionStage(config, timeout_seconds=SESSION_TIMEOUT_SECONDS, baseline_min_samples=
+                            SESSION_BASELINE_MIN_SAMPLES), ],
         impose_order,
         anchor=CHAIN_ANCHORS["tc5_session"],
         envelope=CLASS_ENVELOPE["tc5_session"],
-        telemetry_class="tc5_session")
+        telemetry_class="tc5_session",
+        shards=shards,
+        shard_column=shard_column)
 
     frames = []
 
