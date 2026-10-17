@@ -33,6 +33,8 @@ import collections
 import dataclasses
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_TIMEOUT_NS = 300 * NS_PER_SECOND
@@ -81,7 +83,7 @@ class _Pending:
     attempts: int
 
 
-class SessionTimer:
+class SessionTimer(StateMixin):
     """
     Per-key pairing of an exchange's start with its outcome.
 

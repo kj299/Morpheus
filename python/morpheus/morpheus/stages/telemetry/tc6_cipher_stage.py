@@ -47,6 +47,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -81,7 +82,7 @@ CIPHER_UNRECOGNIZED = "cipher_unrecognized"
 
 
 @register_stage("tc6-cipher", ignore_args=["key_columns"])
-class TC6CipherStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Rank each negotiated cipher suite and compare it against its pair's own historical floor.
 
@@ -109,6 +110,8 @@ class TC6CipherStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_samples : int, default = 512
         Handshakes retained per pair regardless of the window.
     """
+
+    _checkpoint_attributes = ("_tracker", )
 
     def __init__(self,
                  c: Config,

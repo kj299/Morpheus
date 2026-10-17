@@ -25,6 +25,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -70,7 +71,7 @@ STATUS_SUFFIX = "_forecast_status"
 
 
 @register_stage("tc1-forecast", ignore_args=["floors"])
-class TC1ForecastStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC1ForecastStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Fit each port's receive level over its recent history and project when it reaches its optic's floor.
 
@@ -140,6 +141,8 @@ class TC1ForecastStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         honest readings behind it. A refused row carries no per-entity features from this stage, sets `clock_refused`,
         and moves no horizon. See `morpheus.utils.event_clock`.
     """
+
+    _checkpoint_attributes = ("_tracker", "_clock")
 
     def __init__(self,
                  c: Config,

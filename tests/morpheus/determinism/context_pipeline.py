@@ -50,9 +50,9 @@ import typing
 import envelope
 import pandas as pd
 import stamping
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
@@ -569,7 +569,7 @@ def _run(config: Config,
          telemetry_class: str,
          settings: dict = None) -> pd.DataFrame:
     """Source → the class's one stage → determinism stamp → sink. No sealing: context is a store, not a stream."""
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(stage)
     pipe.add_stage(

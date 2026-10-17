@@ -39,6 +39,8 @@ history the window has already forgotten.
 import collections
 import dataclasses
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_WINDOW_NS = 600 * NS_PER_SECOND
@@ -96,7 +98,7 @@ class _EntityWindow:
     started: bool = False
 
 
-class OutcomeRunTracker:
+class OutcomeRunTracker(StateMixin):
     """
     Per-entity failure counting and run length over a trailing window.
 

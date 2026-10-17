@@ -24,6 +24,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -66,7 +67,7 @@ the same three values composed the same way, so a resolved MAC lands on exactly 
 
 
 @register_stage("tc1-normalize")
-class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Turn raw layer 1 collector records into the TC-1 envelope.
 
@@ -136,6 +137,8 @@ class TC1NormalizeStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         become every later sample's predecessor and turn each of them into an out-of-order sample with no delta. A
         refused sample carries no deltas, sets `clock_refused`, and moves nothing. See `morpheus.utils.event_clock`.
     """
+
+    _checkpoint_attributes = ("_tracker", "_clock")
 
     def __init__(self,
                  c: Config,

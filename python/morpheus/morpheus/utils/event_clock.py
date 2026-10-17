@@ -42,6 +42,8 @@ end backwards, and a stale row simply fails to advance the clock.
 
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_MAX_SKEW_SECONDS = 7 * 24 * 3600
@@ -57,7 +59,7 @@ pipeline's health record can count it per collector and window, which is where a
 """
 
 
-class EventClock:
+class EventClock(StateMixin):
     """
     The largest event time the stream has been willing to believe.
 

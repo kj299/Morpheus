@@ -53,6 +53,8 @@ import dataclasses
 import statistics
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_WINDOW_NS = 24 * 3600 * NS_PER_SECOND
@@ -158,7 +160,7 @@ def coefficient_of_variation(values: typing.Sequence[float]) -> typing.Optional[
     return statistics.pstdev(values) / mean
 
 
-class ArrivalRegularityTracker:
+class ArrivalRegularityTracker(StateMixin):
     """
     Per-entity regularity of arrival times, and of the sizes that came with them.
 

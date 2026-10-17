@@ -43,6 +43,8 @@ import collections
 import dataclasses
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_BUCKET_NS = 3600 * NS_PER_SECOND
@@ -104,7 +106,7 @@ class _EntityHistory:
     saturated: bool = False
 
 
-class BucketPeakTracker:
+class BucketPeakTracker(StateMixin):
     """
     Per-entity history of per-period peaks, and each observation measured against the periods before its own.
 

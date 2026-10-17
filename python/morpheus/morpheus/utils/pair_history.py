@@ -41,6 +41,8 @@ import collections
 import dataclasses
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 DAY_NS = 24 * 3600 * NS_PER_SECOND
 
@@ -93,7 +95,7 @@ class _EntityPairs:
     saturated: bool = False
 
 
-class PairHistoryTracker:
+class PairHistoryTracker(StateMixin):
     """
     Per-entity recall of the pairs it has produced, and when each was last seen.
 

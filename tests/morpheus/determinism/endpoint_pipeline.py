@@ -56,9 +56,9 @@ import typing
 import envelope
 import pandas as pd
 import stamping
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
@@ -379,7 +379,7 @@ def run_pipeline(config: Config,
     # taken out of the stream and kept.
     (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=batches[ENDPOINT_CLASS]))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 

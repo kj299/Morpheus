@@ -24,6 +24,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -51,7 +52,7 @@ EPOCH_WEEKDAY = 3
 
 
 @register_stage("tc5-cadence")
-class TC5CadenceStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5CadenceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write how unusual an authentication's hour of day and day of week are for the principal making it.
 
@@ -102,6 +103,8 @@ class TC5CadenceStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     decimals : int, default = 4
         Decimal places the two quantized scores are rounded to, under determinism control 9.
     """
+
+    _checkpoint_attributes = ("_hours", "_weekdays")
 
     def __init__(self,
                  c: Config,

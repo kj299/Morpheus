@@ -112,9 +112,9 @@ import saas_pipeline
 import stamping
 import telemetry_pipeline
 import transport_pipeline
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
@@ -835,7 +835,7 @@ def _build_leases(rows: list):
 
 def close_lease_bindings(config: Config, dataframes: list[pd.DataFrame], impose_order: bool = True) -> pd.DataFrame:
     """The DHCP server's acknowledgements, closed into leases: each one held until its term ran out or was released."""
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 
@@ -1274,7 +1274,7 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
 
 def close_mac_bindings(config: Config, dataframes: list[pd.DataFrame], impose_order: bool = True) -> pd.DataFrame:
     """The two sites' MAC tables, closed into bindings by the stage that closes every MAC binding in this fork."""
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     # Copies, because a source frame is where a stage's needed columns are added, and the same walks are scored as
     # their own class afterwards: given the originals, every walk would arrive there carrying the binding columns.
     pipe.set_source(InMemorySourceStage(config, dataframes=[frame.copy() for frame in dataframes]))
@@ -1304,7 +1304,7 @@ def run_class(config: Config,
     # A flow's chain is rooted on the machine it came from where its address resolved to one.
     anchored = telemetry_class == FLOW_CLASS and inventory_table is not None
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 

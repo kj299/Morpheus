@@ -60,6 +60,7 @@ from morpheus.cli.register_stage import register_stage
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -144,7 +145,7 @@ def _number(value: typing.Any) -> typing.Optional[float]:
                     "out_of_order_columns",
                     "fallback_columns"
                 ])
-class PipelineHealthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class PipelineHealthStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Gather the stages' own counts into one health record per window, collector, telemetry class and tenant.
 
@@ -166,6 +167,8 @@ class PipelineHealthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     unpaired_columns, abandoned_columns, unclassified_columns, out_of_order_columns, fallback_columns : list of str
         The flag and count columns each total reads. The defaults are what the shipped stages write.
     """
+
+    _checkpoint_attributes = ("_history", )
 
     def __init__(self,
                  c: Config,

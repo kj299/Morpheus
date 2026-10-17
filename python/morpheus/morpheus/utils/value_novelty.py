@@ -47,6 +47,8 @@ import collections
 import dataclasses
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 DEFAULT_MAX_VALUES = 64
 """Distinct values recalled per field per entity. A port that has legitimately held more optics than this is
 already the anomaly the feature exists to surface.
@@ -98,7 +100,7 @@ class _FieldState:
     instant_values: set = dataclasses.field(default_factory=set)
 
 
-class ValueNoveltyTracker:
+class ValueNoveltyTracker(StateMixin):
     """
     Per-entity identifier state, detecting a change whenever it happens.
 

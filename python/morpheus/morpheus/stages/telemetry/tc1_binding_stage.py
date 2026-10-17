@@ -60,6 +60,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stage_schema import StageSchema
@@ -120,7 +121,7 @@ OPEN_REASON = "open"
 
 
 @register_stage("tc1-binding", modes=[])
-class TC1BindingStage(GpuAndCpuMixin, SinglePortStage):
+class TC1BindingStage(CheckpointMixin, GpuAndCpuMixin, SinglePortStage):
     """
     Close layer 1 port observations into resolvable intervals.
 
@@ -158,6 +159,8 @@ class TC1BindingStage(GpuAndCpuMixin, SinglePortStage):
         Also emit a provisional record the moment a binding opens, with a null `bind_end` and
         `bind_provisional = true`, so a port brought into service now is resolvable before its binding closes.
     """
+
+    _checkpoint_attributes = ("_closer", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -432,7 +435,8 @@ class TC1BindingStage(GpuAndCpuMixin, SinglePortStage):
         A port whose optic never changed is otherwise never emitted, and in a healthy estate that is nearly every
         port -- which is to say, nearly the whole lookup.
         """
-        if (not self._emit_open_on_complete):
+        if (not self._emit_open_on_complete or self.end_of_stream_suspended):
+            # A stop for a checkpoint is not the binding's end; the instance that resumes closes it when it does end.
             return []
 
         return self._emit(self._closer.drain())

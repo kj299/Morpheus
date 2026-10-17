@@ -24,6 +24,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stage_schema import StageSchema
@@ -89,7 +90,7 @@ def _granted_until(event_time_ns: int, seconds: typing.Any) -> typing.Optional[i
 
 
 @register_stage("tc2-binding", ignore_args=["attribute_columns", "stop_values", "snapshot_scope_columns"])
-class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
+class TC2BindingStage(CheckpointMixin, GpuAndCpuMixin, SinglePortStage):
     """
     Emit closed layer 2 bindings from a stream of observations.
 
@@ -187,6 +188,8 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         a lease renewed every half-term would end it one tick after its last renewal and leave the rest of the term
         unresolvable.
     """
+
+    _checkpoint_attributes = ("_snapshots", "_closer", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -519,7 +522,8 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
         A binding that never moved is otherwise never emitted, so a replay over a finite corpus would lose every
         stable MAC in the estate, which is most of them.
         """
-        if (not self._emit_open_on_complete):
+        if (not self._emit_open_on_complete or self.end_of_stream_suspended):
+            # A stop for a checkpoint is not the binding's end; the instance that resumes closes it when it does end.
             return []
 
         return self._emit(self._closer.drain())

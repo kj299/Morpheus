@@ -57,6 +57,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -157,7 +158,7 @@ def normalize_integrity(level: typing.Any) -> typing.Optional[str]:
 
 
 @register_stage("tc7-endpoint")
-class TC7EndpointStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write whether each process's parent-image pairing is new to its host and to its host's peer group.
 
@@ -192,6 +193,8 @@ class TC7EndpointStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_entities : int, default = 200000
         Hosts and peer groups recalled before the least recently seen is forgotten.
     """
+
+    _checkpoint_attributes = ("_hosts", "_groups")
 
     def __init__(self,
                  c: Config,

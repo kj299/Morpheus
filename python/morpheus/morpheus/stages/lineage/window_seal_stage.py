@@ -25,6 +25,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 @register_stage("window-seal")
-class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Group rows into fixed event-time windows and emit each window once it is deterministically sealed.
 
@@ -122,6 +123,8 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         When True a row with an uninterpretable event time fails the batch instead of being emitted flagged.
     """
 
+    _checkpoint_attributes = ("_sealer", "_buffers", "_emit_control_messages")
+
     def __init__(self,
                  c: Config,
                  period_seconds: int = 300,
@@ -190,6 +193,11 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
     def _column(self, name: str) -> str:
         return f"{self._column_prefix}{name}"
+
+    @property
+    def sealed_through_window_id(self) -> typing.Optional[int]:
+        """The latest window this stage has published complete, which is what names a checkpoint taken after it."""
+        return self._sealer.sealed_through_window_id
 
     @property
     def name(self) -> str:
@@ -395,7 +403,11 @@ class WindowSealStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         return emissions
 
     def on_completed(self) -> typing.Optional[list]:
-        """Seal and emit every window still open when the stream ends."""
+        """Seal and emit every window still open when the stream ends, unless the end is a stop for a checkpoint."""
+        if (self.end_of_stream_suspended):
+            # The open windows are this stage's memory now, and the instance that resumes publishes them.
+            return None
+
         if (not self._seal_on_complete):
             self._buffers.clear()
             return None

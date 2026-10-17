@@ -50,6 +50,7 @@ import typing
 
 from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
 from morpheus.utils.determinism import quantize_value
+from morpheus.utils.tracker_state import StateMixin
 
 DEFAULT_MAX_WINDOWS = 64
 """Windows retained per entity.
@@ -128,7 +129,7 @@ class _EntityTrack:
     rising: int = 0
 
 
-class DriftTrajectoryTracker:
+class DriftTrajectoryTracker(StateMixin):
     """
     Per-entity trajectory of a per-window score.
 

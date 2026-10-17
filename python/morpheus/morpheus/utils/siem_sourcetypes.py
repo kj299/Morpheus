@@ -43,6 +43,7 @@ import typing
 
 from morpheus.utils.determinism_envelope import CONFIG_HASH_COLUMN
 from morpheus.utils.determinism_envelope import FINGERPRINT_COLUMN
+from morpheus.utils.determinism_envelope import RESUMED_FROM_COLUMN
 from morpheus.utils.determinism_envelope import TIER_COLUMN
 from morpheus.utils.model_manifest import MODEL_FALLBACK_COLUMN
 from morpheus.utils.model_manifest import MODEL_VERSION_COLUMN
@@ -104,11 +105,12 @@ class Unproduced:
     """What would have to exist. Specific, so it reads as a work item rather than an apology."""
 
 
-PROVENANCE_COLUMNS = (TIER_COLUMN, FINGERPRINT_COLUMN, CONFIG_HASH_COLUMN)
+PROVENANCE_COLUMNS = (TIER_COLUMN, FINGERPRINT_COLUMN, CONFIG_HASH_COLUMN, RESUMED_FROM_COLUMN)
 """Control 12 at the delivery boundary: the determinism envelope every scored event carries.
 
 Written by `DeterminismStampStage`, which every composed pipeline places behind its feature stages, so a consumer
-comparing two events can tell whether they came out of the same configuration under the same rules. The commit,
+comparing two events can tell whether they came out of the same configuration under the same rules, and, from
+`resumed_from_state`, whether the process that scored them began cold or resumed a saved history. The commit,
 image digest, feature schema version and seed travel beside these three and are not required, because a corpus
 records `unknown` for the first two honestly and a deployment is what supplies them.
 """

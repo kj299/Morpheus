@@ -84,9 +84,9 @@ import envelope as universal_envelope
 import pandas as pd
 import stamping
 
+from resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
 from morpheus.stages.lineage.determinism_stamp_stage import DeterminismStampStage
@@ -752,7 +752,7 @@ def _run_class(config: Config,
     measured: R-P-L5-006 asks about four consecutive daily windows, and a day is not something an hourly window
     knows about.
     """
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 

@@ -24,6 +24,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -61,7 +62,7 @@ TRUE_VALUES = ("true", "yes", "y", "1", "t")
 
 
 @register_stage("tc5-risk")
-class TC5RiskStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5RiskStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write the TC-5 failure, multi-factor and run features for each authenticating principal.
 
@@ -128,6 +129,8 @@ class TC5RiskStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_entities : int, default = 100000
         Principals tracked before the least recently seen is forgotten.
     """
+
+    _checkpoint_attributes = ("_auth_runs", "_mfa_runs", "_mfa_ratio")
 
     def __init__(self,
                  c: Config,

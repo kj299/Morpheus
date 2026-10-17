@@ -39,9 +39,9 @@ records resolve to no machine, which is what an estate without a static-address 
 import typing
 
 import pandas as pd
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
@@ -170,7 +170,7 @@ def build(addresses: typing.Iterable[str],
 def _close(config: Config, dataframes: list, stage: TC2BindingStage, impose_order: bool) -> pd.DataFrame:
     from host_frame import to_host_frame  # pylint: disable=import-outside-toplevel
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 

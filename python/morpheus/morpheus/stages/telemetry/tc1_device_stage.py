@@ -26,6 +26,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -43,6 +44,7 @@ from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import NS_PER_SECOND
 from morpheus.utils.event_clock import EventClock
 from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.tracker_state import StateMixin
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
 logger = logging.getLogger(__name__)
@@ -144,7 +146,7 @@ class _DeviceState:
     previous_rising: int = 0
 
 
-class RebootCounter:
+class RebootCounter(StateMixin):
     """
     Per-device restarts per period, and how many periods in a row each held more than the one before.
 
@@ -209,7 +211,7 @@ class RebootCounter:
 
 
 @register_stage("tc1-device", ignore_args=["change_window"])
-class TC1DeviceStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC1DeviceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Derive what happened to a switch or router as a whole: restarts, configuration changes and routing churn.
 
@@ -280,6 +282,8 @@ class TC1DeviceStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         How far ahead of the stream's own progress a row's event time may be before it is refused. A refused row
         carries no device features, sets `clock_refused`, and moves no state. See `morpheus.utils.event_clock`.
     """
+
+    _checkpoint_attributes = ("_baseline", "_reboots", "_configs", "_clock")
 
     def __init__(self,
                  c: Config,

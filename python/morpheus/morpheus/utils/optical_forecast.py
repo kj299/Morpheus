@@ -54,6 +54,7 @@ import typing
 
 from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
 from morpheus.utils.determinism import quantize_value
+from morpheus.utils.tracker_state import StateMixin
 
 NS_PER_SECOND = 10**9
 NS_PER_DAY = 24 * 3600 * NS_PER_SECOND
@@ -170,7 +171,7 @@ class _EntityTrack:
     saturated: bool = False
 
 
-class OpticalForecastTracker:
+class OpticalForecastTracker(StateMixin):
     """
     Per-entity linear trend of a receive level, extrapolated to a floor.
 

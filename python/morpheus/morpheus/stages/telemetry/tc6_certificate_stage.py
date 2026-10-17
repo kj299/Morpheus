@@ -61,6 +61,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -119,7 +120,7 @@ ISSUER_NEW_TO_ESTATE = "cert_issuer_new_to_estate"
 
 
 @register_stage("tc6-certificate", ignore_args=["key_columns"])
-class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC6CertificateStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Compare each handshake's certificate against its destination's established issuer, and flag self-signing.
 
@@ -162,6 +163,8 @@ class TC6CertificateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         History the estate needs before `cert_issuer_new_to_estate` answers. The estate-wide history is kept over
         `window_seconds`, like the per-destination one.
     """
+
+    _checkpoint_attributes = ("_tracker", "_estate")
 
     def __init__(self,
                  c: Config,

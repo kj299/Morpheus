@@ -25,9 +25,9 @@ Edges are not part of any golden file. They are a function of the golden rows, a
 """
 
 import pandas as pd
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.edge_emit_stage import EDGE_COLUMNS
 from morpheus.stages.lineage.edge_emit_stage import EdgeEmitStage
@@ -62,7 +62,7 @@ def emit(config: Config, rows: pd.DataFrame, **stage_kwargs) -> pd.DataFrame:
 
     ordered = rows.sort_values(list(DEFAULT_ORDER_COLUMNS), kind="stable").reset_index(drop=True)
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=[ordered]))
     pipe.add_stage(EdgeEmitStage(config, **stage_kwargs))
     sink = pipe.add_stage(InMemorySinkStage(config))

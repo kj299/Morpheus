@@ -50,6 +50,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -94,7 +95,7 @@ OBJECT_TYPES_IN_WEEK = "saas_object_types_in_week"
 
 
 @register_stage("tc7-saas")
-class TC7SaasStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write each operation's record count against the principal's own baseline for it, and the week's breadth so far.
 
@@ -135,6 +136,8 @@ class TC7SaasStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     decimals : int, default = 4
         Decimal places the baseline and ratio are rounded to, under determinism control 9.
     """
+
+    _checkpoint_attributes = ("_baselines", "_weeks")
 
     def __init__(self,
                  c: Config,

@@ -25,6 +25,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -55,7 +56,7 @@ FLAG_COLUMNS = ("link_flap_unpolled", "link_flap_device_reset", "link_flap_last_
 
 
 @register_stage("tc1-flap")
-class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC1FlapStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Count link state transitions per port, including the ones polling cannot see.
 
@@ -107,6 +108,8 @@ class TC1FlapStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         port's hour at once and hide a link that was flapping. A refused row carries no per-entity features from this
         stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
+
+    _checkpoint_attributes = ("_tracker", "_clock")
 
     def __init__(self,
                  c: Config,

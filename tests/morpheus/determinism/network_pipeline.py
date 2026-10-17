@@ -75,8 +75,8 @@ import host_identity
 import pandas as pd
 import stamping
 
+from resumable import ResumableLinearPipeline
 from morpheus.config import Config
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.collector_sequence_stage import CollectorSequenceStage
@@ -688,7 +688,7 @@ def run_pipeline(config: Config,
     (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
     (leases, inventory) = host_identity.tables(config, batches, impose_order)
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     # The late delivery arrives after every other record, however the rest were split, because that is when it came.
     pipe.set_source(
         InMemorySourceStage(config, dataframes=batches[TELEMETRY_CLASS] + batches.get(LATE_DELIVERY_CLASS, [])))

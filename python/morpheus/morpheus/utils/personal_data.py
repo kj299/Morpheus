@@ -701,6 +701,7 @@ _OPERATIONAL = (
     "model_fallback_used",
     "model_version",
     "pipeline_fingerprint",
+    "resumed_from_state",
     "rng_seed",  # A single-record session's bounds: timestamps, like event_time.
     "session_start",
     "session_end",  # What kind of host an asset is, and the layer 3 destination's context and baseline maturity.

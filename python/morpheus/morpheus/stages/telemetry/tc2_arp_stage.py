@@ -25,6 +25,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -64,7 +65,7 @@ CLAIMANTS_SATURATED_COLUMN = "macs_claiming_sender_ip_saturated"
 
 
 @register_stage("tc2-arp", ignore_args=["excluded_sender_ips"])
-class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC2ArpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Score ARP for the two shapes cache poisoning takes.
 
@@ -128,6 +129,8 @@ class TC2ArpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         no per-entity features from this stage, sets `clock_refused`, and moves no horizon. See
         `morpheus.utils.event_clock`.
     """
+
+    _checkpoint_attributes = ("_ratio", "_claimants", "_clock")
 
     def __init__(self,
                  c: Config,

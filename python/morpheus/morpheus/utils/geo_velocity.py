@@ -48,9 +48,12 @@ import collections
 import dataclasses
 import math
 import typing
+
 import pandas as pd
+
 from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
 from morpheus.utils.determinism import quantize_value
+from morpheus.utils.tracker_state import StateMixin
 
 NS_PER_SECOND = 10**9
 
@@ -173,7 +176,7 @@ def validate_coordinate(latitude: typing.Any, longitude: typing.Any) -> bool:
     return -90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0
 
 
-class GeoVelocityTracker:
+class GeoVelocityTracker(StateMixin):
     """
     Per-entity implied travel speed between consecutive observations.
 

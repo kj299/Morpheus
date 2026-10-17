@@ -91,9 +91,9 @@ import envelope as universal_envelope
 import pandas as pd
 import stamping
 
+from resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
@@ -1044,7 +1044,7 @@ def _run_class(config: Config,
     if (chain is not None and seal):
         raise ValueError("a chained class is sealed with the other chained classes, not on its own")
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 
@@ -1124,7 +1124,7 @@ def _seal_chains(config: Config, outputs: dict[str, pd.DataFrame], parts: int = 
                              entity_key_column=DEFAULT_ANCHOR_COLUMN)
     added = [name for name in sealer._needed_columns if name not in union.columns]  # pylint: disable=protected-access
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(sealer)
     sink = pipe.add_stage(InMemorySinkStage(config))

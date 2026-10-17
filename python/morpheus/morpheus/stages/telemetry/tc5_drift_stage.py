@@ -17,8 +17,8 @@ import logging
 import statistics
 import typing
 
-import pandas as pd
 import mrc
+import pandas as pd
 from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
@@ -26,6 +26,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -47,7 +48,7 @@ AGGREGATES = (AGGREGATE_NONE, AGGREGATE_MEAN, AGGREGATE_MAX)
 
 
 @register_stage("tc5-drift")
-class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write the trajectory of an entity's score across consecutive windows.
 
@@ -103,6 +104,8 @@ class TC5DriftStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         which is the reduction for a running count -- the distinct object types a principal has touched so far
         this week -- whose last value is the window's total and whose mean is not.
     """
+
+    _checkpoint_attributes = ("_tracker", )
 
     def __init__(self,
                  c: Config,

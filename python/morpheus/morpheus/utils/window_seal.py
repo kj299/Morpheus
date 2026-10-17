@@ -33,6 +33,7 @@ import dataclasses
 import typing
 
 from morpheus.utils.lineage import window_id_from_timestamp
+from morpheus.utils.tracker_state import StateMixin
 
 SEALED_BY_WATERMARK = "watermark"
 """The window's seal was triggered by the event-time watermark passing its lateness horizon."""
@@ -79,7 +80,7 @@ class BatchResult:
     sealed: list[int]
 
 
-class WindowSealer:
+class WindowSealer(StateMixin):
     """
     Watermark-driven window assignment and sealing.
 
@@ -135,6 +136,18 @@ class WindowSealer:
     def open_window_ids(self) -> list[int]:
         """Ordinals of windows currently holding on-time rows, ascending."""
         return sorted(self._open)
+
+    @property
+    def sealed_through_window_id(self) -> typing.Optional[int]:
+        """The latest window the watermark has sealed, or `None` before the first row.
+
+        A checkpoint is named by this: every window up to it has been published complete, so a process resumed from
+        the checkpoint republishes none of them.
+        """
+        if (self._watermark_ns is None):
+            return None
+
+        return (self._watermark_ns - self._lateness_ns - self._epoch_ns) // self._period_ns - 1
 
     def window_id(self, event_time_ns: int) -> int:
         """The ordinal of the window containing `event_time_ns`."""
