@@ -110,7 +110,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 75
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 78
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
@@ -126,7 +126,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     # the trajectory rule reads it.
     writers = [name for name in names if runner.writes_risk(name)]
 
-    assert len(writers) == 52
+    assert len(writers) == 55
     assert max(position[name] for name in writers) < position[runner.CHAIN]
     assert position[runner.SUMMARY] < position[runner.TRAJECTORY] < position[runner.CHAIN]
     assert min(position[name] for name in expiries) > max(position[name] for name in names if name not in expiries)
@@ -269,6 +269,25 @@ counts; and the summary groups the week of DNS and HTTP history and the service 
 older than it.
 """
 
+BEFORE_THE_DEVICES = {
+    "R-B-L2-002 - Port-to-MAC binding novelty": 2,
+    "R-B-L2-006 - New vendor on a VLAN": 2,
+    "Device restart": 1,
+    "Behavior summary - per-layer scores": 5743,
+    "Binding lookup - L2/L3 refresh": 1505,
+    "Binding lookup - L2/L3 expiry": 1505,
+    "Binding lookup - L2 refresh": 927,
+    "Binding lookup - L2 expiry": 927,
+}
+"""What every run before step 15's devices and physical chain found where they changed the answer.
+
+The campaign's headquarters desk ports reach layer 2 for the first time, and each of the four intrusions is a
+second address on its port and two of them a vendor new to the desk VLAN; the restart report reads the devices'
+own polls, where the storm switch restarts in three periods; the intruders' leases and their ports' MAC bindings
+fill the two lower rungs; and the summary groups the device polls, the port polls, the walks and the intruders'
+flows. The three searches step 15 added are absent from the earlier runs and are not compared.
+"""
+
 
 def _present(changes: dict, run: dict) -> dict:
     """The changes a later step made, restricted to the searches this run dispatched."""
@@ -302,18 +321,28 @@ def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
+    # R-B-L2-002's six were the two then written and four ports whose null step reached the wire. Six are written
+    # again since step 15, for a different four -- the campaign's desk ports -- so the count no longer tells them
+    # apart: the search matches by coincidence, and the run's figure is pinned on its own below.
+    devices = {
+        name: rows
+        for (name, rows) in _present(BEFORE_THE_DEVICES, run).items()
+        if name != "R-B-L2-002 - Port-to-MAC binding novelty"
+    }
+
     assert differing == {
+        **devices,
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS,
         **BEFORE_THE_HOST_BASELINES,
         **BEFORE_THE_MODELS,
-        "R-B-L2-002 - Port-to-MAC binding novelty": 6,
         "Binding health - unresolved rate": 5,
         "R-P-L3-005 - Fan-out trajectory": 0,
     }, ("the watchlist expiry now expects what the run found; two are nulls that reached the wire; the trajectory "
         "rule's own SPL could not fire, which the third run found")
-    assert expected["R-B-L2-002 - Port-to-MAC binding novelty"]["expected_rows"] == 2
+    assert run["searches"]["R-B-L2-002 - Port-to-MAC binding novelty"]["rows"] == 6
+    assert expected["R-B-L2-002 - Port-to-MAC binding novelty"]["expected_rows"] == 6
     assert expected["Binding health - unresolved rate"]["expected_rows"] == 1
 
 
@@ -340,6 +369,7 @@ def test_the_second_run_differed_from_what_is_written_only_where_the_trajectory_
     }
 
     assert differing == {
+        **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS,
@@ -400,6 +430,7 @@ def test_the_fourth_run_differs_from_what_is_written_only_where_the_learned_mode
     }
 
     assert differing == {
+        **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS,
@@ -428,6 +459,7 @@ def test_the_fifth_run_differs_from_what_is_written_only_where_the_host_baseline
     }
 
     assert differing == {
+        **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS,
@@ -455,8 +487,13 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**_present(BEFORE_THE_SERVICES, run), **BEFORE_THE_LEASES, **BEFORE_THE_NETWORK_OBJECTS}
-    assert len(run["searches"]) == 52 and len(expected) == 75
+    assert differing == {
+        **_present(BEFORE_THE_DEVICES, run),
+        **_present(BEFORE_THE_SERVICES, run),
+        **BEFORE_THE_LEASES,
+        **BEFORE_THE_NETWORK_OBJECTS
+    }
+    assert len(run["searches"]) == 52 and len(expected) == 78
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
 
 
@@ -488,8 +525,13 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**_present(BEFORE_THE_SERVICES, run), **BEFORE_THE_LEASES, **BEFORE_THE_PLATFORM}
-    assert len(run["searches"]) == 62 and len(expected) == 75
+    assert differing == {
+        **_present(BEFORE_THE_DEVICES, run),
+        **_present(BEFORE_THE_SERVICES, run),
+        **BEFORE_THE_LEASES,
+        **BEFORE_THE_PLATFORM
+    }
+    assert len(run["searches"]) == 62 and len(expected) == 78
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -513,8 +555,8 @@ def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arriv
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**_present(BEFORE_THE_SERVICES, run), **BEFORE_THE_LEASES}
-    assert len(run["searches"]) == 66 and len(expected) == 75
+    assert differing == {**_present(BEFORE_THE_DEVICES, run), **_present(BEFORE_THE_SERVICES, run), **BEFORE_THE_LEASES}
+    assert len(run["searches"]) == 66 and len(expected) == 78
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -538,6 +580,31 @@ def test_the_ninth_run_differs_from_what_is_written_only_where_the_services_arri
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_SERVICES
-    assert len(run["searches"]) == 72 and len(expected) == 75
+    assert differing == {**_present(BEFORE_THE_DEVICES, run), **BEFORE_THE_SERVICES}
+    assert len(run["searches"]) == 72 and len(expected) == 78
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
+
+
+TENTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-16T1841Z.json")
+"""The run over step 13's events, which matched every expectation then written."""
+
+
+def test_the_tenth_run_differs_from_what_is_written_only_where_the_devices_arrived():
+    # Made on 2026-10-16 when a service and an application became entities: all seventy-five then matched, with 213
+    # risk records. Against step 15's events it differs in the two layer 2 rules the campaign's desk ports now reach,
+    # the restart report, which reads the devices' own polls, the two lower binding rungs and their expiries, and the
+    # summary; it has none of the three searches step 15 added.
+    with open(TENTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_DEVICES
+    assert len(run["searches"]) == 75 and len(expected) == 78
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 213

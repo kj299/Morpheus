@@ -343,7 +343,7 @@ def test_every_class_ran_and_sealed(result: pd.DataFrame):
     # And the quarantine: the DMZ poller's polls, held for an untrusted clock rather than scored.
     assert set(result["telemetry_class"]) == set(tp.TELEMETRY_CLASSES) | {universal_envelope.QUARANTINE_CLASS}
 
-    for name in ("tc1", "tc2_mac", "tc2_arp", "tc2_auth"):
+    for name in ("tc1", tp.DEVICE_CLASS, "tc2_mac", "tc2_arp", "tc2_auth"):
         sealed = _rows(result, name)
         assert sealed["window_id"].notna().all(), name
         assert (sealed["is_late"] == False).all(), name  # noqa: E712  pylint: disable=singleton-comparison
@@ -874,3 +874,91 @@ def test_a_binding_ends_where_its_source_says_it_did(result: pd.DataFrame):
     assert guest["bind_end_reason"] == "explicit"
     assert guest["bind_end"] == tp.GUEST_LEAVES_AT_SECONDS * NS
     assert (bindings["bind_end_observed"] == True).sum() == 1  # noqa: E712  pylint: disable=singleton-comparison
+
+
+# --- What step 15 planted: the device as a thing with a behaviour of its own ----------------------------------------
+
+
+def _minutes(frame: pd.DataFrame) -> list[int]:
+    return sorted(int(value) // (60 * NS) for value in frame["event_time"])
+
+
+def _number(frame: pd.DataFrame, column: str) -> pd.Series:
+    return pd.to_numeric(frame[column], errors="coerce")
+
+
+@pytest.mark.cpu_mode
+def test_a_device_is_keyed_on_itself_and_its_ports_carry_it(result: pd.DataFrame):
+    devices = _rows(result, tp.DEVICE_CLASS)
+
+    assert set(devices["device_key"]) == {f"{tp.SITE}:{device}" for device in tp.DEVICES}
+    assert (devices["entity_key"] == devices["device_key"]).all()
+    assert (devices["chain_anchor"] == devices["device_key"]).all()
+
+    # The port key's middle segment is the device, spelled the way the device's own key spells it.
+    layer_1 = _rows(result, "tc1")
+    rebooting_ports = layer_1[layer_1["device_id"] == tp.REBOOTING_SWITCH]["entity_key"]
+    assert {key.rsplit(":", 1)[0] for key in rebooting_ports} == {f"{tp.SITE}:{tp.REBOOTING_SWITCH}"}
+
+
+@pytest.mark.cpu_mode
+def test_a_restart_is_read_once_from_the_device(result: pd.DataFrame):
+    devices = _rows(result, tp.DEVICE_CLASS)
+    restarted = devices[_is(devices, "device_rebooted")]
+
+    by_device = {key: _minutes(rows) for (key, rows) in restarted.groupby("device_key")}
+    assert by_device == {
+        f"{tp.SITE}:{tp.REBOOTING_SWITCH}": [tp.REBOOT_AT_MINUTE],
+        f"{tp.SITE}:{tp.STORM_SWITCH}": list(tp.STORM_REBOOT_MINUTES),
+    }
+
+    # The 'Device restart' report: the device's restarts and its ports' flags, one row per device per window. The
+    # rebooting switch's three ports and its own poll are one row; the storm switch, polled only as a device, is one
+    # row for each period it restarted in.
+    layer_1 = _rows(result, "tc1")
+    flagged = layer_1[_is(layer_1, "counter_reset") | _is(layer_1, "link_flap_device_reset")]
+    report = {(key.rsplit(":", 1)[0], window) for (key, window) in zip(flagged["entity_key"], flagged["window_id"])}
+    report |= set(zip(restarted["device_key"], restarted["window_id"]))
+    assert len(report) == 1 + len({minute * 60 // tp.PERIOD_SECONDS for minute in tp.STORM_REBOOT_MINUTES})
+
+
+@pytest.mark.cpu_mode
+def test_the_storm_rises_three_periods_running_and_the_single_restart_does_not(result: pd.DataFrame):
+    devices = _rows(result, tp.DEVICE_CLASS)
+    rising = _number(devices, "device_reboot_rising_buckets")
+    trajectory = devices[(rising >= 3) & _is(devices, "device_reboot_baseline_mature")]
+
+    # R-P-L1-009: the storm's third restart in its third period, and nothing else.
+    assert list(trajectory["device_key"]) == [f"{tp.SITE}:{tp.STORM_SWITCH}"]
+    assert _minutes(trajectory) == [tp.STORM_REBOOT_MINUTES[-1]]
+    assert _number(trajectory, "device_reboots_in_bucket").tolist() == [3]
+    assert _number(trajectory, "device_reboot_baseline").tolist() == [2]
+
+    single = devices[devices["device_key"] == f"{tp.SITE}:{tp.REBOOTING_SWITCH}"]
+    assert _number(single, "device_reboot_rising_buckets").max() == 1
+
+
+@pytest.mark.cpu_mode
+def test_a_change_outside_the_window_is_the_one_the_rule_reads(result: pd.DataFrame):
+    devices = _rows(result, tp.DEVICE_CLASS)
+    changed = devices[_is(devices, "config_changed")]
+
+    assert set(changed["device_key"]) == {f"{tp.SITE}:{tp.SWITCH}"}
+    assert _minutes(changed) == [tp.PUSH_AT_MINUTE, tp.OUT_OF_WINDOW_CHANGE_AT_MINUTE]
+    assert _is(changed, "config_first_seen").all()
+
+    # The push lands inside the window and the second change outside it, which is R-D-L1-008's one row. A poll that
+    # changed nothing has nothing to place.
+    outside = changed[changed["config_change_in_window"].astype(str).str.lower() == "false"]
+    assert _minutes(outside) == [tp.OUT_OF_WINDOW_CHANGE_AT_MINUTE]
+    assert devices[~_is(devices, "config_changed")]["config_change_in_window"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_the_routers_loss_is_on_its_row_and_fires_nothing(result: pd.DataFrame):
+    devices = _rows(result, tp.DEVICE_CLASS)
+    churned = devices[_number(devices, "route_count_delta").fillna(0) != 0]
+
+    assert list(churned["device_key"]) == [f"{tp.SITE}:{tp.ROUTER}"]
+    assert _minutes(churned) == [tp.ROUTE_DROP_AT_MINUTE]
+    assert _number(churned, "route_count_delta").tolist() == [tp.ROUTES_AFTER - tp.ROUTES_BEFORE]

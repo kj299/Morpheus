@@ -108,6 +108,9 @@ FLAP = "R-D-L1-003 - Link flap instability"
 ERRORS = "R-B-L1-005 - Error rate step"
 NEIGHBOR = "R-D-L1-006 - LLDP neighbor change"
 VOLUME = "R-B-L1-007 - Interface volume departure"
+CONFIGURATION = "R-D-L1-008 - Configuration change outside the change window"
+TRAJECTORY = "R-P-L1-009 - Reboot-rate trajectory"
+PHYSICAL = "R-C-003 - Physical compromise chain"
 VENDOR = "R-B-L2-006 - New vendor on a VLAN"
 SLOW = "R-B-L2-007 - Slow 802.1X authorization"
 INSTANT = "R-B-L2-008 - Instant 802.1X authorization"
@@ -118,6 +121,9 @@ FLAP_TRANSITIONS = threshold(FLAP, r"link_flaps_in_window\s*>=\s*([\d.]+)")
 ERROR_STEP = threshold(ERRORS, r"error_rate_step\s*>\s*([\d.]+)")
 SURGE_FACTOR = threshold(VOLUME, r"surge_factor\s*=\s*([\d.]+)")
 SILENCE_FACTOR = threshold(VOLUME, r"silence_factor\s*=\s*([\d.]+)")
+RISING_PERIODS = threshold(TRAJECTORY, r"device_reboot_rising_buckets\s*>=\s*([\d.]+)")
+PHYSICAL_TOLERANCE_SECONDS = int(threshold(PHYSICAL, r"t_vendor >= t_port - (\d+) AND"))
+PHYSICAL_WINDOW_SECONDS = int(threshold(PHYSICAL, r"t_vendor - t_port <= (\d+)"))
 SLOW_RATIO = threshold(SLOW, r"auth_elapsed_ratio\s*>=\s*([\d.]+)")
 SLOW_ATTEMPTS = threshold(SLOW, r"auth_attempts\s*>=\s*([\d.]+)")
 INSTANT_RATIO = threshold(INSTANT, r"auth_elapsed_ratio\s*<=\s*([\d.]+)")
@@ -203,14 +209,16 @@ def test_the_detections_return_exactly_what_is_written(expected: dict, telemetry
         "candidate_rows_before_the_lookup"] == first_in_window
 
     # R-B-L2-002 needs no gate: the first-in-window rows whose count the port has never reached, one notable per
-    # port with the largest step and the addresses that made it.
+    # port with the largest step and the addresses that made it. The estate's ports are derived here from the
+    # pipeline; the campaign's desk ports reach the same sourcetype from another corpus and are derived from the
+    # indexed events in the layer 2 test below.
     stepped = scored[(scored["macs_per_port_first_in_window"] == True)  # noqa: E712  pylint: disable=singleton-comparison
                      & (scored["macs_per_port_step"] > 0)]
     novelty = searches["R-B-L2-002 - Port-to-MAC binding novelty"]
+    estate_ports = set(scored["port_key"].dropna())
 
-    assert novelty["expected_rows"] == stepped["port_key"].nunique()
-    assert novelty["contributing_rows"] == len(stepped)
-    written = {(row["port_key"], row["step"], row["new_mac_count"]) for row in novelty["key_values"]}
+    written = {(row["port_key"], row["step"], row["new_mac_count"])
+               for row in novelty["key_values"] if row["port_key"] in estate_ports}
     assert written == {(port, int(group["macs_per_port_step"].max()), group["mac_address"].nunique())
                        for (port, group) in stepped.groupby("port_key")}
 
@@ -1039,6 +1047,24 @@ def test_the_credential_replay_returns_exactly_what_is_written(expected: dict):
     assert entry["key_values"] == replays
 
 
+def test_the_physical_compromise_chain_returns_exactly_what_is_written(expected: dict):
+    # Read from the indexed port polls, table walks and flows, so a column one of the three joins needs and the wire
+    # dropped shows up here as a miss. The tolerance and the window are the stanza's.
+    classes = (campaign_pipeline.PORT_CLASS, campaign_pipeline.MAC_CLASS, campaign_pipeline.FLOW_CLASS)
+    events = [event for event in _scored_events() if event.get("telemetry_class") in classes]
+    frame = pd.DataFrame(events)
+    stamps = pd.to_datetime(frame["event_time"].str.replace("UTC", "", regex=False), utc=True)
+    frame["event_time"] = (stamps - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(nanoseconds=1)
+
+    fired = campaign_pipeline.physical_compromises(frame,
+                                                   window_seconds=PHYSICAL_WINDOW_SECONDS,
+                                                   tolerance_seconds=PHYSICAL_TOLERANCE_SECONDS)
+    entry = expected["searches"][PHYSICAL]
+
+    assert entry["expected_rows"] == len(fired)
+    assert [(row["port_key"], row["mac_address"]) for row in entry["key_values"]] == sorted(fired)
+
+
 def _scored_events() -> list:
     # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
     # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
@@ -1311,6 +1337,7 @@ NUMBER_WORDS = {
     "sixty-six": 66,
     "seventy-two": 72,
     "seventy-five": 75,
+    "seventy-eight": 78,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -1687,6 +1714,12 @@ LAYER_1_AND_2 = {
         "lldp_neighbor_chassis_id_first_seen") is True and e.get("lldp_neighbor_chassis_id") is not None,
                    None),
     "R-B-L1-007": ("morpheus_score_l1.jsonlines", lambda e: _departed(e) is not None, "entity_key"),
+    "R-D-L1-008": ("morpheus_score_l1.jsonlines",
+                   lambda e: e.get("config_changed") is True and e.get("config_change_in_window") is False,
+                   None),
+    "R-P-L1-009": ("morpheus_score_l1.jsonlines", lambda e: e.get("device_reboot_baseline_mature") is True and
+                   _at_least(e, "device_reboot_rising_buckets", RISING_PERIODS),
+                   None),
     "R-B-L2-002": ("morpheus_score_l2.jsonlines",
                    lambda e: e.get("macs_per_port_first_in_window") is True and _over(e, "macs_per_port_step", 0),
                    "port_key"),
@@ -1748,22 +1781,38 @@ def test_the_new_layer_1_detections_return_exactly_what_is_written(expected: dic
     assert sorted((row["entity_key"], row["lldp_neighbor_chassis_id"]) for row in searches[NEIGHBOR]["key_values"]) \
         == sorted((rows[0]["entity_key"], rows[0]["lldp_neighbor_chassis_id"]) for rows in neighbors)
 
+    # The device's own rules, one risk record per poll: the change outside the window, and the third period running
+    # with more restarts than the one before.
+    for (rule, key) in (("R-D-L1-008", CONFIGURATION), ("R-P-L1-009", TRAJECTORY)):
+        notables = _notables(rule)
+
+        assert searches[key]["expected_rows"] == len(notables), key
+        assert [row["entity_key"] for row in searches[key]["key_values"]] == [rows[0]["entity_key"]
+                                                                             for rows in notables], key
+
 
 def test_the_restart_report_is_one_row_per_device_and_window(expected: dict):
+    # The device's own restart and its ports' flags, gathered under the device: the port rows carry no device key,
+    # so the search composes one from the site and the device, as the device stage composes its own.
     reported = [
-        event for event in _events_of("morpheus_score_l1.jsonlines")
-        if event.get("counter_reset") is True or event.get("link_flap_device_reset") is True
+        event for event in _events_of("morpheus_score_l1.jsonlines") if event.get("device_rebooted") is True
+        or event.get("counter_reset") is True or event.get("link_flap_device_reset") is True
     ]
-    devices = collections.defaultdict(set)
+    devices = collections.defaultdict(lambda: {"restarts": 0, "ports": set()})
 
     for event in reported:
-        devices[(event["site_id"], event["device_id"], event["window_id"])].add(event["entity_key"])
+        device = devices[(event.get("device_key") or f"{event['site_id']}:{event['device_id']}", event["window_id"])]
+        device["restarts"] += int(event.get("device_rebooted") is True)
+
+        if (event.get("port_id") is not None):
+            device["ports"].add(event["port_id"])
 
     entry = expected["searches"]["Device restart"]
 
     assert entry["expected_rows"] == len(devices)
-    assert [(row["site_id"], row["device_id"], row["ports_reporting"]) for row in entry["key_values"]
-            ] == [(site, device, len(ports)) for ((site, device, _), ports) in sorted(devices.items())]
+    assert [(row["device_key"], row["window_id"], row["device_restarts"], row["ports_reporting"])
+            for row in entry["key_values"]] == [(key, window, device["restarts"], len(device["ports"]))
+                                                for ((key, window), device) in sorted(devices.items())]
 
 
 def test_the_adjacency_lookup_holds_one_row_per_link(expected: dict):
@@ -1774,11 +1823,20 @@ def test_the_adjacency_lookup_holds_one_row_per_link(expected: dict):
 
 def test_the_new_layer_2_detections_return_exactly_what_is_written(expected: dict):
     searches = expected["searches"]
+    novelty = _notables("R-B-L2-002")
+    entry = searches["R-B-L2-002 - Port-to-MAC binding novelty"]
+
+    assert entry["expected_rows"] == len(novelty)
+    assert entry["contributing_rows"] == sum(len(rows) for rows in novelty)
+    assert sorted(row["port_key"] for row in entry["key_values"]) == [rows[0]["port_key"] for rows in novelty]
+
     vendors = _notables("R-B-L2-006")
 
     assert searches[VENDOR]["expected_rows"] == len(vendors)
+    # `values(oui)` is every vendor new to the segment in the group, space-separated here as a multivalue reads.
     assert [(row["vlan_key"], row["new_ouis"]) for row in searches[VENDOR]["key_values"]
-            ] == [(rows[0]["vlan_key"], rows[0]["mac_address"][:8]) for rows in vendors]
+            ] == [(rows[0]["vlan_key"], " ".join(sorted({row["mac_address"][:8]
+                                                         for row in rows}))) for rows in vendors]
 
     for (rule, key) in (("R-B-L2-007", SLOW), ("R-B-L2-008", INSTANT)):
         notables = _notables(rule)

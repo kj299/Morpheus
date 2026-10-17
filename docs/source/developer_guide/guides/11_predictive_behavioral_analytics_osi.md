@@ -62,7 +62,7 @@ request since 2026-10-03, and in GPU mode on one card, where all twelve matched 
 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the card has not yet seen the trees steps 9 and 10 built.
 That is fifty-four stages and forty-three supporting
 modules, covered by 2,296 distinct tests, itemized in
-[Part 6](#provided). Fifty-two of the fifty-five rules Part 3 specifies ship as saved searches, four of
+[Part 6](#provided). Fifty-five of the fifty-seven rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -75,12 +75,12 @@ repaired. On 2026-10-09 the run over the repaired events returned what was writt
 2026-10-10 a run over step 9's events returned what was then written for all fifty-two, a run later that day
 over step 10's returned what was then written for all sixty-two, and a run that night over step 11's
 returned what was then written for all sixty-six. On 2026-10-15 a run over step 12's returned what was then written
-for all seventy-two, and on 2026-10-16 a run over step 13's returned what is written for all seventy-five the app now
-ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
+for all seventy-two, on 2026-10-16 a run over step 13's returned what was then written for all seventy-five, and on
+2026-10-17 a run over step 15's returned what is written for all seventy-eight the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
 scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
-What remains design rather than a running system: three of the fifty-five rules (R-B-L4-001 and
-R-B-L7-003, which need a Triton endpoint, and R-C-003), a learned model for hosts, the
+What remains design rather than a running system: two of the fifty-seven rules (R-B-L4-001 and
+R-B-L7-003, which need a Triton endpoint), a learned model for hosts, the
 hysteresis half of control 9 (its suppression half ships on every detection), controls 10 and 11 as code, the sharding router's wiring, and clock
 correction, since `clock_source` and `clock_offset_ms` are schema that nothing produces or checks. Layer 5
 is the case to state precisely: **each principal has a learned model of their own, and only principals do.**
@@ -1046,8 +1046,8 @@ still flagged, whereas an interpolated estimate would put a number nobody measur
 analyst. Devices report the field relative to their own uptime, so a Tier 1 collector has to normalize
 it to an absolute time; a value that goes backwards is read as a device restart, which is counted as a
 transition and labelled so a planned reboot can be excluded by rule rather than silently inflating the
-count. R-D-L1-003 excludes it, and the `Device restart` report gathers the same labels into one row per device,
-since a switch that restarts reports a reset on every port and is one event.
+count. R-D-L1-003 excludes it, and the `Device restart` report gathers the same labels beside the device's own
+restart into one row per device, since a switch that restarts reports a reset on every port and is one event.
 
 Rates ship as {py:class}`~morpheus.stages.telemetry.tc1_rate_stage.TC1RateStage`, after the normalize stage. A
 delta is not a feature on its own: forty CRC errors is a quiet hour on one link and a failing cable on another, and
@@ -1073,6 +1073,25 @@ chassis MAC or a system name and an interface description, and the poller names 
 host name, so each end of a link carries a key of its own and `Topology - LLDP adjacency` writes both to the
 `lldp_adjacency` lookup. Resolving the two into one link needs the mapping from LLDP identity to poller name, which
 is TC-0's to supply. A port with no neighbour carries a null link rather than a link to nobody.
+
+**A switch or router is an entity of its own: the `tc1_device` sub-class.** A port key carries its device only
+as the middle segment, so a restart surfaced once per port and a configuration push nowhere at all. The device's
+own poll is keyed `site_id:device_id`, which is the port key with the port taken off, and carries `sys_uptime`
+(`sysUpTime`, in hundredths of a second), `running_config_hash` (a digest of the running configuration -- not
+`config_hash`, which is the pipeline's own provenance), `cpu_util`, `mem_util`, `route_count`, `bgp_peer_count`
+and `syslog_rate`. {py:class}`~morpheus.stages.telemetry.tc1_device_stage.TC1DeviceStage` derives four things
+from it. A restart, `device_rebooted`, read from the uptime alone exactly as the counter normalization reads it --
+an uptime that went backwards, or advanced by less than the time between polls, unless the 32-bit `TimeTicks`
+counter itself rolled over. The two therefore never disagree about whether a device came up. Restarts per period,
+`device_reboots_in_bucket`, measured against the most any earlier period inside thirty days held with
+{py:mod}`~morpheus.utils.bucket_peak`, and `device_reboot_rising_buckets`, how many periods in a row ending at this
+one each held more restarts than the one before, which is the trajectory R-P-L1-009 reads. A configuration change,
+`config_changed` and `config_first_seen` from {py:mod}`~morpheus.utils.value_novelty` as the port identifiers have
+them, with `config_change_in_window` saying whether the change landed inside the estate's change window -- a pair
+of UTC clock times the estate declares, null where it has declared none, which R-D-L1-008 reads. And
+`route_count_delta`, the routing table's change since the device's last poll, which travels as context on the other
+two and fires nothing of its own. The gauges are carried and not yet read by any rule. Device rows go on the
+`morpheus:score:l1` stanza beside the port rows, as a second variant of its contract.
 
 **Cadence:** 30 to 60 seconds for counters, event-driven for state transitions.
 **Cardinality:** thousands to low tens of thousands of ports. Low enough for per-port models.
@@ -1121,6 +1140,14 @@ nowhere. `ouis_per_vlan` is measured against the VLAN's own history by the same
 {py:class}`~morpheus.stages.telemetry.tc2_baseline_stage.TC2BaselineStage` that measures the per-port MAC count,
 asked a second time with `entity_column="vlan_key"`, and R-B-L2-006 reads its step: a vendor the segment has never
 carried. A third camera on the camera VLAN is a new device and not a new kind, and does not step.
+
+The same novelty is kept per port as well, because a VLAN's history is a hundred desks' and a vendor new to one
+desk is no news to the segment. `oui_first_seen_on_port` is whether the port has ever carried the vendor in
+`mac_oui`, the first three octets of the address unless the collector supplied the OUI itself, from
+{py:mod}`~morpheus.utils.value_novelty` with every MAC of one walk measured against the port as it stood before
+that walk. It is null on a port's first walk, which establishes what the port carries rather than being an event,
+and it is R-C-003's second step. The closed binding carries `oui` too, derived from the MAC where the walk did not
+supply it, so a binding names the vendor of the device it bound.
 
 Note that these three do not shard alike. Counts per port and per VLAN shard cleanly by switch, but
 distinct ports per MAC needs every sighting of a MAC to reach one instance, which sharding by switch
@@ -1282,6 +1309,12 @@ fan-out (distinct `dst_ip` per `src_ip` per window), fan-in, distinct destinatio
 byte-count asymmetry (`bytes_out / (bytes_in + 1)`), TTL variance per source (fingerprints an
 interposed device), and inter-flow arrival regularity (a low coefficient of variation is the beaconing
 signal).
+
+Whether a destination is the estate's management network is a fact about the estate, not about the address, so
+the reach stage takes it as a list: given `management_prefixes`, it writes `dst_is_management` on every flow, and
+null without one rather than guessing that nothing is management. It is R-C-003's last step. The search head keeps
+the same prefixes, with each one's VLAN and role, in the `vlan_designations` lookup, which the app ships with its
+header only, as it ships `port_designations`.
 
 **Cadence:** continuous. Flow records on the shorter of active timeout (60s) or natural flow end.
 **Cardinality:** millions of addresses, billions of flows per day at enterprise scale. Model at the
@@ -1651,10 +1684,14 @@ instead. The count is a floor, for the reason the flap stage gives, so the rule 
 The corpus plants a link flapping in every polling gap from the half hour, which reaches ten on its fifth flapping
 poll; a single flap, the swaps, the re-patch and the insertion each count two. Tier D1.
 
-**Device restart.** Not a rule and writes no risk: one row per device per window, gathering the `counter_reset`
-and `link_flap_device_reset` flags its ports raise on the first poll after it comes back. Without it a restart is
-one flag per port, each read on its own as a fault; with it, a restart is one event, and an unplanned one is a
-question for the change calendar. The corpus restarts a second switch at the half hour.
+**Device restart.** Not a rule and writes no risk: one row per device per window. The device's own poll is the
+authority, `device_rebooted` from the `tc1_device` sub-class, and the `counter_reset` and `link_flap_device_reset`
+flags its ports raise on the first poll after it comes back are gathered beside it as the ports that reported it,
+under a `device_key` the search composes from the site and the device for port rows, which carry none. An estate
+that polls only its ports therefore still gets one row per device. Without it a restart is one flag per port, each
+read on its own as a fault; with it, a restart is one event, and an unplanned one is a question for the change
+calendar. The corpus restarts a second switch at the half hour, which is one row with its three ports, and a third
+switch in a storm, which is a row for each of the three periods it restarted in.
 
 **R-B-L1-005 - Error rate step.** `error_rate_step` above 0.1 errors a second, on a mature baseline: the port is
 running more CRC and symbol errors than in any five-minute period of its own history. Ships over
@@ -1681,6 +1718,23 @@ always carried something and now carries nothing with its link up, which is a re
 service. Measured per UTC hour by default, so an overnight backup is measured against overnights. The two factors
 are placeholders, stated in the search as `surge_factor` and `silence_factor`. The corpus plants one of each,
 which fire for the five polls before the next period's peak and trough join the history. Tier D1.
+
+**R-D-L1-008 - Configuration change outside the change window.** `config_changed` true and
+`config_change_in_window` false on a device's poll: its running configuration changed when the estate said nobody
+would be changing anything. Unauthorized access to a switch's management plane changes its configuration, and so
+does an engineer working outside the calendar; the rule does not tell them apart, which is the analyst's question
+and the reason the notable carries whether the configuration is one the device has run before. The window is the
+estate's to declare, as a pair of UTC clock times that may wrap midnight, and without one the column is null and
+the rule fires on nothing. The corpus pushes one switch's configuration inside the first ten minutes of the hour,
+which is the window, and changes it again at forty minutes, which fires; nothing else changes. Tier D1.
+
+**R-P-L1-009 - Reboot-rate trajectory.** `device_reboot_rising_buckets` of three or more on a mature baseline: a
+device that restarted more often in each of three successive periods than in the one before. A failing supply, a
+process crashing sooner after each start or a watchdog firing ever earlier all get worse before the device stops,
+and the trajectory is visible before the outage is. One restart is the report above's, however unplanned; two in a
+row with more each time is still within what maintenance produces. The corpus restarts a switch once, then twice,
+then three times in three five-minute periods, which fires on the third period's third restart, beside the second
+switch's single restart, which reaches a run of one. Tier D1.
 
 **Topology - LLDP adjacency.** Not a rule: a lookup refresh writing one row per `link_key` to `lldp_adjacency`,
 with the neighbour on the far end and when the link was first and last seen, merged with what the lookup already
@@ -1769,20 +1823,23 @@ the port's 99th percentile, which below a hundred exchanges is a tenth of the sl
 infrastructure should not hold looks like. A bypass has no exchange at all and is R-D-L2-005's. The corpus plants
 it on the second bench, accepted in the second it was asked, where every exchange before it took four. Tier D1.
 
-These fifteen, R-D-L1-001, 002, 003 and 006, R-B-L1-005 and 007, R-P-L1-004, R-B-L2-002, 006, 007 and 008, and
-R-D-L2-001, 003, 004 and 005, are the layer 1 and 2 rules in this part that exist as code rather than as
-specification; the layer 3 to 7 and chained rules that ship are recorded in their own sections below. The seven
+These seventeen, R-D-L1-001, 002, 003, 006 and 008, R-B-L1-005 and 007, R-P-L1-004 and 009, R-B-L2-002, 006, 007
+and 008, and R-D-L2-001, 003, 004 and 005, are the layer 1 and 2 rules in this part that exist as code rather than
+as specification; the layer 3 to 7 and chained rules that ship are recorded in their own sections below. The nine
 layer 1 rules, R-B-L2-002, 006, 007 and 008, and R-D-L2-004 and 005 read columns the shipped stages produce and
 depend on nothing outside the pipeline; R-D-L2-001 and 003 depend on a list the
 estate owns, and each ships with the hook for that list and fires on nothing until it is populated, while
 R-D-L2-003 fires on every first-hop redundancy address until its exclusion list is supplied. R-B-L2-002 reads the
 designation list too, only to leave trunk and LAG-member ports out, and measures every port without it. All
-fifteen predicates are asserted in Python over the determinism harness's planted corpus: R-D-L1-001 fires
+seventeen predicates are asserted in Python over the determinism harness's planted corpus: R-D-L1-001 fires
 exactly once and R-D-L2-004 and 005 twice each, once per spoof and once per bypass, R-P-L1-004 on the one failing
 optic, R-B-L2-002 once each on the hub and the spoofed port, 001 once per offending MAC, and 003 on the flooded
 gateway and not on the redundancy pair; R-D-L1-002, 003 and R-B-L1-005 each on the one port planted for it,
-R-D-L1-006 on the re-patch and the insertion, R-B-L1-007 on the surge and the silence, R-B-L2-006 on the two
-VLANs, and R-B-L2-007 and 008 each on one bench's exchange, with every control beside them quiet.
+R-D-L1-006 on the re-patch and the insertion, R-B-L1-007 on the surge and the silence, R-D-L1-008 on the change
+outside the window and not the push inside it, R-P-L1-009 on the storm and not the single restart, R-B-L2-006 on
+the two VLANs, and R-B-L2-007 and 008 each on one bench's exchange, with every control beside them quiet. R-D-L1-008
+fires on nothing in an estate that has declared no change window, which is the honest answer to a question it was
+not given; it shares that shape with R-D-L2-001's designation list, though it depends on no lookup.
 
 **R-P-L1-004 - Optical degradation forecast.** Linear extrapolation of `optical_rx_dbm` per port
 projects a crossing of the transceiver's minimum receive threshold within 14 days. This is an operations
@@ -2264,6 +2321,13 @@ then a layer 2 binding of a novel OUI to that port, then a layer 3 flow from the
 management VLAN, all within 4 hours. This chain is the only reason the layer 1 pipeline pays for itself
 and it justifies the whole TC-1 collection effort.
 
+Ships as a saved search joined on the identifiers rather than on a lineage: the port's layer 1 event --
+`transceiver_serial_changed` or `link_flaps` above zero -- is joined on the port to a layer 2 walk where
+`oui_first_seen_on_port` is true, and the walk's MAC to a layer 3 flow with `dst_is_management` true, which the flow
+carries from the DHCP lease that gave the device its address. Each step may precede the one before it by the
+two-minute join tolerance the other chains allow, and the last must land within four hours of the first. The
+`vlan_designations` lookup names the management VLAN the destination sits in. One risk record per port and MAC.
+
 **R-C-004 - Staged exfiltration.** Layer 7 bulk data access (R-B-L7-002) by a principal, then within
 2 hours a layer 4 transfer envelope breach (R-B-L4-005) from a host bound to that principal's active
 session, then a layer 6 connection to a destination whose certificate issuer is novel for the
@@ -2275,7 +2339,7 @@ physical `port_id` values in different `site_id` values, within a window shorter
 time. This is impossible travel with physical-layer corroboration, and it is far stronger than the
 geolocation version because it does not depend on IP geolocation accuracy.
 
-All four chains that ship are asserted in
+All five chains are asserted in
 `tests/morpheus/determinism/test_campaign_harness.py`, over a corpus written as one estate seen by three collectors
 -- `tests/morpheus/determinism/campaign_pipeline.py` -- where an attacker completes all three steps and six others
 each fall one step short: the process before the login, the last step thirty-five minutes after the first, a login to
@@ -2308,6 +2372,19 @@ the estate's own record of where its sites are, and `column_prefix`, so the site
 `site_travel_*` beside the geolocation-based one rather than over it. The search reads only the sign-ins the stage
 measured or anchored on, and carries the anchor forward so the notable names both ports. Its inverse is the
 second sign-in made at a shared workstation the asset inventory names as one, at the principal's request.
+
+R-C-003 is asserted there too, on a single-board computer plugged into a desk port at headquarters: the port's
+link drops for the swap, the next walk of the switch's MAC table finds a vendor the port has never carried, the
+device asks the DHCP server for an address, and a quarter of an hour later it opens SSH to the switches'
+management interface. Three others each fall one step short: a laptop of the fleet's own vendor plugged in the same
+way, which is no new vendor; a printer of a new vendor that only ever prints, which reaches no management address;
+and a second single-board computer that reaches the management network from a desk whose link never drops, because
+it sits behind the desk's own switch. Each control is shown quiet because of its one missing condition and nothing
+else: drop that condition from the rule and it fires on the control as well. The port polls and the table walks
+come from the same poller, as SNMP is deployed, and the flows reach the port by the MAC the lease recorded, so the
+chain needs no lineage identifier spanning three layers. The rogue host is not invisible to the single-layer
+rules -- its port's MAC count steps for R-B-L2-002 and its vendor is new to the VLAN for R-B-L2-006 -- but neither
+can say that the device went on to reach the management network, and the printer steps both of them as well.
 
 Six decisions come with R-C-001. **Layer 3 seals hourly.** The rule's "previous hour" is `window_id + 1`, which is
 an hour only because every layer 3 corpus seals at 3600 seconds where `WindowSealStage` defaults to 300; the stanza
@@ -3790,6 +3867,10 @@ Pass 4 measures each of these and records which the fork reuses.
   peak and trough, traffic per UTC hour ({py:class}`~morpheus.stages.telemetry.tc1_rate_stage.TC1RateStage`,
   over {py:mod}`~morpheus.utils.bucket_peak`), which R-B-L1-005 and R-B-L1-007 read; and `link_key`, a link
   named by its two ends ({py:mod}`~morpheus.utils.entity_key`).
+- TC-1 devices: a switch or router keyed on itself, its restarts read from `sysUpTime` and measured per period
+  against its own history, the periods running that each held more, its configuration changes placed against the
+  estate's change window, and its routing table's churn
+  ({py:class}`~morpheus.stages.telemetry.tc1_device_stage.TC1DeviceStage`), which R-D-L1-008 and R-P-L1-009 read.
 - Identifier change detection with no period boundary ({py:mod}`~morpheus.utils.value_novelty` and
   {py:class}`~morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage`), which closes the blind spot
   a period-bucketed distinct count can only narrow.
@@ -3868,7 +3949,7 @@ Pass 4 measures each of these and records which the fork reuses.
   window of a given width, the composed pipelines re-run over the same corpora, and a report of which columns
   moved and at what width each shipped rule changed what it accuses. It runs anywhere in about forty seconds,
   needs no card, and answers the open question this document had left open since it was written.
-- R-D-L5-003 and R-D-L5-004 as saved searches, two of the fifty-two detections that now ship. Their
+- R-D-L5-003 and R-D-L5-004 as saved searches, two of the fifty-five detections that now ship. Their
   predicates are asserted in Python over the corpus and their row counts written into the validation
   package, so an expectation cannot go stale without a test failing. Both fire on the planted cases and
   neither fires on the negative controls beside them. R-D-L5-003 ships with an empty egress exclusion
@@ -4078,7 +4159,7 @@ Pass 4 measures each of these and records which the fork reuses.
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
   counts are the finding: fourteen columns identify a person or an account, twenty-five address their device,
-  seventeen locate them, and two hundred and thirty-two are profile, two hundred and twenty-two of them behavioural,
+  seventeen locate them, and two hundred and thirty-five are profile, two hundred and twenty-five of them behavioural,
   which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
@@ -4111,7 +4192,7 @@ Pass 4 measures each of these and records which the fork reuses.
   [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
   the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
   and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Two of the
-  seventy-five searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
+  seventy-eight searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
   empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
   is working from a rule that is broken.
 - One rule run end to end offline, from a file to bytes a SIEM parses
@@ -4141,6 +4222,11 @@ Pass 4 measures each of these and records which the fork reuses.
   R-B-L1-005 and the volume departure R-B-L1-007; at layer 2 the new vendor on a VLAN R-B-L2-006 and the slow
   and instant 802.1X authorizations R-B-L2-007 and R-B-L2-008; with the `Device restart` report and the
   `lldp_adjacency` lookup the topology search keeps.
+- The device detections, read off the switch's or router's own poll and asserted on the telemetry corpus's plants:
+  a configuration change outside the estate's change window, R-D-L1-008, on the change at forty minutes and not
+  the push inside the window, and the reboot-rate trajectory R-P-L1-009 on the reboot storm and not the single
+  restart; and the chained R-C-003, asserted in the campaign harness on the rogue host alone, with each of its three
+  controls fired only when the one condition it lacks is dropped from the rule.
 - Provisional open bindings (`TC2BindingStage(emit_open_bindings=True)`), so live attribution has an
   answer inside the idle window, capped by a duration the consumer states rather than one the stage
   invents.
@@ -4218,13 +4304,13 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Upstream reuse decision | Small | Decided and measured, in Part 0's Pass 4: every DFP stage, the three identity-provider source stages, `MLFlowDriftStage` and `TimeSeriesStage` are rejected, each for a reason `examples/upstream_reuse/evaluate.py` measured and `test_upstream_reuse.py` holds to its artifact; the `dfencoder` `AutoEncoder` and `manual_seed` are reused, and the Azure sign-in fields are the normalization target. Closed by #67 |
 | Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
 | **The per-entity learned model for hosts** | Large | The principals' half is built, in step 8. Each principal of the session corpus has a `morpheus.models.dfencoder` autoencoder trained on the CPU by `examples/layer5_model/train_models.py` on a fortnight before the week it scores, committed as plain numbers under `examples/layer5_model/models/`, loaded and checked against its recorded version by `load_models`, scored in CI by a NumPy forward pass that agrees with the upstream class wherever Torch imports, and pinned in the manifest with the end of its training data, so no model scores the rows it was fitted on; a joiner falls back to a population model fitted on the same fortnight. R-B-L5-001 and R-B-L5-002 return their first rows, 42 and 28, on a search head too. Three findings came with it and are recorded rather than tuned away: the scores are uncalibrated where the fortnight never varied a feature, a cumulative feature keeps a principal firing until the next training window, and R-D-L5-008 misses a new place whose first sign-in failed. `run_model.py` now trains on the fortnight and scores the week through the same pinned scorer; its standing card artifact, from 2026-10-03, predates that and scored the week it trained on. What remains is hosts: `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame, which waits on host identity. Tracked in #59 |
-| Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run held 94 risk records for the 94 rows the detections then returned; with the learned layer 5 models it held 166 risk records for the 166 rows the detections returned, with step 9's host baselines it held 198, and with step 10's network objects it held 209, and with step 13's services and applications it holds 213 risk records for the 213 rows the detections returned. Chain assembly stays empty on the sample events because the two three-layer chains a detection accuses sum 55 and 50 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
+| Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run held 94 risk records for the 94 rows the detections then returned; with the learned layer 5 models it held 166 risk records for the 166 rows the detections returned, with step 9's host baselines it held 198, and with step 10's network objects it held 209, with step 13's services and applications it held 213, and with step 15's devices and physical chain it holds 221 risk records for the 221 rows the detections returned. Chain assembly stays empty on the sample events because the two three-layer chains a detection accuses sum 55 and 50 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
 | Clock skew where the corpora cannot measure it | Medium | Step 7's runs are recorded: the search-head run of all forty-eight searches on Splunk 10.2.8 on 2026-10-09 returned what `expected_results.json` says for every one, over events whose wire format the first run, on 2026-10-05, corrected; the conformance runs of 2026-10-09 passed every marked variant on a card, 759 of 759 before step 6 and 760 of 760 after it, the parity test over all twelve corpora among them; both results and the model artifact are committed and the documents' numbers are tested against them; the clock skew experiment decides all fifty-two detections, and did again after steps 9 to 13; the eight step 10 added hold to a minute on collector and switch clocks, step 11 measured layer 3 on its routers' clocks, and step 12's leases and inventory reports gave layers 4 and 6 clocks a sweep can move. What it could not measure remains: the SaaS pair's corpus carries one clock and needs the context store's record time per row, layers 4 and 6 are measured only as a uniform shift until their corpora carry an exporter per packet capture and an inspection point per egress, and the 120-second join tolerance itself needs a corpus whose chain steps sit within a minute of each other on different clocks. Recorded under #58; correcting the clocks rather than measuring them is #62 |
 | Host baselines at layers 3, 4 and 6 | Medium | Built, in step 9. `TC3BaselineStage` keeps each host's hourly peak fan-out, fan-in and byte asymmetry over fourteen days, with an optional group column so one address in two routing domains is two hosts, and the network corpus gained the fortnight it is measured against. R-B-L3-001 fires on a step above the source's own history with the literal fifty kept as a floor, and a DHCP server's Monday checks, which the literal fired on, are its control; R-B-L3-006 reads fan-in onto a destination the inventory calls a workstation, R-B-L3-007 a first contact more lopsided than the host has ever sent, and R-D-L3-008 a port sweep inside the estate. `community_id` is on layers 3 and 6, and a report joins one connection across layers 3, 4 and 6 on it. `normalize_hostname` keys a host in the endpoint, asset, enrichment and envelope stages and in the layer 5 target, so `FIN-01` and `fin-01` are one host and R-C-001 joins without folding case; the asset record carries `device_role`, `os_family` and `os_version`, R-C-001 requires a server, R-B-L7-004 scales its severity by criticality and carries the owner, and R-B-L6-001 is gated on a managed host again. Every host feature is read by a search or listed under [Features without a rule](#features-without-a-rule), and a test holds the list to the stages. What remains: layer 4 still has no per-host baseline beyond the per-triple envelope, `ja4_client_changed` has no rule because the corpus shows nothing a rule on it would add, R-P-L3-005 now visibly fires on every host's first minutes of the day and wants the same step condition, and the inventory is looked up on the address at layer 6 until hosts have an identity across layers (#63). Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | Built, in step 12. `TC2BindingStage` takes a grant column, so a DHCP server's acknowledgements close into leases that last the term the server granted, and an EDR agent's inventory reports into which machine each interface belongs to; the network, transport, presentation and application corpora, and the campaign's layers 3, 4 and 6, resolve each source address through both with `BindingResolverStage` and carry `mac_address`, `host_key` and each hop's binding identifier, with chains rooted on the machine. `TC7EndpointStage` writes the same `host_key` for a process, and a host identity harness seals four layers together and finds one workstation one entity and one chain, with a re-leased address as the control. `EdgeEmitStage` writes `morpheus:edge` records with both ends' identifiers and layers, the relation, the join method and the child's `lineage_id`; every estate and campaign resolver writes its binding's identifier; the SIEM gains `binding_l2` and `binding_l5_l2` with refresh and expiry jobs, a directory lookup the estate supplies, a host evidence report and an identity walk that agrees with the pipeline on all twenty-five sign-ins; and R-C-002 and R-C-004 join on `community_id` and `session_key` where present. Departures: chains stay one per layer in the single-layer corpora, which seal alone, and only the harness seals layers together; the layer 3 and 4 compositions carry `host_key` without the machine's asset context, which the harness attaches; DNS and HTTP are resolved to a machine but not to a session, because the application corpus has no sessions; and the reference corpus's flows are no longer sent to the SIEM, rather than being renamed. The DHCP and EDR collectors themselves are not Morpheus. Gaps G03, G04, G17, G43, G52 and G80 are closed by #63 |
 | Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | Built, in step 10. R-D-L1-002 reads the optical tap step, R-D-L1-003 flap instability with restarts excluded, R-D-L1-006 a neighbour the port has never had, and a `Device restart` report gathers the reboot flags into one row per device. `TC1RateStage` divides each delta by its interval into error, discard and traffic rates and `utilization` against `link_speed_bps`, from the 64-bit octet counters TC-1 now requires, and measures each port's error rate against its own peak (R-B-L1-005) and its traffic against its own peak and trough per UTC hour (R-B-L1-007). `link_key` names a link by its two ends and `Topology - LLDP adjacency` keeps the record; R-B-L2-002 leaves trunk and LAG-member ports out. `ouis_per_vlan` is keyed `site_id:vlan_id`, measured against its own history and read by R-B-L2-006; the four-part key is gone from Part 2. `TC2AuthStage` keeps each port's 99th percentile and R-B-L2-007 and 008 read its two tails. `TC2BindingStage` gains a stop column and a snapshot mode, and the corpus ends one binding `explicit` and one `snapshot_absent`. What remains: a link resolves to one name from both ends only where the LLDP identity and the key the poller builds agree, which needs TC-0's mapping; a restart splits each of its ports' layer 1 bindings for the poll its neighbour is unknown; discards have no baseline; and the hour-of-day history is untested beyond one hour of corpus. Tracked in #61 |
 | Envelope validation, clock quarantine, collector and pipeline health, late-arrival delivery, platform baselines | Medium | Built, in step 11. Every corpus record carries `observed_time`, `ingest_time`, `clock_source`, `clock_offset_ms`, `sampling_policy` and `tenant_id`, and every layer 3 flow `exporter_id`. `EnvelopeValidateStage` stamps `ingest_time`, marks a missing field that has no stated reason, and quarantines a record whose clock is unsynchronized or more than a second out: the telemetry corpus's DMZ poller, three polls at 4500 ms, reaches `morpheus:quarantine` and nothing else. `CollectorSequenceStage` finds the ARP sensor's three undelivered records; `PipelineHealthStage` writes 851 `morpheus:health` records over the sample events, and its per-feed baseline steps on the SaaS corpus's doubling tenant alone. Nine more stateful stages refuse a far-future time; a late flow reaches `morpheus:late` and no detection, and every detection reads `window_complete=true`. Four reports ship with expectations, and Part 2 gains TC-P. What is not built: correcting an event time by the offset a collector reports, and guarding the layer 3 to 7 window stages' clocks |
-| Device telemetry class and R-C-003 | Large | A switch or router exists only as the middle segment of a port key; a reboot surfaces once per port in the pipeline, and only the `Device restart` report in the SIEM gathers it into one row per device; configuration change, route churn and CPU are absent from design and code. R-C-003, the chain that justifies layer 1, has no stanza, corpus actor or harness, and two of its three inputs are absent: OUI novelty is kept per VLAN only and the closed binding carries no `oui`; nothing classifies a management destination. A `tc1_device` sub-class keyed `site_id:device_id` with a stage deriving reboot, `config`-change and route-count features and two rules; per-port OUI novelty, `dst_is_management` and a `vlan_designations` lookup; a rogue-host actor in a corpus holding layers 1, 2 and 3 together. Tracked in #65 |
+| Device telemetry class and R-C-003 | Large | Built, in step 15. A `tc1_device` sub-class keyed `site_id:device_id` carries the device's own poll, and `TC1DeviceStage` reads a restart from `sysUpTime` as the counter normalization does, measures restarts per period against the device's own thirty days and counts the periods running that each held more, which R-P-L1-009 reads, places a configuration change against the estate's change window, which R-D-L1-008 reads, and differences the routing table. The `Device restart` report reads the device's restart first and gathers its ports' flags beside it. `TC2CardinalityStage` keeps OUI novelty per port as `oui_first_seen_on_port`, the closed binding carries `oui`, and `TC3ReachStage` writes `dst_is_management` from the estate's prefixes, with a `vlan_designations` lookup on the search head. R-C-003 ships, over a rogue-host actor in the campaign corpus, which now holds layers 1, 2 and 3 at headquarters, with three controls each one condition short. What remains: the gauges -- `cpu_util`, `mem_util`, `syslog_rate`, `bgp_peer_count` -- are carried and read by no rule; a change window is one window for the estate rather than one per device or per day; and the management prefixes are given to the stage and to the lookup separately, so the two can disagree. Tracked in #65 |
 | Service and application entity | Large | Built, in step 13. `TC7ServiceStage` keys a service on `sni:dst_port`, or `dst_ip:dst_port` without a name, and measures its connections, bytes and distinct clients per window, new client fingerprints, and its clients against its own busiest day; R-B-L7-007 reads it. DNS and HTTP clients are measured against their own busiest day, and R-B-L7-001 and R-D-L7-005 threshold the ratio with the literal as a floor; `TC7DnsStage` reads `response_code` into an NXDOMAIN ratio and counts distinct registered domains per client, and R-B-L7-008 reads both; `TC7HttpStage` reads the user agent into a family, an operating system and per-client novelty. `TC6CertificateStage` keys a destination on `dst_ip:sni`, and R-D-L6-002 groups on it. TC-0 gains an `application` kind keyed `address:port` and carrying `service_account` and `owning_team`, produced by `TC0ApplicationStage` on `context:application` and attached as `ctx_application_*` at layers 4, 6 and 7; the context corpus reassigns a server and records it late. `TC4FlowStage` carries the options, segment size and window of each SYN packet into a per-host `stack_fingerprint`, and R-B-L4-004 ships as a join on `host_key` rather than on a flow. What remains: `client_app` is still read by nothing; a SaaS application is not yet an entity of its own, only the servers that answer for one; the 5xx ratio is not measured per service; and user agent novelty is per client, not per principal. Gaps G10, G29, G49, G50, G51 and G77 are closed by #64 |
 | Triton-backed rules R-B-L4-001 and R-B-L7-003 | Medium | Specified over the `abp` features and over request bodies; no fork pipeline composes `TritonInferenceStage` and no `Scorer`-protocol adapter exists for layers 4 or 7 the way `ReferenceScorer` and `DfencoderScorer` do for layer 5. Both need a Triton endpoint and a GPU path CPU CI cannot exercise; revisit once the per-user model's CPU inference path exists as the pattern to copy. Not scheduled; recorded as gap G48 in the retrospective |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it, asserted equal to the unsharded golden under control 13. Tracked in #66 |
@@ -4454,7 +4540,7 @@ whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
 fork emits, fourteen identify a person or an account, twenty-five are addresses, seventeen locate, twenty are
-pseudonyms -- and two hundred and thirty-two are profile, two hundred and twenty-two of them behavioural; the other
+pseudonyms -- and two hundred and thirty-five are profile, two hundred and twenty-five of them behavioural; the other
 ten are the organisational columns the TC-0 context store and its join carry. **The largest category by far
 is the one the design manufactures rather than collects.** An estate reviewing this will think about the
 authentication logs it ingested; most of what it ends up holding about a person is derived here, from those
@@ -4512,7 +4598,8 @@ this order:
    collection points. R-B-L6-001 is one of the best rules in the set relative to its cost.
 5. **Layers 1 and 2 last.** Highest collection effort, lowest standalone detection value, but they
    complete the ladder and enable R-C-003 and R-C-005, which are not expressible any other way; R-C-005 ships
-   on the layer 2 bindings and R-C-003 does not yet.
+   on the layer 2 bindings, and R-C-003 on the port's own history of vendors and the estate's management
+   prefixes.
 
 Apply the D1 and D2 determinism controls from the start. Retrofitting determinism onto a running
 detection pipeline means re-tuning every threshold, because the scores will move.

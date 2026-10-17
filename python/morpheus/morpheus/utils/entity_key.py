@@ -203,3 +203,38 @@ def compose_link_key(near_key: typing.Any, far_chassis: typing.Any, far_port: ty
         return None
 
     return LINK_SEPARATOR.join(sorted([near, far]))
+
+
+def mac_oui(supplied: typing.Any, mac: typing.Any) -> typing.Optional[str]:
+    """
+    The organizationally unique identifier of a MAC address: the one a collector supplied, or the first three octets.
+
+    Deriving rather than leaving it null keeps an OUI feature meaningful on estates whose collectors omit the field,
+    which would otherwise report one distinct OUI, forever, on every port and every segment. Shared by the layer 2
+    stages, so a port's OUI history and a binding's OUI attribute are the same string.
+
+    Parameters
+    ----------
+    supplied : str
+        The OUI the collector reported, if it reported one.
+    mac : str
+        The MAC address, in any of the usual separators.
+
+    Returns
+    -------
+    str or None
+        The OUI lowercased and colon-separated, `aa:bb:cc`, or `None` where neither gives one.
+    """
+    value = normalize_text(supplied)
+
+    if (value is not None):
+        return value.lower()
+
+    text = normalize_text(mac)
+
+    if (text is None):
+        return None
+
+    octets = text.lower().replace("-", ":").split(":")
+
+    return ":".join(octets[0:3]) if len(octets) >= 3 else None

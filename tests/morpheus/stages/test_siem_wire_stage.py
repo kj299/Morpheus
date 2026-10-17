@@ -74,6 +74,8 @@ SCORE_L2_COLUMNS = {
     "ouis_per_vlan": [1, 1],
     "ouis_per_vlan_first_in_window": [True, False],
     "ouis_per_vlan_step": [0, 0],
+    "mac_oui": ["aa:bb:cc", "aa:bb:cc"],
+    "oui_first_seen_on_port": [None, False],
     "ouis_per_vlan_baseline_max": [1, 1],
     "ouis_per_vlan_baseline_mature": [True, True],
     "auth_attempts": [1, 1],

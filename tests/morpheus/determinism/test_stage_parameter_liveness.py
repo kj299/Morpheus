@@ -68,6 +68,7 @@ from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
 from morpheus.stages.telemetry.tc0_identity_stage import TC0IdentityStage
 from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
+from morpheus.stages.telemetry.tc1_device_stage import TC1DeviceStage
 from morpheus.stages.telemetry.tc1_feature_stage import TC1FeatureStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
 from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
@@ -308,6 +309,35 @@ def flaps() -> dict:
         "oper_status": statuses,
         "if_last_change": [0, 6000, 12000, 18000, 24000, 24000],
     }
+
+
+def device_polls(restarts: tuple = (6, 10, 12, 15, 17, 19)) -> dict:
+    """One switch polled every minute for twenty minutes: by default restarts at minutes six, ten, twelve, fifteen,
+    seventeen and nineteen, one then two then three to a five-minute period; a configuration pushed at minute two and
+    changed again at minute eight; and a routing table that loses most of itself at minute fourteen."""
+    uptimes = []
+    booted = None
+
+    for minute in range(20):
+        booted = minute if minute in restarts else booted
+        uptimes.append(360000 + minute * 6000 if booted is None else (minute - booted) * 6000 + 2000)
+
+    return {
+        "site_id": ["hq"] * 20,
+        "device_id": ["sw1"] * 20,
+        "event_time": [minute * MINUTE for minute in range(20)],
+        "sys_uptime": uptimes,
+        "running_config_hash": ["cfg-1"] * 2 + ["cfg-2"] * 6 + ["cfg-3"] * 12,
+        "route_count": [1200] * 14 + [400] * 6,
+    }
+
+
+def two_device_polls() -> dict:
+    """The same polls from two switches, interleaved minute by minute."""
+    polls = {name: [value for value in values for _ in range(2)] for (name, values) in device_polls().items()}
+    polls["device_id"] = ["sw1", "sw2"] * 20
+
+    return polls
 
 
 def identifiers() -> dict:
@@ -1142,6 +1172,8 @@ def wire() -> dict:
         "ouis_per_vlan": [1, 2],
         "ouis_per_vlan_first_in_window": [True, True],
         "ouis_per_vlan_step": [None, 1],
+        "mac_oui": ["aa:bb:cc", "aa:bb:cc"],
+        "oui_first_seen_on_port": [None, False],
         "ouis_per_vlan_baseline_max": [None, 1],
         "ouis_per_vlan_baseline_mature": [False, True],
         "auth_attempts": [1, 0],
@@ -1445,6 +1477,35 @@ REGISTRY: dict = {
                      "all three comparisons, so no unit can change any emitted value. It would begin to matter the "
                      "moment anything compares the converted value against an absolute time; nothing does yet."),
                 Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
+            ),
+        ),
+    "TC1DeviceStage":
+        Scenario(
+            stage=TC1DeviceStage,
+            frame=device_polls,
+            base={
+                "bucket_seconds": 300, "min_buckets": 1
+            },
+            knobs=(
+                Knob("site_column", INPUT_COLUMN, benign="site_id"),
+                Knob("device_column", INPUT_COLUMN, benign="device_id"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
+                Knob("uptime_column", INPUT_COLUMN, benign="sys_uptime"),
+                # Hundredths of a second read as thousandths: every uptime is ten times shorter, and a poll a minute
+                # after a restart reads as the device coming up again inside the gap.
+                Knob("uptime_unit", DIFFERS, benign="cs", extreme="ms"),
+                Knob("config_column", INPUT_COLUMN, benign="running_config_hash"),
+                Knob("route_column", INPUT_COLUMN, benign="route_count"),
+                # The first change lands inside a window of the first five minutes, the second outside it.
+                Knob("change_window", DIFFERS, benign=None, extreme=["00:00", "00:05"]),
+                Knob("bucket_seconds", DIFFERS, benign=300, extreme=60),
+                # The busiest period first, so a short window lets it age out of the baseline and a long one keeps it.
+                Knob("window_seconds", DIFFERS, benign=30 * 86400, extreme=600, frame=lambda: device_polls((1, 2, 3))),
+                Knob("min_buckets", DIFFERS, benign=1, extreme=3),
+                # Two devices, so a cap of one forgets each whenever the other is seen.
+                Knob("max_devices", DIFFERS, benign=100000, extreme=1, frame=two_device_polls),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
             ),
         ),
     "TC1ChangeStage":
@@ -2256,23 +2317,26 @@ REGISTRY: dict = {
                      Knob("max_buckets", DIFFERS, benign=1024, extreme=4),
                  )),
     "TC3ReachStage":
-        Scenario(stage=TC3ReachStage,
-                 frame=flow_records,
-                 base={
-                     "window_seconds": 3600, "min_denominator": 1
-                 },
-                 knobs=(
-                     Knob("src_column", INPUT_COLUMN, benign="src_ip"),
-                     Knob("dst_column", INPUT_COLUMN, benign="dst_ip"),
-                     Knob("asn_column", INPUT_COLUMN, benign="bgp_as_dst"),
-                     Knob("bytes_out_column", INPUT_COLUMN, benign="bytes_out"),
-                     Knob("bytes_in_column", INPUT_COLUMN, benign="bytes_in"),
-                     Knob("time_column", INPUT_COLUMN, benign="event_time"),
-                     Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
-                     Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
-                     Knob("min_denominator", DIFFERS, benign=1, extreme=100),
-                     Knob("max_samples", DIFFERS, benign=4096, extreme=2),
-                 )),
+        Scenario(
+            stage=TC3ReachStage,
+            frame=flow_records,
+            base={
+                "window_seconds": 3600, "min_denominator": 1
+            },
+            knobs=(
+                Knob("src_column", INPUT_COLUMN, benign="src_ip"),
+                Knob("dst_column", INPUT_COLUMN, benign="dst_ip"),
+                Knob("asn_column", INPUT_COLUMN, benign="bgp_as_dst"),
+                Knob("bytes_out_column", INPUT_COLUMN, benign="bytes_out"),
+                Knob("bytes_in_column", INPUT_COLUMN, benign="bytes_in"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+                Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
+                Knob("min_denominator", DIFFERS, benign=1, extreme=100),
+                Knob("max_samples", DIFFERS, benign=4096, extreme=2),
+                # Four of the flows reach the management network; with no list, none is classified.
+                Knob("management_prefixes", DIFFERS, benign=None, extreme=["10.0.0.8/30"]),
+            )),
     "TC3BeaconStage":
         Scenario(stage=TC3BeaconStage,
                  frame=paired_flows,

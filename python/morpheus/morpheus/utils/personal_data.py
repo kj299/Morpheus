@@ -273,6 +273,10 @@ _PROFILES = (
     "stack_fingerprint",
     "stack_os_family",
     "stack_fingerprint_first_seen",
+    # Who made the network card in the device behind a port, as the user agent says what software a client ran:
+    # a person's laptop, phone or the computer they plugged in under the desk.
+    "mac_oui",
+    "oui",
     "dot1x_result",
     "drift_acceleration",
     "drift_baseline_sigma",
@@ -308,6 +312,7 @@ _PROFILES = (
     "dst_asn_first_seen",
     "dst_is_multicast",
     "dst_is_private",
+    "dst_is_management",
     "dst_is_reserved",
     "dst_port",
     "dst_ports_per_src",
@@ -736,6 +741,26 @@ _OPERATIONAL = (
     "auth_elapsed_p99",
     "auth_elapsed_samples",
     "mac_action",
+    # Whether a port has carried a vendor before, which is the port's history rather than any device's; and a switch
+    # or router's own poll and what it derives: its restarts, configuration and routing table, about the device.
+    "oui_first_seen_on_port",
+    "device_key",
+    "sys_uptime",
+    "running_config_hash",
+    "cpu_util",
+    "mem_util",
+    "route_count",
+    "bgp_peer_count",
+    "syslog_rate",
+    "device_rebooted",
+    "device_reboots_in_bucket",
+    "device_reboot_baseline",
+    "device_reboot_baseline_mature",
+    "device_reboot_rising_buckets",
+    "config_changed",
+    "config_first_seen",
+    "config_change_in_window",
+    "route_count_delta",
     # The envelope's account of the collector and its clock, the tenant the record belongs to, and the pipeline's
     # own refusals and counts: what a health search groups by, and nothing about whom a record concerns. The tenant
     # is an organization, and the exporter a router.

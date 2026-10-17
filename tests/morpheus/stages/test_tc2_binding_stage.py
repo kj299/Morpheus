@@ -645,3 +645,31 @@ def test_a_lease_covers_its_whole_term_and_a_release_ends_it(config: Config):
     assert (result.loc["10.0.0.6", "bind_end"], result.loc["10.0.0.6",
                                                            "bind_end_reason"]) == (40 * MINUTE_NS, "explicit")
     assert result.loc["10.0.0.7", "bind_end"] == 180 * MINUTE_NS
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_binding_names_the_vendor_of_its_mac(config: Config):
+    # The OUI is a default attribute, derived from the MAC where the table walk carries none, so a binding says which
+    # vendor was on the port. It never changes for one MAC, so it never splits a binding.
+    (emitted, _) = feed(config, frame(["b8:27:eb:00:00:01"] * 3, ["Gi1/0/1", "Gi1/0/1", "Gi1/0/2"]))
+
+    assert _as_list(emitted[0], "oui") == ["b8:27:eb"]
+    assert _as_list(emitted[0], "bind_observations") == [2]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_supplied_oui_is_the_attribute(config: Config):
+    payload = frame(["b8:27:eb:00:00:01"] * 2, ["Gi1/0/1", "Gi1/0/2"])
+    payload["oui"] = ["B8:27:EB"] * 2
+    (emitted, _) = feed(config, payload)
+
+    assert _as_list(emitted[0], "oui") == ["B8:27:EB"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_attribute_list_without_the_oui_derives_nothing(config: Config):
+    (emitted, _) = feed(config,
+                        frame([MAC_A] * 2, ["Gi1/0/1", "Gi1/0/2"]),
+                        attribute_columns=["site_id", "switch_id", "port_id"])
+
+    assert "oui" not in emitted[0].df.columns

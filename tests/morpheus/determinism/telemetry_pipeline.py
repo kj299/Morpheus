@@ -61,6 +61,12 @@ Into that corpus are planted the things the layer 1 and layer 2 features exist t
   stage sees it, and returned as the `quarantine` class, which is what reaches `morpheus:quarantine`;
 - a **sequence gap**: the ARP sensor numbers three records it never delivers, partway through the hour, which
   `CollectorSequenceStage` reports on the next record it does deliver and the health record counts;
+- the **devices themselves**, polled once a minute as `tc1_device` rows keyed `site_id:device_id`: a
+  configuration pushed inside the estate's change window and another changed outside it, which R-D-L1-008 fires on
+  and the first must not; the rebooting switch's restart seen once, as the device's own event; a **reboot storm**,
+  a switch whose restarts come one, then two, then three to a five-minute period, which R-P-L1-009 reads as a
+  trajectory where the single restart must not; and a router that loses two thirds of its routes with half its
+  BGP peers, which is context on the device row and fires nothing;
 - and one thing that must **not** fire: a VRRP pair whose two MACs legitimately share one address, carried on the
   exclusion list, so the ARP rule's exclusion path is exercised rather than assumed.
 
@@ -101,6 +107,7 @@ from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
+from morpheus.stages.telemetry.tc1_device_stage import TC1DeviceStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
 from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
 from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
@@ -391,11 +398,38 @@ ROAM_AT_SECONDS = 2100
 
 CS_PER_SECOND = 100
 
-TELEMETRY_CLASSES = ("tc1", "tc1_binding", "tc2_mac", "tc2_binding", "tc2_arp", "tc2_auth")
+DEVICE_CLASS = "tc1_device"
+DEVICE_POLLER = "snmp-poller"
+"""The class a device's own poll arrives as, and the poller that sends it: `sysUpTime`, a digest of the running
+configuration, the routing table's size and the health gauges, once a minute per switch or router. The poller is the
+one that polls the ports, numbering the device polls in a sequence of their own, so the estate's collectors are the
+ones the clock skew experiment already spreads by name."""
+STORM_SWITCH = "sw5"
+ROUTER = "rtr1"
+DEVICES = [SWITCH, REBOOTING_SWITCH, PEER_SWITCH, STORM_SWITCH, ROUTER]
+CHANGE_WINDOW = ["00:00", "00:10"]
+"""The estate's change window, in UTC. The corpus starts at midnight, so its first ten minutes are inside it."""
+PUSH_AT_MINUTE = 2
+"""`SWITCH`'s configuration is pushed inside the window: a change, and a scheduled one."""
+OUT_OF_WINDOW_CHANGE_AT_MINUTE = 40
+"""`SWITCH`'s configuration changes again, outside the window, which is what R-D-L1-008 fires on."""
+STORM_REBOOT_MINUTES = (36, 40, 43, 45, 47, 49)
+"""When the storm switch restarts: once in the period from minute 35, twice in the one from 40, three times in the
+one from 45. Each period holds more than the one before, three in a row, which is the trajectory R-P-L1-009 reads;
+`REBOOTING_SWITCH` restarts once and holds a run of one."""
+ROUTE_DROP_AT_MINUTE = 50
+ROUTES_BEFORE = 1200
+ROUTES_AFTER = 400
+BGP_PEERS_BEFORE = 4
+BGP_PEERS_AFTER = 2
+"""The router loses two of its four BGP peers, and the routes they carried, at minute fifty."""
+
+TELEMETRY_CLASSES = ("tc1", "tc1_binding", DEVICE_CLASS, "tc2_mac", "tc2_binding", "tc2_arp", "tc2_auth")
 
 CLASS_ENVELOPE = {
     "tc1": (1, ["site_id", "device_id", "port_id"]),
     "tc1_binding": (1, ["site_id", "device_id", "port_id"]),
+    DEVICE_CLASS: (1, ["site_id", "device_id"]),
     "tc2_mac": (2, ["mac_address"]),
     "tc2_binding": (2, ["mac_address"]),
     "tc2_arp": (2, ["arp_sender_mac"]),
@@ -404,9 +438,10 @@ CLASS_ENVELOPE = {
 """The layer each class came from, and the columns Part 2 names as its behavioral subject.
 
 Layer 1 keys on the port and layer 2 on the MAC, which is the guide's own split: at layer 1 the port is the
-thing that persists, and at layer 2 the MAC is the thing that moves between ports. The 802.1X class is the
-exception and keys on the port rather than the supplicant, because an exchange is a question about the port that
-authorized it -- the same reasoning that gives `TC2AuthStage` its port-keyed timing.
+thing that persists, and at layer 2 the MAC is the thing that moves between ports. The device class keys on the
+switch or router itself, because a restart or a configuration push happens to the device and not to any one port.
+The 802.1X class is the exception and keys on the port rather than the supplicant, because an exchange is a question
+about the port that authorized it -- the same reasoning that gives `TC2AuthStage` its port-keyed timing.
 """
 
 SETTINGS = {
@@ -415,6 +450,7 @@ SETTINGS = {
     "baseline_min_buckets": BASELINE_MIN_BUCKETS,
     "optic_floors": OPTIC_FLOORS,
     "auth_baseline_min_samples": AUTH_BASELINE_MIN_SAMPLES,
+    "change_window": CHANGE_WINDOW,
 }
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
 RULES = ("R-D-L1-001",
@@ -424,6 +460,8 @@ RULES = ("R-D-L1-001",
          "R-B-L1-005",
          "R-D-L1-006",
          "R-B-L1-007",
+         "R-D-L1-008",
+         "R-P-L1-009",
          "R-B-L2-002",
          "R-D-L2-001",
          "R-D-L2-003",
@@ -457,6 +495,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
     corpus = {
         "tc1": _build_layer_1(rng, extra),
+        DEVICE_CLASS: _build_devices(),
         "tc2_mac": _build_mac_snapshots(rng, extra),
         "tc2_arp": _build_arp(rng),
         "tc2_auth": _build_auth(rng, extra),
@@ -639,6 +678,75 @@ def _build_layer_1(rng: random.Random, extra: random.Random) -> pd.DataFrame:
     rows.sort(key=lambda row: row["event_time"])
 
     return pd.DataFrame(rows)
+
+
+def _device_uptime_cs(device: str, minute: int) -> int:
+    """A device's `sysUpTime` at a poll: up an hour when the corpus starts, and twenty or thirty seconds after each
+    restart, as the port polls of the same switch report it."""
+    boot_uptime_cs = 3600 * CS_PER_SECOND
+
+    if (device == REBOOTING_SWITCH and minute >= REBOOT_AT_MINUTE):
+        return (minute - REBOOT_AT_MINUTE) * 60 * CS_PER_SECOND + 30 * CS_PER_SECOND
+
+    restarts = [at for at in STORM_REBOOT_MINUTES if at <= minute] if device == STORM_SWITCH else []
+
+    if (len(restarts) > 0):
+        return (minute - restarts[-1]) * 60 * CS_PER_SECOND + 20 * CS_PER_SECOND
+
+    return boot_uptime_cs + minute * 60 * CS_PER_SECOND
+
+
+def _device_config(device: str, minute: int) -> str:
+    if (device != SWITCH or minute < PUSH_AT_MINUTE):
+        return f"cfg-{device}-1"
+
+    return f"cfg-{device}-2" if minute < OUT_OF_WINDOW_CHANGE_AT_MINUTE else f"cfg-{device}-3"
+
+
+def _build_devices() -> pd.DataFrame:
+    """Each switch and router's own poll, once a minute: a configuration push and a change outside the window, a
+    restart, a reboot storm and a routing loss.
+
+    Fixed values rather than draws, as the DMZ poller's are, so adding the class moves nothing in the others. The
+    gauges vary with the minute so no column is a constant, and none of them is read by a rule.
+    """
+    rows = []
+    seq = 0
+
+    for minute in range(0, CORPUS_SECONDS // 60 + 1):
+        for (index, device) in enumerate(DEVICES):
+            routed = device == ROUTER
+            dropped = routed and minute >= ROUTE_DROP_AT_MINUTE
+            seq += 1
+            rows.append({
+                "event_time": minute * 60 * NS_PER_SECOND,
+                "site_id": SITE,
+                "device_id": device,
+                "sys_uptime": _device_uptime_cs(device, minute),
+                "running_config_hash": _device_config(device, minute),
+                "cpu_util": round(0.2 + 0.01 * ((minute * 7 + index * 3) % 11), 2),
+                "mem_util": round(0.4 + 0.01 * ((minute * 5 + index) % 7), 2),
+                "route_count": (ROUTES_AFTER if dropped else ROUTES_BEFORE) if routed else 40 + index,
+                "bgp_peer_count": (BGP_PEERS_AFTER if dropped else BGP_PEERS_BEFORE) if routed else 0,
+                "syslog_rate": round(1.0 + 0.1 * ((minute + index) % 5), 1),
+                "collector_id": DEVICE_POLLER,
+                "schema_version": "TC-1/1.0.0",
+                "origin_hash": f"{DEVICE_POLLER}-device-{seq:05d}",
+                "collector_seq": seq,
+            })
+
+    return pd.DataFrame(rows)
+
+
+def device_stages(config: Config) -> list:
+    """The device composition: restarts against the device's own periods, configuration changes placed against the
+    estate's change window, and routing churn."""
+    return [
+        TC1DeviceStage(config,
+                       change_window=list(CHANGE_WINDOW),
+                       bucket_seconds=PERIOD_SECONDS,
+                       min_buckets=BASELINE_MIN_BUCKETS),
+    ]
 
 
 def _mac_row(time_s: int, mac: str, switch: str, port: str, vlan: int, envelope: dict, action: str = None) -> dict:
@@ -889,20 +997,22 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
 
 CHAIN_ROOTS = {
     "tc1": ["entity_key"],
+    DEVICE_CLASS: ["device_key"],
     "tc2_mac": ["port_key"],
     "tc2_arp": ["resolved_port_key", "arp_sender_ip"],
     "tc2_auth": ["auth_port_key"],
 }
 """What each class's correlation chain is rooted on, as candidates in order of preference, decided per row.
 
-A layer 1 sample is about a port, so its chain is rooted on the port's `entity_key`. A MAC table row and an
+A layer 1 sample is about a port, so its chain is rooted on the port's `entity_key`; a device's poll is about the
+device, and roots on its `device_key`. A MAC table row and an
 802.1X exchange each name the port they were observed on directly, so they root on it too. An ARP observation
 names only the address being claimed -- unless the ladder resolved its MAC to a port, in which case the
 observation is about that port and joins the port's chain, with `chain_anchor_source` recording that it got
 there through the binding table. An unresolved one stays rooted on the address, which is what it was rooted on
 before and is still true. The binding classes have no entry because they are not sealed into windows at all.
 
-These four classes are sealed together, in one pass over their union in event-time order, because a chain is a
+These five classes are sealed together, in one pass over their union in event-time order, because a chain is a
 Merkle root over its members and the members of a port's chain now come from two layers. Sealing each class on
 its own would give the same root key two different roots, one per class, and nothing downstream could tell that
 they were the same chain."""
@@ -1074,6 +1184,41 @@ def build_port_binding_table(port_bindings: pd.DataFrame) -> BindingTable:
                                        end_column="bind_end")
 
 
+def layer_1_stages(config: Config) -> list:
+    """
+    The layer 1 composition: counters, the rates they become and the port's history of them, optics, flaps,
+    identifier changes. Shared with the campaign corpus, whose port polls meet the same contract.
+
+    The rate history is kept over the sealing period with the corpus's floor, as the layer 2 baseline is; the volume
+    history is kept per hour of the day, which an hour-long corpus exercises without contradicting.
+    """
+    return [
+        TC1NormalizeStage(config, uptime_column="uptime", uptime_unit="cs"),
+        TC1RateStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
+        TC1OpticalStage(config),
+        TC1ForecastStage(config, floors=OPTIC_FLOORS),
+        TC1FlapStage(config, last_change_column="if_last_change", last_change_unit="cs"),
+        TC1ChangeStage(config),
+    ]
+
+
+def mac_table_stages(config: Config) -> list:
+    """
+    The layer 2 composition over MAC table walks: the cardinality features, each port's vendor history, and each
+    port's count and each VLAN's vendor count against the peaks of their own earlier periods. Shared with the
+    campaign corpus, whose two sites' tables meet the same contract.
+    """
+    return [
+        TC2CardinalityStage(config),
+        TC2BaselineStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
+        TC2BaselineStage(config,
+                         entity_column="vlan_key",
+                         value_column="ouis_per_vlan",
+                         bucket_seconds=PERIOD_SECONDS,
+                         min_buckets=BASELINE_MIN_BUCKETS),
+    ]
+
+
 def run_classes(config: Config,
                 corpus: dict[str, pd.DataFrame],
                 batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
@@ -1117,24 +1262,14 @@ def run_classes(config: Config,
         outputs[universal_envelope.QUARANTINE_CLASS] = quarantined
 
     # Layer 1: counters, the rates they become and the port's history of them, optics, flaps, identifier changes.
-    # The rate history is kept over the sealing period with the corpus's floor, as the layer 2 baseline is; the
-    # volume history is kept per hour of the day, which an hour-long corpus exercises without contradicting.
-    outputs["tc1"] = _run_class(
-        config,
-        batches["tc1"],
-        [
-            TC1NormalizeStage(config, uptime_column="uptime", uptime_unit="cs"),
-            TC1RateStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
-            TC1OpticalStage(config),
-            TC1ForecastStage(config, floors=OPTIC_FLOORS),
-            TC1FlapStage(config, last_change_column="if_last_change", last_change_unit="cs"),
-            TC1ChangeStage(config),
-        ],
-        impose_order,
-        seal=False,
-        chain=CHAIN_ROOTS["tc1"],
-        envelope=CLASS_ENVELOPE["tc1"],
-        telemetry_class="tc1")
+    outputs["tc1"] = _run_class(config,
+                                batches["tc1"],
+                                layer_1_stages(config),
+                                impose_order,
+                                seal=False,
+                                chain=CHAIN_ROOTS["tc1"],
+                                envelope=CLASS_ENVELOPE["tc1"],
+                                telemetry_class="tc1")
 
     # The same layer 1 snapshots, closed into port bindings. This is the ladder's last rung: the table that takes
     # a switch port to the site, optic and neighbour it held at a given moment. The stage emits its own
@@ -1151,25 +1286,26 @@ def run_classes(config: Config,
         port_bindings["row_key"] = port_bindings["binding_uid"]
         outputs["tc1_binding"] = port_bindings
 
+    # The devices themselves: restarts, configuration changes and routing churn, keyed on the switch or router.
+    outputs[DEVICE_CLASS] = _run_class(config,
+                                       batches[DEVICE_CLASS],
+                                       device_stages(config),
+                                       impose_order,
+                                       seal=False,
+                                       chain=CHAIN_ROOTS[DEVICE_CLASS],
+                                       envelope=CLASS_ENVELOPE[DEVICE_CLASS],
+                                       telemetry_class=DEVICE_CLASS)
+
     # Layer 2, from the same snapshots: the cardinality features, each port's count and each VLAN's vendor count
     # against the peaks of their own earlier periods, and the closed bindings.
-    outputs["tc2_mac"] = _run_class(
-        config,
-        batches["tc2_mac"],
-        [
-            TC2CardinalityStage(config),
-            TC2BaselineStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
-            TC2BaselineStage(config,
-                             entity_column="vlan_key",
-                             value_column="ouis_per_vlan",
-                             bucket_seconds=PERIOD_SECONDS,
-                             min_buckets=BASELINE_MIN_BUCKETS),
-        ],
-        impose_order,
-        seal=False,
-        chain=CHAIN_ROOTS["tc2_mac"],
-        envelope=CLASS_ENVELOPE["tc2_mac"],
-        telemetry_class="tc2_mac")
+    outputs["tc2_mac"] = _run_class(config,
+                                    batches["tc2_mac"],
+                                    mac_table_stages(config),
+                                    impose_order,
+                                    seal=False,
+                                    chain=CHAIN_ROOTS["tc2_mac"],
+                                    envelope=CLASS_ENVELOPE["tc2_mac"],
+                                    telemetry_class="tc2_mac")
     # The table walk is a snapshot of each switch, and the switch's own removal notice is a stop: both ends a
     # source reports, beside the ones the closer infers.
     bindings = _run_class(

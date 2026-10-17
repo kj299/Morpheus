@@ -130,6 +130,8 @@ FLAP = "R-D-L1-003 - Link flap instability"
 ERRORS = "R-B-L1-005 - Error rate step"
 NEIGHBOR = "R-D-L1-006 - LLDP neighbor change"
 VOLUME = "R-B-L1-007 - Interface volume departure"
+CONFIGURATION = "R-D-L1-008 - Configuration change outside the change window"
+TRAJECTORY = "R-P-L1-009 - Reboot-rate trajectory"
 SUBSTITUTION_LINK_FLAPS = threshold(SUBSTITUTION, r"link_flaps\s*=\s*([\d.]+)")
 FORECAST_DAYS = threshold(FORECAST, r"optical_rx_dbm_days_to_floor\s*<=\s*([\d.]+)")
 TAP_RX_DROP_DB = threshold(TAP, r"optical_rx_dbm_deviation\s*<=\s*(-[\d.]+)")
@@ -139,6 +141,7 @@ FLAP_TRANSITIONS = threshold(FLAP, r"link_flaps_in_window\s*>=\s*([\d.]+)")
 ERRORS_STEP = threshold(ERRORS, r"error_rate_step\s*>\s*([\d.]+)")
 SURGE_FACTOR = threshold(VOLUME, r"surge_factor\s*=\s*([\d.]+)")
 SILENCE_FACTOR = threshold(VOLUME, r"silence_factor\s*=\s*([\d.]+)")
+RISING_PERIODS = threshold(TRAJECTORY, r"device_reboot_rising_buckets\s*>=\s*([\d.]+)")
 
 
 def layer_1_decisions(result: pd.DataFrame) -> dict:
@@ -164,6 +167,11 @@ def layer_1_decisions(result: pd.DataFrame) -> dict:
 
     R-B-L1-007: traffic above twice the port's own hourly peak, or below a tenth of a trough that was not zero,
     on a mature baseline, `stats ... BY entity_key`. The direction is a `values()` beside the key, not part of it.
+
+    R-D-L1-008: `config_changed=true config_change_in_window=false`, one notable per device per configuration, the
+    suppression's fields. Read off the device's own poll, where the other six read the port's.
+
+    R-P-L1-009: `device_reboot_baseline_mature=true device_reboot_rising_buckets>=3`, one notable per device.
     """
     polls = rows(result, "tc1").sort_values(["entity_key", "event_time"], kind="stable")
     polls = polls.assign(previous_serial=polls.groupby("entity_key")["transceiver_serial"].shift(1))
@@ -196,6 +204,13 @@ def layer_1_decisions(result: pd.DataFrame) -> dict:
     departed = polls[true(polls, "bits_per_second_baseline_mature")
                      & ((traffic > SURGE_FACTOR * peak) | ((trough > 0) & (traffic < SILENCE_FACTOR * trough)))]
 
+    devices = rows(result, "tc1_device")
+    requires(CONFIGURATION, r"config_changed=true config_change_in_window=false")
+    unscheduled = devices[true(devices, "config_changed") & false(devices, "config_change_in_window")]
+    requires(TRAJECTORY, r"device_reboot_baseline_mature=true")
+    worsening = devices[true(devices, "device_reboot_baseline_mature")
+                        & (number(devices, "device_reboot_rising_buckets") >= RISING_PERIODS)]
+
     return {
         "R-D-L1-001": keys(substituted, ["entity_key", "previous_serial", "transceiver_serial"]),
         "R-P-L1-004": keys(projected, ["entity_key"]),
@@ -204,6 +219,8 @@ def layer_1_decisions(result: pd.DataFrame) -> dict:
         "R-B-L1-005": keys(erring, ["entity_key"]),
         "R-D-L1-006": keys(moved, ["entity_key", "lldp_neighbor_chassis_id"]),
         "R-B-L1-007": keys(departed, ["entity_key"]),
+        "R-D-L1-008": keys(unscheduled, ["entity_key", "running_config_hash"]),
+        "R-P-L1-009": keys(worsening, ["entity_key"]),
     }
 
 
@@ -715,6 +732,7 @@ LATERAL = "R-C-001 - Lateral movement chain"
 C2 = "R-C-002 - TLS anomaly precedes beaconing"
 EXFIL = "R-C-004 - Staged exfiltration"
 REPLAY = "R-C-005 - Credential replay across the stack"
+PHYSICAL = "R-C-003 - Physical compromise chain"
 NS_PER_SECOND = 1_000_000_000
 
 LATERAL_LOGIN_TOLERANCE_NS = int(threshold(LATERAL, r"t_login >= t_fanout - (\d+) AND")) * NS_PER_SECOND
@@ -733,12 +751,22 @@ EXFIL_BREACH_WINDOW_NS = int(threshold(EXFIL, r"t_breach - t_export <= (\d+)")) 
 EXFIL_HANDSHAKE_TOLERANCE_NS = int(threshold(EXFIL, r"t_handshake >= t_breach - (\d+) AND")) * NS_PER_SECOND
 EXFIL_HANDSHAKE_WINDOW_NS = int(threshold(EXFIL, r"t_handshake - t_export <= (\d+)")) * NS_PER_SECOND
 REPLAY_KMH = threshold(REPLAY, r"site_travel_kmh >= ([\d.]+)")
+PHYSICAL_VENDOR_TOLERANCE_NS = int(threshold(PHYSICAL, r"t_vendor >= t_port - (\d+) AND")) * NS_PER_SECOND
+PHYSICAL_VENDOR_WINDOW_NS = int(threshold(PHYSICAL, r"t_vendor - t_port <= (\d+)")) * NS_PER_SECOND
+PHYSICAL_MANAGEMENT_TOLERANCE_NS = int(threshold(PHYSICAL, r"t_management >= t_vendor - (\d+) AND")) * NS_PER_SECOND
+PHYSICAL_MANAGEMENT_WINDOW_NS = int(threshold(PHYSICAL, r"t_management - t_port <= (\d+)")) * NS_PER_SECOND
 JOIN_TOLERANCE_NS = {
-    "R-C-001": LATERAL_LOGIN_TOLERANCE_NS, "R-C-002": C2_TOLERANCE_NS, "R-C-004": EXFIL_BREACH_TOLERANCE_NS
+    "R-C-001": LATERAL_LOGIN_TOLERANCE_NS,
+    "R-C-002": C2_TOLERANCE_NS,
+    "R-C-003": PHYSICAL_VENDOR_TOLERANCE_NS,
+    "R-C-004": EXFIL_BREACH_TOLERANCE_NS
 }
 """The tolerance each joined chain allows a later step to precede an earlier one by, as its search states it."""
 
 requires(EXFIL, r"cert_issuer_new_to_estate=true")
+requires(PHYSICAL, r"\(transceiver_serial_changed=true OR link_flaps>0\)")
+requires(PHYSICAL, r"oui_first_seen_on_port=true")
+requires(PHYSICAL, r"dst_is_management=true mac_address=\*")
 requires(LATERAL, r"endpoint_pair_novel=true ctx_device_role=server")
 requires(LATERAL, r"eval target = target_host_key")
 requires(LATERAL, r"eval target = endpoint_host")
@@ -873,11 +901,46 @@ def _credential_replays(result: pd.DataFrame) -> set:
     return fired
 
 
+def _physical_compromises(result: pd.DataFrame) -> set:
+    """
+    R-C-003: a port's link event or optic change, then a vendor the port has never carried on it, then the device
+    behind that MAC reaching a management address, each step allowed to precede the last by the join tolerance and
+    all inside the window from the port's event. Joined on the port and then on the MAC, as the search joins. Keyed
+    `(port_key, mac_address)`, the search's `stats ... BY`.
+    """
+    polls = rows(result, "tc1")
+    polls = polls[true(polls, "transceiver_serial_changed") | (number(polls, "link_flaps").fillna(0) > 0)]
+    walks = rows(result, "tc2_mac")
+    walks = walks[true(walks, "oui_first_seen_on_port")]
+    flows = rows(result, "tc3")
+    flows = flows[true(flows, "dst_is_management") & flows["mac_address"].notna()]
+    fired = set()
+
+    for (_, poll) in polls.iterrows():
+        t_port = int(poll["event_time"])
+
+        for (_, walk) in walks[walks["port_key"] == poll["entity_key"]].iterrows():
+            t_vendor = int(walk["event_time"])
+
+            if not (t_port - PHYSICAL_VENDOR_TOLERANCE_NS <= t_vendor <= t_port + PHYSICAL_VENDOR_WINDOW_NS):
+                continue
+
+            for (_, flow) in flows[flows["mac_address"] == walk["mac_address"]].iterrows():
+                t_management = int(flow["event_time"])
+
+                if (t_management >= t_vendor - PHYSICAL_MANAGEMENT_TOLERANCE_NS
+                        and t_management - t_port <= PHYSICAL_MANAGEMENT_WINDOW_NS):
+                    fired.add((str(walk["port_key"]), str(walk["mac_address"])))
+
+    return fired
+
+
 def chain_decisions(result: pd.DataFrame) -> dict:
-    """The four chained detections over the campaign pipeline's output."""
+    """The five chained detections over the campaign pipeline's output."""
     return {
         "R-C-001": _lateral_movement(result),
         "R-C-002": _tls_before_beaconing(result),
+        "R-C-003": _physical_compromises(result),
         "R-C-004": _staged_exfiltration(result),
         "R-C-005": _credential_replays(result),
     }

@@ -44,8 +44,16 @@ The destination ASN's novelty is per source and permanent, not windowed --
 question worth asking about a first contact. A source opens many flows in one timestamp, so flows at one instant
 are measured against the networks it reached before that instant, never against each other, and a burst to a new
 network reads as novel in every flow of it whatever order the collector listed them in.
+
+**A management destination is the estate's to name.** `dst_is_management` is true for a flow to an address inside
+one of `management_prefixes` -- the switches', routers' and controllers' own interfaces, which the estate's
+`vlan_designations` lookup records against their VLAN -- and false outside them. No classifier can know which of an
+estate's private ranges carry its management plane, so without a list the column is null, meaning unclassified,
+rather than false, which would mean classified and not management. It is the last step of R-C-003: a device that
+appeared on a port and then reached for the network's own control plane.
 """
 
+import ipaddress
 import logging
 import math
 import typing
@@ -85,12 +93,13 @@ DST_RESERVED = "dst_is_reserved"
 DST_MULTICAST = "dst_is_multicast"
 BYTE_ASYMMETRY = "byte_asymmetry"
 ASN_FIRST_SEEN = "dst_asn_first_seen"
+DST_MANAGEMENT = "dst_is_management"
 
 DEFAULT_ASN_COLUMN = "bgp_as_dst"
 """Where the destination's autonomous system number is expected, as the TC-3 required field list names it."""
 
 
-@register_stage("tc3-reach")
+@register_stage("tc3-reach", ignore_args=["management_prefixes"])
 class TC3ReachStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Classify each flow's destination and describe the mix of destinations a source has been reaching.
@@ -123,6 +132,9 @@ class TC3ReachStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         fires on every host's first minute.
     max_samples : int, default = 4096
         Flows retained per source for the proportion.
+    management_prefixes : list of str, optional
+        The estate's management networks, in CIDR notation: where its network devices' own interfaces live. Given,
+        `dst_is_management` says whether each flow's destination is inside one; absent, the column is null.
     """
 
     def __init__(self,
@@ -136,11 +148,20 @@ class TC3ReachStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                  time_unit: str = "ns",
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_denominator: int = DEFAULT_MIN_DENOMINATOR,
-                 max_samples: int = 4096):
+                 max_samples: int = 4096,
+                 management_prefixes: list[str] = None):
         super().__init__(c)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
+
+        # Parsed once, strictly: a prefix with host bits set is a typing error in the estate's list, and accepting it
+        # would quietly classify a different network than the one the operator meant.
+        try:
+            self._management = (None if management_prefixes is None else
+                                [ipaddress.ip_network(str(prefix).strip()) for prefix in management_prefixes])
+        except ValueError as error:
+            raise ValueError(f"management_prefixes must be CIDR networks: {error}") from error
 
         self._src_column = src_column
         self._dst_column = dst_column
@@ -163,6 +184,7 @@ class TC3ReachStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._needed_columns[DST_MULTICAST] = TypeId.BOOL8
         self._needed_columns[BYTE_ASYMMETRY] = TypeId.FLOAT64
         self._needed_columns[ASN_FIRST_SEEN] = TypeId.BOOL8
+        self._needed_columns[DST_MANAGEMENT] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -292,7 +314,29 @@ class TC3ReachStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             for (column, values) in classified.items():
                 assign_nullable_bool_column(df, column, values)
 
+            assign_nullable_bool_column(df,
+                                        DST_MANAGEMENT,
+                                        [self._is_management(value) for value in to_host_list(df, self._dst_column)])
+
         return message
+
+    def _is_management(self, value: typing.Any) -> typing.Optional[bool]:
+        """Whether a destination is inside one of the estate's management networks, or `None` where unanswerable:
+        no list was given, or the destination is not an address."""
+        if (self._management is None):
+            return None
+
+        text = normalize_text(value)
+
+        try:
+            address = ipaddress.ip_address(text) if text is not None else None
+        except ValueError:
+            return None
+
+        if (address is None):
+            return None
+
+        return any(address in network for network in self._management)
 
     @staticmethod
     def _asymmetry(out_value: typing.Any, in_value: typing.Any) -> typing.Optional[float]:
