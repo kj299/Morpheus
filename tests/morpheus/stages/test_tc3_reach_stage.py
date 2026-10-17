@@ -181,3 +181,38 @@ def test_the_destination_classifiers_are_read_on_the_host(monkeypatch):
     classified = TC3ReachStage._classify({"dst_ip": None}, "dst_ip")  # pylint: disable=protected-access
 
     assert all(values == [True, False] for values in classified.values())
+
+
+def _nullable(values) -> list:
+    return [None if pd.isna(value) else bool(value) for value in values]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_management_destination_is_the_estates_to_name(config: Config):
+    # R-C-003's last step. Both destinations are private; only the estate's list says which one is its control plane.
+    result = run(config,
+                 flows(["10.99.0.1", "10.20.0.5", "10.99.0.254", "8.8.8.8"]),
+                 management_prefixes=["10.99.0.0/24", "fd00:99::/64"])
+
+    assert _nullable(result["dst_is_management"]) == [True, False, True, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_without_a_list_management_is_unclassified_rather_than_false(config: Config):
+    result = run(config, flows(["10.99.0.1", "8.8.8.8"]))
+
+    assert _nullable(result["dst_is_management"]) == [None, None]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_destination_that_is_not_an_address_is_unclassified(config: Config):
+    result = run(config, flows(["10.99.0.1", "not-an-address"]), management_prefixes=["10.99.0.0/24"])
+
+    assert _nullable(result["dst_is_management"]) == [True, None]
+
+
+@pytest.mark.parametrize("prefixes", [["10.99.0.1/24"], ["management"], ["10.99.0.0/33"]])
+def test_a_prefix_that_is_not_a_network_is_refused(config: Config, prefixes):
+    # Host bits set is a typing error in the estate's list; accepting it would classify a network nobody meant.
+    with pytest.raises(ValueError, match="management_prefixes"):
+        TC3ReachStage(config, management_prefixes=prefixes)

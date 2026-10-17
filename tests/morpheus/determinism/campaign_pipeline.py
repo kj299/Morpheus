@@ -14,7 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-One campaign told at three layers, and the composed pipelines that measure it, for the chained rules.
+One campaign told at every layer from the switch port up, and the composed pipelines that measure it, for the chained
+rules.
 
 Every other corpus in this fork is one layer's, and they share no entity: an address in the layer 3 corpus is not a
 principal in the layer 5 one or a host in the layer 7 one. A chained rule needs the opposite -- the same source, the
@@ -83,6 +84,21 @@ The attacker signs in at headquarters and, twenty minutes later, in Edinburgh. F
 - **unresolved address**: the second sign-in comes from an address no lease names, so no port can be claimed;
 - **expired lease**: the second address was leased to an Edinburgh desk, but the lease ended an hour earlier;
 - **failed sign-in**: the second attempt at Edinburgh is refused, and a failure proves nobody was there.
+
+**R-C-003 - Physical compromise chain.** Within four hours, in order: a layer 1 event on a desk port -- a transceiver
+substitution, or the link dropping and coming back, which is a workstation unplugged; a device of a vendor that port
+has never carried appearing on it at layer 2; and a layer 3 flow from the address the DHCP server leased that device
+to the estate's management network. The headquarters switch's polls are the first step, its table walks the second,
+and the flows the third, each through its own layer's stages; the steps are joined on the port, from the poll to the
+walk, and on the device's MAC, from the walk to the flow, whose address the DHCP lease named. The attacker unplugs
+a desk workstation, plugs a single-board computer into the port and reaches for the switches' own interfaces. Three
+others each do two of the three:
+
+- **known vendor**: a desk re-patched, with another of the estate's own workstations on it, whose administrator
+  reaches the management network -- the vendor is one the port has always carried;
+- **no management**: a printer plugged into a desk port, which only ever talks to the print server;
+- **no layer 1 event**: a single-board computer joins a desk port behind the workstation already on it, through a
+  desk switch, and reaches the management network, but the port's link never dropped.
 """
 
 import typing
@@ -94,6 +110,7 @@ import pandas as pd
 import presentation_pipeline
 import saas_pipeline
 import stamping
+import telemetry_pipeline
 import transport_pipeline
 
 from morpheus.config import Config
@@ -148,7 +165,7 @@ CLASSES = (FLOW_CLASS, AUTH_CLASS, PROCESS_CLASS, SESSION_CLASS, TRANSFER_CLASS,
 composed pipeline, which is the one its single-layer rules are asserted over."""
 SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS}
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-C-001", "R-C-002", "R-C-004", "R-C-005")
+RULES = ("R-C-001", "R-C-002", "R-C-003", "R-C-004", "R-C-005")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 # The rule's own figures, stated once so the corpus is built around them deliberately.
@@ -747,19 +764,19 @@ def _desks() -> list:
 
 
 def _build_mac_tables(rows: list):
-    """Both sites' MAC tables every five minutes, from an hour before the sign-ins until after the last of them."""
-    start = at(LAST_DAY, REPLAY_HOUR - 1)
-    end = at(LAST_DAY, REPLAY_HOUR + 5)
+    """Both sites' MAC tables every five minutes, from an hour before the sign-ins until after the last of them:
+    R-C-005's desks, and the desk ports R-C-003's devices are plugged into."""
+    for when in _walk_times():
+        listed = [(desk, desk.mac) for desk in _desks()] + _intrusion_macs(when)
 
-    for when in range(start, end + 1, 300 * NS_PER_SECOND):
-        for desk in _desks():
-            record = _envelope(rows, f"{desk.site}-mac", "tc2_mac.v1", desk.mac, when)
+        for (desk, mac) in listed:
+            record = _envelope(rows, f"{desk.site}-mac", "tc2_mac.v1", mac, when)
             record.update({
-                "mac_address": desk.mac,
+                "mac_address": mac,
                 "site_id": desk.site,
                 "switch_id": SITE_SWITCHES[desk.site],
                 "port_id": desk.port,
-                "vlan_id": 30,
+                "vlan_id": DESK_VLAN,
             })
             rows.append(record)
 
@@ -771,9 +788,9 @@ the daily renewals of the workstations the other campaigns run from."""
 INVENTORY_CLASS = host_identity.INVENTORY_CLASS
 """The EDR agents' daily inventory reports: which machine each workstation's network interface belongs to."""
 
-CORPUS_CLASSES = CLASSES + (MAC_CLASS, LEASE_CLASS, INVENTORY_CLASS)
-"""Every collector in the corpus: the emitted classes, and the MAC tables, leases and inventory reports the
-addresses resolve through."""
+CORPUS_CLASSES = CLASSES + (MAC_CLASS, LEASE_CLASS, INVENTORY_CLASS, "tc1")
+"""Every collector in the corpus: the emitted classes, the MAC tables, leases and inventory reports the addresses
+resolve through, and the headquarters switch's port polls."""
 
 CLIENT_POOLS = ("10.20.1.", "10.20.2.")
 """The workstation subnets the DHCP server hands out: R-C-004's and R-C-002's hosts. The servers on 10.20.0.x are on
@@ -873,7 +890,175 @@ def _build_replays(logins: list):
         _login(logins, replay.principal, replay.second.address, "intranet", second, result=replay.second_result)
 
 
-FLOW_EXPORTERS = (("10.20.0.", "rtr-campus-0:256"), ("10.20.1.", "rtr-campus-1:512"), ("10.20.2.", "rtr-campus-2:768"))
+# --- R-C-003: the physical compromise chain -----------------------------------------------------------------------
+
+PORT_CLASS = "tc1"
+"""The headquarters access switch's SNMP polls of the desk ports R-C-003's actors plug into."""
+
+PORT_POLLER = "hq-mac"
+"""The headquarters SNMP poller, which walks the access switch's interface table on the cadence it walks the bridge
+table on. One poller for both is how SNMP collection is deployed -- `sysUpTime` rides on both walks -- and it keeps
+the campaign's collectors the eleven the clock skew experiment spreads by name."""
+PHYSICAL_HOUR = 16
+PHYSICAL_WINDOW_SECONDS = 4 * 3600
+"""R-C-003's window, the guide's: the port event, the new vendor and the management flow inside four hours."""
+
+PHYSICAL_SEVERITY = 85
+
+MANAGEMENT_VLAN = 99
+MANAGEMENT_PREFIXES = ("10.99.0.0/24", )
+"""The estate's management network, where its switches', routers' and controllers' own interfaces live. A
+deployment supplies it as it supplies the directory, and records it against VLAN 99 in `vlan_designations`."""
+
+SWITCH_MANAGEMENT = "10.99.0.10"
+"""The headquarters switch's own management interface."""
+
+PRINT_SERVER = "10.20.0.30"
+DESK_VLAN = 30
+FLEET_OUI = "aa:30:0a"
+"""The vendor of every workstation the estate issues: each desk's MAC is numbered from its address, under one OUI."""
+
+BOOT_UPTIME_CS = 30 * DAY_SECONDS * 100
+"""The headquarters switch's uptime when the polls begin, in hundredths of a second: up for a month."""
+
+
+class Intrusion(typing.NamedTuple):
+    """Something plugged into a desk port: the desk whose port it is, the device and what it does."""
+
+    desk: Desk
+    device_mac: str
+    device_address: str
+    link_event: bool = True
+    reaches_management: bool = True
+
+
+INTRUSIONS = {
+    "rogue":
+        Intrusion(Desk(HQ, "Gi1/0/41", "10.30.1.41"), "b8:27:eb:3c:00:41", "10.30.1.141"),
+    "known-vendor":
+        Intrusion(Desk(HQ, "Gi1/0/42", "10.30.1.42"), "aa:30:0a:1e:02:42", "10.30.1.142"),
+    "no-management":
+        Intrusion(Desk(HQ, "Gi1/0/43", "10.30.1.43"), "00:1b:a9:3c:00:43", "10.30.1.143", reaches_management=False),
+    "no-link-event":
+        Intrusion(Desk(HQ, "Gi1/0/44", "10.30.1.44"), "b8:27:eb:3c:00:44", "10.30.1.144", link_event=False),
+}
+"""The attacker, then the three who each do two of R-C-003's three steps. A single-board computer's OUI, b8:27:eb;
+another workstation of the estate's own; a printer's, 00:1b:a9."""
+
+
+def _intrusion_time(index: int) -> int:
+    """When the device goes in: three minutes past a ten-minute mark, between two polls and two table walks."""
+    return at(LAST_DAY, PHYSICAL_HOUR, 3 + 10 * index)
+
+
+def _walk_times() -> range:
+    """The table walks and polls, every five minutes from an hour before the sign-ins until after the last of them."""
+    return range(at(LAST_DAY, REPLAY_HOUR - 1), at(LAST_DAY, REPLAY_HOUR + 5) + 1, 300 * NS_PER_SECOND)
+
+
+def _intrusion_macs(when: int) -> list:
+    """What each R-C-003 port's walk lists at an instant: the desk's workstation until it is unplugged, and the
+    device from the first walk after it went in. Behind a desk switch, both."""
+    rows = []
+
+    for (index, intrusion) in enumerate(INTRUSIONS.values()):
+        arrived = when > _intrusion_time(index)
+
+        if (not arrived or not intrusion.link_event):
+            rows.append((intrusion.desk, intrusion.desk.mac))
+
+        if (arrived):
+            rows.append((intrusion.desk, intrusion.device_mac))
+
+    return rows
+
+
+def _build_port_polls(rows: list):
+    """
+    The headquarters switch's poll of each R-C-003 port, every five minutes, with the fields the layer 1 stages read.
+
+    The port is up on every poll. Where a workstation is unplugged and a device plugged in, the link dropped and
+    came back between two polls, and only the switch's own `ifLastChange` records it: it advances to the instant
+    the link came back, which is what `TC1FlapStage` counts as two transitions.
+    """
+    octets = {intrusion.desk.port: 10**12 for intrusion in INTRUSIONS.values()}
+    start = _walk_times()[0]
+
+    for (poll, when) in enumerate(_walk_times()):
+        for (index, intrusion) in enumerate(INTRUSIONS.values()):
+            # A healthy optic still wanders by thousandths of a decibel; a perfectly flat reading gives the trend fit
+            # nothing to estimate its own spread from.
+            jitter = ((poll * 7 + index * 3) % 11 - 5) * 0.004
+            port = intrusion.desk.port
+            uptime_cs = BOOT_UPTIME_CS + (when - start) // (NS_PER_SECOND // 100)
+            changed = intrusion.link_event and when > _intrusion_time(index)
+            last_change_cs = (BOOT_UPTIME_CS + (_intrusion_time(index) + 20 * NS_PER_SECOND - start) //
+                              (NS_PER_SECOND // 100)) if changed else 10 * 100
+            octets[port] += 300 * 4_000_000 // 8
+            record = _envelope(rows, PORT_POLLER, "TC-1/1.0.0", f"{port}@{when}", when)
+            record.update({
+                "site_id": HQ,
+                "device_id": SITE_SWITCHES[HQ],
+                "port_id": port,
+                "uptime": uptime_cs,
+                "if_last_change": last_change_cs,
+                "oper_status": "up",
+                "link_speed_bps": 1_000_000_000,
+                "optical_tx_dbm": round(-2.0 - jitter / 2, 4),
+                "optical_rx_dbm": round(-7.0 + jitter, 4),
+                "transceiver_serial": f"XCVR-{SITE_SWITCHES[HQ]}-{port}",
+                "transceiver_type": telemetry_pipeline.OPTIC_TYPE,
+                "lldp_neighbor_chassis_id": None,
+                "lldp_neighbor_port_id": None,
+                "crc_errors": 0,
+                "symbol_errors": 0,
+                "input_discards": 0,
+                "output_discards": 0,
+                "if_hc_in_octets": octets[port],
+                "if_hc_out_octets": octets[port] // 2,
+            })
+            rows.append(record)
+
+
+def _build_intrusion_leases(rows: list):
+    """The DHCP server's acknowledgement for each device, a minute after it went in, held until the evening."""
+    for (index, intrusion) in enumerate(INTRUSIONS.values()):
+        start = _intrusion_time(index) + 60 * NS_PER_SECOND
+        end = at(LAST_DAY, LEASE_ENDS_HOUR)
+        record = _envelope(rows,
+                           LEASE_COLLECTOR,
+                           "tc3_dhcp.v1",
+                           f"{intrusion.device_address}>{intrusion.device_mac}",
+                           start)
+        record.update({
+            "ip": intrusion.device_address,
+            "mac": intrusion.device_mac,
+            "switch_id": SITE_SWITCHES[HQ],
+            "port_id": intrusion.desk.port,
+            "dhcp_message": "ack",
+            "lease_seconds": (end - start) // NS_PER_SECOND,
+        })
+        rows.append(record)
+
+
+def _build_intrusion_flows(flows: list):
+    """Three flows from each device a quarter of an hour after it went in: SSH to the switch's management
+    interface, or, for the printer, to the print server."""
+    for (index, intrusion) in enumerate(INTRUSIONS.values()):
+        (destination, port) = (SWITCH_MANAGEMENT, 22) if intrusion.reaches_management else (PRINT_SERVER, 631)
+
+        for minute in range(3):
+            _flow(flows,
+                  intrusion.device_address,
+                  destination,
+                  _intrusion_time(index) + (15 + minute) * 60 * NS_PER_SECOND,
+                  dst_port=port,
+                  bytes_out=2400,
+                  bytes_in=3600)
+
+
+FLOW_EXPORTERS = (("10.20.0.", "rtr-campus-0:256"), ("10.20.1.", "rtr-campus-1:512"), ("10.20.2.", "rtr-campus-2:768"),
+                  ("10.30.1.", "rtr-hq-1:1024"))
 """The router that exports a source's flows, and its IPFIX observation domain, by the source's subnet."""
 
 
@@ -935,12 +1120,18 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     _build_mac_tables(mac_tables)
     leases: list = []
     _build_leases(leases)
+    _build_intrusion_leases(leases)
+    port_polls: list = []
+    _build_port_polls(port_polls)
 
     # The workstations' daily renewals and inventory reports, which say which machine an address was at layers 3, 4
     # and 6. The renewals come from the same DHCP server as the desks' leases.
     sources = [row["src_ip"] for row in flows + packets + handshakes]
     times = [row["event_time"] for row in flows + packets + handshakes]
     workstations = host_identity.build(sources, min(times), max(times), pools=CLIENT_POOLS)
+    # R-C-003's devices are added after: none is a workstation the EDR inventories, and their flows' times must not
+    # stretch the span the workstations' renewals cover.
+    _build_intrusion_flows(flows)
 
     # Every flow names the router that metered it, which is what stamped its times.
     flow_frame = frame(flows)
@@ -955,6 +1146,7 @@ def build_corpus() -> dict[str, pd.DataFrame]:
         HANDSHAKE_CLASS: frame(handshakes),
         SAAS_CLASS: frame(exports),
         MAC_CLASS: frame(mac_tables),
+        PORT_CLASS: frame(port_polls),
         LEASE_CLASS: frame(leases + workstations[LEASE_CLASS].to_dict("records")),
         INVENTORY_CLASS: frame(workstations[INVENTORY_CLASS].to_dict("records")),
     })
@@ -1026,7 +1218,7 @@ def _stages(config: Config,
             [
                 CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"),
                 TC3CardinalityStage(config, window_seconds=PERIOD_SECONDS),
-                TC3ReachStage(config, window_seconds=PERIOD_SECONDS),
+                TC3ReachStage(config, window_seconds=PERIOD_SECONDS, management_prefixes=list(MANAGEMENT_PREFIXES)),
                 TC3BaselineStage(config, bucket_seconds=PERIOD_SECONDS),
                 TC3BeaconStage(config, window_seconds=2 * PERIOD_SECONDS),
                 TC3TtlStage(config, window_seconds=2 * PERIOD_SECONDS),
@@ -1041,6 +1233,14 @@ def _stages(config: Config,
 
     if (telemetry_class == SESSION_CLASS):
         return ([TC5SessionStage(config)], 5, ["user_principal"])
+
+    # R-C-003's first two steps go through the same layer 1 and layer 2 compositions the telemetry corpus's polls
+    # and table walks do, so they meet the same sourcetypes' contracts.
+    if (telemetry_class == PORT_CLASS):
+        return (telemetry_pipeline.layer_1_stages(config), 1, ["site_id", "device_id", "port_id"])
+
+    if (telemetry_class == MAC_CLASS):
+        return (telemetry_pipeline.mac_table_stages(config), 2, ["mac_address"])
 
     if (telemetry_class == AUTH_CLASS):
         ladder = [] if mac_table is None else _login_ladder(config, mac_table, lease_table)
@@ -1075,7 +1275,9 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
 def close_mac_bindings(config: Config, dataframes: list[pd.DataFrame], impose_order: bool = True) -> pd.DataFrame:
     """The two sites' MAC tables, closed into bindings by the stage that closes every MAC binding in this fork."""
     pipe = LinearPipeline(config)
-    pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
+    # Copies, because a source frame is where a stage's needed columns are added, and the same walks are scored as
+    # their own class afterwards: given the originals, every walk would arrive there carrying the binding columns.
+    pipe.set_source(InMemorySourceStage(config, dataframes=[frame.copy() for frame in dataframes]))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 
     if (impose_order):
@@ -1216,8 +1418,13 @@ def run_pipeline(config: Config,
             if (name == SESSION_CLASS and len(frames[-1]) > 0):
                 sessions = host_identity.session_table(session_intervals(frames[-1]), at(LAST_DAY + 1))
 
-    # Every collector whose records the classes emit can be held at once: at a wide enough spread the one clock left
-    # inside the bound is a site's MAC table, which only the bindings read.
+    # R-C-003's port polls and table walks, emitted as the telemetry corpus emits its own. The walks are also what
+    # the MAC bindings above were closed from.
+    for name in (PORT_CLASS, MAC_CLASS):
+        if (len(batches.get(name, [])) > 0):
+            frames.append(run_class(config, name, batches[name], impose_order=impose_order))
+
+    # Every collector whose records the classes emit can be held at once.
     combined = pd.concat(frames, ignore_index=True) if len(frames) > 0 else pd.DataFrame()
 
     return canonicalize(envelope.with_quarantine(combined, quarantined),
@@ -1579,5 +1786,64 @@ def credential_replays(result: pd.DataFrame, kmh_threshold: float = REPLAY_KMH) 
                 fired.setdefault(principal, (previous_port, row["login_port_key"], float(row["site_travel_kmh"])))
 
             previous_port = row["login_port_key"]
+
+    return fired
+
+
+# --- R-C-003, evaluated the way its search evaluates it ------------------------------------------------------------
+
+
+def physical_compromises(result: pd.DataFrame,
+                         port_event: bool = True,
+                         new_vendor: bool = True,
+                         management: bool = True,
+                         window_seconds: typing.Optional[int] = PHYSICAL_WINDOW_SECONDS,
+                         tolerance_seconds: int = JOIN_TOLERANCE_SECONDS) -> dict:
+    """
+    (port, MAC) pairs R-C-003 fires on, each with its three step times.
+
+    The port's layer 1 events are joined to the walks on the port, and the walks to the flows on the device's MAC,
+    which the flow carries from the DHCP lease that named its address. Each switch drops one condition, so a test can
+    show that the condition, and not something else, is what keeps a control quiet.
+    """
+    tolerance_ns = tolerance_seconds * NS_PER_SECOND
+    window_ns = None if window_seconds is None else window_seconds * NS_PER_SECOND
+
+    polls = result[result["telemetry_class"] == PORT_CLASS]
+
+    if (port_event):
+        polls = polls[polls["transceiver_serial_changed"].map(_truthy)
+                      | (polls["link_flaps"].astype("Int64").fillna(0) > 0)]
+
+    walks = result[(result["telemetry_class"] == MAC_CLASS) & result["port_key"].notna()]
+
+    if (new_vendor):
+        walks = walks[walks["oui_first_seen_on_port"].map(_truthy)]
+
+    flows = result[(result["telemetry_class"] == FLOW_CLASS) & result["mac_address"].notna()]
+
+    if (management):
+        flows = flows[flows["dst_is_management"].map(_truthy)]
+
+    fired: dict = {}
+
+    for (_, poll) in polls.iterrows():
+        t1 = int(poll["event_time"])
+
+        for (_, walk) in walks[walks["port_key"] == poll["entity_key"]].iterrows():
+            t2 = int(walk["event_time"])
+
+            if (t2 < t1 - tolerance_ns) or (window_ns is not None and t2 - t1 > window_ns):
+                continue
+
+            for (_, flow) in flows[flows["mac_address"] == walk["mac_address"]].iterrows():
+                t3 = int(flow["event_time"])
+
+                if (t3 < t2 - tolerance_ns) or (window_ns is not None and t3 - t1 > window_ns):
+                    continue
+
+                key = (walk["port_key"], walk["mac_address"])
+                (s1, s2, s3) = fired.get(key, (t1, t2, t3))
+                fired[key] = (min(s1, t1), min(s2, t2), min(s3, t3))
 
     return fired

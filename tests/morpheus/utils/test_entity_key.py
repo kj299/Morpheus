@@ -21,6 +21,7 @@ import pytest
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import compose_link_key
+from morpheus.utils.entity_key import mac_oui
 from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
 
@@ -156,3 +157,11 @@ def test_a_link_is_named_by_both_its_ends_in_one_order():
                           ("hq:sw1:Gi1/0/1", "sw3", float("nan"))])
 def test_a_link_with_a_missing_end_is_none(missing):
     assert compose_link_key(*missing) is None
+
+
+@pytest.mark.parametrize(("supplied", "mac", "expected"),
+                         [(None, "B8:27:EB:00:00:01", "b8:27:eb"), (None, "b8-27-eb-00-00-01", "b8:27:eb"),
+                          ("B8:27:EB", "aa:bb:cc:00:00:01", "b8:27:eb"), (None, None, None),
+                          (None, "b827eb000001", None), (float("nan"), "aa:30:0a:00:00:01", "aa:30:0a")])
+def test_the_oui_is_the_supplied_one_or_the_first_three_octets(supplied, mac, expected):
+    assert mac_oui(supplied, mac) == expected

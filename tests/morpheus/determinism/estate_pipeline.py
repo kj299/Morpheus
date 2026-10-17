@@ -95,7 +95,7 @@ KEY_COLUMNS = ["telemetry_class", "row_key"]
 IGNORE_COLUMNS: list[str] = []
 
 AUTH_CLASS = "tc5_auth"
-CHAINED_CLASSES = ("tc1", "tc2_mac", "tc2_arp", "tc2_auth", AUTH_CLASS)
+CHAINED_CLASSES = ("tc1", tp.DEVICE_CLASS, "tc2_mac", "tc2_arp", "tc2_auth", AUTH_CLASS)
 UNCHAINED_CLASSES = ("tc1_binding", "tc2_binding")
 """The closed bindings. They are tables rather than observations, so nothing correlates them into a chain."""
 SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS}

@@ -55,6 +55,7 @@ SAVEDSEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 RULE = "R-C-001 - Lateral movement chain"
 EXFIL_RULE = "R-C-004 - Staged exfiltration"
 REPLAY_RULE = "R-C-005 - Credential replay across the stack"
+PHYSICAL_RULE = "R-C-003 - Physical compromise chain"
 C2_RULE = "R-C-002 - TLS anomaly precedes beaconing"
 
 
@@ -578,6 +579,111 @@ def test_a_refused_sign_in_proves_nobody_was_there(result: pd.DataFrame):
     assert second["auth_result"] == "failure"
     assert second["login_site_id"] == "edinburgh"
     assert second["site_travel_status"] == "not_successful"
+
+
+@pytest.mark.cpu_mode
+def test_the_physical_compromise_fires_on_the_attacker_alone(result: pd.DataFrame):
+    intrusion = cp_.INTRUSIONS["rogue"]
+    fired = cp_.physical_compromises(result)
+
+    assert set(fired) == {(f"hq:hq-sw1:{intrusion.desk.port}", intrusion.device_mac)}
+
+    (t_port, t_vendor, t_management) = fired[(f"hq:hq-sw1:{intrusion.desk.port}", intrusion.device_mac)]
+
+    # In order, and inside the window: the poll after the link came back, the walk that first listed the device,
+    # the first flow to the switches' own interfaces.
+    assert t_port <= t_vendor <= t_management
+    assert t_management - t_port <= cp_.PHYSICAL_WINDOW_SECONDS * 10**9
+
+
+@pytest.mark.cpu_mode
+@pytest.mark.parametrize("name, condition",
+                         [("known-vendor", {
+                             "new_vendor": False
+                         }), ("no-management", {
+                             "management": False
+                         }), ("no-link-event", {
+                             "port_event": False
+                         })])
+def test_each_physical_control_is_stopped_by_its_one_condition(result: pd.DataFrame, name: str, condition: dict):
+    intrusion = cp_.INTRUSIONS[name]
+    pair = (f"hq:hq-sw1:{intrusion.desk.port}", intrusion.device_mac)
+
+    assert pair not in cp_.physical_compromises(result)
+    assert pair in cp_.physical_compromises(result, **condition)
+
+
+def _steps(result: pd.DataFrame) -> dict:
+    """Per R-C-003 port, which of the three steps the pipeline's output holds."""
+    polls = result[result["telemetry_class"] == cp_.PORT_CLASS]
+    walks = result[result["telemetry_class"] == cp_.MAC_CLASS]
+    flows = result[result["telemetry_class"] == cp_.FLOW_CLASS]
+    steps = {}
+
+    for (name, intrusion) in cp_.INTRUSIONS.items():
+        port = f"hq:hq-sw1:{intrusion.desk.port}"
+        own_polls = polls[polls["entity_key"] == port]
+        own_walks = walks[(walks["port_key"] == port) & (walks["mac_address"] == intrusion.device_mac)]
+        own_flows = flows[flows["mac_address"] == intrusion.device_mac]
+        steps[name] = (bool((own_polls["link_flaps"].astype("Int64").fillna(0) > 0).any()),
+                       bool(own_walks["oui_first_seen_on_port"].astype("boolean").fillna(False).any()),
+                       bool(own_flows["dst_is_management"].astype("boolean").fillna(False).any()))
+
+    return steps
+
+
+@pytest.mark.cpu_mode
+def test_each_intrusion_takes_the_steps_it_was_planted_with(result: pd.DataFrame):
+    # Each control takes two of the three steps, and a different two, so each step is shown to be necessary.
+    assert _steps(result) == {
+        "rogue": (True, True, True),
+        "known-vendor": (True, False, True),
+        "no-management": (True, True, False),
+        "no-link-event": (False, True, True),
+    }
+
+
+@pytest.mark.cpu_mode
+def test_the_management_flow_reaches_the_port_through_the_lease(result: pd.DataFrame):
+    # The chain's last join is on the MAC, which the flow carries only because the DHCP lease named its address:
+    # the rogue device is in no inventory, so the flow knows no machine, only the interface.
+    intrusion = cp_.INTRUSIONS["rogue"]
+    flows = result[(result["telemetry_class"] == cp_.FLOW_CLASS) & (result["src_ip"] == intrusion.device_address)]
+
+    assert set(flows["mac_address"]) == {intrusion.device_mac}
+    assert flows["host_lease_uid"].notna().all()
+    assert flows["host_key"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_a_ports_first_walk_says_nothing_about_vendors(result: pd.DataFrame):
+    # Null, not false and not true: on the first walk there is nothing for a vendor to be new against.
+    walks = result[result["telemetry_class"] == cp_.MAC_CLASS].sort_values("event_time", kind="mergesort")
+    first = walks.groupby("port_key", sort=False).head(1)
+
+    assert first["oui_first_seen_on_port"].isna().all()
+
+
+def _physical_search() -> str:
+    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
+        text = handle.read()
+
+    return text.split(f"[{PHYSICAL_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
+
+
+def test_the_physical_compromise_search_carries_the_conditions_this_harness_asserts():
+    search = _physical_search()
+
+    assert "(transceiver_serial_changed=true OR link_flaps>0)" in search
+    assert "oui_first_seen_on_port=true" in search
+    assert "dst_is_management=true mac_address=*" in search
+    assert "join type=inner max=0 port_key" in search
+    assert "join type=inner max=0 mac_address" in search
+    assert f"t_vendor >= t_port - {cp_.JOIN_TOLERANCE_SECONDS}" in search
+    assert f"t_management >= t_vendor - {cp_.JOIN_TOLERANCE_SECONDS}" in search
+    assert f"t_management - t_port <= {cp_.PHYSICAL_WINDOW_SECONDS}" in search
+    assert f"risk_score = {cp_.PHYSICAL_SEVERITY}" in search
+    assert "notable" not in search
 
 
 def _replay_search() -> str:

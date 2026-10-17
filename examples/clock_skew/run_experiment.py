@@ -551,7 +551,7 @@ def main() -> int:
                  rules.endpoint_decisions,
                  columns="hostname"),
         "campaign":
-            spec("campaign, collector clocks: the four chains, to three hours",
+            spec("campaign, collector clocks: the five chains, to three hours",
                  campaign_pipeline,
                  rules.chain_decisions,
                  magnitudes=CHAIN_MAGNITUDES_NS),

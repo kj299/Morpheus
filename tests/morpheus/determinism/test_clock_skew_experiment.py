@@ -338,7 +338,7 @@ def test_every_shipped_detection_is_decided_once(experiment):
 
     assert sorted(decided) == sorted(set(decided)), "a rule is decided twice"
     assert set(decided) == _shipped_detections()
-    assert len(decided) == 52
+    assert len(decided) == 55
 
 
 def test_a_sweep_over_one_clock_is_not_reported_as_a_tolerance(experiment):

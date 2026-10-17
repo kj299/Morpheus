@@ -235,39 +235,7 @@ class CounterTracker:
                 current.counters.get(name) is not None and previous.counters.get(name) is not None
                 and current.counters[name] < previous.counters[name] for name in self._counter_names)
 
-        if (self._is_uptime_rollover(previous, current, interval_ns)):
-            # The uptime counter reached its own ceiling and restarted. The device did not: it has been up longer
-            # than the counter can express. Reading this as a reboot would emit the port's entire lifetime of
-            # errors as one interval's delta.
-            return False
-
-        if (previous.uptime_ns is None):
-            # Only the earlier uptime is missing, which does not make this unresolvable: an uptime shorter than the
-            # sampling gap still shows the device came up inside it, and a longer one still shows it did not.
-            return current.uptime_ns < interval_ns
-
-        # An uptime that went backwards is unambiguous. An uptime that advanced by less than the sampling gap means
-        # the device came up during it, which a plain comparison of uptimes would miss.
-        return current.uptime_ns < previous.uptime_ns or current.uptime_ns < interval_ns
-
-    def _is_uptime_rollover(self, previous: _EntityState, current: _EntityState, interval_ns: int) -> bool:
-        """Whether a low uptime is its counter rolling over rather than the device restarting.
-
-        Both look identical in one sample: a small uptime where a large one stood. They differ in what they imply
-        about the elapsed time. A rollover implies the uptime advanced from just under the ceiling, around it, and
-        on to its current value, which should account for the sampling gap. A restart implies the device has simply
-        been up for the current uptime. Whichever of the two better explains the gap is the one taken, so no
-        threshold has to be guessed.
-        """
-        if (self._uptime_ceiling_ns is None or previous.uptime_ns is None):
-            return False
-
-        if (current.uptime_ns >= previous.uptime_ns):
-            return False
-
-        rollover_elapsed = (self._uptime_ceiling_ns - previous.uptime_ns) + current.uptime_ns
-
-        return abs(rollover_elapsed - interval_ns) < abs(current.uptime_ns - interval_ns)
+        return device_restarted(previous.uptime_ns, current.uptime_ns, interval_ns, self._uptime_ceiling_ns)
 
     def _delta_for(self,
                    name: str,
@@ -309,3 +277,68 @@ class CounterTracker:
 
         while (len(self._states) > self._max_entities):
             self._states.popitem(last=False)
+
+
+def uptime_rolled_over(previous_uptime_ns: typing.Optional[int],
+                       uptime_ns: int,
+                       interval_ns: int,
+                       uptime_ceiling_ns: typing.Optional[int]) -> bool:
+    """
+    Whether a low uptime is its counter rolling over rather than the device restarting.
+
+    Both look identical in one sample: a small uptime where a large one stood. They differ in what they imply about
+    the elapsed time. A rollover implies the uptime advanced from just under the ceiling, around it, and on to its
+    current value, which should account for the sampling gap. A restart implies the device has simply been up for
+    the current uptime. Whichever of the two better explains the gap is the one taken, so no threshold has to be
+    guessed.
+    """
+    if (uptime_ceiling_ns is None or previous_uptime_ns is None):
+        return False
+
+    if (uptime_ns >= previous_uptime_ns):
+        return False
+
+    rollover_elapsed = (uptime_ceiling_ns - previous_uptime_ns) + uptime_ns
+
+    return abs(rollover_elapsed - interval_ns) < abs(uptime_ns - interval_ns)
+
+
+def device_restarted(previous_uptime_ns: typing.Optional[int],
+                     uptime_ns: int,
+                     interval_ns: int,
+                     uptime_ceiling_ns: typing.Optional[int] = None) -> bool:
+    """
+    Whether a device restarted between two samples, read from its uptime at each and the time between them.
+
+    Shared by the port counters, where a restart is what tells a reset from a wrap, and the device stage, where a
+    restart is the event.
+
+    Parameters
+    ----------
+    previous_uptime_ns : int or None
+        The device's uptime at the earlier sample, if it was known.
+    uptime_ns : int
+        Its uptime at this sample.
+    interval_ns : int
+        The time between the two samples.
+    uptime_ceiling_ns : int, optional
+        Where the uptime counter itself rolls over: `TIMETICKS_CEILING_NS` for SNMP `sysUpTime`.
+
+    Returns
+    -------
+    bool
+    """
+    if (uptime_rolled_over(previous_uptime_ns, uptime_ns, interval_ns, uptime_ceiling_ns)):
+        # The uptime counter reached its own ceiling and restarted. The device did not: it has been up longer than
+        # the counter can express. Reading this as a reboot would emit the port's entire lifetime of errors as one
+        # interval's delta.
+        return False
+
+    if (previous_uptime_ns is None):
+        # Only the earlier uptime is missing, which does not make this unresolvable: an uptime shorter than the
+        # sampling gap still shows the device came up inside it, and a longer one still shows it did not.
+        return uptime_ns < interval_ns
+
+    # An uptime that went backwards is unambiguous. An uptime that advanced by less than the sampling gap means the
+    # device came up during it, which a plain comparison of uptimes would miss.
+    return uptime_ns < previous_uptime_ns or uptime_ns < interval_ns

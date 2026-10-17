@@ -40,6 +40,7 @@ sys.path.insert(0, str(REPO_ROOT / "tests" / "morpheus" / "determinism"))
 # The class of each estate row, and the sourcetype a deployment would send it on.
 CLASS_SOURCETYPES = {
     "tc1": "morpheus:score:l1",
+    "tc1_device": "morpheus:score:l1",
     "tc2_mac": "morpheus:score:l2",
     "tc2_arp": "morpheus:score:l2",
     "tc2_auth": "morpheus:score:l2",
@@ -75,8 +76,11 @@ CAMPAIGN_SOURCETYPES = {
     "tc4": "morpheus:score:l4",
     "tc6": "morpheus:score:l6",
     "tc7_saas": "morpheus:score:l7",
+    "tc1": "morpheus:score:l1",
+    "tc2_mac": "morpheus:score:l2",
 }
-"""The campaign's classes, in the order it runs them, and the sourcetype each layer's records always go on."""
+"""The campaign's classes, in the order it runs them, and the sourcetype each layer's records always go on. The port
+polls and MAC table walks run last, after the classes they bind to, and carry R-C-003's first two steps."""
 
 
 def _render(frame, sourcetype: str) -> list:

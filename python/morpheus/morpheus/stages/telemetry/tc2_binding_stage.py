@@ -35,14 +35,21 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import mac_oui
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import EventClock
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ATTRIBUTE_COLUMNS = ["site_id", "switch_id", "port_id", "vlan_id"]
-"""What a MAC address is bound to in the TC-2 telemetry class: the class's own `site_id:switch_id:port_id:vlan_id`."""
+DEFAULT_ATTRIBUTE_COLUMNS = ["site_id", "switch_id", "port_id", "vlan_id", "oui"]
+"""What a MAC address is bound to in the TC-2 telemetry class: the class's own `site_id:switch_id:port_id:vlan_id`,
+and the vendor the address belongs to."""
+
+OUI_ATTRIBUTE = "oui"
+"""The one attribute the stage derives when the source does not carry it: a MAC's OUI is its first three octets, so a
+binding can say which vendor was on a port without every collector reporting it. It never changes for one MAC, so it
+never splits a binding."""
 
 PORT_KEY_COLUMN = "port_key"
 PORT_KEY_ATTRIBUTES = ("site_id", "switch_id", "port_id")
@@ -135,11 +142,13 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
     time_unit : str, default = "ns"
         Unit for numeric timestamps in `time_column`. Ignored for datetime columns.
     attribute_columns : list of str, optional
-        Columns making up the binding target. Defaults to `["site_id", "switch_id", "port_id", "vlan_id"]`, the
-        telemetry class's own entity key. A sample whose target differs from the open binding's displaces it; one
-        whose target matches extends it. Columns outside this list are ignored, so a changing signal strength does
-        not split a binding. When `site_id`, `switch_id` and `port_id` are all present, each emitted binding also
-        carries `port_key`, the port as `site_id:switch_id:port_id`, identical to the layer 1 `entity_key`.
+        Columns making up the binding target. Defaults to `["site_id", "switch_id", "port_id", "vlan_id", "oui"]`,
+        the telemetry class's own entity key and the bound MAC's vendor; `oui`, where listed and absent from the
+        source, is derived from the key's first three octets. A sample whose target differs from the open binding's
+        displaces it; one whose target matches extends it. Columns outside this list are ignored, so a changing
+        signal strength does not split a binding. When `site_id`, `switch_id` and `port_id` are all present, each
+        emitted binding also carries `port_key`, the port as `site_id:switch_id:port_id`, identical to the layer 1
+        `entity_key`.
     max_clock_skew_seconds : int, default = 604800
         How far ahead of the stream's own progress a row's event time may be before it is refused. Expiry runs on
         event time, so a device whose clock is wrong by years would otherwise drive the idle horizon past every
@@ -355,7 +364,9 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
 
         source = meta.copy_dataframe()
 
-        required = [self._key_column, self._time_column] + self._attribute_columns
+        derived = [name for name in self._attribute_columns if name == OUI_ATTRIBUTE and name not in source.columns]
+        required = [self._key_column, self._time_column
+                    ] + [name for name in self._attribute_columns if name not in derived]
 
         if (self._grant_column is not None):
             required.append(self._grant_column)
@@ -367,7 +378,10 @@ class TC2BindingStage(GpuAndCpuMixin, SinglePortStage):
 
         keys = to_host_list(source, self._key_column)
         raw_times = to_host_list(source, self._time_column)
-        attributes = {name: to_host_list(source, name) for name in self._attribute_columns}
+        attributes = {
+            name: ([mac_oui(None, key) for key in keys] if name in derived else to_host_list(source, name))
+            for name in self._attribute_columns
+        }
 
         if (self._action_column is not None and self._action_column in source.columns):
             actions = [normalize_text(value) for value in to_host_list(source, self._action_column)]

@@ -405,3 +405,55 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
     with pytest.raises(ValueError, match="max_clock_skew_seconds"):
         TC2CardinalityStage(config, max_clock_skew_seconds=0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_vendor_new_to_a_port_is_flagged_on_its_first_sighting(config: Config):
+    # A desk port that has only ever carried the estate's workstations, and then a single-board computer: R-C-003's
+    # second step. The port's first walk has nothing to be new against, and the vendor's second sighting is not new.
+    macs = ["aa:30:0a:00:00:01", "aa:30:0a:00:00:01", "b8:27:eb:00:00:01", "b8:27:eb:00:00:01"]
+    meta = run(config, frame(macs))
+
+    assert _as_list(meta, "mac_oui") == ["aa:30:0a", "aa:30:0a", "b8:27:eb", "b8:27:eb"]
+    assert _as_list(meta, "oui_first_seen_on_port") == [None, False, True, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_vendor_known_on_the_port_is_not_new_however_long_ago(config: Config):
+    # No window: the port carried the vendor once, long ago, and its return is not a first sighting. A VLAN count
+    # whose window had expired would call it new.
+    macs = ["aa:30:0a:00:00:01", "b8:27:eb:00:00:01", "aa:30:0a:00:00:02", "b8:27:eb:00:00:02"]
+    # Six days later: inside the clock guard's week, far outside a one-minute window.
+    times = [0, MINUTE_NS, 6 * 86400 * NS_PER_SECOND, 6 * 86400 * NS_PER_SECOND + MINUTE_NS]
+    meta = run(config, frame(macs, times=times), window_seconds=60)
+
+    assert _as_list(meta, "oui_first_seen_on_port") == [None, True, False, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_vendor_known_elsewhere_is_still_new_to_this_port(config: Config):
+    # The VLAN already carries the vendor on another port, so the VLAN's count does not step; the port's does.
+    macs = ["b8:27:eb:00:00:01", "aa:30:0a:00:00:01", "aa:30:0a:00:00:01", "b8:27:eb:00:00:02"]
+    ports = ["Gi1/0/1", "Gi1/0/2", "Gi1/0/2", "Gi1/0/2"]
+    meta = run(config, frame(macs, ports=ports))
+
+    assert _as_list(meta, "oui_first_seen_on_port") == [None, None, False, True]
+    assert _as_list(meta, "ouis_per_vlan_first_in_window") == [True, True, False, False]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_every_mac_in_one_walk_is_measured_against_the_port_before_it(config: Config):
+    # A hub's addresses in one walk: each is judged against what the port carried before the walk, so two of a new
+    # vendor in one walk are both new, and their order within the walk changes nothing.
+    macs = ["aa:30:0a:00:00:01", "b8:27:eb:00:00:01", "b8:27:eb:00:00:02", "aa:30:0a:00:00:01"]
+    times = [0, MINUTE_NS, MINUTE_NS, MINUTE_NS]
+    meta = run(config, frame(macs, times=times))
+
+    assert _as_list(meta, "oui_first_seen_on_port") == [None, True, True, False]
+
+
+def test_needed_columns_name_the_port_vendor_columns(config: Config):
+    needed = TC2CardinalityStage(config).get_needed_columns()
+
+    assert needed["mac_oui"] == TypeId.STRING
+    assert needed["oui_first_seen_on_port"] == TypeId.BOOL8

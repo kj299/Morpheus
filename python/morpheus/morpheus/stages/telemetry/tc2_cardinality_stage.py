@@ -36,11 +36,13 @@ from morpheus.utils.distinct_window import NS_PER_SECOND
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
+from morpheus.utils.entity_key import mac_oui
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import EventClock
 from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.value_novelty import ValueNoveltyTracker
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,15 @@ PORT_KEY_SEPARATOR = KEY_SEPARATOR
 VLAN_KEY = "vlan_key"
 """The VLAN as the per-VLAN count groups on it: `site_id:vlan_id`, or the VLAN alone without a site column."""
 
+MAC_OUI = "mac_oui"
+"""The OUI of the row's MAC address, as the collector supplied it or as derived from the address."""
+
+OUI_FIRST_SEEN_ON_PORT = "oui_first_seen_on_port"
+"""Whether the port has never carried a device of this OUI before. Null on the port's first table walk, when there
+is nothing yet to be new against."""
+
+OUI_FIELD = "oui"
+
 
 @register_stage("tc2-cardinality")
 class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
@@ -77,6 +88,15 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     - **`ouis_per_vlan`** — an OUI a VLAN has not carried before is an unmanaged device class appearing on a
       segment that was meant to be homogeneous. The VLAN is counted per site, as `vlan_key`, `site_id:vlan_id`:
       VLAN numbers are local, and VLAN 10 at two sites is two segments whose devices have nothing in common.
+
+    Beside the counts, **`oui_first_seen_on_port`** asks the VLAN's question of one port, with no window: has this
+    port ever carried a device of this vendor before? A desk port that has only ever carried the estate's own
+    workstations and now carries a single-board computer is the second step of R-C-003, the physical compromise
+    chain, and it is a per-port question because a VLAN that already holds that vendor elsewhere would hide it. The
+    history has no period, for the reason `morpheus.utils.value_novelty` gives: a novelty that a window boundary can
+    reset is one an attacker can wait out. A port's first table walk answers null, since there is nothing yet for a
+    vendor to be new against, and every MAC in one walk is measured against the port as it stood before that walk,
+    so a hub's five addresses are each judged against the port's history rather than against each other.
 
     Each count comes with a `<name>_first_in_window` flag saying whether this particular value was absent from the
     window before this sample, which is what turns a count into an event, and a `<name>_saturated` flag saying
@@ -108,7 +128,7 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Column holding the VLAN identifier.
     oui_column : str, default = "oui"
         Column holding the organizationally unique identifier. Where a collector does not supply it, it is derived
-        from the first three octets of the MAC address rather than being left null.
+        from the first three octets of the MAC address rather than being left null. Written to `mac_oui` either way.
     time_column : str, default = "event_time"
         Column holding the observation's event time. Event time, never ingest time.
     time_unit : str, default = "ns"
@@ -159,6 +179,8 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             name: DistinctWindowTracker(window_ns=window_seconds * NS_PER_SECOND, max_samples=max_samples)
             for name in COUNTS
         }
+        # Every MAC in one table walk shares the walk's instant, so ties are measured rather than refused.
+        self._port_ouis = ValueNoveltyTracker([OUI_FIELD], simultaneous=True)
 
         for name in COUNTS:
             self._needed_columns[name] = TypeId.INT64
@@ -167,6 +189,8 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         self._needed_columns["port_key"] = TypeId.STRING
         self._needed_columns[VLAN_KEY] = TypeId.STRING
+        self._needed_columns[MAC_OUI] = TypeId.STRING
+        self._needed_columns[OUI_FIRST_SEEN_ON_PORT] = TypeId.BOOL8
 
         self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
         self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
@@ -205,25 +229,10 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         """
         return normalize_text(value)
 
-    @classmethod
-    def _oui(cls, supplied: typing.Any, mac: typing.Optional[str]) -> typing.Optional[str]:
-        """
-        Return the OUI, deriving it from the MAC where the collector did not supply one.
-
-        Deriving rather than leaving it null keeps the VLAN count meaningful on estates whose collectors omit the
-        field, which would otherwise report one distinct OUI, forever, on every segment.
-        """
-        value = cls._text(supplied)
-
-        if (value is not None):
-            return value.lower()
-
-        if (mac is None):
-            return None
-
-        octets = mac.lower().replace("-", ":").split(":")
-
-        return ":".join(octets[0:3]) if len(octets) >= 3 else None
+    @staticmethod
+    def _oui(supplied: typing.Any, mac: typing.Optional[str]) -> typing.Optional[str]:
+        """Return the OUI, deriving it from the MAC where the collector did not supply one; see `mac_oui`."""
+        return mac_oui(supplied, mac)
 
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
@@ -267,6 +276,8 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             port_keys: list = []
             vlan_keys: list = []
+            row_ouis: list = []
+            oui_first_seen: list = []
             counts: dict[str, list] = {name: [] for name in COUNTS}
             first: dict[str, list] = {name: [] for name in COUNTS}
             saturated: dict[str, list] = {name: [] for name in COUNTS}
@@ -287,6 +298,8 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 port_keys.append(port_key)
                 vlan_key = compose_key((sites[position], vlans[position]) if has_site else (vlans[position], ))
                 vlan_keys.append(vlan_key)
+                oui = self._oui(ouis[position], mac)
+                row_ouis.append(oui)
 
                 try:
                     event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
@@ -299,6 +312,7 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                         first[name].append(None)
                         saturated[name].append(False)
 
+                    oui_first_seen.append(None)
                     unordered += 1
                     continue
 
@@ -308,13 +322,20 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                         first[name].append(None)
                         saturated[name].append(False)
 
+                    oui_first_seen.append(None)
                     refused[position] = True
                     continue
+
+                if (port_key is None or oui is None):
+                    oui_first_seen.append(None)
+                else:
+                    novelty = self._port_ouis.observe(port_key, event_time_ns, {OUI_FIELD: oui})
+                    oui_first_seen.append(novelty.first_seen[OUI_FIELD])
 
                 observations = {
                     MACS_PER_PORT: (port_key, mac),
                     PORTS_PER_MAC: (mac, port_key),
-                    OUIS_PER_VLAN: (vlan_key, self._oui(ouis[position], mac)),
+                    OUIS_PER_VLAN: (vlan_key, oui),
                 }
 
                 out_of_order = False
@@ -342,6 +363,8 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
             assign_str_column(df, "port_key", port_keys)
             assign_str_column(df, VLAN_KEY, vlan_keys)
+            assign_str_column(df, MAC_OUI, row_ouis)
+            assign_nullable_bool_column(df, OUI_FIRST_SEEN_ON_PORT, oui_first_seen)
 
             for name in COUNTS:
                 assign_nullable_int_column(df, name, counts[name])

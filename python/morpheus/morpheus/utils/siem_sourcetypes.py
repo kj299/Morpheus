@@ -135,16 +135,13 @@ PRODUCED: dict = {
             name="morpheus:score:l1",
             time_column="event_time",
             time_columns=ENVELOPE_TIME_COLUMNS,
-            producer="The TC-1 stages (normalize, rate, optical, forecast, flap, change) behind WindowSealStage; the "
-            "`tc1` class of `tests/morpheus/determinism/telemetry_pipeline.py`.",
-            # R-D-L1-001 reads the serial change, the flap count and the collector's own `oper_status`, carried
-            # through rather than derived: a serial that changed on a poll the flap count says the link never moved
-            # for. R-P-L1-004 reads the forecast status and the days the fitted trend gives the optic. R-D-L1-002
-            # reads the optical deviations from the port's own median, R-D-L1-003 the hour's flap count and the
-            # restart label it excludes, which with the counter reset is what the Device restart report collapses,
-            # R-B-L1-005 the error rate against its history, R-D-L1-006 the neighbour change, and R-B-L1-007 the
-            # traffic against its peak and its trough. The deltas and the interval they cover are here because every
-            # rate is one divided by the other, and the link key because the adjacency lookup is keyed on it.
+            producer="The TC-1 stages (normalize, rate, optical, forecast, flap, change) behind WindowSealStage, the "
+            "`tc1` class of `tests/morpheus/determinism/telemetry_pipeline.py` and of "
+            "`tests/morpheus/determinism/campaign_pipeline.py`; and TC1DeviceStage behind the same seal, the "
+            "`tc1_device` class of `tests/morpheus/determinism/telemetry_pipeline.py`.",
+            # Two sub-classes share the stanza: a port's poll and a device's. Both are keyed on the site and the device,
+            # and a port's key is the device's with the port appended, so the 'Device restart' report can gather a
+            # device's own restart and its ports' flags into one row.
             required_columns=("event_uid",
                               "entity_key",
                               "lineage_id",
@@ -154,48 +151,77 @@ PRODUCED: dict = {
                               *ENVELOPE_COLUMNS,
                               "site_id",
                               "device_id",
-                              "port_id",
-                              "transceiver_serial",
-                              "transceiver_serial_changed",
-                              "link_flaps",
-                              "oper_status",
-                              "optical_rx_dbm_forecast_status",
-                              "optical_rx_dbm_days_to_floor",
-                              "optical_rx_dbm_floor_dbm",
-                              "optical_rx_dbm_trend_db_per_day",
-                              "optical_rx_dbm_trend_samples",
-                              "optical_rx_dbm",
-                              "optical_rx_dbm_baseline",
-                              "optical_rx_dbm_baseline_samples",
-                              "optical_rx_dbm_deviation",
-                              "optical_tx_dbm_deviation",
-                              "link_flaps_in_window",
-                              "link_flap_device_reset",
-                              "counter_reset",
-                              "interval_seconds",
-                              "crc_errors_delta",
-                              "symbol_errors_delta",
-                              "input_discards_delta",
-                              "output_discards_delta",
-                              "if_hc_in_octets_delta",
-                              "if_hc_out_octets_delta",
-                              "error_rate",
-                              "error_rate_baseline_max",
-                              "error_rate_baseline_mature",
-                              "error_rate_step",
-                              "discard_rate",
-                              "bits_per_second",
-                              "bits_per_second_baseline_max",
-                              "bits_per_second_baseline_min",
-                              "bits_per_second_baseline_mature",
-                              "utilization",
-                              "lldp_neighbor_chassis_id",
-                              "lldp_neighbor_chassis_id_changed",
-                              "lldp_neighbor_chassis_id_first_seen",
-                              "lldp_neighbor_port_id",
-                              "link_key",
-                              "resolution_method",
                               "chain_anchor_source"),
+            variant_columns=(
+                # A port. R-D-L1-001 reads the serial change, the flap count and the collector's own `oper_status`,
+                # carried through rather than derived: a serial that changed on a poll the flap count says the link
+                # never moved for. R-P-L1-004 reads the forecast status and the days the fitted trend gives the optic.
+                # R-D-L1-002 reads the optical deviations from the port's own median, R-D-L1-003 the hour's flap count
+                # and the restart label it excludes, which with the counter reset is what the Device restart report
+                # gathers, R-B-L1-005 the error rate against its history, R-D-L1-006 the neighbour change, and
+                # R-B-L1-007 the traffic against its peak and its trough. R-C-003 reads the serial change and the
+                # flap count as its first step. The deltas and the interval they cover are here because every rate is
+                # one divided by the other, and the link key because the adjacency lookup is keyed on it.
+                ("port_id",
+                 "transceiver_serial",
+                 "transceiver_serial_changed",
+                 "link_flaps",
+                 "oper_status",
+                 "optical_rx_dbm_forecast_status",
+                 "optical_rx_dbm_days_to_floor",
+                 "optical_rx_dbm_floor_dbm",
+                 "optical_rx_dbm_trend_db_per_day",
+                 "optical_rx_dbm_trend_samples",
+                 "optical_rx_dbm",
+                 "optical_rx_dbm_baseline",
+                 "optical_rx_dbm_baseline_samples",
+                 "optical_rx_dbm_deviation",
+                 "optical_tx_dbm_deviation",
+                 "link_flaps_in_window",
+                 "link_flap_device_reset",
+                 "counter_reset",
+                 "interval_seconds",
+                 "crc_errors_delta",
+                 "symbol_errors_delta",
+                 "input_discards_delta",
+                 "output_discards_delta",
+                 "if_hc_in_octets_delta",
+                 "if_hc_out_octets_delta",
+                 "error_rate",
+                 "error_rate_baseline_max",
+                 "error_rate_baseline_mature",
+                 "error_rate_step",
+                 "discard_rate",
+                 "bits_per_second",
+                 "bits_per_second_baseline_max",
+                 "bits_per_second_baseline_min",
+                 "bits_per_second_baseline_mature",
+                 "utilization",
+                 "lldp_neighbor_chassis_id",
+                 "lldp_neighbor_chassis_id_changed",
+                 "lldp_neighbor_chassis_id_first_seen",
+                 "lldp_neighbor_port_id",
+                 "link_key",
+                 "resolution_method"),
+                # A device. The Device restart report reads the restart and the uptime it came back with, R-D-L1-008
+                # the configuration change and where it fell against the change window, and R-P-L1-009 the restarts
+                # per period against the device's own history and how many periods in a row have each held more. The
+                # routing churn rides along as context on both.
+                ("device_key",
+                 "sys_uptime",
+                 "device_rebooted",
+                 "device_reboots_in_bucket",
+                 "device_reboot_baseline",
+                 "device_reboot_baseline_mature",
+                 "device_reboot_rising_buckets",
+                 "running_config_hash",
+                 "config_changed",
+                 "config_first_seen",
+                 "config_change_in_window",
+                 "route_count",
+                 "route_count_delta",
+                 "bgp_peer_count"),
+            ),
         ),
     "morpheus:score:l3":
         Sourcetype(
@@ -214,6 +240,8 @@ PRODUCED: dict = {
             # `community_id` because the connection evidence report joins this layer to layers 4 and 6 on it.
             # `host_key` and `mac_address` are the host evidence report's: the machine the source address
             # resolved to through the DHCP leases and the asset inventory, null for a static address neither knows.
+            # R-C-003 reads `mac_address` and `dst_is_management` as its last step: the device a new port carried,
+            # reaching the estate's management network.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -254,6 +282,7 @@ PRODUCED: dict = {
                               "flow_regularity_mature",
                               "dst_is_reserved",
                               "dst_is_multicast",
+                              "dst_is_management",
                               "ip_ttl_shift",
                               "ip_ttl_shifted",
                               "ip_ttl_established",
@@ -507,10 +536,12 @@ PRODUCED: dict = {
             time_column="event_time",
             time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-2 stages (cardinality, baseline, ARP, auth) behind WindowSealStage; the `tc2_mac`, "
-            "`tc2_arp` and `tc2_auth` classes of `tests/morpheus/determinism/telemetry_pipeline.py`.",
+            "`tc2_arp` and `tc2_auth` classes of `tests/morpheus/determinism/telemetry_pipeline.py`, and the "
+            "`tc2_mac` class of `tests/morpheus/determinism/campaign_pipeline.py`.",
             # R-D-L2-001, R-D-L2-003 and R-D-L2-005 read these off this sourcetype, and R-B-L2-002 reads the step
             # and the baseline it is a step above. R-B-L2-006 reads the per-VLAN vendor count, keyed per site, and
-            # its history; R-B-L2-007 and R-B-L2-008 read each exchange against the port's own distribution.
+            # its history; R-B-L2-007 and R-B-L2-008 read each exchange against the port's own distribution. R-C-003
+            # reads a vendor the port has never carried, as its second step, with the vendor itself beside it.
             required_columns=("event_uid",
                               "port_key",
                               "lineage_id",
@@ -535,6 +566,8 @@ PRODUCED: dict = {
                               "ouis_per_vlan_step",
                               "ouis_per_vlan_baseline_max",
                               "ouis_per_vlan_baseline_mature",
+                              "mac_oui",
+                              "oui_first_seen_on_port",
                               "auth_attempts",
                               "auth_elapsed_seconds",
                               "auth_elapsed_p99",
