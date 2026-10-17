@@ -34,10 +34,12 @@ from morpheus.io import serializers
 from morpheus.utils.binding_table import TABLE_NAME_COLUMN
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.siem_wire import SPLUNK_TIME_FORMAT
+from morpheus.utils.siem_wire import filename_for
 from morpheus.utils.siem_wire import omit_null_fields
 from morpheus.utils.siem_wire import render_event_time
 from morpheus.utils.siem_wire import render_event_time_series
 from morpheus.utils.siem_wire import to_wire_lines
+from morpheus.utils.siem_wire import topic_for
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 PROPS_PATH = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheus-lineage", "default", "props.conf")
@@ -299,3 +301,12 @@ def test_the_wire_serializer_sends_no_nulls_from_a_frame_with_gaps():
     assert lines == ['{"port_key":"p1","macs_per_port_step":1}', '{"port_key":"p2","ratio":0.5,"label":"x"}']
     assert all(":null" not in line for line in serializers.df_to_json(frame, strip_newlines=True)) is False, \
         "the generic serializer still sends nulls; if it stops, this module's reason to exist should be revisited"
+
+
+def test_the_topic_and_file_names_are_the_sourcetype_in_each_medium_s_alphabet():
+    # A colon is not a topic character and is awkward in a file name; everything else about the sourcetype is kept,
+    # so the transport configuration can be read without a table.
+    assert topic_for("morpheus:score:l3") == "morpheus.score.l3"
+    assert topic_for("binding:l2:open") == "binding.l2.open"
+    assert filename_for("morpheus:score:l3") == "morpheus_score_l3.jsonlines"
+    assert filename_for("context:identity") == "context_identity.jsonlines"

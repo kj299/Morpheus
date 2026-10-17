@@ -252,8 +252,7 @@ def route(segment: str, result) -> list[tuple[str, str, typing.Any]]:
 def deliver(groups: list,
             output_dir: typing.Optional[pathlib.Path],
             policy: typing.Optional[dict] = None,
-            kafka_bootstrap_servers: typing.Optional[str] = None,
-            kafka_topic_prefix: str = "morpheus.") -> dict[str, int]:
+            kafka_bootstrap_servers: typing.Optional[str] = None) -> dict[str, int]:
     """
     Put each group through `MinimizationStage`, `SiemWireStage` and `SiemWireSinkStage`.
 
@@ -268,6 +267,8 @@ def deliver(groups: list,
     from morpheus.stages.lineage.minimization_stage import MinimizationStage
     from morpheus.stages.output.siem_wire_sink_stage import SiemWireSinkStage
     from morpheus.stages.output.siem_wire_stage import SiemWireStage
+    from morpheus.utils.siem_wire import filename_for
+    from morpheus.utils.siem_wire import topic_for
 
     config = _config()
     written: dict[str, int] = {}
@@ -287,12 +288,10 @@ def deliver(groups: list,
 
         if (kafka_bootstrap_servers is not None):
             sink = SiemWireSinkStage(config,
-                                     kafka_topic=kafka_topic_prefix + sourcetype.replace(":", "."),
+                                     kafka_topic=topic_for(sourcetype),
                                      kafka_bootstrap_servers=kafka_bootstrap_servers)
         else:
-            sink = SiemWireSinkStage(config,
-                                     filename=str(output_dir / f"{sourcetype.replace(':', '_')}.jsonlines"),
-                                     append=True)
+            sink = SiemWireSinkStage(config, filename=str(output_dir / filename_for(sourcetype)), append=True)
 
         pipe.add_stage(sink)
         pipe.run()

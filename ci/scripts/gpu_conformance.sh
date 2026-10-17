@@ -194,6 +194,7 @@ UNMARKED=(
     tests/morpheus/utils/test_siem_wire.py
     tests/morpheus/utils/test_splunk_app_contracts.py
     tests/morpheus/utils/test_splunk_field_contracts.py
+    tests/morpheus/utils/test_splunk_transport.py
     tests/morpheus/utils/test_stack_fingerprint.py
     tests/morpheus/utils/test_tracker_state.py
     tests/morpheus/utils/test_ttl_profile.py

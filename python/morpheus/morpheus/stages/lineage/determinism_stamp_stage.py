@@ -40,7 +40,7 @@ from morpheus.utils.model_manifest import ModelManifest
 logger = logging.getLogger(__name__)
 
 
-@register_stage("determinism-stamp")
+@register_stage("determinism-stamp", ignore_args=["envelope", "manifest"])
 class DeterminismStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write the determinism envelope onto every row, and the model version onto every scored one.
@@ -84,12 +84,16 @@ class DeterminismStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
     def __init__(self,
                  c: Config,
-                 envelope: DeterminismEnvelope,
-                 manifest: typing.Optional[ModelManifest] = None,
+                 envelope: DeterminismEnvelope = None,
+                 manifest: ModelManifest = None,
                  entity_column: str = "user_principal",
                  window_column: str = "window_id",
                  time_column: str = "event_time"):
         super().__init__(c)
+
+        if (envelope is None):
+            # The None default exists only to satisfy the CLI's ignored-argument rule.
+            raise ValueError("envelope is required")
 
         self._envelope = envelope
         self._manifest = manifest

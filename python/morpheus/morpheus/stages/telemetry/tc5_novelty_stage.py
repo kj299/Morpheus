@@ -178,7 +178,7 @@ class TC5NoveltyStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                  max_samples: int = 4096,
                  max_values: int = 256,
                  max_entities: int = 100_000,
-                 target_host_column: typing.Optional[str] = None):
+                 target_host_column: str = None):
         super().__init__(c)
 
         if (window_seconds <= 0):

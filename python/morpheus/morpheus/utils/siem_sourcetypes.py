@@ -881,6 +881,43 @@ PRODUCED: dict = {
 UNPRODUCED: dict = {}
 """Sourcetypes the app parses and nothing here emits, with what is missing."""
 
+INDEX_BY_PREFIX = (("morpheus:score:", "behavior_events"), ("morpheus:edge", "behavior_lineage"),
+                   ("morpheus:health", "behavior_health"), ("morpheus:quarantine", "behavior_quarantine"),
+                   ("morpheus:late", "behavior_late"), ("binding:", "behavior_bindings"), ("context:",
+                                                                                           "behavior_context"))
+"""Where each sourcetype is indexed, by the longest prefix that names it.
+
+The app's searches read each sourcetype from one index and the transport configuration under
+`examples/splunk_lineage_app/transport/` sends it there; `tests/morpheus/utils/test_splunk_transport.py` holds the
+searches, the connector and the forwarder inputs to this one table.
+"""
+
+
+def index_for(name: str) -> str:
+    """
+    The index a sourcetype's records belong in.
+
+    Parameters
+    ----------
+    name : str
+        A stanza name, produced or not.
+
+    Returns
+    -------
+    str
+        The index name from `indexes.conf`.
+
+    Raises
+    ------
+    KeyError
+        If no prefix in `INDEX_BY_PREFIX` names the sourcetype.
+    """
+    for (prefix, index) in INDEX_BY_PREFIX:
+        if (name.startswith(prefix)):
+            return index
+
+    raise KeyError(f"No index is configured for sourcetype {name!r}")
+
 
 def stanza_names() -> tuple:
     """

@@ -168,7 +168,7 @@ class TC5TravelStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                  max_entities: int = 100_000,
                  decimals: int = DEFAULT_FLOAT_DECIMALS,
                  column_prefix: str = "travel",
-                 location_column: typing.Optional[str] = None,
+                 location_column: str = None,
                  locations: typing.Optional[typing.Mapping[str, tuple]] = None):
         super().__init__(c)
 

@@ -1,0 +1,19 @@
+{
+  "name": "morpheus-lineage-splunk",
+  "config": {
+    "connector.class": "com.splunk.kafka.connect.SplunkSinkConnector",
+    "tasks.max": "4",
+    "topics": "binding.bucketed,binding.l1,binding.l2,binding.l2.open,context.application,context.asset,context.identity,morpheus.edge,morpheus.health,morpheus.late,morpheus.quarantine,morpheus.score.l1,morpheus.score.l2,morpheus.score.l3,morpheus.score.l4,morpheus.score.l5,morpheus.score.l6,morpheus.score.l7",
+    "splunk.hec.uri": "https://hec.example.internal:8088",
+    "splunk.hec.token": "${file:/etc/kafka-connect/secrets.properties:morpheus.hec.token}",
+    "splunk.hec.raw": "true",
+    "splunk.hec.raw.line.breaker": "\n",
+    "splunk.indexes": "behavior_bindings,behavior_bindings,behavior_bindings,behavior_bindings,behavior_context,behavior_context,behavior_context,behavior_lineage,behavior_health,behavior_late,behavior_quarantine,behavior_events,behavior_events,behavior_events,behavior_events,behavior_events,behavior_events,behavior_events",
+    "splunk.sourcetypes": "binding:bucketed,binding:l1,binding:l2,binding:l2:open,context:application,context:asset,context:identity,morpheus:edge,morpheus:health,morpheus:late,morpheus:quarantine,morpheus:score:l1,morpheus:score:l2,morpheus:score:l3,morpheus:score:l4,morpheus:score:l5,morpheus:score:l6,morpheus:score:l7",
+    "splunk.sources": "morpheus",
+    "splunk.hec.ack.enabled": "true",
+    "splunk.hec.ssl.validate.certs": "true",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.storage.StringConverter"
+  }
+}

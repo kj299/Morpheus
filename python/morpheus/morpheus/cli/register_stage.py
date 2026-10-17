@@ -225,6 +225,18 @@ def set_options_param_type(options_kwargs: dict, annotation, doc_type: str):
     options_kwargs.update(doc_type_kwargs)
 
 
+def _none_when_absent(inner):
+    """A click callback that returns None for a multiple-valued option that was not given, else what `inner` does."""
+
+    def callback(ctx, param, value):
+        if (len(value) == 0):
+            return None
+
+        return value if inner is None else inner(ctx, param, value)
+
+    return callback
+
+
 def compute_option_name(stage_arg_name: str, rename_options: typing.Dict[str, str] = None) -> tuple:
 
     if (rename_options is None):
@@ -329,6 +341,12 @@ def register_stage(command_name: str = None,
                             option_kwargs["default"] = None
 
                         set_options_param_type(option_kwargs, p_value.annotation, get_param_type(numpy_doc, p_name))
+
+                        if (option_kwargs.get("multiple", False) and p_value.default is None):
+                            # click hands an absent multiple-valued option over as an empty tuple, not as the
+                            # signature's None, so a stage that supplies its default on None would see an empty
+                            # list and refuse it. Give it the None it was written for.
+                            option_kwargs["callback"] = _none_when_absent(option_kwargs.get("callback"))
 
                         # Now overwrite with any user supplied values for this option
                         option_kwargs.update(option_args.get(p_name, {}))

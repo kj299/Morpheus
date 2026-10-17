@@ -102,6 +102,49 @@ def render_event_time_series(values: typing.Sequence, time_unit: str = "ns") -> 
     return [render_event_time(value, time_unit=time_unit) for value in values]
 
 
+def topic_for(sourcetype: str) -> str:
+    """
+    The Kafka topic a sourcetype's records are produced to: the sourcetype with its colons as dots.
+
+    `morpheus:score:l3` is produced to `morpheus.score.l3`. A colon is not a legal topic character, a dot is, and
+    keeping the name otherwise means the connector configuration that maps topics back to sourcetypes can be read
+    without a table. The segment runners name their topics with this and the transport configuration under
+    `examples/splunk_lineage_app/transport/` is rendered from it, so the two cannot disagree.
+
+    Parameters
+    ----------
+    sourcetype : str
+        A stanza name from `morpheus.utils.siem_sourcetypes`.
+
+    Returns
+    -------
+    str
+        The topic.
+    """
+    return sourcetype.replace(":", ".")
+
+
+def filename_for(sourcetype: str) -> str:
+    """
+    The file a sourcetype's records are written to by a runner: the sourcetype with its colons as underscores,
+    with the `.jsonlines` suffix.
+
+    `morpheus:score:l3` is written to `morpheus_score_l3.jsonlines`, which the forwarder's `inputs.conf` under
+    `examples/splunk_lineage_app/transport/` monitors onto that sourcetype.
+
+    Parameters
+    ----------
+    sourcetype : str
+        A stanza name from `morpheus.utils.siem_sourcetypes`.
+
+    Returns
+    -------
+    str
+        The file name, without a directory.
+    """
+    return sourcetype.replace(":", "_") + ".jsonlines"
+
+
 def omit_null_fields(line: str) -> str:
     """
     One serialized record with its null fields removed.
