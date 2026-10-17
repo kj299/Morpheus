@@ -41,7 +41,10 @@ from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
+from morpheus.utils.determinism_envelope import COLD_START
+from morpheus.utils.stage_checkpoint import CheckpointDirectory
 from morpheus.utils.stage_checkpoint import restore_stages
+from morpheus.utils.stage_checkpoint import snapshot_digest
 from morpheus.utils.stage_checkpoint import snapshot_stages
 from morpheus.utils.stage_checkpoint import suspend_end_of_stream
 from morpheus.utils.tracker_state import from_bytes
@@ -49,6 +52,12 @@ from morpheus.utils.tracker_state import to_bytes
 
 _ACTIVE: list = []
 """Non-empty while `stop_and_resume()` is in effect. Holds the per-run record the context returns."""
+
+_PERSISTED: list = []
+"""Non-empty while `persisted()` is in effect: what the previous process left, and what this one will leave."""
+
+PERSISTED_FORMAT = 1
+"""Version of the checkpoint a composition writes: one stage snapshot per linear segment, in the order run."""
 
 
 class ResumeRecord:
@@ -75,6 +84,59 @@ def stop_and_resume() -> typing.Iterator[ResumeRecord]:
         yield record
     finally:
         _ACTIVE.pop()
+
+
+class PersistRecord:
+    """A composition's checkpoint across processes: the one restored from, and the segments this run snapshots."""
+
+    def __init__(self, previous: typing.Optional[dict], final: bool = False):
+        self.previous = previous
+        """The checkpoint the last process wrote, or `None` on a cold start."""
+
+        self.final = final
+        """Whether this run reaches the end of the data, so open windows and bindings are flushed, not kept."""
+
+        self.resumed_from = COLD_START if previous is None else snapshot_digest(previous)
+        """What every row scored in this process carries as `resumed_from_state`."""
+
+        self.segments: list = []
+        """One stage snapshot per linear segment run, in order."""
+
+    def restore(self, stages: list) -> None:
+        """Hand the next segment its predecessor's memory, if the previous process ran that far."""
+        position = len(self.segments)
+
+        if (self.previous is not None and position < len(self.previous["segments"])):
+            restore_stages(stages, self.previous["segments"][position])
+
+
+@contextlib.contextmanager
+def persisted(directory: str, final: bool = False) -> typing.Iterator[PersistRecord]:
+    """
+    Within this block, every `ResumableLinearPipeline.run()` restores its stages from the last checkpoint in
+    `directory`, stops without flushing, and contributes its snapshot to the checkpoint written when the block ends.
+
+    The segments of a composition are matched by the order they run in, and each segment's stages by position and
+    class, so a checkpoint written by one composition refuses to restore into another. A block that raises writes
+    nothing, so the previous checkpoint stays the latest. With `final`, the run is the last over its data: open
+    windows are sealed and open bindings drained as a replay would, and the checkpoint is not written.
+    """
+    store = CheckpointDirectory(directory)
+    record = PersistRecord(store.latest(), final=final)
+    _PERSISTED.append(record)
+
+    try:
+        yield record
+    finally:
+        _PERSISTED.pop()
+
+    if (not final):
+        store.write({"format": PERSISTED_FORMAT, "resumed_from": record.resumed_from, "segments": record.segments})
+
+
+def resumed_from() -> str:
+    """The digest of the checkpoint this process resumed from, or `COLD_START`; what the envelope stamps."""
+    return _PERSISTED[-1].resumed_from if len(_PERSISTED) > 0 else COLD_START
 
 
 def _split(frames: list, at_row: int) -> tuple[list, list]:
@@ -115,6 +177,13 @@ class ResumableLinearPipeline(LinearPipeline):
         self._resume_config = c
         self._pristine: list = []
 
+    def _run_persisted(self, record: PersistRecord):
+        middle = self._linear_stages[1:-1]
+        record.restore(middle)
+        suspend_end_of_stream(middle, suspended=not record.final)
+        super().run()
+        record.segments.append(snapshot_stages(middle))
+
     def add_stage(self, stage):  # pylint: disable=arguments-differ
         if (len(_ACTIVE) > 0 and not isinstance(stage, InMemorySinkStage)):
             # Copied before it is added, so the copy has never been wired, built or shown a row.
@@ -123,6 +192,9 @@ class ResumableLinearPipeline(LinearPipeline):
         return super().add_stage(stage)
 
     def run(self):
+        if (len(_ACTIVE) == 0 and len(_PERSISTED) > 0):
+            return self._run_persisted(_PERSISTED[-1])
+
         if (len(_ACTIVE) == 0):
             return super().run()
 

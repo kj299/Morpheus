@@ -52,6 +52,7 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.media_type import category
 from morpheus.utils.media_type import crosses_category
+from morpheus.utils.media_type import normalize
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,8 @@ class TC6ContentStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
                 # A row where something was declared or detected and the map could not place it. A row carrying
                 # neither type is not a gap in the map, it is a record this rule does not apply to.
-                present = declared_values[position] is not None or detected_values[position] is not None
+                present = (normalize(declared_values[position]) is not None
+                           or normalize(detected_values[position]) is not None)
                 unclassified.append(present and verdict is None)
 
             assign_str_column(df, DECLARED_CATEGORY, declared)

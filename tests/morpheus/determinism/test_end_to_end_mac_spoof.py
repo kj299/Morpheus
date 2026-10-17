@@ -188,3 +188,36 @@ def test_every_record_carries_what_the_alert_shows(notables: list):
                 continue
 
             assert field in record, f"{field} is on the alert and absent from the record"
+
+
+def test_under_the_example_policy_the_spoof_still_fires_and_no_mac_is_plaintext(tmp_path):
+    # Minimization runs after the binding stage has keyed on the plaintext address, so the rule still fires on the
+    # one conflict; what reaches the SIEM names the device and the port only by digest.
+    output = tmp_path / "notables.jsonlines"
+    env = dict(os.environ, MORPHEUS_MINIMIZATION_KEY="an-estate-key-of-sufficient-length")
+    completed = subprocess.run([
+        sys.executable,
+        RUNNER,
+        "--source",
+        SOURCE,
+        "--output",
+        str(output),
+        "--policy",
+        os.path.join(EXAMPLE, "minimization_policy.example.yaml")
+    ],
+                               capture_output=True,
+                               text=True,
+                               check=False,
+                               timeout=600,
+                               cwd=REPO_ROOT,
+                               env=env)
+
+    assert completed.returncode == 0, completed.stderr[-4000:]
+
+    records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines() if line.strip()]
+    macs = {json.loads(line)["mac_address"].lower() for line in _read_lines(SOURCE)}
+    text = output.read_text(encoding="utf-8").lower()
+
+    assert len(records) == 6
+    assert len([record for record in records if _fires(record)]) == 1
+    assert sorted(mac for mac in macs if mac in text) == []

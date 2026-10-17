@@ -59,6 +59,10 @@ NOT_STATE = {
     "TC2AuthStage": {
         "_warned_portwise": WARN_ONCE
     },
+    "SiemWireSinkStage": {
+        "_written": "a count of the records this process wrote, which the runner reports; a resumed process starts "
+                    "its own count, and the file it appends to already holds the earlier records"
+    },
     "TC0EnrichStage": {
         "_store": "the store sorts a fact's versions on first read and caches that; the store itself is a "
                   "constructor argument, rebuilt from the same context source on restart",

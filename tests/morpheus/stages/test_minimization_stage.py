@@ -225,3 +225,16 @@ def test_an_empty_batch_passes_through(config: Config):
     MinimizationStage(config, drop=["source_ip"]).on_data(meta)
 
     assert meta.count == 0
+
+
+@pytest.mark.cpu_mode
+def test_a_gap_in_a_digested_column_is_not_a_copy_of_a_gap_in_a_kept_one(config: Config):
+    # pandas spells a gap NaN, and NaN is one object it hands out again and again, so a NaN in the digested
+    # principal matched a NaN in a kept personal column and the check refused a policy over nothing.
+    payload = authentications()
+    payload["user_principal"] = ["alice@example.com", float("nan"), "alice@example.com"]
+    payload["source_ip"] = ["203.0.113.5", float("nan"), "198.51.100.7"]
+
+    result = run(config, payload, pseudonymize=ALL_NAMES, key=KEY)
+
+    assert "alice@example.com" not in list(result["user_principal"])

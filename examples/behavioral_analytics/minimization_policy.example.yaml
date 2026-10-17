@@ -1,0 +1,39 @@
+# An estate's first minimization policy, as `segment_runner.py --policy` and `run_mac_spoof.py --policy` apply it.
+#
+# MinimizationStage applies it immediately before the wire, after every feature has been computed, and refuses a
+# batch in which a kept personal column still holds a value a pseudonymized one held. Every segment's runner passes
+# that check under this policy, and tests/morpheus/determinism/test_segment_runners.py asserts no principal from
+# the inputs survives in plaintext anywhere in the output.
+#
+# How it was arrived at, by running a smaller one and reading the refusals and the output:
+#
+#   identifies, addresses   the categories in morpheus.utils.personal_data that name a person or their device. An
+#                           802.1X MAC-bypass identity is the device's MAC, so the two travel together.
+#   chain_anchor            copied from whichever candidate a chain was rooted on.
+#   entity_key              a SaaS or sign-in row's entity is the principal itself. On layers 1 and 2 it is a
+#                           port, and digesting it means digesting the port keys beside it, below.
+#   origin_hash             a flow's origin carries its addresses and ports.
+#   model_version           each principal has a model of their own, and its version names them.
+#   *_port_key, link_key    copies of a layer 1 or 2 entity key.
+#
+# What it costs: a digested key joins only to lookups digested under the same key. The binding lookups the app
+# refreshes from these records stay consistent, because they are built from the same digests; a lookup the estate
+# supplies keyed on plaintext (port_designations, vlan_designations) has to be digested the same way before it
+# joins. What it is not: anonymization. The pseudonyms are stable, the estate holds the key, and the binding lookups
+# exist to turn an address back into a person.
+
+key_env: MORPHEUS_MINIMIZATION_KEY
+
+pseudonymize:
+  - identifies
+  - addresses
+  - chain_anchor
+  - entity_key
+  - origin_hash
+  - model_version
+  - resolved_port_key
+  - port_key
+  - auth_port_key
+  - link_key
+
+drop: []

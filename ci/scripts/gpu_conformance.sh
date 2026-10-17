@@ -85,6 +85,7 @@ TARGETS=(
     tests/morpheus/stages/test_lineage_stamp_stage.py
     tests/morpheus/stages/test_minimization_stage.py
     tests/morpheus/stages/test_pipeline_health_stage.py
+    tests/morpheus/stages/test_siem_wire_sink_stage.py
     tests/morpheus/stages/test_siem_wire_stage.py
     tests/morpheus/stages/test_tc1_binding_stage.py
     tests/morpheus/stages/test_tc1_change_stage.py
@@ -145,6 +146,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_readme_inventory.py
     tests/morpheus/determinism/test_representation_invariance.py
     tests/morpheus/determinism/test_search_head_run.py
+    tests/morpheus/determinism/test_segment_runners.py
     tests/morpheus/determinism/test_splunk_validation_package.py
     tests/morpheus/determinism/test_stage_parameter_liveness.py
     tests/morpheus/determinism/test_upstream_reuse.py
