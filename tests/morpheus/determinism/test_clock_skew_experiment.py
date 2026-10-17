@@ -459,6 +459,23 @@ def test_credential_replay_first_breaks_by_losing_its_attacker(experiment):
     assert baseline == {(campaign_pipeline.QUIN, )}
 
 
+@pytest.mark.slow
+@pytest.mark.cpu_mode
+def test_the_physical_chain_holds_at_the_widest_spread_swept(experiment):
+    # R-C-003's port event and its new vendor come through one poller, the one at the middle of the campaign's
+    # eleven clocks, so no collector spread pulls them apart; the flow that completes it has four hours to land and
+    # the lease it resolves through moves the other way. Three hours of spread, the most the ladder reaches, leaves it
+    # accusing its attacker and nothing else.
+    import campaign_pipeline  # pylint: disable=import-outside-toplevel
+
+    corpus = campaign_pipeline.build_corpus()
+    widest = max(experiment.CHAIN_MAGNITUDES_NS) / experiment.SECOND_NS
+
+    assert widest == 10800
+    assert _chains_at(experiment, corpus, widest)["R-C-003"] == {("hq:hq-sw1:Gi1/0/41", "b8:27:eb:3c:00:41")}
+    assert campaign_pipeline.PORT_POLLER == "hq-mac", "the port polls share the MAC table's poller and its clock"
+
+
 # --- The corrected curve and the exporter axis --------------------------------------------------------------------
 
 

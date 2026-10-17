@@ -24,7 +24,7 @@ R-B-L7-007,R-B-L7-007 - Service reached by new clients,service_key,1h,none
 R-B-L7-008,R-B-L7-008 - Domain generation,src_ip,1h,none
 R-C-001,R-C-001 - Lateral movement chain,"src_ip,user_principal,target",3h,none
 R-C-002,R-C-002 - TLS anomaly precedes beaconing,"src_ip,dst_ip",3h,none
-R-C-003,R-C-003 - Physical compromise chain,"port_key,mac_address",4h,none
+R-C-003,R-C-003 - Physical compromise chain,"port_key,mac_address",5h,none
 R-C-004,R-C-004 - Staged exfiltration,"user_principal,src_ip",12h,none
 R-C-005,R-C-005 - Credential replay across the stack,"user_principal,event_uid",24h,none
 R-D-L1-001,R-D-L1-001 - Transceiver substitution,"entity_key,transceiver_serial",1h,none
