@@ -65,6 +65,7 @@ from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.siem_wire_sink_stage import SiemWireSinkStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
+from morpheus.stages.telemetry.flow_record_normalize_stage import FlowRecordNormalizeStage
 from morpheus.stages.telemetry.tc0_application_stage import TC0ApplicationStage
 from morpheus.stages.telemetry.tc0_asset_stage import TC0AssetStage
 from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
@@ -1108,6 +1109,26 @@ def envelopes() -> dict:
 def _ingest_after(seconds: int) -> typing.Callable:
     """A replay's ingest clock: every record reaches the pipeline `seconds` after the sensor saw it."""
     return lambda observed: [None if value is None else int(value) + seconds * SECOND for value in observed]
+
+
+def ipfix_records() -> dict:
+    """Three flow records as the IPFIX decoder reads them, from two exporters, one with no BGP route."""
+    return {
+        "flowStartMilliseconds": [1000, 2000, 3000],
+        "sourceIPv4Address": ["10.0.0.1", "10.0.0.2", "10.0.0.3"],
+        "sourceTransportPort": [49152, 49153, 49154],
+        "destinationIPv4Address": ["10.0.1.1", "10.0.1.2", "10.0.1.3"],
+        "destinationTransportPort": [443, 53, 0],
+        "protocolIdentifier": [6, 17, 1],
+        "minimumTTL": [64, 64, 128],
+        "octetDeltaCount": [100, 74, 84],
+        "reverseOctetDeltaCount": [2000, 180, 0],
+        "bgpDestinationAsNumber": [64500, 0, 64512],
+        "exporter_address": ["192.0.2.11", "192.0.2.11", "192.0.2.12"],
+        "observation_domain_id": [256, 256, 512],
+        "export_time": [1, 2, 3],
+        "received_ns": [1 * SECOND, 2 * SECOND, 3 * SECOND],
+    }
 
 
 def sequences() -> dict:
@@ -2197,6 +2218,24 @@ REGISTRY: dict = {
                 Knob("time_unit", DIFFERS, benign="ns", extreme="ms"),
                 Knob("ingest_clock", DIFFERS, benign=_ingest_after(1), extreme=_ingest_after(5)),
                 Knob("on_quarantine", DIFFERS, benign=None, extreme=[].append),
+            ),
+        ),
+    "FlowRecordNormalizeStage":
+        Scenario(
+            stage=FlowRecordNormalizeStage,
+            frame=ipfix_records,
+            base={
+                "collector_id": "netflow-01", "tenant_id": "corp"
+            },
+            knobs=(
+                Knob("collector_id", DIFFERS, benign="netflow-01", extreme="netflow-02"),
+                Knob("tenant_id", DIFFERS, benign="corp", extreme="labs"),
+                Knob("schema_version", DIFFERS, benign="tc3.v1", extreme="tc3.v2"),
+                Knob("clock_source", DIFFERS, benign="ntp_disciplined", extreme="unsynchronized"),
+                Knob("clock_offset_ms", DIFFERS, benign=17.0, extreme=-3.0),
+                Knob("sampling_policy", DIFFERS, benign="full", extreme="1:100"),
+                Knob("exporter_names", DIFFERS, benign={"192.0.2.11": "rtr-access-1"}, extreme={}),
+                Knob("first_seq", DIFFERS, benign=0, extreme=10),
             ),
         ),
     "CollectorSequenceStage":

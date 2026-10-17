@@ -222,3 +222,6 @@ examples/behavioral_analytics/notables.jsonlines
 
 # The fork CPU workflow installs its environment from this explicit package list; it is source, not a build product.
 !ci/scripts/cpu_env/linux-64-cpu.lock
+
+# Real-format collector fixtures: Zeek writes its logs as *.log, and the round-trip test reads these.
+!examples/behavioral_analytics/fixtures/*/*.log
