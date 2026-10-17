@@ -1157,6 +1157,7 @@ def wire() -> dict:
         "determinism_tier": ["D1", "D1"],
         "pipeline_fingerprint": ["f1", "f1"],
         "config_hash": ["c1", "c1"],
+        "resumed_from_state": ["cold-start", "cold-start"],
         "port_key": ["hq:sw1:Gi1/0/1"] * 2,
         "macs_per_port": [1, 2],
         "macs_per_port_saturated": [False, False],
@@ -2557,7 +2558,9 @@ def _stage_classes_on_disk() -> set:
             if (FORK_HEADER not in text[:2000]):
                 continue
 
-            found.update(re.findall(r"^class (\w+)\(.*(?:Stage|Mixin).*\):", text, re.MULTILINE))
+            # A stage names a stage base. Matching any mixin would also find a tracker defined beside its stage,
+            # such as `RebootCounter(StateMixin)`, which has state and no parameters of a stage's.
+            found.update(re.findall(r"^class (\w+)\(.*Stage.*\):", text, re.MULTILINE))
 
     return found
 

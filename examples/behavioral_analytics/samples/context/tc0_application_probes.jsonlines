@@ -1,0 +1,5 @@
+{"probe_id": "ledger-api-day3", "dst_ip": "10.0.2.51", "dst_port": 443, "event_time": 302400000000000, "tenant_id": "corp"}
+{"probe_id": "unmapped-server", "dst_ip": "10.0.2.99", "dst_port": 443, "event_time": 302400000000000, "tenant_id": "corp"}
+{"probe_id": "billing-before-reassignment", "dst_ip": "10.0.2.50", "dst_port": 8443, "event_time": 475200000000000, "tenant_id": "corp"}
+{"probe_id": "billing-port-unrecorded-reassignment", "dst_ip": "10.0.2.50", "dst_port": 8443, "event_time": 820800000000000, "tenant_id": "corp"}
+{"probe_id": "billing-port-after-recording", "dst_ip": "10.0.2.50", "dst_port": 8443, "event_time": 1080000000000000, "tenant_id": "corp"}

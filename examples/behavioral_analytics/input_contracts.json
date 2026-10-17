@@ -1,0 +1,1729 @@
+{
+  "format": 1,
+  "envelope": [
+    {
+      "name": "event_time",
+      "type": "integer",
+      "unit": "ns since the Unix epoch",
+      "source": "When the device or `service` observed it",
+      "notes": "Not when the collector ran and not when the record was indexed. `A` device that cannot report its own observation time sends the poll time and says so in `schema_version`."
+    },
+    {
+      "name": "observed_time",
+      "type": "integer",
+      "unit": "ns since the Unix epoch",
+      "source": "When the collector received or read the record",
+      "notes": "The gap from `event_time` is the collection lag the health searches measure."
+    },
+    {
+      "name": "collector_id",
+      "type": "string",
+      "unit": "",
+      "source": "The collector's own stable identity",
+      "notes": "Must survive a restart; a collector that renames itself renames every record it has produced."
+    },
+    {
+      "name": "collector_seq",
+      "type": "integer",
+      "unit": "count",
+      "source": "Strictly increasing per `collector_id`",
+      "notes": "Ties are an envelope violation and `TotalOrderStage` refuses them; a gap is a record that was never delivered, which `CollectorSequenceStage` counts."
+    },
+    {
+      "name": "schema_version",
+      "type": "string",
+      "unit": "",
+      "source": "The collector's own contract version",
+      "notes": "For example tc3.v1."
+    },
+    {
+      "name": "origin_hash",
+      "type": "string",
+      "unit": "",
+      "source": "What identifies the record at its source",
+      "notes": "Anything stable the source gives: a flow tuple and its start, a log record's own identifier. Hashed with the three fields above into `lineage_id`."
+    },
+    {
+      "name": "clock_source",
+      "type": "string",
+      "unit": "",
+      "source": "How the device's clock is disciplined",
+      "notes": "One of `ntp_disciplined`, `ptp`, `gps`, `unsynchronized`. An unsynchronized clock is quarantined."
+    },
+    {
+      "name": "clock_offset_ms",
+      "type": "float",
+      "unit": "ms",
+      "source": "The device's last measured offset from its reference",
+      "notes": "Integers are accepted. Beyond a second either way the record is quarantined."
+    },
+    {
+      "name": "sampling_policy",
+      "type": "string",
+      "unit": "",
+      "source": "Whether every record is sent",
+      "notes": "`full`, or the sampling the exporter applies, for example 1:100. `A` count from a sampled feed is not comparable with one from a `full` feed."
+    },
+    {
+      "name": "tenant_id",
+      "type": "string",
+      "unit": "",
+      "source": "The collector's own configuration",
+      "notes": "The logical scope every health and platform search groups by."
+    }
+  ],
+  "classes": {
+    "tc0_application": {
+      "layer": 0,
+      "title": "Application inventory (TC-0)",
+      "home": "context",
+      "envelope": false,
+      "description": "One record per change to what an application is: its address and port, who owns it and how much it matters. Read by `TC0ApplicationStage` into the bitemporal context store.",
+      "columns": [
+        {
+          "name": "source_seq",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "The inventory's own change sequence",
+          "notes": "Orders two changes recorded at one instant."
+        },
+        {
+          "name": "server_address",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB or `service` catalogue",
+          "notes": "The address the application listens on."
+        },
+        {
+          "name": "server_port",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "CMDB or `service` catalogue",
+          "notes": ""
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB or `service` catalogue",
+          "notes": "The application's name, which `ctx_application_name` carries."
+        },
+        {
+          "name": "owning_team",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB",
+          "notes": ""
+        },
+        {
+          "name": "service_account",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB or directory",
+          "notes": "The account the application runs as."
+        },
+        {
+          "name": "criticality",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB",
+          "notes": "low, medium, high or critical."
+        },
+        {
+          "name": "data_classification",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB or data catalogue",
+          "notes": ""
+        },
+        {
+          "name": "valid_from",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the fact became true",
+          "notes": "Valid time, which may be before it was recorded."
+        },
+        {
+          "name": "valid_to",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the fact stopped being true",
+          "notes": "Null while it still holds."
+        },
+        {
+          "name": "recorded_at",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the inventory recorded the change",
+          "notes": "Known time. `A` correction recorded later does not rewrite what was known before it."
+        },
+        {
+          "name": "change",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The inventory's change type",
+          "notes": "`assert` or `retract`."
+        },
+        {
+          "name": "tenant_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The inventory's own configuration",
+          "notes": ""
+        }
+      ]
+    },
+    "tc0_asset": {
+      "layer": 0,
+      "title": "Asset inventory (TC-0)",
+      "home": "context",
+      "envelope": false,
+      "description": "One record per change to what a machine is. Read by `TC0AssetStage` into the bitemporal context store, keyed on the normalized `hostname`.",
+      "columns": [
+        {
+          "name": "source_seq",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "The inventory's own change sequence",
+          "notes": ""
+        },
+        {
+          "name": "hostname",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB or EDR inventory",
+          "notes": "Case-folded and stripped of the domain downstream, as `normalize_hostname` does."
+        },
+        {
+          "name": "owner",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB",
+          "notes": "`A` principal, in the form identity records use."
+        },
+        {
+          "name": "owning_team",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB",
+          "notes": ""
+        },
+        {
+          "name": "criticality",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB",
+          "notes": ""
+        },
+        {
+          "name": "data_classification",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB or data catalogue",
+          "notes": ""
+        },
+        {
+          "name": "peer_group",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB",
+          "notes": "The group a host is compared with."
+        },
+        {
+          "name": "device_role",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "CMDB or EDR",
+          "notes": "`workstation`, `server`, `dns_server`, `dhcp_server` among others; R-B-L3-006 reads `workstation`."
+        },
+        {
+          "name": "os_family",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "EDR inventory",
+          "notes": "R-B-L4-004 compares a host's TCP stack with it."
+        },
+        {
+          "name": "os_version",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "EDR inventory",
+          "notes": ""
+        },
+        {
+          "name": "valid_from",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the fact became true",
+          "notes": ""
+        },
+        {
+          "name": "valid_to",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the fact stopped being true",
+          "notes": "Null while it still holds."
+        },
+        {
+          "name": "recorded_at",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the inventory recorded the change",
+          "notes": ""
+        },
+        {
+          "name": "change",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The inventory's change type",
+          "notes": "`assert` or `retract`."
+        },
+        {
+          "name": "tenant_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The inventory's own configuration",
+          "notes": ""
+        }
+      ]
+    },
+    "tc0_identity": {
+      "layer": 0,
+      "title": "Identity directory (TC-0)",
+      "home": "context",
+      "envelope": false,
+      "description": "One record per change to a principal: department, manager, employment status, account type, privilege and group membership. Read by `TC0IdentityStage`; the layer 5 searches read what it held at the time of each sign-in.",
+      "columns": [
+        {
+          "name": "source_seq",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "The directory's change sequence (`usnChanged`, or the HR system's own)",
+          "notes": ""
+        },
+        {
+          "name": "user_principal",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`userPrincipalName`",
+          "notes": "Lower case; the same form sign-in records carry."
+        },
+        {
+          "name": "department",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "department",
+          "notes": "Null on a record that changes only another attribute."
+        },
+        {
+          "name": "manager",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "manager, resolved to a principal",
+          "notes": "Null on a record that changes only another attribute."
+        },
+        {
+          "name": "employment_status",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "HR system",
+          "notes": "active, leave or terminated. Null on a record that changes only another attribute."
+        },
+        {
+          "name": "account_type",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "Directory or HR system",
+          "notes": "`human` or `service`; R-B-L5-005 excludes `service` accounts."
+        },
+        {
+          "name": "privilege_level",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "PAM or directory group",
+          "notes": ""
+        },
+        {
+          "name": "group_name",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`memberOf`, one group per record",
+          "notes": "`A` membership is a fact of its own with its own valid interval."
+        },
+        {
+          "name": "valid_from",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the fact became true",
+          "notes": ""
+        },
+        {
+          "name": "valid_to",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the fact stopped being true",
+          "notes": "Null while it still holds."
+        },
+        {
+          "name": "recorded_at",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the directory recorded the change",
+          "notes": "Null only on a record whose known time is its valid time."
+        },
+        {
+          "name": "change",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The directory's change type",
+          "notes": "`assert` or `retract`."
+        },
+        {
+          "name": "tenant_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The directory's own configuration",
+          "notes": ""
+        }
+      ]
+    },
+    "tc1": {
+      "layer": 1,
+      "title": "Interface poll (TC-1)",
+      "home": "telemetry",
+      "envelope": true,
+      "description": "One record per port per poll, with the raw counters as the device reports them. `TC1NormalizeStage` differences the counters itself, so a collector sends totals and `sysUpTime`, never deltas.",
+      "columns": [
+        {
+          "name": "site_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The collector's inventory",
+          "notes": "The first component of every entity key; it must not vary between polls."
+        },
+        {
+          "name": "device_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`sysName` (`1.3.6.1.2.1.1.5`)",
+          "notes": "The same value layer 2 sends as `switch_id`."
+        },
+        {
+          "name": "port_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`ifName` (`1.3.6.1.2.1.31.1.1.1.1`)",
+          "notes": "The interface name, not the `ifIndex`."
+        },
+        {
+          "name": "uptime",
+          "type": "integer",
+          "unit": "centiseconds",
+          "required": true,
+          "source": "`sysUpTime` (`1.3.6.1.2.1.1.3`)",
+          "notes": "`TimeTicks`; a fall is a restart, which tells a counter wrap from a reboot."
+        },
+        {
+          "name": "if_last_change",
+          "type": "integer",
+          "unit": "centiseconds",
+          "required": true,
+          "source": "`ifLastChange` (`1.3.6.1.2.1.2.2.1.9`)",
+          "notes": "Measured on the same clock as uptime; a flap between polls moves it."
+        },
+        {
+          "name": "oper_status",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`ifOperStatus` (`1.3.6.1.2.1.2.2.1.8`)",
+          "notes": "`up` or `down`."
+        },
+        {
+          "name": "link_speed_bps",
+          "type": "integer",
+          "unit": "bits/s",
+          "required": true,
+          "source": "`ifHighSpeed` (`1.3.6.1.2.1.31.1.1.1.15`) times 1,000,000",
+          "notes": "Utilization is measured against it."
+        },
+        {
+          "name": "optical_tx_dbm",
+          "type": "float",
+          "unit": "dBm",
+          "required": true,
+          "source": "ENTITY-SENSOR-MIB or the vendor DOM table",
+          "notes": "Null on a copper port."
+        },
+        {
+          "name": "optical_rx_dbm",
+          "type": "float",
+          "unit": "dBm",
+          "required": true,
+          "source": "ENTITY-SENSOR-MIB or the vendor DOM table",
+          "notes": "`A` one to three `dB` step with transmit steady is the tap R-D-L1-002 reads."
+        },
+        {
+          "name": "transceiver_serial",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`entPhysicalSerialNum` (`1.3.6.1.2.1.47.1.1.1.1.11`)",
+          "notes": "R-D-L1-001 reads a change."
+        },
+        {
+          "name": "transceiver_type",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`entPhysicalModelName` or the vendor DOM table",
+          "notes": "Selects the receive floor R-P-L1-004 forecasts against."
+        },
+        {
+          "name": "lldp_neighbor_chassis_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`lldpRemChassisId` (`1.0.8802.1.1.2.1.4.1.1.5`)",
+          "notes": "Null where no neighbour speaks LLDP."
+        },
+        {
+          "name": "lldp_neighbor_port_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`lldpRemPortId` (`1.0.8802.1.1.2.1.4.1.1.7`)",
+          "notes": "Null where no neighbour speaks LLDP."
+        },
+        {
+          "name": "crc_errors",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "`dot3StatsFCSErrors` (`1.3.6.1.2.1.10.7.2.1.3`)",
+          "notes": "`A` 32-bit total; the stage handles the wrap."
+        },
+        {
+          "name": "symbol_errors",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "`dot3StatsSymbolErrors` (`1.3.6.1.2.1.10.7.2.1.18`)",
+          "notes": "`A` 32-bit total."
+        },
+        {
+          "name": "input_discards",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "`ifInDiscards` (`1.3.6.1.2.1.2.2.1.13`)",
+          "notes": ""
+        },
+        {
+          "name": "output_discards",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "`ifOutDiscards` (`1.3.6.1.2.1.2.2.1.19`)",
+          "notes": ""
+        },
+        {
+          "name": "if_hc_in_octets",
+          "type": "integer",
+          "unit": "octets",
+          "required": true,
+          "source": "`ifHCInOctets` (`1.3.6.1.2.1.31.1.1.1.6`)",
+          "notes": "The 64-bit counter, not `ifInOctets`."
+        },
+        {
+          "name": "if_hc_out_octets",
+          "type": "integer",
+          "unit": "octets",
+          "required": true,
+          "source": "`ifHCOutOctets` (`1.3.6.1.2.1.31.1.1.1.10`)",
+          "notes": "The 64-bit counter, not `ifOutOctets`."
+        }
+      ]
+    },
+    "tc1_device": {
+      "layer": 1,
+      "title": "Device poll (TC-1)",
+      "home": "telemetry",
+      "envelope": true,
+      "description": "One record per switch or router per poll: the device's own behaviour rather than any port's. Read by `TC1DeviceStage`.",
+      "columns": [
+        {
+          "name": "site_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The collector's inventory",
+          "notes": ""
+        },
+        {
+          "name": "device_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`sysName` (`1.3.6.1.2.1.1.5`)",
+          "notes": ""
+        },
+        {
+          "name": "sys_uptime",
+          "type": "integer",
+          "unit": "centiseconds",
+          "required": true,
+          "source": "`sysUpTime` (`1.3.6.1.2.1.1.3`)",
+          "notes": "`A` fall is a restart."
+        },
+        {
+          "name": "running_config_hash",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`A` digest of the running configuration the collector fetches",
+          "notes": "Any stable digest; only a change matters. R-D-L1-008 reads a change outside the change window."
+        },
+        {
+          "name": "cpu_util",
+          "type": "float",
+          "unit": "fraction 0 to 1",
+          "required": true,
+          "source": "HOST-RESOURCES-MIB `hrProcessorLoad` or the vendor CPU table, divided by 100",
+          "notes": ""
+        },
+        {
+          "name": "mem_util",
+          "type": "float",
+          "unit": "fraction 0 to 1",
+          "required": true,
+          "source": "HOST-RESOURCES-MIB `hrStorage` or the vendor memory table",
+          "notes": ""
+        },
+        {
+          "name": "route_count",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "`inetCidrRouteNumber` (`1.3.6.1.2.1.4.24.6`)",
+          "notes": "Its change between polls is `route_count_delta`."
+        },
+        {
+          "name": "bgp_peer_count",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "BGP4-MIB `bgpPeerState` counted where established",
+          "notes": "Zero on a device that runs no BGP."
+        },
+        {
+          "name": "syslog_rate",
+          "type": "float",
+          "unit": "messages per second",
+          "required": true,
+          "source": "The collector's count of the device's `syslog` over the poll interval",
+          "notes": ""
+        }
+      ]
+    },
+    "tc2_arp": {
+      "layer": 2,
+      "title": "ARP observation (TC-2)",
+      "home": "telemetry",
+      "envelope": true,
+      "description": "One record per ARP packet a sensor saw. Read by `TC2ArpStage`, which counts gratuitous replies and the MACs claiming one address.",
+      "columns": [
+        {
+          "name": "arp_sender_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "ARP sender protocol address (Zeek arp.log `orig_spa`)",
+          "notes": ""
+        },
+        {
+          "name": "arp_sender_mac",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "ARP sender hardware address (`orig_sha`)",
+          "notes": "Lower case, colon separated."
+        },
+        {
+          "name": "arp_target_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "ARP target protocol address (`resp_spa`)",
+          "notes": "Equal to the sender's on a gratuitous `reply`."
+        },
+        {
+          "name": "arp_operation",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "ARP opcode",
+          "notes": "`request` or `reply`."
+        }
+      ]
+    },
+    "tc2_auth": {
+      "layer": 2,
+      "title": "802.1X exchange (TC-2)",
+      "home": "telemetry",
+      "envelope": true,
+      "description": "One record per step of an 802.1X exchange on a port. Read by `TC2AuthStage`, which pairs the start with the outcome and measures how long it took.",
+      "columns": [
+        {
+          "name": "site_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The collector's inventory",
+          "notes": ""
+        },
+        {
+          "name": "switch_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "RADIUS NAS-Identifier, mapped to `sysName`",
+          "notes": "The same value layer 1 sends as `device_id`."
+        },
+        {
+          "name": "port_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "RADIUS NAS-Port-Id",
+          "notes": "The interface name."
+        },
+        {
+          "name": "mac_address",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "RADIUS Calling-Station-Id",
+          "notes": "Lower case, colon separated."
+        },
+        {
+          "name": "dot1x_identity",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "RADIUS User-Name",
+          "notes": ""
+        },
+        {
+          "name": "dot1x_result",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "Access-Request, Access-Accept or Access-Reject",
+          "notes": "`started`, `success` or `failure`."
+        }
+      ]
+    },
+    "tc2_mac": {
+      "layer": 2,
+      "title": "MAC address table (TC-2)",
+      "home": "telemetry",
+      "envelope": true,
+      "description": "One record per (address, port) entry in one snapshot. Send the whole table each poll, not the delta: a binding closes because an address was seen elsewhere, and one that silently drops out of a delta feed looks the same as one that never moved.",
+      "columns": [
+        {
+          "name": "mac_address",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`dot1dTpFdbAddress` (`1.3.6.1.2.1.17.4.3.1.1`)",
+          "notes": "Lower case, colon separated."
+        },
+        {
+          "name": "site_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The collector's inventory",
+          "notes": "The device does not know its site."
+        },
+        {
+          "name": "switch_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`sysName` (`1.3.6.1.2.1.1.5`)",
+          "notes": "The same value layer 1 sends as `device_id`."
+        },
+        {
+          "name": "port_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`dot1dBasePortIfIndex` mapped to `ifName`",
+          "notes": "The interface name, not the bridge port number; a bridge port number joins to nothing layer 1 emits."
+        },
+        {
+          "name": "vlan_id",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "`dot1qVlanFdbId`",
+          "notes": "Send a number."
+        },
+        {
+          "name": "mac_action",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "`A` MAC-move or MAC-notification trap, where the switch sends one",
+          "notes": "`removed` on an explicit removal, null in a snapshot. With it, a binding's end is observed rather than inferred."
+        }
+      ]
+    },
+    "tc3": {
+      "layer": 3,
+      "title": "Flow record (TC-3)",
+      "home": "network",
+      "envelope": true,
+      "description": "One record per flow as an exporter reports it. Read by the TC-3 stages, which measure fan-out, fan-in, reach, beaconing and TTL per host.",
+      "columns": [
+        {
+          "name": "src_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "IPFIX `sourceIPv4Address` (8) or `sourceIPv6Address` (27)",
+          "notes": ""
+        },
+        {
+          "name": "src_port",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "IPFIX `sourceTransportPort` (7)",
+          "notes": ""
+        },
+        {
+          "name": "dst_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "IPFIX `destinationIPv4Address` (12) or `destinationIPv6Address` (28)",
+          "notes": ""
+        },
+        {
+          "name": "dst_port",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "IPFIX `destinationTransportPort` (11)",
+          "notes": ""
+        },
+        {
+          "name": "protocol",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "IPFIX `protocolIdentifier` (4), named",
+          "notes": "`tcp`, `udp` or `icmp`."
+        },
+        {
+          "name": "ip_ttl",
+          "type": "integer",
+          "unit": "hops",
+          "required": true,
+          "source": "IPFIX `minimumTTL` (52)",
+          "notes": "`TC3TtlStage` compares it with the source's established value."
+        },
+        {
+          "name": "bytes_out",
+          "type": "integer",
+          "unit": "bytes",
+          "required": true,
+          "source": "IPFIX `octetDeltaCount` (1) in the initiator's direction",
+          "notes": "An exporter that reports both directions gives both; one that reports a direction per record needs the reverse record paired."
+        },
+        {
+          "name": "bytes_in",
+          "type": "integer",
+          "unit": "bytes",
+          "required": true,
+          "source": "IPFIX reverse `octetDeltaCount`",
+          "notes": ""
+        },
+        {
+          "name": "bgp_as_dst",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "IPFIX `bgpDestinationAsNumber` (17)",
+          "notes": "Null where the exporter has no BGP view."
+        },
+        {
+          "name": "exporter_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The exporter's address and IPFIX `observationDomainId`",
+          "notes": "Two domains on one router are two exporters."
+        }
+      ]
+    },
+    "tc3_dhcp": {
+      "layer": 3,
+      "title": "DHCP acknowledgement (TC-3)",
+      "home": "network",
+      "envelope": true,
+      "description": "One record per DHCP message a `server` logged. `TC2BindingStage` closes them into leases, which name the interface behind every address the flows, packets and handshakes come from.",
+      "columns": [
+        {
+          "name": "ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "DHCPACK `yiaddr`",
+          "notes": ""
+        },
+        {
+          "name": "mac",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "DHCPACK `chaddr`",
+          "notes": "Lower case, colon separated."
+        },
+        {
+          "name": "dhcp_message",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The message type",
+          "notes": "`ack` or `release`."
+        },
+        {
+          "name": "lease_seconds",
+          "type": "integer",
+          "unit": "seconds",
+          "required": true,
+          "source": "Option 51, the lease time",
+          "notes": "The term the `server` granted, which ends the lease if no renewal follows."
+        },
+        {
+          "name": "switch_id",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "Option 82 remote-id, mapped to `sysName`",
+          "notes": "Where the relay inserts it; the layer 2 rung of R-C-005 resolves through it."
+        },
+        {
+          "name": "port_id",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "Option 82 circuit-id, mapped to `ifName`",
+          "notes": ""
+        }
+      ]
+    },
+    "tc4": {
+      "layer": 4,
+      "title": "Packet (TC-4)",
+      "home": "transport",
+      "envelope": true,
+      "description": "One record per packet, from a capture point. `TC4FlowStage` rolls them into the thirteen per-flow features the shipped abp-pcap model reads, and `TC4EnvelopeStage` measures each conversation's transfer against its own history.",
+      "columns": [
+        {
+          "name": "src_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "IP source address",
+          "notes": ""
+        },
+        {
+          "name": "src_port",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "TCP or UDP source port",
+          "notes": ""
+        },
+        {
+          "name": "dst_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "IP destination address",
+          "notes": ""
+        },
+        {
+          "name": "dst_port",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "TCP or UDP destination port",
+          "notes": ""
+        },
+        {
+          "name": "protocol",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "IP protocol, named",
+          "notes": ""
+        },
+        {
+          "name": "tcp_flags",
+          "type": "integer",
+          "unit": "bit field",
+          "required": true,
+          "source": "The TCP flags byte",
+          "notes": "FIN 1, SYN 2, RST 4, PSH 8, ACK 16."
+        },
+        {
+          "name": "data_len",
+          "type": "integer",
+          "unit": "bytes",
+          "required": true,
+          "source": "Payload length",
+          "notes": ""
+        },
+        {
+          "name": "tcp_options_order",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "The `SYN` packet's TCP options, in order",
+          "notes": "Comma separated, for example mss,nop,ws,nop,nop,sok. Present on `SYN` packets only; R-B-L4-004 reads the stack it names."
+        },
+        {
+          "name": "tcp_mss",
+          "type": "integer",
+          "unit": "bytes",
+          "required": false,
+          "source": "The `SYN` packet's MSS option",
+          "notes": "Null except on a `SYN`."
+        },
+        {
+          "name": "tcp_window_initial",
+          "type": "integer",
+          "unit": "bytes",
+          "required": false,
+          "source": "The `SYN` packet's window",
+          "notes": "Null except on a `SYN`."
+        }
+      ]
+    },
+    "tc5_auth": {
+      "layer": 5,
+      "title": "Authentication (TC-5)",
+      "home": "session",
+      "envelope": true,
+      "description": "One record per sign-in attempt at an identity provider or a domain controller. Read by the TC-5 stages; the field names follow the Azure sign-in mapping Part 0's Pass 4 adopted.",
+      "columns": [
+        {
+          "name": "user_principal",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`userPrincipalName`",
+          "notes": "Lower case."
+        },
+        {
+          "name": "source_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`ipAddress`",
+          "notes": ""
+        },
+        {
+          "name": "app",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`appDisplayName`",
+          "notes": ""
+        },
+        {
+          "name": "auth_result",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`status.errorCode`, named",
+          "notes": "`success` or `failure`."
+        },
+        {
+          "name": "target_host",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "`A` domain controller's target computer (4624 `WorkstationName` or the Kerberos `service` host)",
+          "notes": "Present on an on-premises sign-in; R-C-005 reads it."
+        },
+        {
+          "name": "source_country",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "`location.countryOrRegion`",
+          "notes": "ISO 3166 alpha-2, lower case."
+        },
+        {
+          "name": "source_region",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "location.state",
+          "notes": ""
+        },
+        {
+          "name": "source_city",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "location.city",
+          "notes": ""
+        },
+        {
+          "name": "source_latitude",
+          "type": "float",
+          "unit": "degrees",
+          "required": false,
+          "source": "`location.geoCoordinates.latitude`",
+          "notes": "Implied travel speed is measured from it."
+        },
+        {
+          "name": "source_longitude",
+          "type": "float",
+          "unit": "degrees",
+          "required": false,
+          "source": "`location.geoCoordinates.longitude`",
+          "notes": ""
+        },
+        {
+          "name": "source_asn",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "The address's autonomous system, from an enrichment the collector applies",
+          "notes": "For example as5089."
+        },
+        {
+          "name": "device_id",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "`deviceDetail.deviceId`",
+          "notes": ""
+        },
+        {
+          "name": "mfa_used",
+          "type": "boolean",
+          "unit": "",
+          "required": false,
+          "source": "`authenticationRequirement` is `multiFactorAuthentication`",
+          "notes": ""
+        },
+        {
+          "name": "mfa_result",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "`mfaDetail` and status, named",
+          "notes": "`approved` or `denied`; null where no second factor was asked for."
+        },
+        {
+          "name": "token_type",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "`tokenIssuerType` or the grant",
+          "notes": "`bearer`, `refresh` among others."
+        }
+      ]
+    },
+    "tc5_session": {
+      "layer": 5,
+      "title": "Session (TC-5)",
+      "home": "session",
+      "envelope": true,
+      "description": "One record per session start or end, or one per session where the provider writes a single `summary` record. `TC5SessionStage` pairs them under any of six vocabularies.",
+      "columns": [
+        {
+          "name": "user_principal",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The account the session belongs to",
+          "notes": ""
+        },
+        {
+          "name": "session_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The provider's session identifier (`TargetLogonId` on Windows)",
+          "notes": "What pairs the start with the end."
+        },
+        {
+          "name": "session_action",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The record's type",
+          "notes": "start/end, logon/logoff, login/logout, open/close, begin/finish, created/terminated, or `summary`."
+        },
+        {
+          "name": "source_ip",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "The address the session was opened from",
+          "notes": ""
+        },
+        {
+          "name": "session_start",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": false,
+          "source": "`A` `summary` record's own start",
+          "notes": "Only on a single-record session; null otherwise."
+        },
+        {
+          "name": "session_end",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": false,
+          "source": "`A` `summary` record's own end",
+          "notes": "Only on a single-record session; null otherwise."
+        }
+      ]
+    },
+    "tc6": {
+      "layer": 6,
+      "title": "TLS handshake (TC-6)",
+      "home": "presentation",
+      "envelope": true,
+      "description": "One record per handshake, with the server's certificate. Read by the TC-6 stages: client fingerprint novelty, certificate issuer novelty, cipher downgrade and declared-against-detected content.",
+      "columns": [
+        {
+          "name": "src_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "Zeek ssl.log `id.orig_h`",
+          "notes": ""
+        },
+        {
+          "name": "src_port",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "`id.orig_p`",
+          "notes": ""
+        },
+        {
+          "name": "dst_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`id.resp_h`",
+          "notes": ""
+        },
+        {
+          "name": "dst_port",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "`id.resp_p`",
+          "notes": ""
+        },
+        {
+          "name": "sni",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "ssl.log `server_name`",
+          "notes": "Null where the client sent none."
+        },
+        {
+          "name": "protocol",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The transport",
+          "notes": "`tcp`, or `udp` for QUIC."
+        },
+        {
+          "name": "tls_version",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "ssl.log version",
+          "notes": "For example TLSv1.3."
+        },
+        {
+          "name": "ja4_client",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The JA4 fingerprint (the Zeek JA4 package's ja4)",
+          "notes": ""
+        },
+        {
+          "name": "certificate_issuer",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "x509.log certificate.issuer of the leaf",
+          "notes": ""
+        },
+        {
+          "name": "certificate_fingerprint_sha256",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "x509.log fingerprint of the leaf",
+          "notes": ""
+        },
+        {
+          "name": "cipher_suite",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "ssl.log cipher",
+          "notes": "The IANA name."
+        },
+        {
+          "name": "validation_result",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "ssl.log `validation_status`",
+          "notes": "`ok`, or the `failure`; self signed certificate is what R-D-L6-003 reads."
+        },
+        {
+          "name": "certificate_not_before",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "x509.log `certificate.not_valid_before`",
+          "notes": ""
+        },
+        {
+          "name": "certificate_not_after",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "x509.log `certificate.not_valid_after`",
+          "notes": ""
+        },
+        {
+          "name": "content_type_declared",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The Content-Type an inspecting proxy saw declared",
+          "notes": "Null without inspection."
+        },
+        {
+          "name": "content_type_detected",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The type the proxy detected from the bytes (Zeek files.log `mime_type`)",
+          "notes": "Null without inspection; R-D-L6-005 reads a mismatch."
+        }
+      ]
+    },
+    "tc7_dns": {
+      "layer": 7,
+      "title": "DNS query (TC-7)",
+      "home": "application",
+      "envelope": true,
+      "description": "One record per query a resolver answered. Read by `TC7DnsStage`, which measures subdomain entropy and breadth per registered domain and `NXDOMAIN` ratios per client.",
+      "columns": [
+        {
+          "name": "src_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "Zeek dns.log `id.orig_h`, or the BIND query log client",
+          "notes": ""
+        },
+        {
+          "name": "query_name",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "dns.log query",
+          "notes": "As asked; the registered domain is found downstream from the Public Suffix List."
+        },
+        {
+          "name": "query_type",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "dns.log `qtype_name`",
+          "notes": "`A`, `AAAA`, `TXT` among others."
+        },
+        {
+          "name": "response_code",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "dns.log `rcode_name`",
+          "notes": "`NOERROR`, `NXDOMAIN` among others."
+        }
+      ]
+    },
+    "tc7_endpoint": {
+      "layer": 7,
+      "title": "Process start (TC-7)",
+      "home": "endpoint",
+      "envelope": true,
+      "description": "One record per process creation an EDR agent or the Windows System Monitor reported. Read by `TC7EndpointStage`, which keeps each host's parent-to-child pairs.",
+      "columns": [
+        {
+          "name": "hostname",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "System Monitor event 1 Computer",
+          "notes": "Case-folded and stripped of the domain downstream."
+        },
+        {
+          "name": "parent_image_path",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "System Monitor event 1 `ParentImage`",
+          "notes": ""
+        },
+        {
+          "name": "image_path",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "System Monitor event 1 Image",
+          "notes": ""
+        },
+        {
+          "name": "integrity_level",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "System Monitor event 1 `IntegrityLevel`",
+          "notes": "Null where the agent does not report one."
+        },
+        {
+          "name": "signature_status",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The image's signature check (System Monitor event 7 `SignatureStatus`, or the EDR agent's)",
+          "notes": ""
+        },
+        {
+          "name": "process_guid",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "System Monitor event 1 `ProcessGuid`",
+          "notes": ""
+        },
+        {
+          "name": "parent_process_guid",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "System Monitor event 1 `ParentProcessGuid`",
+          "notes": ""
+        },
+        {
+          "name": "command_line_hash",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "`A` digest of System Monitor event 1 `CommandLine`",
+          "notes": "The digest, not the line: a command line carries credentials often enough that it should not travel."
+        }
+      ]
+    },
+    "tc7_host_inventory": {
+      "layer": 7,
+      "title": "Host inventory report (TC-7)",
+      "home": "network",
+      "envelope": true,
+      "description": "One record per interface an EDR agent reports for its machine, renewed on a schedule. `TC2BindingStage` closes them into which machine each interface belonged to and when.",
+      "columns": [
+        {
+          "name": "mac",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The agent's interface inventory",
+          "notes": "Lower case, colon separated."
+        },
+        {
+          "name": "hostname",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The agent's machine name",
+          "notes": ""
+        },
+        {
+          "name": "report_valid_seconds",
+          "type": "integer",
+          "unit": "seconds",
+          "required": true,
+          "source": "How long the agent's report stands",
+          "notes": "The term a report grants, which ends the binding if no renewal follows."
+        }
+      ]
+    },
+    "tc7_http": {
+      "layer": 7,
+      "title": "HTTP request (TC-7)",
+      "home": "application",
+      "envelope": true,
+      "description": "One record per `request` a proxy or sensor saw. Read by `TC7HttpStage`, which measures each client's distinct paths and error ratio against its own history and parses the user agent.",
+      "columns": [
+        {
+          "name": "src_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "Zeek http.log `id.orig_h`, or the Squid client address",
+          "notes": ""
+        },
+        {
+          "name": "dst_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`id.resp_h`",
+          "notes": ""
+        },
+        {
+          "name": "dst_port",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "`id.resp_p`",
+          "notes": ""
+        },
+        {
+          "name": "http_method",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "http.log method",
+          "notes": ""
+        },
+        {
+          "name": "url_path",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "http.log `uri`, without the query string",
+          "notes": ""
+        },
+        {
+          "name": "status_code",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "http.log `status_code`",
+          "notes": ""
+        },
+        {
+          "name": "user_agent",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "http.log `user_agent`",
+          "notes": ""
+        }
+      ]
+    },
+    "tc7_saas": {
+      "layer": 7,
+      "title": "SaaS audit operation (TC-7)",
+      "home": "saas",
+      "envelope": true,
+      "description": "One record per operation a `SaaS` audit log recorded. Read by `TC7SaasStage`, which measures each principal's records per operation against its own history.",
+      "columns": [
+        {
+          "name": "user_principal",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "M365 `UnifiedAuditLog` `UserId`",
+          "notes": "Lower case."
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "Operation",
+          "notes": ""
+        },
+        {
+          "name": "target_object",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`ObjectId`",
+          "notes": ""
+        },
+        {
+          "name": "target_object_type",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`ItemType`, or the workload's object type",
+          "notes": ""
+        },
+        {
+          "name": "record_count",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "The number of records the operation touched",
+          "notes": "Where the workload reports it; R-B-L7-002 measures it."
+        },
+        {
+          "name": "result",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`ResultStatus`",
+          "notes": "`success` or `failure`."
+        },
+        {
+          "name": "client_app",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "`ClientInfoString` or the workload's client",
+          "notes": ""
+        },
+        {
+          "name": "source_ip",
+          "type": "string",
+          "unit": "",
+          "required": false,
+          "source": "`ClientIP`",
+          "notes": ""
+        }
+      ]
+    },
+    "tc7_service": {
+      "layer": 7,
+      "title": "Service connection (TC-7)",
+      "home": "application",
+      "envelope": true,
+      "description": "One record per connection a load balancer or sensor saw to a `service`. Read by `TC7ServiceStage`, which keys a `service` on its name and port and measures its clients against its own busiest day.",
+      "columns": [
+        {
+          "name": "src_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The client address",
+          "notes": ""
+        },
+        {
+          "name": "dst_ip",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The `service` address",
+          "notes": ""
+        },
+        {
+          "name": "dst_port",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "The `service` port",
+          "notes": ""
+        },
+        {
+          "name": "sni",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The TLS `server` name",
+          "notes": "Null where the client sent none; the `service` is then keyed on its address."
+        },
+        {
+          "name": "bytes_total",
+          "type": "integer",
+          "unit": "bytes",
+          "required": true,
+          "source": "Bytes in both directions",
+          "notes": ""
+        },
+        {
+          "name": "ja4_client",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The client's JA4 fingerprint",
+          "notes": ""
+        }
+      ]
+    }
+  }
+}

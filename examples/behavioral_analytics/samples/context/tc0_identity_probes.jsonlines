@@ -1,0 +1,11 @@
+{"probe_id": "alice-day3", "user_principal": "alice@example.com", "event_time": 302400000000000, "tenant_id": "corp"}
+{"probe_id": "reporter-service-account", "user_principal": "svc-reports@example.com", "event_time": 302400000000000, "tenant_id": "corp"}
+{"probe_id": "bob-before-move", "user_principal": "bob@example.com", "event_time": 475200000000000, "tenant_id": "corp"}
+{"probe_id": "carol-before-correction", "user_principal": "carol@example.com", "event_time": 475200000000000, "tenant_id": "corp"}
+{"probe_id": "mallory-unknown", "user_principal": "mallory@example.com", "event_time": 475200000000000, "tenant_id": "corp"}
+{"probe_id": "bob-after-move", "user_principal": "bob@example.com", "event_time": 1080000000000000, "tenant_id": "corp"}
+{"probe_id": "dave-unreported-leaver", "user_principal": "dave@example.com", "event_time": 1252800000000000, "tenant_id": "corp"}
+{"probe_id": "erin-before-snapshot", "user_principal": "erin@example.com", "event_time": 1252800000000000, "tenant_id": "corp"}
+{"probe_id": "erin-after-snapshot", "user_principal": "erin@example.com", "event_time": 1425600000000000, "tenant_id": "corp"}
+{"probe_id": "dave-reported-leaver", "user_principal": "dave@example.com", "event_time": 1684800000000000, "tenant_id": "corp"}
+{"probe_id": "carol-after-correction", "user_principal": "carol@example.com", "event_time": 1944000000000000, "tenant_id": "corp"}
