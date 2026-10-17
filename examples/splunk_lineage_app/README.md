@@ -24,7 +24,7 @@ installation and the knobs that must match the Morpheus pipeline.
 
 The app is configuration, not code: indexes, sourcetypes, KV Store binding lookups, and scheduled
 searches. It assumes a Morpheus pipeline is publishing scored events, lineage edges, and bucketed
-binding rows as described in the guide, typically through Splunk Connect for Kafka.
+binding rows as described in the guide, through the Kafka connector or the forwarder inputs under `transport/`.
 
 ## Contents
 
@@ -39,6 +39,8 @@ binding rows as described in the guide, typically through Splunk Connect for Kaf
 | `lookups/vlan_designations.csv` | Search heads | The estate's VLANs by the prefix each one routes, `site_id,vlan_id,role,subnet`, matched as a CIDR on `subnet`; R-C-003 reads it to name the management VLAN a flow reached. Ships header-only; populate it from the IP address plan |
 | `lookups/principal_directory.csv` | Search heads | The estate's directory: which 802.1X identity each principal presents, `user_principal,dot1x_identity,valid_from,valid_until`. Ships header-only; it is the first rung from a person to a port and no telemetry this app reads supplies it |
 | `lookups/rule_metadata.csv` | Search heads | One row per detection: `rule_id,saved_search,suppress_fields,suppress_period,hysteresis`. The stanzas' `alert.suppress.*` keys are held to it by a test; `hysteresis` is `none` for every rule until a model scores near a threshold |
+| `transport/kafka-connect-splunk.json` | The Kafka Connect worker | A Splunk Connect for Kafka sink over one topic per produced sourcetype, each mapped to its sourcetype and index, posted to the HTTP Event Collector's raw endpoint so the stanzas above set `_time`. Rendered from `morpheus.utils.siem_sourcetypes` by `transport/make_transport.py`; `transport/README.md` explains each setting |
+| `transport/inputs.conf` | Indexers (the token) or the universal forwarder on the runners' host (the monitors) | The HEC token stanza the connector posts to, allowing exactly the seven indexes, and one monitor per sourcetype over the files the segment runners write |
 | `lookups/scanner_allowlist.csv` | Search heads | The estate's own scanners, which R-B-L3-001 excludes: `src_ip,allowed,owner,note`. Ships header-only; until it is populated the rule fires on every scanner, authorized ones included |
 
 ## Installation
@@ -63,6 +65,24 @@ $SPLUNK_HOME/bin/splunk btool indexes list behavior_events --debug
 $SPLUNK_HOME/bin/splunk btool props list morpheus:score:l3 --debug
 $SPLUNK_HOME/bin/splunk btool savedsearches list "Chain assembly - cross-layer risk" --debug
 ```
+
+## Getting the records in
+
+The pipeline side ends in `SiemWireSinkStage`, which writes each sourcetype to a Kafka topic named after it
+(`morpheus.score.l3` for `morpheus:score:l3`) or to a file (`morpheus_score_l3.jsonlines`). `transport/` holds
+the configuration for the rest of the way, and its [README](transport/README.md) says when to use which:
+
+- **Kafka**, the recommended path: apply `transport/kafka-connect-splunk.json` to a Kafka Connect worker running
+  Splunk Connect for Kafka, and enable the token in `transport/inputs.conf` on the indexers it posts to. The
+  connector uses the raw endpoint, so the `props.conf` stanzas above are what set `_time`; the event endpoint
+  would stamp the Kafka record's time instead.
+- **Files and a universal forwarder**: run the segments with `--output` under `/var/spool/morpheus/<segment>/`
+  and deploy the monitor stanzas in `transport/inputs.conf` to the forwarder.
+
+Both are rendered from the sourcetype inventory the pipeline writes from, and
+`tests/morpheus/utils/test_splunk_transport.py` holds them to it, to the stanzas and indexes in this app and to
+the index each saved search reads a sourcetype from. Neither has been run against a live connector or
+forwarder; the search-head run under `validate/` indexes the sample events directly.
 
 ## Settings that must match the pipeline
 

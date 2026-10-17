@@ -39,6 +39,169 @@ checkpoint, and the two runs together write what one does; the other segments re
 bindings their own run closes, where a deployment keeps those bindings in lookups on the SIEM instead. Under the
 example policy no principal from the inputs appears in any segment's output.
 
+## From the `morpheus` command line
+
+Every one of the fifty-six stages is a `morpheus run pipeline-other` command, and
+`tests/morpheus/stages/test_lineage_stage_cli.py` builds each command and holds the compositions below to the
+CLI. The runners are the complete form: four stages take Python objects the command line cannot carry --
+`determinism-stamp` the envelope, `tc0-enrich` a context store, `binding-resolve` a binding table and `tc5-score`
+a model -- and `from-file` reads with the default parser rather than the runners' type-preserving one. What the
+CLI composes is therefore each segment's feature stages over its sample, without provenance, context or model
+columns, anchored on the record's own key where a binding lookup would have resolved a host; `siem-wire` is told
+not to require the columns the omitted stages would have written. An argument the CLI ignores (`floors`,
+`key_columns`, a store) keeps its Python default.
+
+Layer 1, from the telemetry segment:
+
+```bash
+morpheus run --use_cpu_only pipeline-other \
+  from-file --filename samples/telemetry/tc1.jsonlines \
+  lineage-stamp --id_columns collector_id --id_columns schema_version --id_columns origin_hash --id_columns collector_seq \
+  total-order collector-sequence \
+  tc1-normalize --uptime_column uptime --uptime_unit cs \
+  tc1-rate --bucket_seconds 300 --min_buckets 6 \
+  tc1-optical tc1-forecast \
+  tc1-flap --last_change_column if_last_change --last_change_unit cs \
+  tc1-change \
+  chain-anchor --candidates entity_key \
+  envelope-stamp --osi_layer 1 --entity_columns site_id --entity_columns device_id --entity_columns port_id \
+  window-seal --period_seconds 300 --lateness_seconds 900 --order_columns event_time --order_columns collector_id --order_columns collector_seq --entity_key_column chain_anchor \
+  siem-wire --sourcetype morpheus:score:l1 --require_columns False \
+  to-siem-wire --filename out/morpheus_score_l1.jsonlines
+```
+
+Layer 3, the network segment:
+
+```bash
+morpheus run --use_cpu_only pipeline-other \
+  from-file --filename samples/network/tc3.jsonlines \
+  lineage-stamp --id_columns collector_id --id_columns schema_version --id_columns origin_hash --id_columns collector_seq \
+  total-order collector-sequence \
+  community-id --dst_ip_column dst_ip --dst_port_column dst_port \
+  tc3-cardinality --window_seconds 3600 \
+  tc3-reach --window_seconds 3600 \
+  tc3-baseline --bucket_seconds 3600 --min_buckets 24 \
+  tc3-beacon --window_seconds 14400 --min_intervals 12 \
+  tc3-ttl --window_seconds 14400 --min_samples 5 \
+  chain-anchor --candidates src_ip \
+  envelope-stamp --osi_layer 3 --entity_columns src_ip \
+  window-seal --period_seconds 3600 --lateness_seconds 900 --order_columns event_time --order_columns collector_id --order_columns collector_seq --entity_key_column chain_anchor \
+  siem-wire --sourcetype morpheus:score:l3 --require_columns False \
+  to-siem-wire --filename out/morpheus_score_l3.jsonlines
+```
+
+Layer 4, the transport segment:
+
+```bash
+morpheus run --use_cpu_only pipeline-other \
+  from-file --filename samples/transport/tc4.jsonlines \
+  lineage-stamp --id_columns collector_id --id_columns schema_version --id_columns origin_hash --id_columns collector_seq \
+  total-order collector-sequence \
+  tc4-flow --bin_seconds 60 \
+  tc4-envelope --window_seconds 28800 \
+  community-id --dst_ip_column dst_ip --dst_port_column dst_port \
+  chain-anchor --candidates flow_id \
+  envelope-stamp --osi_layer 4 --entity_columns flow_id \
+  window-seal --period_seconds 3600 --lateness_seconds 900 --order_columns event_time --order_columns collector_id --order_columns collector_seq --entity_key_column chain_anchor \
+  siem-wire --sourcetype morpheus:score:l4 --require_columns False \
+  to-siem-wire --filename out/morpheus_score_l4.jsonlines
+```
+
+Layer 5, the authentication class of the session segment. The daily seal and the drift stage behind it read the
+model's score, so they go with `tc5-score`:
+
+```bash
+morpheus run --use_cpu_only pipeline-other \
+  from-file --filename samples/session/tc5_auth.jsonlines \
+  lineage-stamp --id_columns collector_id --id_columns schema_version --id_columns origin_hash --id_columns collector_seq \
+  total-order collector-sequence \
+  tc5-novelty \
+  tc5-cadence --min_samples 6 \
+  tc5-travel --excluded_source_networks 198.51.100.0/24 \
+  tc5-risk --min_denominator 1 \
+  envelope-stamp --osi_layer 5 --entity_columns user_principal \
+  window-seal --period_seconds 3600 --lateness_seconds 900 --order_columns event_time --order_columns collector_id --order_columns collector_seq --entity_key_column user_principal \
+  siem-wire --sourcetype morpheus:score:l5 --require_columns False \
+  to-siem-wire --filename out/morpheus_score_l5.jsonlines
+```
+
+Layer 6, the presentation segment:
+
+```bash
+morpheus run --use_cpu_only pipeline-other \
+  from-file --filename samples/presentation/tc6.jsonlines \
+  lineage-stamp --id_columns collector_id --id_columns schema_version --id_columns origin_hash --id_columns collector_seq \
+  total-order collector-sequence \
+  community-id --dst_ip_column dst_ip --dst_port_column dst_port \
+  tc6-fingerprint \
+  tc6-certificate --min_samples 5 \
+  tc6-cipher --min_samples 5 \
+  tc6-content \
+  chain-anchor --candidates src_ip \
+  envelope-stamp --osi_layer 6 --entity_columns src_ip \
+  window-seal --period_seconds 3600 --lateness_seconds 900 --order_columns event_time --order_columns collector_id --order_columns collector_seq --entity_key_column chain_anchor \
+  siem-wire --sourcetype morpheus:score:l6 --require_columns False \
+  to-siem-wire --filename out/morpheus_score_l6.jsonlines
+```
+
+Layer 7, the DNS class of the application segment:
+
+```bash
+morpheus run --use_cpu_only pipeline-other \
+  from-file --filename samples/application/tc7_dns.jsonlines \
+  lineage-stamp --id_columns collector_id --id_columns schema_version --id_columns origin_hash --id_columns collector_seq \
+  total-order collector-sequence \
+  tc7-dns \
+  chain-anchor --candidates src_ip \
+  envelope-stamp --osi_layer 7 --entity_columns src_ip \
+  window-seal --period_seconds 3600 --lateness_seconds 900 --order_columns event_time --order_columns collector_id --order_columns collector_seq --entity_key_column chain_anchor \
+  siem-wire --sourcetype morpheus:score:l7 --require_columns False \
+  to-siem-wire --filename out/morpheus_score_l7.jsonlines
+```
+
+Layer 7, the SaaS segment, with its weekly seal and the breadth trajectory over it:
+
+```bash
+morpheus run --use_cpu_only pipeline-other \
+  from-file --filename samples/saas/tc7_saas.jsonlines \
+  lineage-stamp --id_columns collector_id --id_columns schema_version --id_columns origin_hash --id_columns collector_seq \
+  total-order collector-sequence \
+  tc7-saas \
+  envelope-stamp --osi_layer 7 --entity_columns user_principal \
+  window-seal --period_seconds 3600 --lateness_seconds 900 --order_columns event_time --order_columns collector_id --order_columns collector_seq --entity_key_column entity_key \
+  window-seal --period_seconds 604800 --lateness_seconds 900 --epoch 1970-01-05 --order_columns event_time --order_columns collector_id --order_columns collector_seq --column_prefix week_ \
+  tc5-drift --score_column saas_object_types_in_week --window_column week_window_id --aggregate max \
+  siem-wire --sourcetype morpheus:score:l7 --require_columns False \
+  to-siem-wire --filename out/morpheus_score_l7.jsonlines
+```
+
+Layer 7, the endpoint segment:
+
+```bash
+morpheus run --use_cpu_only pipeline-other \
+  from-file --filename samples/endpoint/tc7_endpoint.jsonlines \
+  lineage-stamp --id_columns collector_id --id_columns schema_version --id_columns origin_hash --id_columns collector_seq \
+  total-order collector-sequence \
+  tc7-endpoint --window_days 30 --warmup_days 7 \
+  envelope-stamp --osi_layer 7 --entity_columns hostname \
+  window-seal --period_seconds 3600 --lateness_seconds 900 --order_columns event_time --order_columns collector_id --order_columns collector_seq --entity_key_column entity_key \
+  siem-wire --sourcetype morpheus:score:l7 --require_columns False \
+  to-siem-wire --filename out/morpheus_score_l7.jsonlines
+```
+
+The identity class of the context segment, which is a store rather than a stream and is not sealed:
+
+```bash
+morpheus run --use_cpu_only pipeline-other \
+  from-file --filename samples/context/tc0_identity.jsonlines \
+  tc0-identity \
+  siem-wire --sourcetype context:identity --require_columns False \
+  to-siem-wire --filename out/context_identity.jsonlines
+```
+
+The test parses every block above into a pipeline, so a renamed option fails it, and runs the last one, so the
+command line is shown to produce records and not only to parse.
+
 # R-D-L2-004, end to end
 
 One command turns a MAC address table into the records the shipped Splunk detection reads:
