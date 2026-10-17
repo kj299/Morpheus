@@ -49,7 +49,7 @@ for row.
 
 ## The result
 
-All fifty-two shipped detections are swept, each over the pipeline that feeds it, through
+All fifty-five shipped detections are swept, each over the pipeline that feeds it, through
 [`rules.py`](./rules.py), which reduces every rule to what it accuses and reads every threshold, join tolerance
 and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hundred, one second, ten, thirty and
 sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
@@ -109,12 +109,23 @@ on the machine both resolve to, so it reads the DHCP server's and the inventory 
 does. The claims come from the application corpus as recorded, and the transport sweep moves the stacks against
 them.
 
-What a sweep can say depends on the clocks in the corpus, and the fifty-two fall into three groups that must
+It was run again on 2026-10-17 after step 15 (#65) made the switch and the router entities and gave R-C-003 a
+chain to find. The device polls come from the poller that polls the ports, and the campaign's headquarters port
+polls from the poller that walks the same switch's MAC table, so no corpus gained a clock: the estate keeps its six
+and the campaign its eleven, and every edge measured before is the edge it was. R-D-L1-008 and R-P-L1-009 are
+unchanged to a minute on collector clocks; the switch-clock sweep moves the port and MAC records by the switch that
+made them and leaves the devices' own polls on the poller's clock, so it says nothing about them. R-C-003 is
+unchanged at every spread swept, to three hours. Its first two steps, the port's link event and the vendor new to it,
+come through one poller and cannot be pulled apart by a collector spread; the poller sits at the middle of the
+eleven clocks; and the flow that completes the chain lands thirteen minutes after the first step, inside a four-hour
+window and a lease whose clock moves the other way by less than the lease has left to run.
+
+What a sweep can say depends on the clocks in the corpus, and the fifty-five fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
-| Inputs on clocks that disagree | 30 | A tolerance, or the spread at which the rule changes |
+| Inputs on clocks that disagree | 33 | A tolerance, or the spread at which the rule changes |
 | Inputs on one clock, in a corpus with several | 20 | Boundary sensitivity under a uniform shift, not a tolerance |
 | Corpus with one clock | 2 | Nothing; reported as not measured |
 
@@ -127,6 +138,7 @@ it gates on, as R-B-L4-004 reads the transport corpus's through the machine it j
 | Rule | Breaking spread |
 | --- | --- |
 | R-D-L1-001, 002, 003 and 006, R-B-L1-005 and 007, R-P-L1-004, R-D-L2-001, 003 and 005, R-B-L2-002, 006, 007 and 008 | unchanged to 60s on collectors and on switches |
+| R-D-L1-008, configuration change outside the window, and R-P-L1-009, reboot-rate trajectory | unchanged to 60s on collectors; the devices' polls are on no switch clock |
 | **R-D-L2-004, MAC in two places** | unchanged to 60s on collectors; **changes at 60s on switches** |
 | R-B-L7-004, process ancestry novelty | unchanged to 60s on host clocks |
 | R-B-L3-001, 002, 004, 006 and 007, R-D-L3-003 and 008 | unchanged to 60s on router clocks |
@@ -136,6 +148,7 @@ it gates on, as R-B-L4-004 reads the transport corpus's through the machine it j
 | **R-C-002, TLS anomaly precedes beaconing** | **1400s**, gaining a control |
 | **R-C-004, staged exfiltration** | **4000s**, gaining a control |
 | **R-C-005, credential replay** | **7201s**, losing its attacker |
+| R-C-003, physical compromise chain | unchanged to 10800s, the widest swept |
 
 **On one clock in a corpus with several.** The session corpus has three collectors, but every authentication
 comes through the identity provider, so for the eight sign-in rules -- R-D-L5-003, 004, 007, 008 and 009,
@@ -257,13 +270,13 @@ more than one collector:
 
 | Corpus | Uncorrected | Quarantine on |
 | --- | --- | --- |
-| Estate, layers 1 and 2 | No rule changes to 60s | No change to 1s; at 10s four of the six collectors are held whole -- 2040 records, all but the MAC table's and the RADIUS server's -- and the eight rules reading them lose all eleven accusations; at 30s all six are held and all fifteen rules lose all twenty-six |
+| Estate, layers 1 and 2 | No rule changes to 60s | No change to 1s; at 10s four of the six collectors are held whole -- 2345 records, all but the MAC table's and the RADIUS server's -- and the ten rules reading them lose all thirteen accusations; at 30s all six are held and all seventeen rules lose all twenty-eight |
 | Session, layer 5 | No rule changes to 60s, on the hour marks or off | No change to 1s; at 10s the identity provider and the RADIUS accounting feed are held and all nine rules lose all twenty-two accusations |
 | Network, layer 3 | No rule changes to 60s | No change to 1s; at 10s the flow collector and the DHCP server are held -- 1335 records, all but the inventory feed's at the middle of the spread -- and all eight rules lose all twenty-seven accusations |
 | Transport, layer 4 | No rule changes to 60s | No change to 1s; at 10s the packet sensor and the DHCP server are held, 483 records, and all four rules lose all five accusations |
 | Presentation, layer 6 | No rule changes to 60s | No change to 1s; at 10s the inspection point and the DHCP server are held, 151 records, and all five rules lose all seven accusations |
 | Application | No rule changes to 60s | No change to 1s; at 10s every collector but the load balancer, at the middle of the spread, is held -- 4803 records -- and the three rules reading the resolver and the proxy lose all four accusations, while R-B-L7-007 keeps its one |
-| Campaign, the chains | No change below 800s; past it three chains **gain** a control and R-C-005 loses its attacker | No change to 1s; from 10s every collector but the HQ MAC table is held and all four chains lose their attackers |
+| Campaign, the chains | No change below 800s; past it three chains **gain** a control and R-C-005 loses its attacker | No change to 1s; from 10s every collector but the HQ MAC table is held and all five chains lose their attackers |
 
 Two things are worth reading off it. Inside the bound, quarantine costs nothing: at a second's spread every clock
 is within half a second of true and nothing but the DMZ poller is held, in any corpus. And beyond it, quarantine
