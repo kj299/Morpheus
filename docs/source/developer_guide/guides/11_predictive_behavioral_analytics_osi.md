@@ -56,7 +56,7 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), feature stages for every telemetry class from TC-0 to TC-7, the layer 5
-scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's six
+scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's seven
 checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
 request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the card has not yet seen the trees steps 9 and 10 built.
@@ -99,7 +99,7 @@ acceleration, the length of the rising run and its total rise in the principal's
 -- against those learned scores. The scores are not calibrated, which is the first thing the model rules
 taught: a feature the fortnight never varied scores any change in the thousands. Hosts have no model yet. Given no score column at all it carries a null in every drift column and says so once in the log.
 Everything else at this layer is built: the session assembly and the six feature stages run under
-control 13's six checks against a week-long corpus, the five deterministic rules and R-B-L5-005's
+control 13's seven checks against a week-long corpus, the five deterministic rules and R-B-L5-005's
 per-principal session-duration baseline ship as saved searches with their predicates asserted against that
 corpus, and `morpheus:score:l5` is a produced sourcetype.
 Controls 1, 2, 4 and 12 now ship as code, ahead of the model
@@ -3670,10 +3670,14 @@ Determinism claims decay silently. Enforce them:
 6. **Permutation test.** Shuffle the input order within a window and assert identical output. This is
    the direct test for control 8, and it is the one that catches an accidentally-removed sort long after
    the fact.
+7. **Stop and resume.** Stop the pipeline halfway through the corpus, keep every stage's state as a snapshot,
+   start fresh stages from the snapshot alone, finish, and assert the uninterrupted golden. The cross-restart
+   diff is a statement about replay; a deployment does not replay, it stops and carries on, and every
+   per-entity baseline it has built lives in the stages.
 
 Run 1 and 2 on every commit; run the rest nightly.
 
-All six checks ship, implemented against the twelve composed pipelines in
+All seven checks ship, implemented against the twelve composed pipelines in
 `tests/morpheus/determinism/`, with the comparison half factored into
 {py:mod}`~morpheus.utils.determinism` for reuse against any pipeline: `canonicalize` reduces output to
 a normal form in which two deterministic runs compare equal, `diff_frames` explains the first
@@ -3687,9 +3691,25 @@ golden output is a checked-in CSV regenerated deliberately, never silently, via
 fresh interpreters with two different `PYTHONHASHSEED` values, which is the variation an in-process
 double run cannot see.
 
-##### Two checks the six do not make
+Check 7 is `tests/morpheus/determinism/test_stop_and_resume.py`. Every tracker under `morpheus.utils` carries
+`to_state` and `from_state` from {py:mod}`~morpheus.utils.tracker_state`, which encodes what the tracker holds as
+plain JSON types with its entity order kept, so two snapshots of the same history are byte-identical whatever the
+hash seed; every stage that remembers lists the attributes that are its memory and gains `checkpoint_state` and
+`restore_state` from {py:class}`~morpheus.pipeline.checkpoint_mixin.CheckpointMixin`; and
+{py:mod}`~morpheus.utils.stage_checkpoint` snapshots and restores a whole composition and keeps the snapshots in a
+directory a runner restores from on start. Every linear segment of every composed pipeline is cut at its halfway
+row, and only the snapshot's bytes cross the cut. Ten of the twelve passed on the first run; the eleventh was a
+binding closer that compared a NaN attribute equal to itself only while both sides held the same NaN object,
+which closed every resumed lease as displaced by its own address and is fixed in the closer; the twelfth, the
+context pipeline, has no stage that remembers and is recorded as such. A stop for a checkpoint keeps open windows
+and bindings rather than flushing them, and a scored row names the snapshot its process resumed from as
+`resumed_from_state`, `cold-start` when there was none. The snapshot is taken when the pipeline has stopped rather
+than at the moment a window seals, because inside a running segment the stages upstream of the seal may already
+hold the next batch.
 
-The six checks compare a pipeline against itself and against a golden. Both answer the question "did this change,"
+##### Two checks the seven do not make
+
+The seven checks compare a pipeline against itself and against a golden. Both answer the question "did this change,"
 and both are silent about a question that turned out to matter more: is this parameter connected to anything at
 all? Four defects found by audit in this fork were that shape -- two expiry timeouts stored and never read, an
 exchange key that ignored the supplicant handed to it, and a key rendering that followed the column's dtype
@@ -3836,7 +3856,7 @@ Pass 4 measures each of these and records which the fork reuses.
   same stream
   ({py:mod}`~morpheus.utils.window_seal` and
   {py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage`).
-- The determinism harness: control 13's six checks running against the twelve composed pipelines over
+- The determinism harness: control 13's seven checks running against the twelve composed pipelines over
   seeded golden corpora, in CPU mode in the fork's CI (`.github/workflows/fork-cpu.yaml`) and in GPU mode on
   one card ({py:mod}`~morpheus.utils.determinism` and
   `tests/morpheus/determinism/`).
@@ -3932,14 +3952,14 @@ Pass 4 measures each of these and records which the fork reuses.
   weight digests and `pipeline_mean_abs_z_max` are identical across the failing run and the passing one, so
   the same weights produced the same scores, and what changed was only whether they held still under
   re-batching.
-- The composed layer 5 pipeline under control 13's six checks
+- The composed layer 5 pipeline under control 13's seven checks
   (`tests/morpheus/determinism/session_pipeline.py`): a week-long corpus of one estate's authentications,
   with an impossible journey, a legitimate eight-hour flight, a token refresh issued from the origin
   between the two, a VPN user whose apparent country changes twice a day, a multi-factor fatigue burst, a
   fumbled password, an off-hours authentication and a service account for which the same hour is
   unremarkable, and the three ways a session record goes wrong. Each planted case is asserted as the
   column a rule would read, and each has beside it the case that must stay quiet.
-- The estate pipeline under the same six checks (`tests/morpheus/determinism/estate_pipeline.py`): layers 1, 2
+- The estate pipeline under the same seven checks (`tests/morpheus/determinism/estate_pipeline.py`): layers 1, 2
   and 5 over one hour of one estate, with a supplied directory and a derived supplicant table carrying each
   principal down to the port they sat at. Fifteen chains span three layers. The remote worker the directory does
   not name reaches no port, and neither does a sign-in made after the hour's last 802.1X exchange, because a
@@ -4170,7 +4190,7 @@ Pass 4 measures each of these and records which the fork reuses.
 - Control 8 as a stage ({py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage`), placed
   once ahead of the first stateful stage. The telemetry stages flag out-of-order arrival rather than
   repairing it, and this is what imposes the order they depend on.
-- The composed telemetry pipeline under control 13's six checks
+- The composed telemetry pipeline under control 13's seven checks
   (`tests/morpheus/determinism/telemetry_pipeline.py`): a snapshot-shaped layer 1 and layer 2 corpus with a
   hub, a spoof, an ARP flood, a reboot, a tap, a failing optic, an unpolled flap, two optic swaps and two 802.1X bypasses planted in it, run
   through every TC-1 and TC-2 stage, with the layer 2 bindings resolving the ARP stream onto the layer 1
@@ -4302,7 +4322,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Component | Effort | Notes |
 | --- | --- | --- |
 | Upstream reuse decision | Small | Decided and measured, in Part 0's Pass 4: every DFP stage, the three identity-provider source stages, `MLFlowDriftStage` and `TimeSeriesStage` are rejected, each for a reason `examples/upstream_reuse/evaluate.py` measured and `test_upstream_reuse.py` holds to its artifact; the `dfencoder` `AutoEncoder` and `manual_seed` are reused, and the Azure sign-in fields are the normalization target. Closed by #67 |
-| Tracker state across a restart | Medium | Seventeen per-entity trackers hold every baseline in process memory and none saves or restores it, so a deployed pipeline loses its history on every restart; a deterministic state round-trip per tracker, a checkpoint at window seal, and a seventh control 13 check that stops and resumes mid-corpus. Tracked in #68 |
+| Tracker state across a restart | Medium | Built, in step 16's first part. All twenty-one trackers under `morpheus.utils`, and the device stage's reboot counter, round-trip through `to_state` and `from_state` over plain JSON types, byte-identical for the same history whatever the hash seed; the thirty-eight stages that remember list their memory and are checked against it under every parameter the liveness registry exercises; a stop for a checkpoint keeps open windows and bindings; `CheckpointDirectory` keeps the snapshots; scored rows carry `resumed_from_state`; and control 13's seventh check stops all twelve composed pipelines halfway and reaches each golden from the snapshot alone. The snapshot is taken when the pipeline stops rather than at a window seal, for the reason check 7 records. What is left is the runners restoring on start, which arrive with them under #66. Tracked in #68 |
 | **The per-entity learned model for hosts** | Large | The principals' half is built, in step 8. Each principal of the session corpus has a `morpheus.models.dfencoder` autoencoder trained on the CPU by `examples/layer5_model/train_models.py` on a fortnight before the week it scores, committed as plain numbers under `examples/layer5_model/models/`, loaded and checked against its recorded version by `load_models`, scored in CI by a NumPy forward pass that agrees with the upstream class wherever Torch imports, and pinned in the manifest with the end of its training data, so no model scores the rows it was fitted on; a joiner falls back to a population model fitted on the same fortnight. R-B-L5-001 and R-B-L5-002 return their first rows, 42 and 28, on a search head too. Three findings came with it and are recorded rather than tuned away: the scores are uncalibrated where the fortnight never varied a feature, a cumulative feature keeps a principal firing until the next training window, and R-D-L5-008 misses a new place whose first sign-in failed. `run_model.py` now trains on the fortnight and scores the week through the same pinned scorer; its standing card artifact, from 2026-10-03, predates that and scored the week it trained on. What remains is hosts: `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame, which waits on host identity. Tracked in #59 |
 | Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run held 94 risk records for the 94 rows the detections then returned; with the learned layer 5 models it held 166 risk records for the 166 rows the detections returned, with step 9's host baselines it held 198, and with step 10's network objects it held 209, with step 13's services and applications it held 213, and with step 15's devices and physical chain it holds 221 risk records for the 221 rows the detections returned. Chain assembly stays empty on the sample events because the two three-layer chains a detection accuses sum 55 and 50 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
 | Clock skew where the corpora cannot measure it | Medium | Step 7's runs are recorded: the search-head run of all forty-eight searches on Splunk 10.2.8 on 2026-10-09 returned what `expected_results.json` says for every one, over events whose wire format the first run, on 2026-10-05, corrected; the conformance runs of 2026-10-09 passed every marked variant on a card, 759 of 759 before step 6 and 760 of 760 after it, the parity test over all twelve corpora among them; both results and the model artifact are committed and the documents' numbers are tested against them; the clock skew experiment decides all fifty-five detections, and did again after steps 9 to 13 and 15; the eight step 10 added hold to a minute on collector and switch clocks, step 11 measured layer 3 on its routers' clocks, and step 12's leases and inventory reports gave layers 4 and 6 clocks a sweep can move. What it could not measure remains: the SaaS pair's corpus carries one clock and needs the context store's record time per row, layers 4 and 6 are measured only as a uniform shift until their corpora carry an exporter per packet capture and an inspection point per egress, and the 120-second join tolerance itself needs a corpus whose chain steps sit within a minute of each other on different clocks. Recorded under #58; correcting the clocks rather than measuring them is #62 |

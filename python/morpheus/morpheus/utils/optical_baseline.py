@@ -45,6 +45,8 @@ import dataclasses
 import statistics
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_WINDOW_NS = 6 * 3600 * NS_PER_SECOND
@@ -89,7 +91,7 @@ class BaselineResult:
     out_of_order: bool
 
 
-class OpticalBaselineTracker:
+class OpticalBaselineTracker(StateMixin):
     """
     Per-entity rolling optical baselines.
 

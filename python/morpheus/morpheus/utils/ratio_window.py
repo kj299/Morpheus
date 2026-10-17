@@ -32,6 +32,8 @@ import collections
 import dataclasses
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_WINDOW_NS = 300 * NS_PER_SECOND
@@ -86,7 +88,7 @@ class _EntityWindow:
     started: bool = False
 
 
-class RatioWindowTracker:
+class RatioWindowTracker(StateMixin):
     """
     Per-entity proportion of one kind of event over a trailing window.
 

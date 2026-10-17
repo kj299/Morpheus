@@ -478,3 +478,16 @@ def test_a_grant_still_running_when_the_stream_stops_ends_at_its_term():
     subject.observe("10.0.0.5", 0, LEASE, granted_until_ns=HOUR_NS)
 
     assert subject.drain()[0].bind_end_ns == HOUR_NS
+
+
+@pytest.mark.parametrize("gap", [float("nan"), None], ids=["nan", "none"])
+def test_a_gap_in_an_attribute_is_the_same_gap_every_time(gap):
+    # A lease row carries no switch or port, and pandas spells the gap NaN. Two NaN objects are unequal, so a
+    # binding compared on them closed as displaced by its own unchanged address -- which a binding restored from a
+    # snapshot, holding a NaN the next row did not, did every time.
+    subject = closer(attribute_names=["mac", "switch_id"])
+    subject.observe("10.0.0.5", 0, {"mac": MAC, "switch_id": float("nan")})
+    result = subject.observe("10.0.0.5", MINUTE_NS, {"mac": MAC, "switch_id": gap})
+
+    assert result.closed == []
+    assert subject.open_binding("10.0.0.5").attributes == {"mac": MAC, "switch_id": None}

@@ -74,9 +74,9 @@ import envelope
 import host_identity
 import pandas as pd
 import stamping
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
 from morpheus.stages.lineage.chain_anchor_stage import ChainAnchorStage
@@ -621,7 +621,7 @@ def _run_class(config: Config,
                hosts: tuple = None,
                applications=None) -> pd.DataFrame:
     """Source, stamp, total order, the class's stage, determinism stamp, envelope, window seal, sink."""
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 

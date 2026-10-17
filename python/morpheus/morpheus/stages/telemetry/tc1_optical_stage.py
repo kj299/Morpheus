@@ -25,6 +25,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -55,7 +56,7 @@ SAMPLES_SUFFIX = "_baseline_samples"
 
 
 @register_stage("tc1-optical")
-class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC1OpticalStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Score each port's optical power against what that port has been reporting.
 
@@ -112,6 +113,8 @@ class TC1OpticalStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     window is invisible for the same reason, since the baseline drifts down with it; catching that needs a
     comparison against a commissioning value, which is asset context and belongs in TC-0.
     """
+
+    _checkpoint_attributes = ("_tracker", "_clock")
 
     def __init__(self,
                  c: Config,

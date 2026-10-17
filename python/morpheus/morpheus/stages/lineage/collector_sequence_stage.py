@@ -51,6 +51,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -78,7 +79,7 @@ def _sequence(value: typing.Any) -> typing.Optional[int]:
 
 
 @register_stage("collector-sequence")
-class CollectorSequenceStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class CollectorSequenceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Flag records a collector skipped past or sent again.
 
@@ -91,6 +92,8 @@ class CollectorSequenceStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage)
     seq_column : str, default = "collector_seq"
         Column holding the collector's sequence number.
     """
+
+    _checkpoint_attributes = ("_last", )
 
     def __init__(self, c: Config, collector_column: str = "collector_id", seq_column: str = "collector_seq"):
         super().__init__(c)

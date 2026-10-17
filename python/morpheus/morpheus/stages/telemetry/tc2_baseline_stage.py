@@ -25,6 +25,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -65,7 +66,7 @@ STEP_SUFFIX = "_step"
 
 
 @register_stage("tc2-baseline")
-class TC2BaselineStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC2BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Measure each port's distinct-MAC count against the most it has carried in any hour of its own history.
 
@@ -117,6 +118,8 @@ class TC2BaselineStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         period at once and stand a period of its own years ahead of the rest. A refused row carries no per-entity
         features from this stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
+
+    _checkpoint_attributes = ("_tracker", "_clock")
 
     def __init__(self,
                  c: Config,

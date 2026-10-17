@@ -69,6 +69,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -133,7 +134,7 @@ build its input frame from this rather than from a second copy of the list that 
 
 
 @register_stage("tc4-flow")
-class TC4FlowStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Roll each record into its flow's time bin and write the running transport features.
 
@@ -175,6 +176,8 @@ class TC4FlowStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_hosts : int, default = 100000
         Sources whose stack fingerprints are remembered before the least recently seen is dropped.
     """
+
+    _checkpoint_attributes = ("_open", "_stacks")
 
     def __init__(self,
                  c: Config,

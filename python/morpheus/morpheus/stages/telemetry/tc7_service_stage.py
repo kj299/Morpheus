@@ -52,6 +52,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -161,7 +162,7 @@ def _number(value: typing.Any) -> typing.Optional[float]:
 
 
 @register_stage("tc7-service")
-class TC7ServiceStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Key each connection on the service it reached, and write that service's window counts and client novelty.
 
@@ -200,6 +201,8 @@ class TC7ServiceStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     baseline_min_days : int, default = 7
         Periods of history a service needs before `service_clients_baseline` is published.
     """
+
+    _checkpoint_attributes = ("_clients", "_fingerprints", "_baseline", "_sums")
 
     def __init__(self,
                  c: Config,

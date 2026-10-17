@@ -64,6 +64,14 @@ DIGEST_CHARACTERS = 16
 TIER_COLUMN = "determinism_tier"
 FINGERPRINT_COLUMN = "pipeline_fingerprint"
 CONFIG_HASH_COLUMN = "config_hash"
+RESUMED_FROM_COLUMN = "resumed_from_state"
+
+COLD_START = "cold-start"
+"""What `resumed_from_state` carries when the process began with no saved state.
+
+A history-gated rule is silent and every first-seen flag fires again after one, which is what an analyst reading a
+quiet hour or a burst of novelty needs to know about the rows in front of them.
+"""
 
 
 def config_hash(config, decimals: int = DIGEST_CHARACTERS) -> str:
@@ -215,6 +223,9 @@ class DeterminismEnvelope:
         The version of the feature schema the scored columns were produced under, for example `TC-5/2.1.0`.
     rng_seed : int
         The seed handed to `morpheus.utils.seed.manual_seed`.
+    resumed_from : str, default = `COLD_START`
+        The `state_digest` of the checkpoint this process restored its stages from, so a scored event names the
+        per-entity history it was scored against. `COLD_START` when it restored none.
     """
 
     tier: str
@@ -224,6 +235,7 @@ class DeterminismEnvelope:
     image_digest: str
     feature_schema_version: str
     rng_seed: int
+    resumed_from: str = COLD_START
 
     def __post_init__(self):
         if (self.tier not in TIERS):
@@ -250,4 +262,5 @@ class DeterminismEnvelope:
             "image_digest": self.image_digest,
             "feature_schema_version": self.feature_schema_version,
             "rng_seed": self.rng_seed,
+            RESUMED_FROM_COLUMN: self.resumed_from,
         }

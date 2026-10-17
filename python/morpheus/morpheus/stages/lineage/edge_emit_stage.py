@@ -63,6 +63,7 @@ from morpheus.cli.register_stage import register_stage
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -108,7 +109,7 @@ def _integral(value: typing.Any) -> typing.Optional[int]:
 
 
 @register_stage("edge-emit", modes=[], ignore_args=["hop_method_columns", "hop_uid_columns", "hop_layers"])
-class EdgeEmitStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class EdgeEmitStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Replace each batch of sealed rows with one edge per resolution hop and per shared connection they carry.
 
@@ -146,6 +147,8 @@ class EdgeEmitStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         If the hop lists differ in length, if there are no hops and no `join_column`, or if `max_keys` is not
         positive.
     """
+
+    _checkpoint_attributes = ("_first", )
 
     def __init__(self,
                  c: Config,

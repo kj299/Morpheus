@@ -61,10 +61,10 @@ import pandas as pd
 import session_pipeline as sp
 import stamping
 import telemetry_pipeline as tp
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
@@ -284,7 +284,7 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
 
 def _run_class(config: Config, dataframes: list, stages: list, impose_order: bool = True) -> pd.DataFrame:
     """Source, stamp, optional total order, the class's stages, sink. No sealing: the union does that."""
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
 
@@ -338,7 +338,7 @@ def _seal_chains(config: Config, outputs: dict[str, pd.DataFrame], parts: int = 
                              entity_key_column=DEFAULT_ANCHOR_COLUMN)
     added = [name for name in sealer._needed_columns if name not in union.columns]  # pylint: disable=protected-access
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(sealer)
     sink = pipe.add_stage(InMemorySinkStage(config))

@@ -56,6 +56,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -80,7 +81,7 @@ JA4_SATURATED = "ja4_client_saturated"
 
 
 @register_stage("tc6-fingerprint", ignore_args=["key_columns"])
-class TC6FingerprintStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write whether each handshake's client fingerprint is new to the host that offered it.
 
@@ -106,6 +107,8 @@ class TC6FingerprintStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_entities : int, default = 100000
         Hosts tracked before the least recently seen is forgotten.
     """
+
+    _checkpoint_attributes = ("_tracker", "_observations")
 
     def __init__(self,
                  c: Config,

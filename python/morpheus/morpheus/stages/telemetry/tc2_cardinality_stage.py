@@ -24,6 +24,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -73,7 +74,7 @@ OUI_FIELD = "oui"
 
 
 @register_stage("tc2-cardinality")
-class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC2CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Count distinct layer 2 identifiers per entity over a trailing window.
 
@@ -144,6 +145,8 @@ class TC2CardinalityStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         port's window at once and let a flood begin from zero. A refused row carries no per-entity features from this
         stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
+
+    _checkpoint_attributes = ("_trackers", "_port_ouis", "_clock")
 
     def __init__(self,
                  c: Config,

@@ -59,6 +59,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -148,7 +149,7 @@ def _flag(value: typing.Any) -> bool:
 
 
 @register_stage("tc1-rate", ignore_args=["error_columns", "discard_columns"])
-class TC1RateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC1RateStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write each port's error, discard and traffic rates, and measure the error rate and the traffic against the port's
     own history.
@@ -194,6 +195,8 @@ class TC1RateStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         once and stand a period of its own years ahead of the rest. A refused row carries no per-entity features from
         this stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
+
+    _checkpoint_attributes = ("_errors", "_volume_peaks", "_volume_troughs", "_clock")
 
     def __init__(self,
                  c: Config,

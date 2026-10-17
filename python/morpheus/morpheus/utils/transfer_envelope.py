@@ -46,6 +46,8 @@ import dataclasses
 import math
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_WINDOW_NS = 30 * 24 * 3600 * NS_PER_SECOND
@@ -153,7 +155,7 @@ def nearest_rank(values: typing.Sequence[float], quantile: float) -> typing.Opti
     return ordered[min(rank, len(ordered)) - 1]
 
 
-class TransferEnvelopeTracker:
+class TransferEnvelopeTracker(StateMixin):
     """
     Per-entity quantile baseline of a magnitude, and each transfer's size against it.
 

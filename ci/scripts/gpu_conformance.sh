@@ -71,6 +71,7 @@ TARGETS=(
     tests/morpheus/determinism/test_saas_harness.py
     tests/morpheus/determinism/test_session_harness.py
     tests/morpheus/determinism/test_siem_wire_contract.py
+    tests/morpheus/determinism/test_stop_and_resume.py
     tests/morpheus/determinism/test_telemetry_harness.py
     tests/morpheus/determinism/test_transport_harness.py
     tests/morpheus/stages/test_binding_resolver_stage.py
@@ -149,6 +150,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_feature_coverage.py
     tests/morpheus/determinism/test_verdict_artifacts.py
     tests/morpheus/stages/test_lineage_stage_cli.py
+    tests/morpheus/stages/test_stage_checkpoint.py
     tests/morpheus/utils/test_arrival_regularity.py
     tests/morpheus/utils/test_binding_closer.py
     tests/morpheus/utils/test_cipher_strength.py
@@ -190,6 +192,7 @@ UNMARKED=(
     tests/morpheus/utils/test_splunk_app_contracts.py
     tests/morpheus/utils/test_splunk_field_contracts.py
     tests/morpheus/utils/test_stack_fingerprint.py
+    tests/morpheus/utils/test_tracker_state.py
     tests/morpheus/utils/test_ttl_profile.py
     tests/morpheus/utils/test_user_agent.py
     tests/morpheus/utils/test_value_novelty.py

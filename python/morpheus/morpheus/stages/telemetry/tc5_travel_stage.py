@@ -25,6 +25,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -59,7 +60,7 @@ DEFAULT_REFRESH_VALUES = ("refresh", "refresh_token", "renew")
 
 
 @register_stage("tc5-travel", ignore_args=["locations"])
-class TC5TravelStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5TravelStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write the implied travel speed between a principal's consecutive successful authentications.
 
@@ -147,6 +148,8 @@ class TC5TravelStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         `location_column` and meaningless without it. A place it does not name reads as `no_coordinate`, which is
         the honest answer for a port the estate has not located.
     """
+
+    _checkpoint_attributes = ("_tracker", )
 
     def __init__(self,
                  c: Config,

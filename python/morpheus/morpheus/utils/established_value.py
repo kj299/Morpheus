@@ -55,6 +55,8 @@ import collections
 import dataclasses
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_WINDOW_NS = 30 * 24 * 3600 * NS_PER_SECOND
@@ -164,7 +166,7 @@ class _EntityWindow:
     instant_prior: list = dataclasses.field(default_factory=list)
 
 
-class ValueHistoryTracker:
+class ValueHistoryTracker(StateMixin):
     """
     Per-entity reference over a trailing window, and each observation measured against it.
 

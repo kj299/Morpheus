@@ -26,9 +26,9 @@ the same reverse proxy under the service corpus's names, so one table serves all
 """
 
 import pandas as pd
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc0_application_stage import DEFAULT_APPLICATION_COLUMNS
@@ -86,7 +86,7 @@ def produce(config: Config, frame: pd.DataFrame) -> pd.DataFrame:
     """The CMDB records through `TC0ApplicationStage`, as `context:application` carries them."""
     from host_frame import to_host_frame  # pylint: disable=import-outside-toplevel
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=[frame]))
     pipe.add_stage(TC0ApplicationStage(config))
     sink = pipe.add_stage(InMemorySinkStage(config))

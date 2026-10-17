@@ -38,6 +38,8 @@ import collections
 import dataclasses
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_COUNTER_BITS = 64
@@ -88,7 +90,7 @@ class _EntityState:
     counters: dict[str, int]
 
 
-class CounterTracker:
+class CounterTracker(StateMixin):
     """
     Per-entity counter state, turning raw totals into deltas.
 

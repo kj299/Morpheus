@@ -66,17 +66,18 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.parsers import ip
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.parsers import ip
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.ratio_window import NS_PER_SECOND
 from morpheus.utils.ratio_window import DEFAULT_MIN_DENOMINATOR
+from morpheus.utils.ratio_window import NS_PER_SECOND
 from morpheus.utils.ratio_window import RatioWindowTracker
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
@@ -100,7 +101,7 @@ DEFAULT_ASN_COLUMN = "bgp_as_dst"
 
 
 @register_stage("tc3-reach", ignore_args=["management_prefixes"])
-class TC3ReachStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Classify each flow's destination and describe the mix of destinations a source has been reaching.
 
@@ -136,6 +137,8 @@ class TC3ReachStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         The estate's management networks, in CIDR notation: where its network devices' own interfaces live. Given,
         `dst_is_management` says whether each flow's destination is inside one; absent, the column is null.
     """
+
+    _checkpoint_attributes = ("_ratios", "_novelty")
 
     def __init__(self,
                  c: Config,

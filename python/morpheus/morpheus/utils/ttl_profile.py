@@ -51,6 +51,8 @@ import collections
 import dataclasses
 import typing
 
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 DEFAULT_WINDOW_NS = 24 * 3600 * NS_PER_SECOND
@@ -148,7 +150,7 @@ def established_ttl(values: typing.Sequence[int]) -> typing.Optional[int]:
     return max(ttl for (ttl, count) in counts.items() if count == best)
 
 
-class TtlProfileTracker:
+class TtlProfileTracker(StateMixin):
     """
     Per-source TTL reference, and each packet's deviation from it.
 

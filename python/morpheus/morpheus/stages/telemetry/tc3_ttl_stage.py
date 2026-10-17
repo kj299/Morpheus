@@ -42,6 +42,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -71,7 +72,7 @@ TTL_SATURATED = "ip_ttl_saturated"
 
 
 @register_stage("tc3-ttl", ignore_args=["key_columns"])
-class TC3TtlStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Compare each flow's TTL against its source's established value.
 
@@ -101,6 +102,8 @@ class TC3TtlStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_samples : int, default = 512
         Flows retained per entity regardless of the window.
     """
+
+    _checkpoint_attributes = ("_tracker", )
 
     def __init__(self,
                  c: Config,

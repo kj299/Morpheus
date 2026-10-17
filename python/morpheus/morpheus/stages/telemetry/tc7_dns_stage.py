@@ -62,6 +62,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -124,7 +125,7 @@ BASELINED = (SUBDOMAINS_PER_DOMAIN, DOMAINS_PER_CLIENT)
 
 
 @register_stage("tc7-dns", ignore_args=["key_columns"])
-class TC7DnsStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Split each query name into its parts and write the three measurements the tunnelling rule reads.
 
@@ -160,6 +161,8 @@ class TC7DnsStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     baseline_min_days : int, default = 7
         Periods of history a client needs before its baselines are published.
     """
+
+    _checkpoint_attributes = ("_tracker", "_domains", "_answers", "_baselines")
 
     def __init__(self,
                  c: Config,

@@ -42,10 +42,10 @@ import typing
 import zlib
 
 import pandas as pd
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.envelope_validate_stage import EnvelopeValidateStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
@@ -177,7 +177,7 @@ def validate(config: Config, batches: dict, id_columns: list) -> tuple[dict, pd.
 
     for (name, frames) in batches.items():
         quarantined: list = []
-        pipe = LinearPipeline(config)
+        pipe = ResumableLinearPipeline(config)
         pipe.set_source(InMemorySourceStage(config, dataframes=[frame.copy() for frame in frames]))
         pipe.add_stage(LineageStampStage(config, id_columns=id_columns))
         pipe.add_stage(EnvelopeValidateStage(config, ingest_clock=replay_ingest_clock,
@@ -246,7 +246,7 @@ def health(config: Config,
         rows = rows.sort_values(["window_id", "row_key"], kind="stable").reset_index(drop=True)
         rows = rows.dropna(axis=1, how="all")
 
-        pipe = LinearPipeline(config)
+        pipe = ResumableLinearPipeline(config)
         pipe.set_source(InMemorySourceStage(config, dataframes=[rows]))
         pipe.add_stage(PipelineHealthStage(config, period_seconds=period_seconds, min_buckets=min_buckets))
         sink = pipe.add_stage(InMemorySinkStage(config))

@@ -24,6 +24,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -81,7 +82,7 @@ rank stops being the slowest exchange ever seen; see `morpheus.utils.transfer_en
 
 
 @register_stage("tc2-auth", ignore_args=["pending_values"])
-class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC2AuthStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Time 802.1X authorization per port, and flag authorization that nobody authenticated for.
 
@@ -164,6 +165,8 @@ class TC2AuthStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Prior exchanges a port needs before its distribution is published. Below a hundred the 99th percentile is
         the slowest exchange ever seen, and an estate setting this lower should read the ratio that way.
     """
+
+    _checkpoint_attributes = ("_timer", "_baselines", "_clock")
 
     def __init__(self,
                  c: Config,

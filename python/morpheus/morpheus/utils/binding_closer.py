@@ -56,6 +56,10 @@ import collections
 import dataclasses
 import typing
 
+import pandas as pd
+
+from morpheus.utils.tracker_state import StateMixin
+
 NS_PER_SECOND = 10**9
 
 MINIMUM_TICK_NS = 1
@@ -84,6 +88,24 @@ GRANTED = "granted"
 
 INFERRED_REASONS = frozenset({DISPLACED, CONFLICT, SNAPSHOT_ABSENT, IDLE_TIMEOUT, EVICTED, DRAINED})
 """Every reason but `EXPLICIT`. A consumer that only trusts observed ends filters on this."""
+
+
+def _present(value: typing.Any) -> typing.Any:
+    """
+    An attribute as the binding compares it: a gap is `None` however the frame spelled it.
+
+    A lease row carries no switch or port, and pandas spells the gap NaN. NaN is unequal to itself, so two sightings
+    of an unchanged binding compared equal only while both held the very same NaN object -- true within one process
+    by accident of how pandas hands values out, and false for a binding restored from a snapshot, which closed every
+    such lease as displaced by its own address.
+    """
+    if (value is None or isinstance(value, (str, bytes, bool, int))):
+        return value
+
+    try:
+        return None if bool(pd.isna(value)) else value
+    except (TypeError, ValueError):
+        return value
 
 
 @dataclasses.dataclass(frozen=True)
@@ -210,7 +232,7 @@ class _OpenBinding:
     granted_until_ns: typing.Optional[int] = None
 
 
-class BindingCloser:
+class BindingCloser(StateMixin):
     """
     Per-key open binding state, emitting intervals as they close.
 
@@ -294,7 +316,7 @@ class BindingCloser:
                            observations=state.observations)
 
     def _target(self, attributes: dict) -> dict:
-        return {name: attributes.get(name) for name in self._attribute_names}
+        return {name: _present(attributes.get(name)) for name in self._attribute_names}
 
     @staticmethod
     def _close(state: _OpenBinding, end_ns: int, reason: str, gap_ns: typing.Optional[int] = None) -> ClosedBinding:

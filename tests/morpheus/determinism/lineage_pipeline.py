@@ -32,10 +32,10 @@ import typing
 import envelope
 import pandas as pd
 import stamping
+from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
-from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
@@ -201,7 +201,7 @@ def run_pipeline(config: Config,
     if (order_columns is None):
         order_columns = DEFAULT_ORDER_COLUMNS
 
-    pipe = LinearPipeline(config)
+    pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(
         LineageStampStage(config, id_columns=["collector_id", "schema_version", "origin_hash", "collector_seq"]))

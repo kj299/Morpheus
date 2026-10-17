@@ -52,6 +52,7 @@ import math
 
 from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
 from morpheus.utils.determinism import quantize_value
+from morpheus.utils.tracker_state import StateMixin
 
 DEFAULT_MAX_ENTITIES = 100_000
 """Entities tracked before the least recently seen is forgotten.
@@ -113,7 +114,7 @@ class _EntityHistogram:
     started: bool = False
 
 
-class CyclicHistogramTracker:
+class CyclicHistogramTracker(StateMixin):
     """
     Per-entity counts over a fixed set of cyclic buckets, reporting how unusual each new sample is.
 

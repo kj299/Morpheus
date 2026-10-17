@@ -61,6 +61,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -113,7 +114,7 @@ UA_FAMILY_FIRST_SEEN = "http_ua_family_first_seen"
 
 
 @register_stage("tc7-http", ignore_args=["key_columns"])
-class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Write each client's windowed 4xx and 2xx counts, their ratio, and its distinct path count.
 
@@ -150,6 +151,8 @@ class TC7HttpStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     baseline_min_days : int, default = 7
         Periods of history a client needs before `http_distinct_paths_baseline` is published.
     """
+
+    _checkpoint_attributes = ("_responses", "_paths", "_baseline", "_agents")
 
     def __init__(self,
                  c: Config,

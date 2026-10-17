@@ -40,6 +40,7 @@ from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
@@ -69,7 +70,7 @@ REGULARITY_SATURATED = "flow_regularity_saturated"
 
 
 @register_stage("tc3-beacon")
-class TC3BeaconStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Measure the inter-arrival and size regularity of each directed address pair.
 
@@ -100,6 +101,8 @@ class TC3BeaconStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     max_entities : int, default = 500000
         Pairs retained before the least recently seen is dropped.
     """
+
+    _checkpoint_attributes = ("_tracker", )
 
     def __init__(self,
                  c: Config,
