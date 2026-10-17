@@ -40,8 +40,9 @@ from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.determinism import quantize_value
 from morpheus.utils.dfencoder_scorer import DfencoderScorer
 from morpheus.utils.dfencoder_scorer import load_models
-from morpheus.utils.model_manifest import ModelManifest
 from morpheus.utils.lineage import window_id_from_timestamp
+from morpheus.utils.model_manifest import ModelManifest
+from morpheus.utils.sharding import stable_shard
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -1022,3 +1023,57 @@ def test_the_reference_scorer_is_documented_as_not_a_model():
     # where they came from.
     assert "**Not a model.**" in sp.ReferenceScorer.__doc__
     assert "No detection claim attaches" in sp.ReferenceScorer.__doc__
+
+
+STREAM_ACCOUNTING_COLUMNS = ("sealed_by", "day_sealed_by", "session_abandoned")
+"""What a branch records about its own stream rather than about an entity.
+
+`sealed_by` says whether a window closed because the watermark passed it or because the stream ended, and
+`session_abandoned` is carried by the record whose arrival ran a silent session past its timeout. Both are decided
+by the rows a branch sees, and a branch sees one shard's rows: the last window a shard holds is flushed where the
+unsharded stream's next row would have sealed it, and a session is abandoned by the next row on its shard rather
+than the next row in the estate. Every column about an entity is the same; these three are about the branch."""
+
+
+def _principal_shards(corpus: dict[str, pd.DataFrame], shards: int) -> set:
+    principals = set().union(*(set(frame["user_principal"].dropna()) for frame in corpus.values()))
+
+    return {stable_shard(principal, shards) for principal in principals}
+
+
+def _differing_columns(expected: pd.DataFrame, actual: pd.DataFrame) -> list:
+    assert list(expected.columns) == list(actual.columns)
+    assert len(expected) == len(actual)
+
+    return [name for name in expected.columns if not expected[name].astype(str).equals(actual[name].astype(str))]
+
+
+@pytest.mark.gpu_and_cpu_mode
+@pytest.mark.parametrize("shards", [1, 3])
+def test_sharded_run_matches_the_unsharded_on_every_entity_column(pipeline_config: Config,
+                                                                  corpus: dict[str, pd.DataFrame],
+                                                                  result: pd.DataFrame,
+                                                                  shards: int):
+    # Control 4: the same composition with every stateful stage instanced once per shard, routed by the stable
+    # hash of the principal, reaches the golden on every column about an entity.
+    assert _principal_shards(corpus, shards) == set(range(shards)), "a shard received no principal"
+
+    sharded = sp.run_pipeline(pipeline_config, corpus, shards=shards)
+    differing = _differing_columns(result, sharded)
+
+    assert set(differing) <= set(STREAM_ACCOUNTING_COLUMNS), differing
+    assert diff_frames(result.drop(columns=list(STREAM_ACCOUNTING_COLUMNS)),
+                       sharded.drop(columns=list(STREAM_ACCOUNTING_COLUMNS))) is None
+    # The same sessions were abandoned; which record carried the count is what moved.
+    assert sharded["session_abandoned"].fillna(0).sum() == result["session_abandoned"].fillna(0).sum()
+    assert (shards == 1) == (differing == [])
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_sharding_check_has_teeth(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
+    # Sharded on a column that splits a principal across branches, the per-entity history is split with it, and
+    # the features built on that history change. If this ever stops differing, the check above is vacuous.
+    split = sp.run_pipeline(pipeline_config, corpus, shards=3, shard_column="collector_seq")
+    differing = set(_differing_columns(result, split)) - set(STREAM_ACCOUNTING_COLUMNS)
+
+    assert len(differing) > 10, sorted(differing)
