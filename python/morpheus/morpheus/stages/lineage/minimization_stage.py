@@ -47,6 +47,7 @@ does nothing at all about retention, which is a property of the index rather tha
 """
 
 import logging
+import math
 import typing
 
 import mrc
@@ -66,12 +67,19 @@ from morpheus.utils.personal_data import BOUNDED_DOMAIN
 from morpheus.utils.personal_data import CATEGORIES
 from morpheus.utils.personal_data import COLUMNS
 from morpheus.utils.personal_data import DEFAULT_DIGEST_LENGTH
-from morpheus.utils.personal_data import PERSONAL_CATEGORIES
 from morpheus.utils.personal_data import PER_ROW
+from morpheus.utils.personal_data import PERSONAL_CATEGORIES
 from morpheus.utils.personal_data import classify
 from morpheus.utils.personal_data import pseudonymize
 
 logger = logging.getLogger(__name__)
+
+
+def _missing(value: typing.Any) -> bool:
+    """A gap, however the frame spelled it. NaN is one object pandas hands out again and again, so a NaN in a
+    pseudonymized column matched every NaN in every kept column and the check refused a policy over a gap."""
+    return value is None or (isinstance(value, float) and math.isnan(value))
+
 
 CLASS_COLUMN = "telemetry_class"
 """Where the stage reads the class from when it is not told one, so the ambiguous names resolve themselves."""
@@ -265,7 +273,7 @@ class MinimizationStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         hidden: set = set()
 
         for values in originals.values():
-            hidden.update(value for value in values if value is not None)
+            hidden.update(value for value in values if not _missing(value))
 
         if (len(hidden) == 0):
             return []
@@ -285,7 +293,7 @@ class MinimizationStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 if (category not in PERSONAL_CATEGORIES):
                     continue
 
-            shared = sorted({value for value in to_host_list(df, column) if value in hidden})
+            shared = sorted({value for value in to_host_list(df, column) if not _missing(value) and value in hidden})
 
             if (len(shared) > 0):
                 found.append((column, len(shared)))

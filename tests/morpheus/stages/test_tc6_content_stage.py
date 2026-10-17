@@ -112,3 +112,12 @@ def test_a_frame_carrying_neither_side_is_refused(config: Config):
     # read as an absence of mismatches.
     with pytest.raises(KeyError, match="content_type"):
         run(config, {"event_time": [START]})
+
+
+@pytest.mark.cpu_mode
+def test_a_record_whose_types_are_nan_is_not_a_gap_in_the_map_either(config: Config):
+    # The same record read from a file: pandas spells the gaps NaN rather than None, and NaN passed the stage's
+    # `is not None` test for a type being present, so every record without types was counted as unclassified.
+    result = run(config, transfers([float("nan"), "image/png"], [float("nan"), "application/zip"]))
+
+    assert [truthy(value) for value in result["content_category_unclassified"]] == [False, False]

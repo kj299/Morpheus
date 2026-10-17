@@ -60,8 +60,8 @@ import envelope
 import host_identity
 import pandas as pd
 import stamping
-
 from resumable import ResumableLinearPipeline
+
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
@@ -261,6 +261,10 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
     frame = pd.DataFrame(rows).sort_values("event_time", kind="mergesort").reset_index(drop=True)
     frame["collector_seq"] = range(len(frame))
+    # Only a SYN carries its options, so these are integers with a gap on every other packet. Held as nullable
+    # integers, as a collector sends them, rather than the float pandas widens a gapped column to.
+    for column in ("tcp_mss", "tcp_window_initial"):
+        frame[column] = frame[column].astype("Int64")
 
     # Which machine each client address was: the DHCP server's leases and the EDR agent's inventory, over the span.
     hosts = host_identity.build(frame["src_ip"], int(frame["event_time"].min()), int(frame["event_time"].max()))

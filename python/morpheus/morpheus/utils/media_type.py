@@ -39,6 +39,7 @@ are an archive, a document and an executable, and treating them as one category 
 exactly the traffic it is for.
 """
 
+import math
 import typing
 
 IMAGE = "image"
@@ -134,7 +135,9 @@ def normalize(value: typing.Any) -> typing.Optional[str]:
     Parameters are dropped: `text/html; charset=utf-8` is the same type as `text/html`, and a rule that treated
     a charset change as a content change would fire on every encoding migration in the estate.
     """
-    if (value is None):
+    # A gap is a gap however the frame spelled it: pandas reads a missing type as NaN, and NaN rendered as text
+    # is the type "nan", which no map places, so a record with no content type at all read as an unmapped one.
+    if (value is None or (isinstance(value, float) and math.isnan(value))):
         return None
 
     text = str(value).split(";", maxsplit=1)[0].strip().lower()

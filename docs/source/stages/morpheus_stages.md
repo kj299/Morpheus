@@ -87,6 +87,7 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - HTTP Server Sink Stage {py:class}`~morpheus.stages.output.http_server_sink_stage.HttpServerSinkStage` Start an HTTP server and listens for incoming requests on a specified endpoint.
 - In Memory Sink Stage {py:class}`~morpheus.stages.output.in_memory_sink_stage.InMemorySinkStage` Collect incoming messages into a list that can be accessed after the pipeline is complete.
 - SIEM Wire Stage {py:class}`~morpheus.stages.output.siem_wire_stage.SiemWireStage` Render event-time columns and stamp the SIEM sourcetype, so what a sink writes is what the SIEM parses.
+- SIEM Wire Sink Stage {py:class}`~morpheus.stages.output.siem_wire_sink_stage.SiemWireSinkStage` Write each record to a file or a Kafka topic with its null fields left out, which is how a SIEM must receive it and what the generic file and Kafka writers do not do.
 - Databricks Delta Lake Sink Stage {py:class}`~morpheus.stages.output.write_to_databricks_deltalake_stage.DataBricksDeltaLakeSinkStage` Write messages to a DeltaLake table.
 - Write To Elastic Search Stage {py:class}`~morpheus.stages.output.write_to_elasticsearch_stage.WriteToElasticsearchStage` Write the messages as documents to Elasticsearch.
 - Write To File Stage {py:class}`~morpheus.stages.output.write_to_file_stage.WriteToFileStage` Write all messages to a file.

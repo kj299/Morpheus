@@ -98,3 +98,10 @@ def test_the_map_is_keyed_in_lower_case():
 
 def test_case_is_folded():
     assert category("IMAGE/PNG") == IMAGE
+
+
+def test_a_gap_is_no_type_however_it_is_spelled():
+    # A NaN rendered as text is the type "nan", which no map places, so a record with no content type at all read
+    # as an unmapped one.
+    assert normalize(float("nan")) is None
+    assert category(float("nan")) is None

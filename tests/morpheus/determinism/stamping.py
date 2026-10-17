@@ -29,6 +29,8 @@ import os
 import re
 import typing
 
+import resumable
+
 from morpheus.utils.determinism_envelope import UNKNOWN
 from morpheus.utils.determinism_envelope import DeterminismEnvelope
 from morpheus.utils.determinism_envelope import pipeline_fingerprint
@@ -134,4 +136,5 @@ def envelope_for(telemetry_class: str,
                                code_commit=UNKNOWN,
                                image_digest=UNKNOWN,
                                feature_schema_version=f"{telemetry_class}/{schema_version}",
-                               rng_seed=rng_seed)
+                               rng_seed=rng_seed,
+                               resumed_from=resumable.resumed_from())

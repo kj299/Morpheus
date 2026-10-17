@@ -1,3 +1,44 @@
+# Running the segments
+
+One runner per segment takes collector files to the records a SIEM receives:
+
+```bash
+python examples/behavioral_analytics/run_network.py --output out/network --state state/network
+```
+
+| Runner | Classes it reads | Sourcetypes it writes |
+|---|---|---|
+| `run_telemetry.py` | `tc1`, `tc1_device`, `tc2_mac`, `tc2_arp`, `tc2_auth` | `morpheus:score:l1`, `morpheus:score:l2`, `binding:l1`, `binding:l2` |
+| `run_network.py` | `tc3`, `tc3_dhcp`, `tc7_host_inventory` | `morpheus:score:l3` |
+| `run_transport.py` | `tc4`, `tc3_dhcp`, `tc7_host_inventory` | `morpheus:score:l4` |
+| `run_session.py` | `tc5_auth`, `tc5_session` | `morpheus:score:l5` |
+| `run_presentation.py` | `tc6`, `tc3_dhcp`, `tc7_host_inventory` | `morpheus:score:l6` |
+| `run_application.py` | `tc7_dns`, `tc7_http`, `tc7_service`, `tc3_dhcp`, `tc7_host_inventory` | `morpheus:score:l7` |
+| `run_saas.py` | `tc7_saas` | `morpheus:score:l7` |
+| `run_endpoint.py` | `tc7_endpoint` | `morpheus:score:l7` |
+| `run_context.py` | `tc0_identity`, `tc0_asset`, `tc0_application` | `context:identity`, `context:asset`, `context:application` |
+
+Every runner also writes `morpheus:late` for a row that arrived after its window sealed and
+`morpheus:quarantine` for a record whose clock could not be trusted. Each reads a directory holding one JSON lines
+file per class, `samples/<segment>/` by default, with `FileSourceStage`, runs the segment's composition -- the one
+its corpus module under `tests/morpheus/determinism/` holds to a golden file -- and ends in `MinimizationStage`,
+`SiemWireStage` and `SiemWireSinkStage`, one file per sourcetype or, with `--kafka`, one topic per sourcetype.
+`SiemWireSinkStage` leaves null fields out, which the generic file and Kafka writers do not.
+
+- **`--state DIR`** restores every stage that remembers from the latest checkpoint in `DIR` before the first row,
+  and checkpoints when the run stops, keeping open windows and bindings for the next run. `--not-final` says
+  another run follows; without it the run flushes as a replay does. Rows carry the digest of the checkpoint they
+  resumed from as `resumed_from_state`.
+- **`--policy minimization_policy.example.yaml`** pseudonymizes before the wire, with the key from the
+  environment variable the policy names. The example policy says how it was arrived at and what it costs.
+
+`tests/morpheus/determinism/test_segment_runners.py` holds every runner to its composition: the files it writes
+from the committed samples are, line for line, the in-memory result rendered through the same wire. For the
+session, SaaS and endpoint segments it also stops a runner halfway through the data and starts it again from its
+checkpoint, and the two runs together write what one does; the other segments rebuild a lookup per run from the
+bindings their own run closes, where a deployment keeps those bindings in lookups on the SIEM instead. Under the
+example policy no principal from the inputs appears in any segment's output.
+
 # R-D-L2-004, end to end
 
 One command turns a MAC address table into the records the shipped Splunk detection reads:
@@ -6,7 +47,9 @@ One command turns a MAC address table into the records the shipped Splunk detect
 python examples/behavioral_analytics/run_mac_spoof.py
 ```
 
-It reads `mac_table_sample.jsonlines` and writes `notables.jsonlines` beside it.
+It reads `mac_table_sample.jsonlines` and writes `notables.jsonlines` beside it. With
+`--policy minimization_policy.example.yaml` it pseudonymizes the addresses and ports before the wire, and the one
+notable still fires.
 
 ## Why this exists
 

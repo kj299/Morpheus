@@ -40,6 +40,7 @@ import logging
 import os
 import pathlib
 import sys
+import typing
 
 import click
 
@@ -49,9 +50,10 @@ from morpheus.config import CppConfig
 from morpheus.config import ExecutionMode
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.file_source_stage import FileSourceStage
+from morpheus.stages.lineage.minimization_stage import MinimizationStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
+from morpheus.stages.output.siem_wire_sink_stage import SiemWireSinkStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
-from morpheus.stages.output.write_to_file_stage import WriteToFileStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.utils.logger import configure_logging
 
@@ -62,16 +64,21 @@ SOURCETYPE = "binding:l2"
 outside every detection window."""
 
 
-def build_pipeline(config: Config, source: pathlib.Path, output: pathlib.Path) -> LinearPipeline:
+def build_pipeline(config: Config,
+                   source: pathlib.Path,
+                   output: pathlib.Path,
+                   policy: typing.Optional[dict] = None) -> LinearPipeline:
     """
-    Four stages, in the order the guide argues for.
+    Four stages, in the order the guide argues for, and a fifth when the estate minimizes.
 
     `TotalOrderStage` first, because everything after it is stateful in arrival order and each of those stages
     flags out-of-order arrival rather than repairing it -- someone has to impose the order they depend on, once,
     ahead of the first of them. `TC2BindingStage` closes a binding when the same address turns up somewhere else,
     and calls it a conflict rather than a move when the two sightings share an instant, because a device cannot
-    be in two places at one time and a poller cannot report it in two places at one time either. `SiemWireStage`
-    last, immediately before the sink, so what is serialized is what the SIEM parses.
+    be in two places at one time and a poller cannot report it in two places at one time either. `MinimizationStage`
+    after every feature is computed, when a policy is given, because minimizing earlier leaves the binding stage
+    nothing to key on. `SiemWireStage` last before the sink, so what is serialized is what the SIEM parses, and
+    `SiemWireSinkStage` writes it with null fields left out, which the generic file writer does not.
     """
     pipe = LinearPipeline(config)
     pipe.set_source(FileSourceStage(config, filename=source, file_type=FileTypes.JSON))
@@ -83,8 +90,17 @@ def build_pipeline(config: Config, source: pathlib.Path, output: pathlib.Path) -
     # about. They have their own stanza, `binding:l2:open`, anchored on `bind_start`; a pipeline that wants both
     # writes two sinks rather than conflating them.
     pipe.add_stage(TC2BindingStage(config))
+
+    if (policy is not None):
+        pipe.add_stage(
+            MinimizationStage(config,
+                              drop=policy["drop"] or None,
+                              pseudonymize=policy["pseudonymize"] or None,
+                              key=policy["key"],
+                              telemetry_class="tc2_binding"))
+
     pipe.add_stage(SiemWireStage(config, sourcetype=SOURCETYPE))
-    pipe.add_stage(WriteToFileStage(config, filename=str(output), overwrite=True, include_index_col=False))
+    pipe.add_stage(SiemWireSinkStage(config, filename=str(output), overwrite=True))
 
     return pipe
 
@@ -100,7 +116,11 @@ def build_pipeline(config: Config, source: pathlib.Path, output: pathlib.Path) -
               default=HERE / "notables.jsonlines",
               show_default=True,
               help="Where to write the closed binding records.")
-def main(source: pathlib.Path, output: pathlib.Path) -> int:
+@click.option("--policy",
+              type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path),
+              default=None,
+              help="A minimization policy, as minimization_policy.example.yaml; its key comes from the environment.")
+def main(source: pathlib.Path, output: pathlib.Path, policy: typing.Optional[pathlib.Path]) -> int:
     """Run the pipeline over a MAC address table and write the records R-D-L2-004 reads."""
     configure_logging(log_level=logging.INFO)
 
@@ -108,7 +128,10 @@ def main(source: pathlib.Path, output: pathlib.Path) -> int:
     config = Config()
     config.execution_mode = ExecutionMode.CPU
 
-    build_pipeline(config, source, output).run()
+    sys.path.insert(0, str(HERE))
+    import segment_runner  # pylint: disable=import-outside-toplevel
+
+    build_pipeline(config, source, output, policy=segment_runner.load_policy(policy)).run()
 
     logging.getLogger(__name__).info("wrote %s", output)
 

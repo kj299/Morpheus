@@ -38,6 +38,8 @@ parameter added later cannot ship without an entry here.
 
 import dataclasses
 import inspect
+import os
+import tempfile
 import typing
 
 import pandas as pd
@@ -61,6 +63,7 @@ from morpheus.stages.lineage.minimization_stage import MinimizationStage
 from morpheus.stages.lineage.pipeline_health_stage import PipelineHealthStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
+from morpheus.stages.output.siem_wire_sink_stage import SiemWireSinkStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
 from morpheus.stages.telemetry.tc0_application_stage import TC0ApplicationStage
 from morpheus.stages.telemetry.tc0_asset_stage import TC0AssetStage
@@ -380,6 +383,9 @@ def port_inventory() -> dict:
 
 
 MINIMIZATION_KEY = b"a-key-long-enough-to-be-accepted"
+
+WIRE_SINK_FILE = os.path.join(tempfile.gettempdir(), "liveness-siem-wire-sink.jsonlines")
+"""Where the wire sink's scenario writes. Appended to, so every construction in the registry can share it."""
 OTHER_MINIMIZATION_KEY = b"a-different-key-of-the-same-size"
 
 
@@ -2496,6 +2502,30 @@ REGISTRY: dict = {
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
             ),
         ),
+    "SiemWireSinkStage":
+        Scenario(
+            stage=SiemWireSinkStage,
+            frame=wire,
+            base={
+                "filename": WIRE_SINK_FILE, "append": True
+            },
+            knobs=(
+                Knob("filename",
+                     INERT,
+                     reason="the stage's effect is the file it writes, which a comparison of emitted frames cannot "
+                     "see; tests/morpheus/stages/test_siem_wire_sink_stage.py reads the file back"),
+                Knob("overwrite", RAISES, benign=False, extreme=True),
+                Knob("append",
+                     INERT,
+                     reason="continuing a file rather than replacing it changes the file, not the frame; the stage's "
+                     "own tests assert both, and the runner restart test depends on it"),
+                Knob("kafka_topic", RAISES, benign=None, extreme="morpheus.score.l2"),
+                Knob("kafka_bootstrap_servers",
+                     INERT,
+                     reason="read only when producing to Kafka, which needs a broker; the stage's own tests stand a "
+                     "recorder in for the producer and assert the brokers it was built with"),
+            ),
+        ),
 }
 
 # --- The checks -----------------------------------------------------------------------------------------------
@@ -2538,7 +2568,6 @@ STAGE_DIRECTORIES = (("stages", "telemetry"), ("stages", "lineage"), ("stages", 
 
 def _stage_classes_on_disk() -> set:
     """Every stage class this fork added, read from the tree rather than from a list beside it."""
-    import os  # pylint: disable=import-outside-toplevel
     import re  # pylint: disable=import-outside-toplevel
 
     root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
@@ -2588,7 +2617,6 @@ def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships()
     # today. That is a number in prose beside a number on disk, which is the shape that has drifted three times
     # already in this repository -- most recently a sourcetype count that stayed wrong through a whole
     # increment. A reader deciding what to instrument acts on this table, so it is checked rather than trusted.
-    import os  # pylint: disable=import-outside-toplevel
     import re  # pylint: disable=import-outside-toplevel
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
@@ -2618,7 +2646,6 @@ def test_the_readme_uses_links_rather_than_sphinx_roles():
     # GitHub, which renders it as the literal text `{py:mod}`morpheus.utils.event_clock``. Two of these were
     # written into the collection section by habit from editing the guide, and nothing but a reader opening the
     # rendered page would have noticed.
-    import os  # pylint: disable=import-outside-toplevel
     import re  # pylint: disable=import-outside-toplevel
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
