@@ -1,0 +1,5 @@
+{"probe_id": "alice-workstation-day2", "hostname": "ws-alice", "event_time": 216000000000000, "tenant_id": "corp"}
+{"probe_id": "ledger-before-reclassification-recorded", "hostname": "db-ledger", "event_time": 561600000000000, "tenant_id": "corp"}
+{"probe_id": "ledger-after-reclassification-recorded", "hostname": "db-ledger", "event_time": 734400000000000, "tenant_id": "corp"}
+{"probe_id": "bob-workstation-unnoticed-move", "hostname": "ws-bob", "event_time": 907200000000000, "tenant_id": "corp"}
+{"probe_id": "builder-after-decommission", "hostname": "build-07", "event_time": 1425600000000000, "tenant_id": "corp"}
