@@ -83,7 +83,8 @@ Being clear about the boundary is the point of writing it down:
   `morpheus.utils.collector_schemas`. Each is tested on a fixture in its format against the committed sample.
   Not read yet:
   - NetFlow v9, sFlow and cloud flow logs at layer 3;
-  - any packet source at layer 4, since `DocaSourceStage` is not composed with `TC4FlowStage`;
+  - any packet source at layer 4: `DocaConvertStage` emits only the source address and the payload, so
+    feeding `TC4FlowStage` from DOCA needs a change to its CUDA kernel, and DOCA hardware to test it on;
   - a proxy's own log, and the content types an inspecting proxy reports, at layers 6 and 7, which Zeek
     cannot see inside TLS;
   - BIND query logs;
