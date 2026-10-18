@@ -69,13 +69,27 @@ Fifty-seven stages and forty-seven supporting modules, covered by 2,437 distinct
 
 Being clear about the boundary is the point of writing it down:
 
-- **The collectors are out of scope.** The SNMP, LLDP, DHCP, and 802.1X polling that produces layer 1
-  and 2 telemetry is not Morpheus and is not here. What ships is everything downstream of it.
-- **Layers 3, 4, 6 and 7 are built, and two of their rules are not.** Sixteen stages and twenty-four detection
-  searches ship for them, asserted over seeded corpora. The two rules that need a Triton endpoint
-  (R-B-L4-001, R-B-L7-003) remain design; no parser maps a real feed (NetFlow, Zeek, a proxy, an EDR) into the
-  columns the stages read. All twenty-four searches have run on a search head over the sample events,
-  each returning the rows written for it.
+- **The collectors are out of scope, at every layer.** Nothing here polls a switch or a router, exports or
+  receives flows, captures packets, runs Zeek, or calls an identity provider's, a SaaS audit API's or an
+  endpoint agent's interface. What ships starts where a collector's records arrive: a JSON line or a Kafka
+  record per [the collector contract](./examples/behavioral_analytics/collector_contract.md), or, for six
+  feeds, the files those feeds write themselves.
+- **Layers 3, 4, 6 and 7 are built, two of their rules are not, and six feeds are read in their own formats.**
+  Seventeen stages and twenty-four detection searches ship for them, asserted over seeded corpora, and all
+  twenty-four have run on a search head over the sample events, each returning the rows written for it. The
+  two rules that need a Triton endpoint (R-B-L4-001, R-B-L7-003) remain design. IPFIX in a packet capture
+  reaches layer 3 through `FlowRecordNormalizeStage`, and Zeek's `ssl.log` with `x509.log`, `http.log` and
+  `dns.log`, the Microsoft 365 audit log and Windows System Monitor events reach layers 6 and 7 through
+  `morpheus.utils.collector_schemas`. Each is tested on a fixture in its format against the committed sample.
+  Not read yet:
+  - NetFlow v9, sFlow and cloud flow logs at layer 3;
+  - any packet source at layer 4, since `DocaSourceStage` is not composed with `TC4FlowStage`;
+  - a proxy's own log, and the content types an inspecting proxy reports, at layers 6 and 7, which Zeek
+    cannot see inside TLS;
+  - BIND query logs;
+  - any endpoint agent other than System Monitor.
+
+  Each of those is one more mapping onto the same columns.
 - **A correlation chain now spans three layers, and the two ways it could have cheated are tested.** The
   estate pipeline runs layers 1, 2 and 5 over one hour of one estate and carries each principal down to
   the port they sat at: a supplied directory takes `user_principal` to `dot1x_identity`, and the 802.1X
