@@ -195,6 +195,9 @@ UNMARKED=(
     tests/morpheus/utils/test_splunk_app_contracts.py
     tests/morpheus/utils/test_splunk_field_contracts.py
     tests/morpheus/utils/test_splunk_transport.py
+    tests/morpheus/stages/test_flow_record_normalize_stage.py
+    tests/morpheus/utils/test_ipfix.py
+    tests/morpheus/utils/test_collector_schemas.py
     tests/morpheus/utils/test_stack_fingerprint.py
     tests/morpheus/utils/test_tracker_state.py
     tests/morpheus/utils/test_ttl_profile.py

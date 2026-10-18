@@ -202,6 +202,28 @@ morpheus run --use_cpu_only pipeline-other \
 The test parses every block above into a pipeline, so a renamed option fails it, and runs the last one, so the
 command line is shown to produce records and not only to parse.
 
+## From real feeds
+
+`fixtures/` holds six of the samples as the feeds that produce them write them, and `fixtures/make_fixtures.py`
+renders and reads them back:
+
+| Class | Fixture | Read with |
+|---|---|---|
+| `tc3` | `network/tc3.pcap`, IPFIX from three routers, one message per flow | `morpheus.utils.ipfix.read_pcap`, then `FlowRecordNormalizeStage` |
+| `tc6` | `presentation/ssl.log` and `x509.log` (Zeek, with the JA4 package's `ja4`) | `collector_schemas.zeek_ssl` |
+| `tc7_http` | `application/http.log` (Zeek) | `collector_schemas.zeek_http` |
+| `tc7_dns` | `application/dns.log` (Zeek) | `collector_schemas.zeek_dns` |
+| `tc7_saas` | `saas/audit.jsonlines`, unified audit log records | `collector_schemas.m365_audit` |
+| `tc7_endpoint` | `endpoint/sysmon.xml`, events 1 and 7 as `wevtutil qe /f:xml` writes them | `collector_schemas.sysmon_process` |
+
+A fixture carries only what its format carries. The collector's own facts -- its identity, contract version,
+tenant, clock discipline and sampling -- are a `CollectorProfile`, the exporters' names are an inventory the stage
+is given, and `collector_seq` counts records in the order read. `tests/morpheus/utils/test_collector_schemas.py`
+holds each normalized fixture to its sample, column for column, and runs the network, application, SaaS and
+endpoint segments over them to the same files the samples give, byte for byte. Zeek does not see inside a TLS
+session, so the two content types an inspecting proxy reports are null from the Zeek schema, and the
+presentation segment's content rule needs a feed that supplies them.
+
 # R-D-L2-004, end to end
 
 One command turns a MAC address table into the records the shipped Splunk detection reads:

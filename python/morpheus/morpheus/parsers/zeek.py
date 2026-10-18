@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2025, NVIDIA CORPORATION.
+# Copyright (c) 2023-2026, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import csv
+import io
+
+import pandas as pd
 
 from morpheus.io.utils import get_csv_reader
 from morpheus.utils.type_aliases import DataFrameModule
@@ -55,6 +60,9 @@ def parse(filepath: str, df_type: DataFrameModule = "cudf") -> DataFrameType:
     DataFrameType
         Parsed Zeek log dataframe
     """
+    if (df_type == "pandas"):
+        return _parse_pandas(filepath)
+
     csv_reader = get_csv_reader(df_type)
     header_gdf = csv_reader(filepath, names=["line"], nrows=8)
     lines_gdf = header_gdf["line"].str.split()
@@ -72,3 +80,54 @@ def parse(filepath: str, df_type: DataFrameModule = "cudf") -> DataFrameType:
         skipfooter=1,
     )
     return log_gdf
+
+
+PANDAS_TYPE_DICT = {**TYPE_DICT, "count": "Int64", "int": "Int64", "port": "Int64", "bool": "boolean"}
+"""Nullable types for pandas, since Zeek writes its unset marker in any column and int64 cannot hold it."""
+
+
+def _parse_pandas(filepath: str) -> pd.DataFrame:
+    """
+    Parse a Zeek ASCII log with pandas, reading the header the way Zeek writes it.
+
+    The cuDF path reads the header as one CSV column, which pandas refuses on the `#set_separator\t,` line Zeek
+    writes into every log, and reads the body with fixed integer types and a dropped last line, which fail on the
+    unset marker and lose a row of a log Zeek has not yet closed. Here the header is read line by line, the body
+    is every line that is not a `#` directive, the `#unset_field` marker is a null, `T` and `F` are booleans, and
+    the counts are nullable.
+    """
+    directives = {}
+    body = []
+
+    with open(filepath, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.rstrip("\n")
+
+            if (line.lstrip().startswith("#")):
+                parts = line.split(None, 1)
+                directives[parts[0].lstrip()] = parts[1] if len(parts) > 1 else ""
+            elif (line):
+                body.append(line)
+
+    names = directives["#fields"].split()
+    types = directives["#types"].split()
+    unset = directives.get("#unset_field", "-").strip()
+    dtypes = {name: PANDAS_TYPE_DICT.get(kind, "str") for (name, kind) in zip(names, types)}
+
+    frame = pd.read_csv(
+        io.StringIO("\n".join(body) + "\n"),
+        sep="\t",
+        names=names,
+        dtype={name: ("str" if kind in ("Int64", "boolean") else kind)
+               for (name, kind) in dtypes.items()},
+        na_values=[unset],
+        keep_default_na=False,
+        quoting=csv.QUOTE_NONE)
+
+    for (name, kind) in dtypes.items():
+        if (kind == "boolean"):
+            frame[name] = frame[name].map({"T": True, "F": False, "True": True, "False": False}).astype("boolean")
+        elif (kind == "Int64"):
+            frame[name] = pd.to_numeric(frame[name]).astype("Int64")
+
+    return frame
