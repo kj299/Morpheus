@@ -451,7 +451,14 @@ _PROFILES = (
     "bits_per_second_baseline_min",
     "bits_per_second_step",
     "utilization",
-    "auth_elapsed_ratio",
+    "auth_elapsed_ratio",  # A workstation's hour as one row, and how far each part of it sits from its peer group's.
+    "frame_rows",
+    "endpoint_novel_pairs",
+    "dsts_per_src_step_z_loss",
+    "internal_dst_ratio_z_loss",
+    "byte_asymmetry_z_loss",
+    "ja4_client_distinct_z_loss",
+    "endpoint_novel_pairs_z_loss",
 )
 
 _PSEUDONYMS = (

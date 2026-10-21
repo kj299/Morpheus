@@ -15,7 +15,7 @@
 """
 The determinism envelope every composed corpus stamps on its rows: control 12, and control 1's model columns.
 
-Every pipeline under this directory builds its envelope here, so the twelve agree on what the fields mean.
+Every pipeline under this directory builds its envelope here, so the thirteen agree on what the fields mean.
 `configuration` digests the settings that decide the output rather than the `Config` (which carries the execution
 mode and would fork the envelope between the CPU and GPU runs control 13's parity check compares);
 `fingerprint` folds in the feature schema version and the thresholds the layer's shipped rules state, read from the

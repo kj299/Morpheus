@@ -65,6 +65,7 @@ from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.siem_wire_sink_stage import SiemWireSinkStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
+from morpheus.stages.telemetry.entity_frame_stage import EntityFrameStage
 from morpheus.stages.telemetry.flow_record_normalize_stage import FlowRecordNormalizeStage
 from morpheus.stages.telemetry.tc0_application_stage import TC0ApplicationStage
 from morpheus.stages.telemetry.tc0_asset_stage import TC0AssetStage
@@ -1128,6 +1129,23 @@ def ipfix_records() -> dict:
         "observation_domain_id": [256, 256, 512],
         "export_time": [1, 2, 3],
         "received_ns": [1 * SECOND, 2 * SECOND, 3 * SECOND],
+    }
+
+
+def sealed_hour() -> dict:
+    """One sealed hour of a merged host stream: two hosts' flows and one host's processes, one row late."""
+    return {
+        "host_key": ["ws-1", "ws-1", "ws-2", "ws-1", "ws-1"],
+        "dsts_per_src": [3, 5, 9, None, None],
+        "endpoint_pair_novel": [None, None, None, True, True],
+        "ctx_peer_group": [None, "finance", "build", "finance", None],
+        "is_late": [False, False, False, False, True],
+        "window_complete": [True] * 5,
+        "window_id": [7] * 5,
+        "window_start_ns": [7 * HOUR] * 5,
+        "window_end_ns": [8 * HOUR] * 5,
+        "revision": [0] * 5,
+        "sealed_by": ["watermark"] * 5,
     }
 
 
@@ -2218,6 +2236,27 @@ REGISTRY: dict = {
                 Knob("time_unit", DIFFERS, benign="ns", extreme="ms"),
                 Knob("ingest_clock", DIFFERS, benign=_ingest_after(1), extreme=_ingest_after(5)),
                 Knob("on_quarantine", DIFFERS, benign=None, extreme=[].append),
+            ),
+        ),
+    "EntityFrameStage":
+        Scenario(
+            stage=EntityFrameStage,
+            frame=sealed_hour,
+            base={"features": {
+                "fan_out": ["dsts_per_src", "max"], "novel": ["endpoint_pair_novel", "count_true"]
+            }},
+            knobs=(
+                Knob("features",
+                     DIFFERS,
+                     benign={
+                         "fan_out": ["dsts_per_src", "max"], "novel": ["endpoint_pair_novel", "count_true"]
+                     },
+                     extreme={"fan_out": ["dsts_per_src", "min"]}),
+                Knob("entity_column", INPUT_COLUMN, benign="host_key"),
+                Knob("carry_columns", DIFFERS, benign=None, extreme=["ctx_peer_group"]),
+                Knob("collector_id", DIFFERS, benign="entity-frame", extreme="host-frame"),
+                Knob("schema_version", DIFFERS, benign="entity_frame.v1", extreme="host_frame.v1"),
+                Knob("first_seq", DIFFERS, benign=0, extreme=10),
             ),
         ),
     "FlowRecordNormalizeStage":

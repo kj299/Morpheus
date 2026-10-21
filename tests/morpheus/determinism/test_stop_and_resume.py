@@ -18,7 +18,7 @@ Control 13's seventh check: a pipeline stopped halfway and resumed from its snap
 
 The cross-restart check (the third) proves a fresh process over the same corpus reaches the same output, which is a
 statement about replay. A deployment does not replay; it stops, and the process that replaces it carries on from
-wherever the old one got to. This is that statement, over all twelve composed pipelines: every linear segment in
+wherever the old one got to. This is that statement, over all thirteen composed pipelines: every linear segment in
 each is stopped at its halfway row with open windows and bindings kept, snapshotted to bytes, restored into stages
 built afresh from the same arguments, and finished -- and the result must be the same golden the uninterrupted run
 is held to. `resumable.py` describes the mechanics.

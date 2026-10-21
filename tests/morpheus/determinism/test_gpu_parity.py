@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Whether every one of the twelve composed pipelines produces the same output in GPU mode as in CPU mode.
+Whether every one of the thirteen composed pipelines produces the same output in GPU mode as in CPU mode.
 
 Every stage declares support for both execution modes, and 203 `gpu_mode` variants assert that per stage. None of
 them composes a pipeline. Both determinism harnesses built their configuration in CPU mode and nothing else, so
@@ -44,8 +44,9 @@ and because a duplicated assertion is cheaper than a reader having to reconstruc
 
 It compared three corpora until 2026-10-04, while the other nine were compared only through their own harnesses.
 That was enough to pass, and it was also how the October runs found the parity defect twice more in pipelines this
-file had never named. Parametrizing it over all twelve makes this the one test whose list of corpora is the list
-of composed pipelines, which `test_the_parity_list_is_every_composed_pipeline` keeps true.
+file had never named. Parametrizing it over all of them -- twelve then, thirteen since the host segment -- makes this
+the one test whose list of corpora is the list of composed pipelines, which
+`test_the_parity_list_is_every_composed_pipeline` keeps true.
 """
 
 import glob
@@ -74,6 +75,7 @@ CORPORA = ("application",
            "context",
            "endpoint",
            "estate",
+           "host_score",
            "lineage",
            "network",
            "presentation",
