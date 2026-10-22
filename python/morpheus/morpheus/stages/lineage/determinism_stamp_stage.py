@@ -76,8 +76,9 @@ class DeterminismStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Column holding the entity the manifest is keyed by.
     window_column : str, default = "window_id"
         Column holding the window each row belongs to, which the manifest checks itself against. Absent from
-        the frame means the manifest's own window is assumed, which is correct for a pipeline that seals before
-        scoring and is why `WindowSealStage` belongs upstream of this.
+        the frame, or given as `None`, means the manifest's own window is assumed, which is correct for a pipeline
+        that seals before scoring and is why `WindowSealStage` belongs upstream of this; `None` is how a pipeline
+        whose rows carry a finer window than the manifest's says so explicitly.
     time_column : str, default = "event_time"
         The row's event time, read only when the manifest declares `scores_from_ns`.
     """

@@ -51,8 +51,8 @@ says, and the drift trajectory downstream treats a null as a break in the run ra
 import logging
 import typing
 
-import pandas as pd
 import mrc
+import pandas as pd
 from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
@@ -126,8 +126,10 @@ class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     entity_column : str, default = "user_principal"
         The behavioral subject. Rows are grouped by it and each group is scored against its own model.
     window_column : str, default = "window_id"
-        The window each row belongs to, checked against the manifest's. Absent, every row is taken to be the
-        manifest's own window, which is the single-window case.
+        The window each row belongs to, checked against the manifest's. Absent from the frame, or given as `None`,
+        every row is taken to be the manifest's own window, which is the single-window case: a frame whose rows
+        carry a finer window than the manifest is pinned for, an hourly host frame against a weekly manifest,
+        says so with `None` rather than by naming a column the frame happens not to have.
     time_column : str, default = "event_time"
         The row's event time, read only when the manifest declares `scores_from_ns`.
     decimals : int, default = 4

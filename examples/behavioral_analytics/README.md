@@ -41,7 +41,7 @@ example policy no principal from the inputs appears in any segment's output.
 
 ## From the `morpheus` command line
 
-Every one of the fifty-six stages is a `morpheus run pipeline-other` command, and
+Every one of the fifty-eight stages is a `morpheus run pipeline-other` command, and
 `tests/morpheus/stages/test_lineage_stage_cli.py` builds each command and holds the compositions below to the
 CLI. The runners are the complete form: four stages take Python objects the command line cannot carry --
 `determinism-stamp` the envelope, `tc0-enrich` a context store, `binding-resolve` a binding table and `tc5-score`
@@ -249,9 +249,9 @@ stamps `_time` by applying the shipped `props.conf`'s own `TIME_PREFIX` and `TIM
 applies R-D-L2-004's predicate to the parsed JSON rather than to a frame.
 
 R-D-L2-004 is the rule this can be done for. It needs one collector and nothing else -- no `port_designations`
-lookup, no exclusion list, no TC-0 context store. Several of the forty-nine shipped detections need something an
+lookup, no exclusion list, no TC-0 context store. Several of the fifty-five shipped detections need something an
 estate has to supply first, a designation list, an exclusion list or the TC-0 context store, and the rest have not
-been run this way yet, so proving one rule end to end is worth more than gesturing at forty-nine.
+been run this way yet, so proving one rule end to end is worth more than gesturing at fifty-five.
 
 ## What the sample contains
 

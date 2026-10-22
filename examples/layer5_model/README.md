@@ -147,7 +147,7 @@ continue if Torch is already imported rather than pretending.
 
 ## Features
 
-The ten columns the model trains on are all derived by the five TC-5 stages, not raw columns a collector sent:
+The ten columns the model trains on are all derived by TC-5 stages -- three of the seven, novelty, cadence and risk -- not raw columns a collector sent:
 
 ```
 logcount  locincrement  appincrement  deviceincrement  asns_in_window

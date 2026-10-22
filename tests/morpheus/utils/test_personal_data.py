@@ -39,6 +39,7 @@ from morpheus.utils.personal_data import COLUMNS
 from morpheus.utils.personal_data import IDENTIFIES
 from morpheus.utils.personal_data import LOCATES
 from morpheus.utils.personal_data import OPERATIONAL
+from morpheus.utils.personal_data import ORGANISATIONAL_PROFILE_COLUMNS
 from morpheus.utils.personal_data import PER_ROW
 from morpheus.utils.personal_data import PERSONAL_CATEGORIES
 from morpheus.utils.personal_data import PROFILES
@@ -163,6 +164,13 @@ def test_the_counts_the_documents_quote_are_the_counts_here():
         14, 25, 17, 20, 242
     ], "the category sizes have moved; README.md and the guide's Part 6 quote them and need the same edit"
 
+    # The split the documents quote inside the profile count: the organisational columns are named, and the rest
+    # are behavioural, so both numbers are recomputed here rather than taken from the prose.
+    organisational = set(ORGANISATIONAL_PROFILE_COLUMNS)
+
+    assert organisational <= set(columns_in(PROFILES))
+    assert (len(organisational), len(columns_in(PROFILES)) - len(organisational)) == (7, 235)
+
     for name in ("README.md",
                  os.path.join("docs",
                               "source",
@@ -170,7 +178,7 @@ def test_the_counts_the_documents_quote_are_the_counts_here():
                               "guides",
                               "11_predictive_behavioral_analytics_osi.md")):
         with open(os.path.join(REPO_ROOT, name), encoding="utf-8") as handle:
-            assert "two hundred and forty-two are profile, two hundred and thirty-two of them behavioural" in re.sub(
+            assert "two hundred and forty-two are profile, two hundred and thirty-five of them behavioural" in re.sub(
                 r"\s+", " ", handle.read()), name
 
 
