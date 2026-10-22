@@ -120,20 +120,31 @@ come through one poller and cannot be pulled apart by a collector spread; the po
 eleven clocks; and the flow that completes the chain lands thirteen minutes after the first step, inside a four-hour
 window and a lease whose clock moves the other way by less than the lease has left to run.
 
+It was run again on 2026-10-22 after step 8's host segment (#59) gained its sourcetype and a rule, R-P-L3-009. The
+host score corpus joins the sweep as a tenth pipeline, with five collector clocks: the flow exporter, the inspection
+point and the EDR, each the only collector of its class, and the DHCP server and inventory feed its hosts resolve
+through. The host frame is the one row in which three collectors' records meet, so the rule is measured against
+clocks that disagree rather than under a shift. It reads a day's mean of hourly frames, and a minute of spread
+moves at most an hour's edge of records into the neighbouring frame: the three host-days it accuses are the same
+at every spread swept, and nothing else moved. With quarantine on, a spread wide enough to hold every collector's
+records leaves the segment nothing to frame; the pipeline now returns the quarantine alone where it raised on an
+empty concatenation.
+
 What a sweep can say depends on the clocks in the corpus, and the fifty-six fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
-| Inputs on clocks that disagree | 33 | A tolerance, or the spread at which the rule changes |
+| Inputs on clocks that disagree | 34 | A tolerance, or the spread at which the rule changes |
 | Inputs on one clock, in a corpus with several | 20 | Boundary sensitivity under a uniform shift, not a tolerance |
 | Corpus with one clock | 2 | Nothing; reported as not measured |
 
 **Measured against clocks that disagree** -- the estate's six collectors and three switches for layers 1 and 2,
 the campaign's eleven collectors for the chains, the network corpus's three routers, each of which stamps its own
-flows, the endpoint corpus's seven hosts, each of whose agents stamps its own process starts, and the presentation
+flows, the endpoint corpus's seven hosts, each of whose agents stamps its own process starts, the presentation
 corpus's inspection point, DHCP server and inventory feed, whose disagreement R-B-L6-001 reads through the machine
-it gates on, as R-B-L4-004 reads the transport corpus's through the machine it joins on:
+it gates on, as R-B-L4-004 reads the transport corpus's through the machine it joins on, and the host score corpus's
+flow exporter, inspection point and EDR, whose records meet in one row of the host frame R-P-L3-009 reads:
 
 | Rule | Breaking spread |
 | --- | --- |
@@ -141,6 +152,7 @@ it gates on, as R-B-L4-004 reads the transport corpus's through the machine it j
 | R-D-L1-008, configuration change outside the window, and R-P-L1-009, reboot-rate trajectory | unchanged to 60s on collectors; the devices' polls are on no switch clock |
 | **R-D-L2-004, MAC in two places** | unchanged to 60s on collectors; **changes at 60s on switches** |
 | R-B-L7-004, process ancestry novelty | unchanged to 60s on host clocks |
+| R-P-L3-009, host drift trajectory | unchanged to 60s on the five collector clocks that feed and resolve the host frame |
 | R-B-L3-001, 002, 004, 006 and 007, R-D-L3-003 and 008 | unchanged to 60s on router clocks |
 | R-B-L6-001, new TLS client fingerprint, and R-B-L4-004, stack fingerprint mismatch | unchanged to 60s on collector clocks |
 | **R-P-L3-005, fan-out trajectory** | **changes at 30s on router clocks**, losing one of the scanner's twenty rises |
