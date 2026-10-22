@@ -126,9 +126,9 @@ point and the EDR, each the only collector of its class, and the DHCP server and
 through. The host frame is the one row in which three collectors' records meet, so the rule is measured against
 clocks that disagree rather than under a shift. It reads a day's mean of hourly frames, and a minute of spread
 moves at most an hour's edge of records into the neighbouring frame: the three host-days it accuses are the same
-at every spread swept, and nothing else moved. With quarantine on, a spread wide enough to hold every collector's
-records leaves the segment nothing to frame; the pipeline now returns the quarantine alone where it raised on an
-empty concatenation.
+at every spread swept, and nothing else moved. With quarantine on, ten seconds puts every feed beyond the bound and
+holds every record, so the segment has nothing to frame and the rule loses its three host-days and accuses nothing
+new; the pipeline now returns the quarantine alone where it raised on an empty concatenation.
 
 What a sweep can say depends on the clocks in the corpus, and the fifty-six fall into three groups that must
 not be added together:
