@@ -3997,8 +3997,9 @@ Pass 4 measures each of these and records which the fork reuses.
   since a chain is decided by which classes were sealed together.
 - The clock-skew experiment (`examples/clock_skew/run_experiment.py`): the collectors' clocks spread across a
   window of a given width, the composed pipelines re-run over the same corpora, and a report of which columns
-  moved and at what width each shipped rule changed what it accuses. It runs anywhere in about forty seconds,
-  needs no card, and answers the open question this document had left open since it was written.
+  moved and at what width each shipped rule changed what it accuses. It runs anywhere without a card -- about six
+  minutes on the machine that recorded it, as the open question below and its README say -- and answers the open
+  question this document had left open since it was written.
 - R-D-L5-003 and R-D-L5-004 as saved searches, two of the fifty-five detections that now ship. Their
   predicates are asserted in Python over the corpus and their row counts written into the validation
   package, so an expectation cannot go stale without a test failing. Both fire on the planted cases and
