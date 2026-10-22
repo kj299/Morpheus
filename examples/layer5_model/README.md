@@ -86,8 +86,15 @@ The first fit was the session models' finding again, louder. No host offered a n
 fortnight, so `ja4_client_distinct` never moved, its training losses had a spread as small as 10^-10, and the
 drifting workstation's first new fingerprint scored in the billions. The corpus now updates each host's browser on
 a different day of the fortnight's second week, as an estate's updates arrive, and the same host's daily mean runs
-from 0.6 to 551 while no ordinary host's daily mean reaches 1.3. The scores are still uncalibrated -- a deviation of 551
+from 0.7 to 379 while no ordinary host's daily mean reaches 1.6. The scores are still uncalibrated -- a deviation of 379
 means far outside the fortnight and nothing more exact.
+
+The models were refitted once, when the host corpus moved onto the epoch timeline the other corpora count from so
+that one search head could index all of them. The fortnight's rows did not change -- the same 224, 224 and 504, with
+the same means and spreads -- but their order did, because the corpus sorts on a key that carries the window, and
+the fit depends on the order the rows are seen in. The second fit is as reproducible as the first, run twice to the
+same digests, and the drifting host's last day reads 379 under it where it read 551 under the first: the same shape,
+another number, which is what an uncalibrated score is.
 
 ## The card run
 

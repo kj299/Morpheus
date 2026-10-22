@@ -541,7 +541,7 @@ def walk_pipeline(search: str) -> tuple:
 def test_the_app_is_where_we_think_it_is():
     # Without this every assertion below passes over an empty parse, which is the failure mode a linter must not
     # have: it would report a clean bill of health for a file it never read.
-    assert len(searches()) == 78
+    assert len(searches()) == 80
     assert len(lookup_fields()) > 0
     assert len(stage_columns()) > 40
 
@@ -959,6 +959,9 @@ def test_a_wildcard_sourcetype_is_checked_against_every_sourcetype_it_names():
 
     assert {"dsts_per_src", "travel_status", "ja4_client"} <= columns
     assert "bind_gap_ns" not in columns
+
+    # The summary's glob names the host segment's rows as well as the seven layers'; the narrower one does not.
+    assert "frame_rows" in contract_columns("morpheus:score:*") and "frame_rows" not in columns
 
 
 def test_the_registry_of_hollow_reads_is_honest():

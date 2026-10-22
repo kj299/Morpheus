@@ -1,10 +1,10 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-17T01:26:51.899236+00:00",
-  "timestamp_shift_weeks": 2954,
+  "at": "2026-10-22T16:03:00.992610+00:00",
+  "timestamp_shift_weeks": 2955,
   "dispatch_window": {
-    "earliest": 1786492800,
-    "latest": 1792203868
+    "earliest": 1787097600,
+    "latest": 1792688439
   },
   "indexed": {
     "binding:bucketed": 3000,
@@ -14,9 +14,10 @@
     "context:asset": 7,
     "context:identity": 23,
     "morpheus:edge": 2763,
-    "morpheus:health": 924,
+    "morpheus:health": 1092,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
+    "morpheus:score:host": 1568,
     "morpheus:score:l1": 1390,
     "morpheus:score:l2": 2626,
     "morpheus:score:l3": 1537,
@@ -33,9 +34,10 @@
     "context:asset": 7,
     "context:identity": 23,
     "morpheus:edge": 2763,
-    "morpheus:health": 924,
+    "morpheus:health": 1092,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
+    "morpheus:score:host": 1568,
     "morpheus:score:l1": 1390,
     "morpheus:score:l2": 2626,
     "morpheus:score:l3": 1537,
@@ -48,8 +50,8 @@
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-4861484.000000",
-        "min_drift": "-5621084.000000"
+        "max_drift": "-4741266.000000",
+        "min_drift": "-5500866.000000"
       }
     ],
     "binding_tables": [
@@ -82,6 +84,13 @@
         "count": "2"
       }
     ],
+    "host_watchlist": [
+      {
+        "rule_id": "R-P-L3-009",
+        "reason": "host-drift-trajectory",
+        "count": "3"
+      }
+    ],
     "three_layer_chain_risk": [
       {
         "total_risk": "0",
@@ -97,8 +106,8 @@
       }
     ],
     "risk_records": {
-      "written": 221,
-      "indexed": 221,
+      "written": 224,
+      "indexed": 224,
       "by_rule": [
         {
           "rule_id": "R-B-L1-005",
@@ -309,6 +318,10 @@
           "count": "43"
         },
         {
+          "rule_id": "R-P-L3-009",
+          "count": "3"
+        },
+        {
           "rule_id": "R-P-L5-006",
           "count": "6"
         },
@@ -327,6 +340,7 @@
     "Binding lookup - L1 history refresh",
     "R-P-L5-006 - Drift trajectory",
     "R-P-L7-006 - Access breadth trajectory",
+    "R-P-L3-009 - Host drift trajectory",
     "Topology - LLDP adjacency",
     "R-C-002 - TLS anomaly precedes beaconing",
     "R-C-001 - Lateral movement chain",
@@ -397,7 +411,8 @@
     "Binding lookup - L2 expiry",
     "Binding lookup - L5/L2 expiry",
     "Binding lookup - L1 history expiry",
-    "Principal watchlist - expiry"
+    "Principal watchlist - expiry",
+    "Host watchlist - expiry"
   ],
   "searches": {
     "Binding lookup - L2/L3 refresh": {
@@ -427,6 +442,10 @@
     "R-P-L7-006 - Access breadth trajectory": {
       "phase": "predictive",
       "rows": 2
+    },
+    "R-P-L3-009 - Host drift trajectory": {
+      "phase": "predictive",
+      "rows": 3
     },
     "Topology - LLDP adjacency": {
       "phase": "search",
@@ -682,7 +701,7 @@
     },
     "Behavior summary - per-layer scores": {
       "phase": "summary",
-      "rows": 7233
+      "rows": 8801
     },
     "R-P-L3-005 - Fan-out trajectory": {
       "phase": "trajectory",
@@ -711,6 +730,10 @@
     "Principal watchlist - expiry": {
       "phase": "expiry",
       "rows": 2
+    },
+    "Host watchlist - expiry": {
+      "phase": "expiry",
+      "rows": 3
     }
   },
   "measures": "what each shipped saved search returns on one Splunk instance over the checked-in sample events, with every timestamp moved by a whole number of weeks and each search dispatched over all of them at once. A row count per search, not the rows themselves."

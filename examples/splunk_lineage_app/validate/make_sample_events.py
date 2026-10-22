@@ -154,6 +154,7 @@ def main() -> int:
     import context_pipeline  # pylint: disable=import-outside-toplevel
     import endpoint_pipeline  # pylint: disable=import-outside-toplevel
     import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
+    import host_score_pipeline  # pylint: disable=import-outside-toplevel
     import network_pipeline  # pylint: disable=import-outside-toplevel
     import pandas as pd  # pylint: disable=import-outside-toplevel
     import presentation_pipeline  # pylint: disable=import-outside-toplevel
@@ -233,6 +234,14 @@ def main() -> int:
                                                                                              processes)):
         _scored(by_sourcetype, result, "morpheus:score:l7")
         _health(by_sourcetype, module, result)
+
+    # The host segment: one row per workstation per hour, scored against its peer group's committed model, on a
+    # sourcetype of its own. Its hosts are the host corpus's and share nothing with any other corpus's machines, so
+    # R-B-L7-004's lookup against the watchlist R-P-L3-009 writes finds none of the endpoint corpus's hosts there.
+    hosts = host_score_pipeline.run_pipeline(host_score_pipeline.build_pipeline_config(),
+                                             host_score_pipeline.build_corpus())
+    _scored(by_sourcetype, hosts, "morpheus:score:host")
+    _health(by_sourcetype, host_score_pipeline, hosts)
 
     # The campaign: one estate seen by all its collectors, which is what R-C-001 and R-C-004 are asserted on. Its
     # records go on the sourcetypes their layers' records always go on, because that is where a chained rule has to

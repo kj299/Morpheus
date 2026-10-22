@@ -726,6 +726,29 @@ def endpoint_decisions(result: pd.DataFrame) -> dict:
     return {"R-B-L7-004": keys(endpoint[true(endpoint, "endpoint_pair_novel")], ["endpoint_host", "endpoint_pair"])}
 
 
+# --- The host segment, over the host score corpus -------------------------------------------------------------
+
+HOST_DRIFT = "R-P-L3-009 - Host drift trajectory"
+HOST_DRIFT_RISING_WINDOWS = threshold(HOST_DRIFT, r"rising_threshold\s*=\s*([\d.]+)")
+HOST_DRIFT_RISE_SIGMAS = threshold(HOST_DRIFT, r"sigma_threshold\s*=\s*([\d.]+)")
+
+requires(HOST_DRIFT, r"drift_mature=true")
+
+
+def host_decisions(result: pd.DataFrame) -> dict:
+    """
+    R-P-L3-009, keyed on the host and the day it fired, as the search deduplicates. The rule has the principals'
+    rising and sigma conditions and neither of their ceilings, and reads the host segment's rows, one per host per
+    hour, so a host-day is accused once however many of its hours carry the trajectory.
+    """
+    hosts = rows(result, "host_score")
+    drifting = hosts[true(hosts, "drift_mature")
+                     & (number(hosts, "drift_rising_windows") >= HOST_DRIFT_RISING_WINDOWS)
+                     & (number(hosts, "drift_rise_sigmas") > HOST_DRIFT_RISE_SIGMAS)]
+
+    return {"R-P-L3-009": keys(drifting, ["host_key", "day_window_id"])}
+
+
 # --- The chains, over the campaign corpus ---------------------------------------------------------------------
 
 LATERAL = "R-C-001 - Lateral movement chain"

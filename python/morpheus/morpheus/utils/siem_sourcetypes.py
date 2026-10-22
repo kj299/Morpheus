@@ -14,7 +14,7 @@
 """
 What produces each sourcetype the shipped Splunk app is configured to parse, or what is missing where nothing does.
 
-The app's `props.conf` declares eighteen stanzas. Each names the field its `TIME_PREFIX` anchors `_time` on, and
+The app's `props.conf` declares nineteen stanzas. Each names the field its `TIME_PREFIX` anchors `_time` on, and
 each of those fields has to reach the wire as a quoted string in the app's `TIME_FORMAT` or Splunk stamps the
 event at index time instead -- silently, with no error anywhere, turning every windowed detection into a rule
 about when the pipeline happened to be busy.
@@ -668,6 +668,48 @@ PRODUCED: dict = {
                  "ctx_department",
                  "ctx_employment_status"),
             ),
+        ),
+    "morpheus:score:host":
+        Sourcetype(
+            name="morpheus:score:host",
+            time_column="event_time",
+            time_columns=ENVELOPE_TIME_COLUMNS,
+            producer="The host segment of `tests/morpheus/determinism/host_score_pipeline.py`: EntityFrameStage over "
+            "each sealed hour of a host's flows, TLS handshakes and process starts, TC5ScoreStage on `host_key` "
+            "against the peer group's committed model, DeterminismStampStage, EnvelopeStampStage and, over the daily "
+            "windows a second WindowSealStage seals, TC5DriftStage; the `host_score` class.",
+            # One row per host per sealed hour, stamped at layer 3 because the frame is keyed on the address the
+            # flows resolve to a host from; the entity is the machine and never a principal. The five features are
+            # the frame itself, and a row of the fortnight the models were fitted on carries them and no score.
+            # R-P-L3-009 reads the drift_* columns the daily seal stamps onto every hour of the day, Behavior summary
+            # reads `max_abs_z` into `peak_z` on these rows as it does on a principal's, and the model columns say
+            # which peer group's model scored the row or that the estate's fallback did. Everything a search reads is
+            # required rather than a variant, because the segment has one producer and it writes every column.
+            required_columns=("event_uid",
+                              "host_key",
+                              "lineage_id",
+                              "osi_layer",
+                              "window_id",
+                              "ctx_peer_group",
+                              "frame_rows",
+                              "dsts_per_src_step",
+                              "internal_dst_ratio",
+                              "byte_asymmetry",
+                              "ja4_client_distinct",
+                              "endpoint_novel_pairs",
+                              "mean_abs_z",
+                              "max_abs_z",
+                              *MODEL_COLUMNS,
+                              "day_window_id",
+                              "drift_mature",
+                              "drift_rising_windows",
+                              "drift_total_rise",
+                              "drift_rise_sigmas",
+                              "drift_baseline_sigma",
+                              "drift_velocity",
+                              "drift_acceleration",
+                              *PROVENANCE_COLUMNS,
+                              *ENVELOPE_COLUMNS),
         ),
     "morpheus:quarantine":
         Sourcetype(

@@ -49,7 +49,7 @@ for row.
 
 ## The result
 
-All fifty-five shipped detections are swept, each over the pipeline that feeds it, through
+All fifty-six shipped detections are swept, each over the pipeline that feeds it, through
 [`rules.py`](./rules.py), which reduces every rule to what it accuses and reads every threshold, join tolerance
 and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hundred, one second, ten, thirty and
 sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
@@ -120,7 +120,7 @@ come through one poller and cannot be pulled apart by a collector spread; the po
 eleven clocks; and the flow that completes the chain lands thirteen minutes after the first step, inside a four-hour
 window and a lease whose clock moves the other way by less than the lease has left to run.
 
-What a sweep can say depends on the clocks in the corpus, and the fifty-five fall into three groups that must
+What a sweep can say depends on the clocks in the corpus, and the fifty-six fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |

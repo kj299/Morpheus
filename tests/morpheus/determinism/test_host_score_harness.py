@@ -48,8 +48,9 @@ DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_host
 
 RISING_WINDOWS = 4
 RISE_SIGMAS = 1.5
-"""R-P-L5-006's trajectory: four consecutive rising windows, by more than one and a half of the entity's own deviations
-in all. The host trajectory is asked the same question; the rule that asks it of hosts ships with their sourcetype."""
+"""R-P-L3-009's trajectory, which is R-P-L5-006's asked of a host: four consecutive rising windows, by more than one and
+a half of the entity's own deviations in all, and neither of the principals' ceilings. The validation package reads the
+two numbers from the stanza; here they are stated, so a changed rule and a changed corpus fail differently."""
 
 
 @pytest.fixture(name="corpus", scope="module")
@@ -111,7 +112,7 @@ def _daily(result: pd.DataFrame) -> pd.DataFrame:
 
 
 def _climbs(daily: pd.DataFrame) -> pd.DataFrame:
-    """The host-days whose trajectory meets R-P-L5-006's two conditions."""
+    """The host-days whose trajectory meets R-P-L3-009's two conditions, mature or not."""
     rising = daily["rising"].astype("Float64").fillna(0) >= RISING_WINDOWS
     far = daily["rise_sigmas"].astype("Float64").fillna(0) >= RISE_SIGMAS
 
@@ -400,10 +401,10 @@ def test_the_numbers_the_documents_quote(result: pd.DataFrame):
                     & (daily["day"] >= hs_.TRAINING_DAYS + hs_.STEP_DAY)]
     ordinary = daily[~daily["host_key"].isin([hs_.host_key(hs_.DRIFTING), hs_.host_key(hs_.STEPPED)])]
 
-    assert round(drifting["mean_abs_z"].iloc[0], 1) == 0.6
-    assert round(drifting["mean_abs_z"].iloc[-1]) == 551
-    assert ordinary["mean_abs_z"].max() < 1.3
-    assert 50 < stepped["mean_abs_z"].min() and stepped["mean_abs_z"].max() < 70
+    assert round(drifting["mean_abs_z"].iloc[0], 1) == 0.7
+    assert round(drifting["mean_abs_z"].iloc[-1]) == 379
+    assert ordinary["mean_abs_z"].max() < 1.6
+    assert 50 < stepped["mean_abs_z"].min() and stepped["mean_abs_z"].max() < 75
 
     with open(hs_.MODELS_PATH, encoding="utf-8") as handle:
         rows = json.load(handle)["trained"]["rows"]

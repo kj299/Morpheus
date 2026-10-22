@@ -110,23 +110,24 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 78
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 80
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
     expiries = [name for name in names if phases[name] == "expiry"]
 
-    assert len(refreshes) == 5 and len(expiries) == 5
+    assert len(refreshes) == 5 and len(expiries) == 6
     assert max(position[name] for name in refreshes) < min(position[name] for name in runner.PREDICTIVE)
 
     for writer in runner.PREDICTIVE:
         assert position[writer] < position["R-B-L7-002 - Bulk data access"]
+        assert position[writer] < position["R-B-L7-004 - Process ancestry novelty"]
 
     # Every detection writes its risk record before the search that sums them, and the summary is collected before
     # the trajectory rule reads it.
     writers = [name for name in names if runner.writes_risk(name)]
 
-    assert len(writers) == 55
+    assert len(writers) == 56
     assert max(position[name] for name in writers) < position[runner.CHAIN]
     assert position[runner.SUMMARY] < position[runner.TRAJECTORY] < position[runner.CHAIN]
     assert min(position[name] for name in expiries) > max(position[name] for name in names if name not in expiries)
@@ -493,7 +494,7 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS
     }
-    assert len(run["searches"]) == 52 and len(expected) == 78
+    assert len(run["searches"]) == 52 and len(expected) == 80
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
 
 
@@ -531,7 +532,7 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
         **BEFORE_THE_LEASES,
         **BEFORE_THE_PLATFORM
     }
-    assert len(run["searches"]) == 62 and len(expected) == 78
+    assert len(run["searches"]) == 62 and len(expected) == 80
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -556,7 +557,7 @@ def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arriv
     }
 
     assert differing == {**_present(BEFORE_THE_DEVICES, run), **_present(BEFORE_THE_SERVICES, run), **BEFORE_THE_LEASES}
-    assert len(run["searches"]) == 66 and len(expected) == 78
+    assert len(run["searches"]) == 66 and len(expected) == 80
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -581,7 +582,7 @@ def test_the_ninth_run_differs_from_what_is_written_only_where_the_services_arri
     }
 
     assert differing == {**_present(BEFORE_THE_DEVICES, run), **BEFORE_THE_SERVICES}
-    assert len(run["searches"]) == 72 and len(expected) == 78
+    assert len(run["searches"]) == 72 and len(expected) == 80
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -606,5 +607,40 @@ def test_the_tenth_run_differs_from_what_is_written_only_where_the_devices_arriv
     }
 
     assert differing == BEFORE_THE_DEVICES
-    assert len(run["searches"]) == 75 and len(expected) == 78
+    assert len(run["searches"]) == 75 and len(expected) == 80
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 213
+
+
+BEFORE_THE_HOSTS = {
+    "Behavior summary - per-layer scores": 7233,
+}
+"""What every run before the host segment's sourcetype found where it changed the answer.
+
+The summary gained the host segment's 1568 frames, one per workstation per hour and each its own group. The two
+searches step 8's second part added, the host drift rule and the host watchlist's expiry, are absent from the earlier
+runs and are not compared.
+"""
+
+ELEVENTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-17T0126Z.json")
+"""The run over step 15's events, which matched every expectation then written."""
+
+
+def test_the_eleventh_run_differs_from_what_is_written_only_where_the_host_segment_arrived():
+    # Made on 2026-10-17 when the switch and the router became entities: all seventy-eight then matched, with 221
+    # risk records. Against the host segment's events it differs in the summary alone, and has neither of the two
+    # searches the segment's sourcetype brought. Nothing else moved: the host corpus's machines share nothing with
+    # any other corpus's, and R-B-L7-004's lookup against the hosts' watchlist finds none of its hosts there.
+    with open(ELEVENTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_HOSTS
+    assert len(run["searches"]) == 78 and len(expected) == 80
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 221

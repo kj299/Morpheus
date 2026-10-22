@@ -54,7 +54,7 @@ RENDERED = {
     "README.md": make_transport.render_readme,
 }
 
-SEARCH_PAIR = re.compile(r"index=(behavior_\w+)\s+sourcetype=([a-z0-9:]+)\b")
+SEARCH_PAIR = re.compile(r"index=(behavior_\w+)\s+sourcetype=([a-z0-9:]+\*?)")
 
 
 def _read(path: str) -> str:
@@ -86,8 +86,9 @@ def test_every_sourcetype_has_an_index_and_the_searches_agree():
 
     assert len(pairs) > 10
 
-    # `sourcetype=morpheus:score:l` is a prefix search over every layer, and the table places it the same way.
-    assert all(index_for(sourcetype) == index for (index, sourcetype) in pairs), sorted(pairs)
+    # `sourcetype=morpheus:score:*` is a prefix search over every score sourcetype, the seven layers' and the host
+    # segment's, and the table places the prefix the same way it places each of them.
+    assert all(index_for(sourcetype.rstrip("*")) == index for (index, sourcetype) in pairs), sorted(pairs)
 
 
 def test_the_validation_script_places_sourcetypes_the_same_way():

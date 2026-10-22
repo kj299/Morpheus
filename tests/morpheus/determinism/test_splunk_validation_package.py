@@ -95,6 +95,8 @@ DRIFT_RISING_THRESHOLD = threshold("R-P-L5-006 - Drift trajectory", r"rising_thr
 DRIFT_SIGMA_THRESHOLD = threshold("R-P-L5-006 - Drift trajectory", r"sigma_threshold\s*=\s*([\d.]+)")
 DRIFT_MEAN_CEILING = threshold("R-P-L5-006 - Drift trajectory", r"mean_ceiling\s*=\s*([\d.]+)")
 DRIFT_ACCELERATION_CEILING = threshold("R-P-L5-006 - Drift trajectory", r"acceleration_ceiling\s*=\s*([\d.]+)")
+HOST_DRIFT_RISING_THRESHOLD = threshold("R-P-L3-009 - Host drift trajectory", r"rising_threshold\s*=\s*([\d.]+)")
+HOST_DRIFT_SIGMA_THRESHOLD = threshold("R-P-L3-009 - Host drift trajectory", r"sigma_threshold\s*=\s*([\d.]+)")
 FAILURE_RUN_THRESHOLD = threshold("R-D-L5-009 - Failed authentication run ending in success",
                                   r"failure_threshold\s*=\s*([\d.]+)")
 COMPOSITE_MAX_THRESHOLD = threshold("R-B-L5-001 - Composite authentication anomaly", r"max_threshold\s*=\s*([\d.]+)")
@@ -311,6 +313,43 @@ def test_the_drift_rule_returns_exactly_what_is_written(expected: dict, sessions
     assert written == set(zip(deduplicated["user_principal"], deduplicated["day_window_id"].astype(int)))
 
 
+def test_the_host_drift_rule_returns_exactly_what_is_written(expected: dict):
+    # R-P-L3-009 as the search states it, over the host segment's events and deduplicated as the search
+    # deduplicates. The entry names every host-day, as the principals' rule's does: a firing nobody can account for
+    # is the drift in meaning this file exists to catch, and the rule has no ceiling to hand a loud day to another.
+    events = _events_of("morpheus_score_host.jsonlines")
+    entry = expected["searches"]["R-P-L3-009 - Host drift trajectory"]
+
+    fires = [
+        event for event in events if event.get("window_complete") is True and event.get("drift_mature") is True
+        and float(event.get("drift_rising_windows") or 0) >= HOST_DRIFT_RISING_THRESHOLD
+        and float(event.get("drift_rise_sigmas") or 0) > HOST_DRIFT_SIGMA_THRESHOLD
+    ]
+    host_days = sorted({(event["host_key"], int(event["day_window_id"])) for event in fires})
+
+    assert entry["contributing_rows"] == len(fires)
+    assert entry["expected_rows"] == len(host_days)
+    assert [(row["host_key"], row["day_window_id"]) for row in entry["key_values"]] == host_days
+
+    # One host, and its rising days from the first the drift stage calls mature: the fourth rising day meets both
+    # conditions and is not yet mature, which the expectation's reason records rather than tunes away.
+    assert {host for (host, _) in host_days} == {entry["key_values"][0]["host_key"]}
+    assert [day for (_, day) in host_days] == list(range(host_days[0][1], host_days[0][1] + len(host_days)))
+
+    immature = [
+        event for event in events
+        if event.get("drift_mature") is False and float(event.get("drift_rising_windows") or 0) >=
+        HOST_DRIFT_RISING_THRESHOLD and float(event.get("drift_rise_sigmas") or 0) > HOST_DRIFT_SIGMA_THRESHOLD
+    ]
+
+    assert {int(event["day_window_id"]) for event in immature} == {host_days[0][1] - 1}
+
+    # The summary reads these rows too, and peak_z is a number on every scored one.
+    scored = [event for event in events if event.get("mean_abs_z") is not None]
+
+    assert scored and all(event.get("max_abs_z") is not None and event.get("osi_layer") == 3 for event in scored)
+
+
 def _true(frame: pd.DataFrame, column: str) -> pd.Series:
     return frame[column].astype("boolean").fillna(False)
 
@@ -426,20 +465,45 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
 
     assert "lookup principal_watchlist user_principal OUTPUT" in _stanza_search("R-B-L7-002 - Bulk data access")
 
+    # The hosts' list is the same contract keyed on the host: the host drift rule writes it by key, and the
+    # process-ancestry rule reads it by the host its rows name.
+    host_fields = [name.strip() for name in transforms["host_watchlist"]["fields_list"].split(",")]
+    host_search = _stanza_search("R-P-L3-009 - Host drift trajectory")
+
+    assert host_fields[0] == "_key" and "host_key" in host_fields
+    assert {f"field.{name}" for name in host_fields[1:]} <= set(kvstore[transforms["host_watchlist"]["collection"]])
+    assert "outputlookup host_watchlist append=true key_field=_key" in host_search
+
+    for field in host_fields[1:]:
+        assert re.search(rf"\b{field}\b", host_search), f"the host drift rule writes no {field}"
+
+    assert "lookup host_watchlist host_key AS endpoint_host OUTPUT" in _stanza_search(
+        "R-B-L7-004 - Process ancestry novelty")
+
     drift = expected["searches"]["R-P-L5-006 - Drift trajectory"]
     breadth = expected["searches"]["R-P-L7-006 - Access breadth trajectory"]
+    host_drift = expected["searches"]["R-P-L3-009 - Host drift trajectory"]
 
     with open(VALIDATION, encoding="utf-8") as handle:
         document = handle.read()
 
     assert f"`R-P-L5-006` with `drift-trajectory` and {drift['expected_rows']} entries" in document
     assert f"`R-P-L7-006` with `access-breadth` and {breadth['expected_rows']}" in document
+    assert f"`R-P-L3-009` with `host-drift-trajectory` and {host_drift['expected_rows']} entries" in document
 
     # None of the principals the bulk rule reports is watched, which is why its severities stand as written.
     watched = {row["user_principal"] for row in drift["key_values"] + breadth["key_values"]}
     bulk = {row["user_principal"] for row in expected["searches"]["R-B-L7-002 - Bulk data access"]["key_values"]}
 
     assert watched and not watched & bulk
+
+    # And none of the hosts the process-ancestry rule reports is on the hosts' list: the host corpus's machines
+    # share nothing with the endpoint corpus's, so R-B-L7-004's severities stand as written too.
+    watched_hosts = {row["host_key"] for row in host_drift["key_values"]}
+    ancestry = expected["searches"]["R-B-L7-004 - Process ancestry novelty"]
+    reported_hosts = {row["endpoint_host"] for row in ancestry["key_values"]}
+
+    assert watched_hosts and reported_hosts and not watched_hosts & reported_hosts
 
 
 SCAN_SYN_RATIO = 0.9
@@ -1066,18 +1130,34 @@ def test_the_physical_compromise_chain_returns_exactly_what_is_written(expected:
 
 
 def _scored_events() -> list:
-    # What a search head would hold for `sourcetype=morpheus:score:l*`. The sourcetype is the filename with the
-    # colons swapped, which is how the generator writes them, so the glob here is the search's glob.
+    # What a search head would hold for `sourcetype=morpheus:score:*`: the seven layers' rows and the host
+    # segment's. The sourcetype is the filename with the colons swapped, which is how the generator writes them, so
+    # the glob here is the search's glob.
     events = []
 
     for name in sorted(os.listdir(EVENTS)):
-        if (not name.startswith("morpheus_score_l") or not name.endswith(".jsonlines")):
+        if (not name.startswith("morpheus_score_") or not name.endswith(".jsonlines")):
             continue
 
         with open(os.path.join(EVENTS, name), encoding="utf-8") as handle:
             events.extend(json.loads(line) for line in handle if line.strip())
 
     return events
+
+
+def _events_read_by(name: str) -> list:
+    """
+    The scored events a search's base search reads, by its sourcetype glob: `morpheus:score:l*` is the seven layers'
+    rows and `morpheus:score:*` those and the host segment's. Chain assembly reads the former, because the host
+    frame is one layer with nothing to chain; the summary reads the latter, so a machine has a `peak_z`.
+    """
+    glob = re.search(r"sourcetype=morpheus:score:(\S+)", _search_text(name)).group(1)
+    prefix = "morpheus_score_" + glob.rstrip("*")
+
+    return [
+        event for name in sorted(os.listdir(EVENTS)) if name.startswith(prefix) and name.endswith(".jsonlines")
+        for event in _events_of(name)
+    ]
 
 
 def _five_minute_bin(event_time: str) -> int:
@@ -1091,8 +1171,10 @@ def test_the_behavior_summary_groups_exactly_what_is_written(expected: dict):
     # `stats ... by` drops a row that is missing any grouping field, so a missing envelope field does not show up
     # as an error anywhere -- it shows up as a smaller number, or as zero. That is why this is evaluated rather
     # than asserted: the row count is the only place the omission would surface.
-    events = _scored_events()
+    events = _events_read_by("Behavior summary - per-layer scores")
     entry = expected["searches"]["Behavior summary - per-layer scores"]
+
+    assert len(events) == len(_scored_events()), "the summary no longer reads every score sourcetype"
 
     keyless = [event for event in events if event.get("osi_layer") is None or not event.get("entity_key")]
     assert keyless == [], f"{len(keyless)} scored events would be dropped by the grouping"
@@ -1175,7 +1257,7 @@ def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(
 
     entry = expected["searches"]["Chain assembly - cross-layer risk"]
     chain = _search_text("Chain assembly - cross-layer risk")
-    events = _scored_events()
+    events = _events_read_by("Chain assembly - cross-layer risk")
 
     with open(os.path.join(EVENTS, "morpheus_edge.jsonlines"), encoding="utf-8") as handle:
         edges = [json.loads(line) for line in handle if line.strip()]
@@ -1338,6 +1420,8 @@ NUMBER_WORDS = {
     "seventy-two": 72,
     "seventy-five": 75,
     "seventy-eight": 78,
+    "seventy-nine": 79,
+    "eighty": 80,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
