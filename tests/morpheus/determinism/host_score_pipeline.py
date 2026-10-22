@@ -200,12 +200,10 @@ SCORED_FEATURES = list(HOST_FEATURES)
 CARRY_COLUMNS = ["ctx_peer_group", "tenant_id"]
 
 MANIFEST_WINDOW = 0
-MANIFEST_WINDOW_COLUMN = "model_window_id"
-"""What the score and stamp stages check the manifest's window against, which no frame row carries.
+"""The window the host manifest is pinned for: the scored week, as the session manifest's is.
 
-A frame row's `window_id` is its hour. The manifest's window is the span its models are pinned for -- the scored week
--- as the session manifest's is; nothing on the row names that span, so the stages take every row as the manifest's
-own, which is the single-window case they document.
+A frame row's `window_id` is its hour, which is not that span, so the score and stamp stages are given no window
+column (`window_column=None`) and take every row as the manifest's own -- the single-window case they document.
 """
 
 DRIFT_PREFIX = "day_"
@@ -474,7 +472,9 @@ def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
 
 def class_stages(config: Config, telemetry_class: str, leases, inventory) -> list:
     """Each class's own layer stages, resolved to the machine and enriched from the inventory."""
-    enrich = TC0EnrichStage(config, store=build_store(), entity_column="host_key", entity_normalization="hostname")
+
+    def enrich() -> TC0EnrichStage:
+        return TC0EnrichStage(config, store=build_store(), entity_column="host_key", entity_normalization="hostname")
 
     if (telemetry_class == FLOW_CLASS):
         return [
@@ -484,7 +484,7 @@ def class_stages(config: Config, telemetry_class: str, leases, inventory) -> lis
             # unpublished in every ordinary hour, and a feature that is only there when something is wrong is not one.
             TC3ReachStage(config, window_seconds=PERIOD_SECONDS, min_denominator=REACH_MIN_DENOMINATOR),
             TC3BaselineStage(config, bucket_seconds=PERIOD_SECONDS),
-            enrich,
+            enrich(),
         ]
 
     if (telemetry_class == HANDSHAKE_CLASS):
@@ -492,7 +492,7 @@ def class_stages(config: Config, telemetry_class: str, leases, inventory) -> lis
         return [
             *host_identity.resolver_stages(config, leases, inventory),
             TC6FingerprintStage(config, key_columns=["host_key"]),
-            enrich,
+            enrich(),
         ]
 
     return [
@@ -562,12 +562,12 @@ def host_stages(config: Config, scorer, manifest: ModelManifest) -> list:
                       manifest=manifest,
                       feature_columns=SCORED_FEATURES,
                       entity_column="host_key",
-                      window_column=MANIFEST_WINDOW_COLUMN),
+                      window_column=None),
         DeterminismStampStage(config,
                               envelope=stamping.envelope_for(HOST_CLASS, SETTINGS, rules=RULES),
                               manifest=manifest,
                               entity_column="host_key",
-                              window_column=MANIFEST_WINDOW_COLUMN),
+                              window_column=None),
         EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS),
         WindowSealStage(config,
                         period_seconds=DAY_S,
@@ -578,22 +578,7 @@ def host_stages(config: Config, scorer, manifest: ModelManifest) -> list:
     ]
 
 
-class PinnedHostScorer:
-    """Answers for every version the host manifest resolves: each peer group's model and the population's."""
-
-    def __init__(self, models: dict):
-        self._models = DfencoderScorer(models, SCORED_FEATURES)
-
-    @property
-    def versions(self) -> list[str]:
-        """Every version this scorer answers for, sorted."""
-        return self._models.versions
-
-    def score(self, model_version: str, features: list) -> list:
-        return self._models.score(model_version, features)
-
-
-def build_scoring(models: dict) -> tuple[PinnedHostScorer, ModelManifest]:
+def build_scoring(models: dict) -> tuple[DfencoderScorer, ModelManifest]:
     """
     The scorer and the host manifest for a set of peer-group models, built together.
 
@@ -604,6 +589,8 @@ def build_scoring(models: dict) -> tuple[PinnedHostScorer, ModelManifest]:
 
     Every inventoried host whose peer group has a model is pinned to that model; the population model is the
     declared fallback, so a host with no group, or a group with no model, is scored against the estate and says so.
+    Every version the manifest resolves is a learned model, so `DfencoderScorer` answers for all of them; the
+    session corpus's `PinnedScorer` splices in its arithmetic fallback, and nothing here has one to splice.
     """
     if (POPULATION not in models):
         raise ValueError(f"the host models have no {POPULATION!r} model; it is the fallback the manifest declares")
@@ -612,7 +599,7 @@ def build_scoring(models: dict) -> tuple[PinnedHostScorer, ModelManifest]:
         host_key(address): models[group][0]
         for (address, group) in sorted(HOSTS.items()) if group is not None and group in models
     }
-    scorer = PinnedHostScorer(dict(models.values()))
+    scorer = DfencoderScorer(dict(models.values()), SCORED_FEATURES)
     manifest = ModelManifest(window_id=MANIFEST_WINDOW,
                              models=pinned,
                              fallback=models[POPULATION][0],
@@ -622,7 +609,7 @@ def build_scoring(models: dict) -> tuple[PinnedHostScorer, ModelManifest]:
 
 
 @functools.lru_cache(maxsize=1)
-def committed_scoring() -> tuple[PinnedHostScorer, ModelManifest]:
+def committed_scoring() -> tuple[DfencoderScorer, ModelManifest]:
     """The committed host models, read and checked against their recorded versions once per process."""
     return build_scoring(load_models(MODELS_PATH))
 

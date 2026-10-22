@@ -451,7 +451,8 @@ _PROFILES = (
     "bits_per_second_baseline_min",
     "bits_per_second_step",
     "utilization",
-    "auth_elapsed_ratio",  # A workstation's hour as one row, and how far each part of it sits from its peer group's.
+    "auth_elapsed_ratio",  # A workstation's hour as one row: how much happened in it, and how far each part of it
+    # sits from what its peer group's model expected.
     "frame_rows",
     "endpoint_novel_pairs",
     "dsts_per_src_step_z_loss",
@@ -460,6 +461,17 @@ _PROFILES = (
     "ja4_client_distinct_z_loss",
     "endpoint_novel_pairs_z_loss",
 )
+
+ORGANISATIONAL_PROFILE_COLUMNS = ("account_type",
+                                  "privilege_level",
+                                  "ctx_account_type",
+                                  "ctx_privilege_level",
+                                  "ctx_department",
+                                  "ctx_employment_status",
+                                  "ctx_groups")
+"""The profile columns that describe a person's place in the organisation rather than their behaviour: what the
+TC-0 identity store and its join carry onto a row. Every other profile column is a behavioural measurement, and the
+documents quote the two counts; this tuple is what makes the split a number a test can recompute."""
 
 _PSEUDONYMS = (
     "binding_uid",

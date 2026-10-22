@@ -14,7 +14,7 @@
 """
 What produces each sourcetype the shipped Splunk app is configured to parse, or what is missing where nothing does.
 
-The app's `props.conf` declares seventeen stanzas. Each names the field its `TIME_PREFIX` anchors `_time` on, and
+The app's `props.conf` declares eighteen stanzas. Each names the field its `TIME_PREFIX` anchors `_time` on, and
 each of those fields has to reach the wire as a quoted string in the app's `TIME_FORMAT` or Splunk stamps the
 event at index time instead -- silently, with no error anywhere, turning every windowed detection into a rule
 about when the pipeline happened to be busy.

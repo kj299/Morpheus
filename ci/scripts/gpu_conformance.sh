@@ -136,7 +136,9 @@ TARGETS=(
 # Files with no execution-mode marker. On a machine with a GPU the default mode is GPU, so these run on the device
 # without being selected by the marker -- which is the only way they run at all, and why they are a tier rather
 # than an omission. `test_lineage_cudf.py` is the one that matters most: its digest equivalence gate asserts the
-# GPU and CPU hashing paths agree, and a marker filter dropped it once already.
+# GPU and CPU hashing paths agree, and a marker filter dropped it once already. A test inside one of these files
+# that carries `cpu_mode` stays on the CPU there, by the marker's own meaning: the tier runs the file on the device,
+# not every test in it.
 UNMARKED=(
     tests/morpheus/determinism/test_clock_skew_experiment.py
     tests/morpheus/determinism/test_end_to_end_mac_spoof.py

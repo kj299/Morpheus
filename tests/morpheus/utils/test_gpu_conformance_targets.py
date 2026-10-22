@@ -24,8 +24,8 @@ fixtures are unfetched -- which is the state of every checkout this has ever bee
 
 The fork's own test files are identified by their copyright header rather than by a second hand-maintained list,
 which would have the same failure mode as the first. Every file this fork added carries the same line and no
-upstream file does; at the time of writing that identifies fifty-six files, exactly matching what the repository
-history says the fork added.
+upstream file does; when this was written that identified fifty-six files, exactly matching what the repository
+history said the fork had added, and the count has grown with every step since: it is recomputed, not asserted.
 
 Which tier a file belongs in is a real distinction, not bookkeeping. A file with `gpu_mode` variants belongs in
 `TARGETS`, where the marker selects it. A file with none belongs in `UNMARKED`, where it runs in the default

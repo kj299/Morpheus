@@ -59,7 +59,7 @@ DEFAULT_SEED = 42
 EVAL_BATCH_SIZE = 64
 
 
-def training_frames() -> dict:
+def training_frames() -> tuple:
     """The fortnight's features per principal, from a pipeline run that needs no model to produce them."""
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
 
@@ -79,7 +79,7 @@ def training_frames() -> dict:
     return session_pipeline.training_frames(result), session_pipeline
 
 
-def host_training_frames() -> dict:
+def host_training_frames() -> tuple:
     """The fortnight's hourly host frames per peer group and for the population, from a run that scores nothing."""
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
 

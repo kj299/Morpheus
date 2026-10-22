@@ -134,11 +134,67 @@ def test_a_missing_column_and_a_bad_feature_are_refused(config):
     with pytest.raises(ValueError, match="at least one"):
         _stage(config, features={})
 
+    # A carried column is checked as a feature's source is: misspelled, it would be null on every row.
+    with pytest.raises(KeyError, match="ctx_peer_grp"):
+        _stage(config, carry_columns=["ctx_peer_grp"]).reduce(_window())
+
+
+@pytest.mark.cpu_mode
+def test_a_feature_may_be_spelled_as_the_command_line_spells_it(config):
+    spelled = _stage(config, features={"fan_out": "dsts_per_src:max", "novel": "endpoint_pair_novel:count_true"})
+    listed = _stage(config,
+                    features={
+                        "fan_out": ["dsts_per_src", "max"], "novel": ["endpoint_pair_novel", "count_true"]
+                    })
+
+    pd.testing.assert_frame_equal(spelled.reduce(_window()), listed.reduce(_window()))
+
+    with pytest.raises(ValueError, match="reduction"):
+        _stage(config, features={"fan_out": "dsts_per_src,max"})
+
+
+@pytest.mark.cpu_mode
+def test_a_feature_or_carried_column_may_not_take_a_name_every_row_carries(config):
+    with pytest.raises(ValueError, match="event_time"):
+        _stage(config, features={"event_time": ["dsts_per_src", "max"]})
+
+    with pytest.raises(ValueError, match="lineage_id"):
+        _stage(config, carry_columns=["lineage_id"])
+
+    with pytest.raises(ValueError, match="ctx_peer_group"):
+        _stage(config, features={"ctx_peer_group": ["dsts_per_src", "max"]}, carry_columns=["ctx_peer_group"])
+
+    # The entity column itself may be named among the carried columns; it is carried once.
+    assert _stage(config, carry_columns=["host_key"]).output_columns.count("host_key") == 1
+
+
+@pytest.mark.cpu_mode
+def test_text_under_a_numeric_feature_is_a_mistake_not_a_zero(config):
+    # A numeral in text is read; a word is refused and the column named.
+    out = _stage(config).reduce(_window(dsts_per_src=["3", "5", "9", None, None]))
+
+    assert list(out["fan_out"]) == [5.0, 9.0]
+
+    with pytest.raises(TypeError, match="dsts_per_src"):
+        _stage(config).reduce(_window(dsts_per_src=["three", "5", "9", None, None]))
+
+
+@pytest.mark.cpu_mode
+def test_a_flag_widened_to_float_or_spelled_out_still_counts(config):
+    # A nullable boolean widened by a gap arrives as 1.0 and 0.0; a flag read back from text arrives as a word.
+    widened = _stage(config).reduce(_window(endpoint_pair_novel=[None, None, None, 1.0, 0.0]))
+    spelled = _stage(config).reduce(_window(endpoint_pair_novel=[None, None, None, "true", "false"]))
+
+    assert widened.iloc[0]["novel"] == 1 and spelled.iloc[0]["novel"] == 1
+
+    # And a late flag that arrived as 1.0 still keeps its row out of the frame.
+    assert _stage(config).reduce(_window(is_late=[0.0, 1.0, 0.0, 0.0, 0.0])).iloc[0]["frame_rows"] == 3
+
 
 @pytest.mark.parametrize("reduction, expected", [("max", 4.0), ("min", 1.0), ("mean", 2.5), ("sum", 5.0), ("last", 4.0),
                                                  ("count_true", 2)])
 def test_each_reduction_ignores_nulls(reduction: str, expected):
-    values = [True, None, 4, float("nan"), 1] if reduction == "count_true" else [1, None, float("nan"), 4]
+    values = [True, None, 0, float("nan"), 1.0] if reduction == "count_true" else [1, None, float("nan"), 4]
 
     assert reduce_values(reduction, values) == expected
     assert reduce_values(reduction, [None, float("nan")]) is None

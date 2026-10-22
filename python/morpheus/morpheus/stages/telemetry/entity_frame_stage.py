@@ -79,22 +79,57 @@ WINDOW_COLUMNS = ("window_id", "window_start_ns", "window_end_ns", "revision", "
 ROWS_COLUMN = "frame_rows"
 """How many of the window's rows were reduced into the frame row."""
 
+TRUE_WORDS = ("true", "t", "yes", "1")
+"""How a feed spells a true boolean when it does not send one."""
+
+FIXED_COLUMNS = (ROWS_COLUMN,
+                 "event_time",
+                 *WINDOW_COLUMNS,
+                 "is_late",
+                 "window_complete",
+                 "lineage_id",
+                 "collector_id",
+                 "schema_version",
+                 "origin_hash",
+                 "collector_seq",
+                 "event_uid")
+"""The columns every frame row carries besides its entity, carried columns and features; a feature may not take
+one of these names, or the envelope it would overwrite could not be told from the feature."""
+
 
 def _present(value: typing.Any) -> bool:
     if (value is None or value is pd.NA):
         return False
 
-    try:
-        return not (isinstance(value, float) and math.isnan(value))
-    except TypeError:
-        return True
+    return not (isinstance(value, float) and math.isnan(value))
 
 
 def _truthy(value: typing.Any) -> bool:
-    return _present(value) and (value is True or str(value).strip().lower() in ("true", "1"))
+    """
+    Whether a value says true: a boolean, a number other than zero, or a word for it.
+
+    A nullable boolean widened to float by a gap in its column arrives as `1.0` and `0.0`, and a flag read back
+    from a text feed arrives as a word; each is still the answer it was.
+    """
+    if (not _present(value)):
+        return False
+
+    if (isinstance(value, (bool, int, float)) or hasattr(value, "item")):
+        return float(value) != 0.0
+
+    return str(value).strip().lower() in TRUE_WORDS
 
 
-def reduce_values(reduction: str, values: list) -> typing.Any:
+def _number(value: typing.Any, source: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError) as error:
+        raise TypeError(f"{source!r} carries {value!r}, which is not a number. A feature reduced by max, min, mean, "
+                        f"sum or last is a numeric column; a column of text under it is a configuration mistake, "
+                        f"not a value of zero and not an absence.") from error
+
+
+def reduce_values(reduction: str, values: list, source: str = "the column") -> typing.Any:
     """
     One feature's value from the values of its column on an entity's rows, in window order.
 
@@ -104,17 +139,25 @@ def reduce_values(reduction: str, values: list) -> typing.Any:
         One of `REDUCTIONS`.
     values : list
         The column's value on each of the entity's rows. Nulls are not values.
+    source : str, default = "the column"
+        The column's name, for the error a value that is not a number raises.
 
     Returns
     -------
     The reduced value, or `None` where no row carries one.
+
+    Raises
+    ------
+    TypeError
+        If a numeric reduction meets a value that is not a number, a numeral in text included only where
+        `float` reads it.
     """
     if (reduction == "count_true"):
         present = [value for value in values if _present(value)]
 
         return None if len(present) == 0 else sum(1 for value in present if _truthy(value))
 
-    present = [float(value) for value in values if _present(value) and not isinstance(value, str)]
+    present = [_number(value, source) for value in values if _present(value)]
 
     return None if len(present) == 0 else _REDUCERS[reduction](present)
 
@@ -139,11 +182,14 @@ class EntityFrameStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
         Pipeline configuration instance.
     features : dict
         Output column to `[source column, reduction]`, the reduction one of `max`, `min`, `mean`, `sum`, `last` or
-        `count_true`.
+        `count_true`; or to the two as one string, `source column:reduction`, which is how the command line
+        spells it (`--features fan_out dsts_per_src:max`). A feature may not take the name of the entity column,
+        a carried column, or one of the envelope and window columns every row carries.
     entity_column : str, default = "host_key"
         What a frame row is about. Rows with no entity are counted and left out.
     carry_columns : list of str, default = None
-        Columns copied onto the frame row from the entity's first row that has a value.
+        Columns copied onto the frame row from the entity's first row that has a value. Each must be in the
+        frame; a misspelled one would otherwise be null on every row and look like a column nobody fills.
     collector_id : str, default = "entity-frame"
         The frame's collector, as its envelope names it.
     schema_version : str, default = "entity_frame.v1"
@@ -170,9 +216,12 @@ class EntityFrameStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
         self._features = {}
 
         for (name, spec) in features.items():
+            if (isinstance(spec, str)):
+                spec = spec.rsplit(":", 1)
+
             if (not isinstance(spec, (list, tuple)) or len(spec) != 2 or spec[1] not in REDUCTIONS):
-                raise ValueError(f"feature {name!r} is {spec!r}; each feature is [source column, reduction] with "
-                                 f"the reduction one of {list(REDUCTIONS)}")
+                raise ValueError(f"feature {name!r} is {spec!r}; each feature is [source column, reduction], or "
+                                 f"'source column:reduction', with the reduction one of {list(REDUCTIONS)}")
 
             self._features[name] = (spec[0], spec[1])
 
@@ -180,7 +229,16 @@ class EntityFrameStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             raise ValueError(f"first_seq must not be negative, received {first_seq}")
 
         self._entity_column = entity_column
-        self._carry_columns = list(carry_columns or [])
+        self._carry_columns = [column for column in (carry_columns or []) if column != entity_column]
+
+        taken = {entity_column, *self._carry_columns, *FIXED_COLUMNS}
+        colliding = sorted(name for name in self._features if name in taken)
+        fixed_carry = sorted(column for column in self._carry_columns if column in FIXED_COLUMNS)
+
+        if (len(colliding) > 0 or len(fixed_carry) > 0):
+            raise ValueError(f"features {colliding} and carried columns {fixed_carry} take names every frame row "
+                             f"already carries ({sorted(taken - set(self._features))}); two columns under one name "
+                             f"would leave the frame unable to say which is which")
         self._collector_id = collector_id
         self._schema_version = schema_version
         self._next_seq = first_seq
@@ -208,20 +266,7 @@ class EntityFrameStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
     @property
     def output_columns(self) -> list[str]:
         """The columns every frame row carries, in order."""
-        return ([self._entity_column] + [column for column in self._carry_columns if column != self._entity_column] +
-                list(self._features) + [
-                    ROWS_COLUMN,
-                    "event_time",
-                    *WINDOW_COLUMNS,
-                    "is_late",
-                    "window_complete",
-                    "lineage_id",
-                    "collector_id",
-                    "schema_version",
-                    "origin_hash",
-                    "collector_seq",
-                    "event_uid",
-                ])
+        return [self._entity_column, *self._carry_columns, *self._features, *FIXED_COLUMNS]
 
     def reduce(self, frame: pd.DataFrame) -> pd.DataFrame:
         """
@@ -240,24 +285,32 @@ class EntityFrameStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
         Raises
         ------
         KeyError
-            If the entity column, the window columns, or a feature's source column is absent. A merged stream
-            carries every class's columns, null on the rows of the classes that do not write them.
+            If the entity column, the sealer's window and flag columns, a carried column or a feature's source
+            column is absent. A merged stream carries every class's columns, null on the rows of the classes that
+            do not write them.
+        TypeError
+            If a numeric feature's column carries a value that is not a number.
         """
-        required = [self._entity_column, *WINDOW_COLUMNS, *sorted({source for (source, _) in self._features.values()})]
+        sources = sorted({source for (source, _) in self._features.values()})
+        required = [self._entity_column, *WINDOW_COLUMNS, "is_late", "window_complete", *self._carry_columns, *sources]
         missing = [column for column in required if column not in frame.columns]
 
         if (len(missing) > 0):
             raise KeyError(f"EntityFrameStage requires columns {missing}; place it directly behind a "
                            f"WindowSealStage. Available columns: {sorted(frame.columns)}")
 
+        # Only the columns the frame reads are turned into records: a merged stream carries every class's
+        # columns, and the window would otherwise pay for each of them on every row.
+        needed = list(dict.fromkeys([*required, "lineage_id"]))
         groups: dict = {}
         skipped = 0
 
-        for record in frame.to_dict("records"):
-            complete = record.get("window_complete")
+        for record in frame[[column for column in needed if column in frame.columns]].to_dict("records"):
             entity = normalize_text(record.get(self._entity_column))
 
-            if (_truthy(record.get("is_late")) or (_present(complete) and not _truthy(complete)) or entity is None):
+            # A row the sealer marked late, or did not mark complete, belongs to an hour already published; a null
+            # flag is not a mark of completeness.
+            if (_truthy(record.get("is_late")) or not _truthy(record.get("window_complete")) or entity is None):
                 skipped += 1
                 continue
 
@@ -274,11 +327,10 @@ class EntityFrameStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             row = {self._entity_column: entity}
 
             for column in self._carry_columns:
-                if (column != self._entity_column):
-                    row[column] = next((member.get(column) for member in members if _present(member.get(column))), None)
+                row[column] = next((member.get(column) for member in members if _present(member.get(column))), None)
 
             for (name, (source, reduction)) in self._features.items():
-                row[name] = reduce_values(reduction, [member.get(source) for member in members])
+                row[name] = reduce_values(reduction, [member.get(source) for member in members], source=source)
 
             row[ROWS_COLUMN] = len(members)
             row["event_time"] = int(first["window_start_ns"])
