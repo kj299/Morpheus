@@ -66,6 +66,7 @@ TARGETS=(
     tests/morpheus/determinism/test_endpoint_harness.py
     tests/morpheus/determinism/test_estate_harness.py
     tests/morpheus/determinism/test_gpu_parity.py
+    tests/morpheus/determinism/test_host_score_harness.py
     tests/morpheus/determinism/test_network_harness.py
     tests/morpheus/determinism/test_presentation_harness.py
     tests/morpheus/determinism/test_saas_harness.py
@@ -196,6 +197,7 @@ UNMARKED=(
     tests/morpheus/utils/test_splunk_field_contracts.py
     tests/morpheus/utils/test_splunk_transport.py
     tests/morpheus/stages/test_flow_record_normalize_stage.py
+    tests/morpheus/stages/test_entity_frame_stage.py
     tests/morpheus/utils/test_ipfix.py
     tests/morpheus/utils/test_collector_schemas.py
     tests/morpheus/utils/test_stack_fingerprint.py

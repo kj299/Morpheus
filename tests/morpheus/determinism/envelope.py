@@ -18,7 +18,7 @@ The universal envelope every corpus's collectors attach, and the two passes ever
 Part 2's envelope is fourteen fields, and the corpora carried four of the collector's ten: `collector_id`,
 `collector_seq`, `schema_version` and `origin_hash`. `attach` gives every record the rest -- when the sensor saw it,
 the collector's clock source and last measured offset, its sampling policy, and the tenant it belongs to -- from one
-table, so the twelve corpora agree on what the fields mean and a collector's clock is the same in every corpus it
+table, so the thirteen corpora agree on what the fields mean and a collector's clock is the same in every corpus it
 appears in.
 
 Each collector's offset is a few milliseconds either side of true, fixed by its name, because a disciplined clock is

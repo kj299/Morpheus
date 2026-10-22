@@ -358,17 +358,17 @@ CORPORA = os.path.dirname(os.path.abspath(__file__))
 
 
 def composed_pipelines() -> list:
-    """The twelve corpora: every `*_pipeline.py` beside this file that is not a `run_` entry point."""
+    """The thirteen corpora: every `*_pipeline.py` beside this file that is not a `run_` entry point."""
     return sorted(name for name in os.listdir(CORPORA) if name.endswith("_pipeline.py") and not name.startswith("run_"))
 
 
 def test_every_composed_pipeline_places_the_determinism_stamp():
     # The envelope was a tested stage that no corpus placed for weeks, while two documents said scored events carried
     # it. A corpus that composes its stages without the stamp is a corpus whose golden proves nothing about
-    # provenance, so the placement is asserted by name, in the source, for all twelve.
+    # provenance, so the placement is asserted by name, in the source, for all thirteen.
     names = composed_pipelines()
 
-    assert len(names) == 12, names
+    assert len(names) == 13, names
 
     unstamped = []
 

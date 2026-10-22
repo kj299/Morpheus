@@ -69,6 +69,26 @@ model is trained on a window that includes it. And the deterministic R-D-L5-008 
 find, because its first sign-in failed. A fortnight of six principals is not a training set; what the committed
 models establish is that a learned score reaches the SIEM pinned, out of sample and reproducible.
 
+## The host models
+
+`train_models.py --hosts` does the same for hosts, keyed by peer group rather than by entity.
+`tests/morpheus/determinism/host_score_pipeline.py` builds one row per workstation per hour from its flows, TLS
+handshakes and process starts -- `dsts_per_src_step`, `internal_dst_ratio`, `byte_asymmetry`,
+`ja4_client_distinct` and `endpoint_novel_pairs` -- and the script fits one autoencoder to the fortnight's rows of
+each peer group the asset inventory names, 224 rows apiece for finance and engineering, and one to every host's
+fortnight, 504 rows, as the population. They are committed in `models/host_models.json` under the same format and
+the same digest check. The host manifest pins every inventoried host to its group's model and declares the
+population's as the fallback, so a host with no group is scored against the estate and its rows say
+`model_fallback_used`, and a laptop issued after the fortnight is scored by its group's model without one of its
+own.
+
+The first fit was the session models' finding again, louder. No host offered a new client fingerprint in the
+fortnight, so `ja4_client_distinct` never moved, its training losses had a spread as small as 10^-10, and the
+drifting workstation's first new fingerprint scored in the billions. The corpus now updates each host's browser on
+a different day of the fortnight's second week, as an estate's updates arrive, and the same host's daily mean runs
+from 0.6 to 551 while no ordinary host's daily mean reaches 1.3. The scores are still uncalibrated -- a deviation of 551
+means far outside the fortnight and nothing more exact.
+
 ## The card run
 
 `run_model.py` trains on a machine with Torch and a CUDA device. Everything the model half depends on was built

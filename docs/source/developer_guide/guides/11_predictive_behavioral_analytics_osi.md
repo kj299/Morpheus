@@ -56,12 +56,14 @@ and
 **What is verified versus designed.** This document was written before any of it was built, and the
 boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
 resolution, window sealing), feature stages for every telemetry class from TC-0 to TC-7, the layer 5
-scoring path with frozen arithmetic in the model's slot, control 8's total order, and control 13's seven
-checks over twelve composed corpora, which run in CPU mode in the fork's own CI on every push and pull
-request since 2026-10-03, and in GPU mode on one card, where all twelve matched their golden files on
-2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the card has not yet seen the trees steps 9 and 10 built.
-That is fifty-seven stages and forty-seven supporting
-modules, covered by 2,437 distinct tests, itemized in
+scoring path with a learned model per principal in the model's slot, a host feature frame scored by a
+learned model per peer group, control 8's total order, and control 13's seven
+checks over thirteen composed corpora, which run in CPU mode in the fork's own CI on every push and pull
+request since 2026-10-03, and in GPU mode on one card, where the twelve that existed then matched their golden
+files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the card has not yet seen
+the trees steps 9 and 10 built, or the host segment.
+That is fifty-eight stages and forty-seven supporting
+modules, covered by 2,465 distinct tests, itemized in
 [Part 6](#provided). Fifty-five of the fifty-seven rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -3704,7 +3706,7 @@ Determinism claims decay silently. Enforce them:
 
 Run 1 and 2 on every commit; run the rest nightly.
 
-All seven checks ship, implemented against the twelve composed pipelines in
+All seven checks ship, implemented against the thirteen composed pipelines in
 `tests/morpheus/determinism/`, with the comparison half factored into
 {py:mod}`~morpheus.utils.determinism` for reuse against any pipeline: `canonicalize` reduces output to
 a normal form in which two deterministic runs compare equal, `diff_frames` explains the first
@@ -3725,10 +3727,10 @@ hash seed; every stage that remembers lists the attributes that are its memory a
 `restore_state` from {py:class}`~morpheus.pipeline.checkpoint_mixin.CheckpointMixin`; and
 {py:mod}`~morpheus.utils.stage_checkpoint` snapshots and restores a whole composition and keeps the snapshots in a
 directory a runner restores from on start. Every linear segment of every composed pipeline is cut at its halfway
-row, and only the snapshot's bytes cross the cut. Ten of the twelve passed on the first run; the eleventh was a
+row, and only the snapshot's bytes cross the cut. Of the twelve composed then, ten passed on the first run; the eleventh was a
 binding closer that compared a NaN attribute equal to itself only while both sides held the same NaN object,
 which closed every resumed lease as displaced by its own address and is fixed in the closer; the twelfth, the
-context pipeline, has no stage that remembers and is recorded as such. A stop for a checkpoint keeps open windows
+context pipeline, has no stage that remembers and is recorded as such. The host segment, the thirteenth, passed on its first run. A stop for a checkpoint keeps open windows
 and bindings rather than flushing them, and a scored row names the snapshot its process resumed from as
 `resumed_from_state`, `cold-start` when there was none. The snapshot is taken when the pipeline has stopped rather
 than at the moment a window seals, because inside a running segment the stages upstream of the seal may already
@@ -3883,7 +3885,7 @@ Pass 4 measures each of these and records which the fork reuses.
   same stream
   ({py:mod}`~morpheus.utils.window_seal` and
   {py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage`).
-- The determinism harness: control 13's seven checks running against the twelve composed pipelines over
+- The determinism harness: control 13's seven checks running against the thirteen composed pipelines over
   seeded golden corpora, in CPU mode in the fork's CI (`.github/workflows/fork-cpu.yaml`) and in GPU mode on
   one card ({py:mod}`~morpheus.utils.determinism` and
   `tests/morpheus/determinism/`).
@@ -3959,8 +3961,8 @@ Pass 4 measures each of these and records which the fork reuses.
   refuses to answer for any other ({py:mod}`~morpheus.utils.model_manifest`), the stable hash that decides an
   entity's shard without depending on `PYTHONHASHSEED` ({py:mod}`~morpheus.utils.sharding`), and the stage that
   stamps all of it ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`), placed
-  behind the feature stages of all twelve composed pipelines, so every golden row carries the envelope and
-  every scored layer 5 row its `model_version` and `model_fallback_used`. These
+  behind the feature stages of all thirteen composed pipelines, so every golden row carries the envelope and
+  every scored layer 5 row and host row its `model_version` and `model_fallback_used`. These
   come before the autoencoder rather than after it because this document says they must: retrofitting
   determinism onto a running detection pipeline means re-tuning every threshold, since the scores will move.
   What is not here is the autoencoder itself, and the boundary is exact -- see the caveat below.
@@ -4206,7 +4208,7 @@ Pass 4 measures each of these and records which the fork reuses.
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
   counts are the finding: fourteen columns identify a person or an account, twenty-five address their device,
-  seventeen locate them, and two hundred and thirty-five are profile, two hundred and twenty-five of them behavioural,
+  seventeen locate them, and two hundred and forty-two are profile, two hundred and thirty-two of them behavioural,
   which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
@@ -4295,8 +4297,8 @@ Pass 4 measures each of these and records which the fork reuses.
   own policy (gap G74).
 - The determinism envelope on every event and the model stamp on every scored one
   ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`, behind the feature
-  stages of all twelve composed pipelines): every golden row carries `determinism_tier`,
-  `pipeline_fingerprint` and `config_hash`, every scored layer 5 row carries `model_version` and
+  stages of all thirteen composed pipelines): every golden row carries `determinism_tier`,
+  `pipeline_fingerprint` and `config_hash`, every scored layer 5 row and host row carries `model_version` and
   `model_fallback_used`, every `morpheus:score:*` contract requires the envelope, and the three layer 5
   searches select the model columns. The configuration hash digests the settings that decide a corpus's
   output rather than the `Config`, so the CPU and GPU runs agree on it; the fingerprint folds in the
@@ -4349,7 +4351,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Component | Effort | Notes |
 | --- | --- | --- |
 | Upstream reuse decision | Small | Decided and measured, in Part 0's Pass 4: every DFP stage, the three identity-provider source stages, `MLFlowDriftStage` and `TimeSeriesStage` are rejected, each for a reason `examples/upstream_reuse/evaluate.py` measured and `test_upstream_reuse.py` holds to its artifact; the `dfencoder` `AutoEncoder` and `manual_seed` are reused, and the Azure sign-in fields are the normalization target. Closed by #67 |
-| Tracker state across a restart | Medium | Built, in step 16's first part. All twenty-one trackers under `morpheus.utils`, and the device stage's reboot counter, round-trip through `to_state` and `from_state` over plain JSON types, byte-identical for the same history whatever the hash seed; the thirty-nine stages that remember list their memory and are checked against it under every parameter the liveness registry exercises; a stop for a checkpoint keeps open windows and bindings; `CheckpointDirectory` keeps the snapshots; scored rows carry `resumed_from_state`; and control 13's seventh check stops all twelve composed pipelines halfway and reaches each golden from the snapshot alone. The snapshot is taken when the pipeline stops rather than at a window seal, for the reason check 7 records. What is left is the runners restoring on start, which arrive with them under #66. Tracked in #68 |
+| Tracker state across a restart | Medium | Built, in step 16's first part. All twenty-one trackers under `morpheus.utils`, and the device stage's reboot counter, round-trip through `to_state` and `from_state` over plain JSON types, byte-identical for the same history whatever the hash seed; the forty stages that remember list their memory and are checked against it under every parameter the liveness registry exercises; a stop for a checkpoint keeps open windows and bindings; `CheckpointDirectory` keeps the snapshots; scored rows carry `resumed_from_state`; and control 13's seventh check stops all thirteen composed pipelines halfway and reaches each golden from the snapshot alone. The snapshot is taken when the pipeline stops rather than at a window seal, for the reason check 7 records. What is left is the runners restoring on start, which arrive with them under #66. Tracked in #68 |
 | **The per-entity learned model for hosts** | Large | The principals' half is built, in step 8. Each principal of the session corpus has a `morpheus.models.dfencoder` autoencoder trained on the CPU by `examples/layer5_model/train_models.py` on a fortnight before the week it scores, committed as plain numbers under `examples/layer5_model/models/`, loaded and checked against its recorded version by `load_models`, scored in CI by a NumPy forward pass that agrees with the upstream class wherever Torch imports, and pinned in the manifest with the end of its training data, so no model scores the rows it was fitted on; a joiner falls back to a population model fitted on the same fortnight. R-B-L5-001 and R-B-L5-002 return their first rows, 42 and 28, on a search head too. Three findings came with it and are recorded rather than tuned away: the scores are uncalibrated where the fortnight never varied a feature, a cumulative feature keeps a principal firing until the next training window, and R-D-L5-008 misses a new place whose first sign-in failed. `run_model.py` now trains on the fortnight and scores the week through the same pinned scorer; its standing card artifact, from 2026-10-03, predates that and scored the week it trained on. What remains is hosts: `TC5ScoreStage(entity_column="host_key")` over a per-window host feature frame, which waits on host identity. Tracked in #59 |
 | Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run held 94 risk records for the 94 rows the detections then returned; with the learned layer 5 models it held 166 risk records for the 166 rows the detections returned, with step 9's host baselines it held 198, and with step 10's network objects it held 209, with step 13's services and applications it held 213, and with step 15's devices and physical chain it holds 221 risk records for the 221 rows the detections returned. Chain assembly stays empty on the sample events because the two three-layer chains a detection accuses sum 55 and 50 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
 | Clock skew where the corpora cannot measure it | Medium | Step 7's runs are recorded: the search-head run of all forty-eight searches on Splunk 10.2.8 on 2026-10-09 returned what `expected_results.json` says for every one, over events whose wire format the first run, on 2026-10-05, corrected; the conformance runs of 2026-10-09 passed every marked variant on a card, 759 of 759 before step 6 and 760 of 760 after it, the parity test over all twelve corpora among them; both results and the model artifact are committed and the documents' numbers are tested against them; the clock skew experiment decides all fifty-five detections, and did again after steps 9 to 13 and 15; the eight step 10 added hold to a minute on collector and switch clocks, step 11 measured layer 3 on its routers' clocks, and step 12's leases and inventory reports gave layers 4 and 6 clocks a sweep can move. What it could not measure remains: the SaaS pair's corpus carries one clock and needs the context store's record time per row, layers 4 and 6 are measured only as a uniform shift until their corpora carry an exporter per packet capture and an inspection point per egress, and the 120-second join tolerance itself needs a corpus whose chain steps sit within a minute of each other on different clocks. Recorded under #58; correcting the clocks rather than measuring them is #62 |
@@ -4588,7 +4590,7 @@ whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
 fork emits, fourteen identify a person or an account, twenty-five are addresses, seventeen locate, twenty are
-pseudonyms -- and two hundred and thirty-five are profile, two hundred and twenty-five of them behavioural; the other
+pseudonyms -- and two hundred and forty-two are profile, two hundred and thirty-two of them behavioural; the other
 ten are the organisational columns the TC-0 context store and its join carry. **The largest category by far
 is the one the design manufactures rather than collects.** An estate reviewing this will think about the
 authentication logs it ingested; most of what it ends up holding about a person is derived here, from those
