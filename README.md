@@ -225,7 +225,7 @@ Being clear about the boundary is the point of writing it down:
   any workflow is recorded after that, through the thirteen pull requests #87 to #99: the workflow is active and
   its triggers unchanged since 2026-10-03, and the cause is not visible from the repository's API. Those merges
   were checked by hand -- the affected test files for every one, the two tiers in full for most, and both tiers
-  in full on 2026-10-22, 4,340 passed and 3 skipped -- which is a weaker statement than a recorded run and is the one this file can make.
+  in full on 2026-10-22, 4,354 passed and 3 skipped on the tree that ships the host score -- which is a weaker statement than a recorded run and is the one this file can make.
   It took two failed runs to get here,
   and what each found is recorded below, after the September parity repairs it repeated. This verdict
   supersedes 455 and 935 on 2026-09-20 (which covered the four composed pipelines and twenty-six stages that
