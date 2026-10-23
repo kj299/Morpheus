@@ -100,39 +100,21 @@ def test_an_unproduced_sourcetype_says_what_is_missing(name: str):
 
 
 def test_the_unproduced_count_is_pinned():
-    # None of the nineteen stanzas is configuration for a producer this fork has not built any longer; the TC-0
-    # context store was the last. Pinned rather than merely recorded, so that landing a producer is a deliberate
-    # edit here and not a silent drift in what the app appears to support -- which is exactly what this assertion
-    # caught when layer 5 gained one, again when `TC1BindingStage` gave `binding:l1` one, as each of layers 3, 4, 6
-    # and 7 gained theirs, and when the context store did. Seventeen since the quarantine, health and late streams;
-    # eighteen since the application kind of the context store; nineteen since the host segment's score, which
-    # shipped with its producer.
+    # Every stanza has a producer. Pinned rather than merely recorded, so that adding a stanza, with or without a
+    # producer, is a deliberate edit here and not a silent drift in what the app appears to support.
     assert len(UNPRODUCED) == 0
     assert len(PRODUCED) == 19
 
 
 NUMBER_WORDS = {
-    # The score sourcetypes reached zero when layer 7 landed, and a sentence saying so has to be checkable too.
+    # "none" because the sentence says none of the stanzas is without a producer; the rest reach the stanza total,
+    # and a total past nineteen fails here with a KeyError naming the word to add.
     "none": 0,
-    "one": 1,
-    "two": 2,
-    "three": 3,
-    "four": 4,
-    "five": 5,
-    "six": 6,
-    "seven": 7,
-    "eight": 8,
-    "nine": 9,
-    "ten": 10,
-    "eleven": 11,
-    "twelve": 12,
-    "thirteen": 13,
-    "fourteen": 14,
-    "fifteen": 15,
-    "sixteen": 16,
-    "seventeen": 17,
-    "eighteen": 18,
-    "nineteen": 19,
+    **{
+        word: number
+        for (number, word) in enumerate(("zero one two three four five six seven eight nine ten eleven twelve "
+                                         "thirteen fourteen fifteen sixteen seventeen eighteen nineteen").split())
+    },
 }
 
 GUIDE = os.path.join(REPO_ROOT,
@@ -164,29 +146,17 @@ def test_the_guide_states_the_same_unproduced_count_the_module_holds():
     assert stated_total == len(PRODUCED) + len(UNPRODUCED)
 
 
-def test_the_guide_breaks_the_unproduced_count_down_correctly():
-    # The sentence does not only give a total, it splits it into score sourcetypes, the layer 1 inventory feed and
-    # the context store. That breakdown drifted too -- it still said five score sourcetypes after layer 5 gained a
-    # producer -- so the parts are checked against the module, not just the sum.
+def test_the_guide_no_longer_breaks_down_an_unproduced_count():
+    # The guide once split the unproduced count into score sourcetypes, the layer 1 inventory feed and the context
+    # store. Nothing is unproduced now, and the count test above holds the guide to that; what must not survive is
+    # the old breakdown beside it.
     with open(GUIDE, encoding="utf-8") as handle:
         text = re.sub(r"\s+", " ", handle.read())
 
-    # `is`/`are` and the singular noun are both accepted, because the count reached one when layer 6 landed and
-    # a pattern that only matched the plural would have failed on a sentence whose only fault was being
-    # grammatical.
-    match = re.search(r"stanzas have no producer in this fork: (\w+) (?:is|are) the score sourcetypes?", text)
+    assert len(UNPRODUCED) == 0, "a stanza lost its producer; restore the breakdown check this replaced"
+    breakdown = re.search(r"stanzas have no producer in this fork: \w+ (?:is|are) the score sourcetypes?", text)
 
-    scores = {name for name in UNPRODUCED if name.startswith("morpheus:score:")}
-
-    if (len(UNPRODUCED) == 0):
-        # Nothing left to break down. The sentence that listed the parts now says there are none, and the count
-        # test above holds it to that; what must not survive is the old breakdown beside it.
-        assert match is None, "the guide still breaks down an unproduced count the module no longer holds"
-        return
-
-    assert match is not None, "the guide no longer breaks the count down; keep it or drop this test"
-    assert NUMBER_WORDS[match.group(1).lower()] == len(scores), (
-        f"the guide says {match.group(1)} unproduced score sourcetypes; the module holds {sorted(scores)}")
+    assert breakdown is None, "the guide still breaks down an unproduced count the module no longer holds"
 
 
 def test_asking_for_an_unproduced_sourcetype_says_what_would_have_to_exist(monkeypatch):

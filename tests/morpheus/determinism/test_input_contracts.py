@@ -17,9 +17,10 @@
 Every input class has a contract, every corpus builder keeps to it, and the samples are what the builders build.
 
 `examples/behavioral_analytics/input_contracts.json` names, per class, each column a collector sends with its type,
-unit and source. This holds every corpus builder in the tree to it -- the eleven corpora, not only the one each
-class's sample is taken from -- so a builder that gains a column without the contract saying what it is fails here,
-and checks that the committed samples and `collector_contract.md` are what `make_input_samples.py` renders now.
+unit and source. This holds every corpus builder in the tree to it -- every corpus in `CORPORA`, not only the one
+each class's sample is taken from -- so a builder that gains a column without the contract saying what it is fails
+here, and checks that the committed samples and `collector_contract.md` are what `make_input_samples.py` renders
+now.
 """
 
 import importlib

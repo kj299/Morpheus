@@ -14,12 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Control 13's six checks against the composed layer 6 pipeline, and the five rules' predicates over its corpus.
+Control 13's six checks against the composed layer 6 pipeline, and the layer 6 rules' predicates over its corpus.
 
 Layer 6 is where the OSI model fits real networks worst, which the guide says plainly, and the class earns its
 place anyway because what it models -- the encoding and cryptographic negotiation surface -- is distinct from
 both layer 5 and layer 7. It is also the cheapest layer in the set: it rides collection points layers 3 and 4
-already established, and four of its five rules reuse primitives this fork had before layer 6 existed.
+already established, and four of its rules reuse primitives this fork had before layer 6 existed.
 
 What the corpus has to prove here is unusual in one way. Three of these rules need a reference and two do not,
 so "the rule is quiet" means two different things, and a harness that asserted only the firings would not tell
@@ -247,7 +247,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     assert diff_frames(ordered, shuffled) is not None
 
 
-# --- The five rules, each with the case beside it that must stay quiet ------------------------------------------
+# --- The deterministic and behavioral rules, each with the case beside it that must stay quiet ------------------
 
 
 @pytest.mark.cpu_mode

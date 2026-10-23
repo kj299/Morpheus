@@ -74,8 +74,10 @@ import envelope
 import host_identity
 import pandas as pd
 import stamping
-
+from corpus_pipeline import _collect
+from corpus_pipeline import build_pipeline_config  # pylint: disable=unused-import  # re-exported for callers
 from resumable import ResumableLinearPipeline
+
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
@@ -589,53 +591,6 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     return envelope.attach_all({TELEMETRY_CLASS: frame, LATE_DELIVERY_CLASS: pd.DataFrame([late]), **hosts})
 
 
-def build_pipeline_config(execution_mode=None) -> Config:
-    """
-    A pipeline configuration, defaulting to CPU mode and importable without a GPU.
-
-    Parameters
-    ----------
-    execution_mode : `morpheus.config.ExecutionMode`, optional
-        Mode to build for. Defaults to CPU, which is what the golden file is an artifact of. The parameter exists
-        so the same corpus and the same golden can be driven in GPU mode and the two compared. Resolved inside the
-        function rather than as a default argument so that importing this module still does not require a GPU.
-    """
-    from morpheus.config import CppConfig  # pylint: disable=import-outside-toplevel
-    from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
-
-    CppConfig.set_should_use_cpp(False)
-
-    config = Config()
-    config.execution_mode = ExecutionMode.CPU if execution_mode is None else execution_mode
-
-    return config
-
-
-def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
-    """Everything the sink received, as one host frame."""
-    from host_frame import to_host_frame
-
-    frames = []
-
-    for message in sink.get_messages():
-        meta = message.payload() if hasattr(message, "payload") else message
-        frame = meta.copy_dataframe()
-        # Integer columns are carried as nullable integers in both modes before anything is joined, so the
-        # concatenation cannot widen them to float in one mode and not the other; see `host_frame`.
-        frames.append(to_host_frame(frame))
-
-    if (len(frames) == 0):
-        return pd.DataFrame()
-
-    # pandas warns here, and at the same operation inside `WindowSealStage`, that a future version will stop
-    # excluding all-NA columns when it infers the concatenated dtypes. Both warnings are real and neither is
-    # acted on yet: the dtypes this produces today are the ones the golden was generated from, and the
-    # batch-split sweep compares the by-row split against the single-frame run byte for byte, so a future pandas
-    # changing them would fail a test rather than drift. The corpus reaches the case the other harnesses do not
-    # because a single flow's row legitimately has no coefficient and no TTL shift to report.
-    return pd.concat(frames, ignore_index=True)
-
-
 def build_stages(config: Config, min_denominator: int = 5) -> list:
     """The TC-3 stages, in the order a deployment would compose them.
 
@@ -724,6 +679,12 @@ def run_pipeline(config: Config,
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
+    # pandas warns inside `_collect`, and at the same operation inside `WindowSealStage`, that a future version will
+    # stop excluding all-NA columns when it infers the concatenated dtypes. Both warnings are real and neither is
+    # acted on yet: the dtypes this produces today are the ones the golden was generated from, and the batch-split
+    # sweep compares the by-row split against the single-frame run byte for byte, so a future pandas changing them
+    # would fail a test rather than drift. The corpus reaches the case the other harnesses do not because a single
+    # flow's row legitimately has no coefficient and no TTL shift to report.
     result = _collect(sink)
 
     # A collector every record of which was quarantined delivered nothing, and the class is absent rather than an

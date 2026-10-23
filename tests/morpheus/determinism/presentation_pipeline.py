@@ -79,6 +79,8 @@ import envelope
 import host_identity
 import pandas as pd
 import stamping
+from corpus_pipeline import _collect
+from corpus_pipeline import build_pipeline_config  # pylint: disable=unused-import  # re-exported for callers
 from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
@@ -425,45 +427,6 @@ def build_corpus() -> dict[str, pd.DataFrame]:
                                 unmanaged=(PERSONAL_DEVICE, ))
 
     return envelope.attach_all({TELEMETRY_CLASS: frame, **hosts})
-
-
-def build_pipeline_config(execution_mode=None) -> Config:
-    """
-    A pipeline configuration, defaulting to CPU mode and importable without a GPU.
-
-    Parameters
-    ----------
-    execution_mode : `morpheus.config.ExecutionMode`, optional
-        Mode to build for. Defaults to CPU, which is what the golden file is an artifact of.
-    """
-    from morpheus.config import CppConfig  # pylint: disable=import-outside-toplevel
-    from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
-
-    CppConfig.set_should_use_cpp(False)
-
-    config = Config()
-    config.execution_mode = ExecutionMode.CPU if execution_mode is None else execution_mode
-
-    return config
-
-
-def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
-    """Everything the sink received, as one host frame."""
-    from host_frame import to_host_frame
-
-    frames = []
-
-    for message in sink.get_messages():
-        meta = message.payload() if hasattr(message, "payload") else message
-        frame = meta.copy_dataframe()
-        # Integer columns are carried as nullable integers in both modes before anything is joined, so the
-        # concatenation cannot widen them to float in one mode and not the other; see `host_frame`.
-        frames.append(to_host_frame(frame))
-
-    if (len(frames) == 0):
-        return pd.DataFrame()
-
-    return pd.concat(frames, ignore_index=True)
 
 
 def build_stages(config: Config,

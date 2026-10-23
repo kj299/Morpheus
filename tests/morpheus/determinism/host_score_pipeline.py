@@ -69,6 +69,8 @@ import envelope
 import host_identity
 import pandas as pd
 import stamping
+from corpus_pipeline import _collect
+from corpus_pipeline import build_pipeline_config  # pylint: disable=unused-import  # re-exported for callers
 from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
@@ -442,40 +444,6 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     })
 
 
-def build_pipeline_config(execution_mode=None) -> Config:
-    """
-    A pipeline configuration, defaulting to CPU mode and importable without a GPU.
-
-    Parameters
-    ----------
-    execution_mode : `morpheus.config.ExecutionMode`, optional
-        Mode to build for. Defaults to CPU, which is what the golden file is an artifact of.
-    """
-    from morpheus.config import CppConfig  # pylint: disable=import-outside-toplevel
-    from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
-
-    CppConfig.set_should_use_cpp(False)
-
-    config = Config()
-    config.execution_mode = ExecutionMode.CPU if execution_mode is None else execution_mode
-
-    return config
-
-
-def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
-    from host_frame import to_host_frame  # pylint: disable=import-outside-toplevel
-
-    frames = []
-
-    for message in sink.get_messages():
-        meta = message.payload() if hasattr(message, "payload") else message
-        frames.append(to_host_frame(meta.copy_dataframe()))
-
-    frames = [frame for frame in frames if len(frame) > 0]
-
-    return pd.concat(frames, ignore_index=True) if len(frames) > 0 else pd.DataFrame()
-
-
 def class_stages(config: Config, telemetry_class: str, leases, inventory) -> list:
     """Each class's own layer stages, resolved to the machine and enriched from the inventory."""
 
@@ -529,7 +497,7 @@ def run_class(config: Config,
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
-    frame = _collect(sink)
+    frame = _collect(sink, drop_empty=True)
     frame["telemetry_class"] = telemetry_class
 
     return frame
@@ -718,7 +686,7 @@ def run_pipeline(config: Config,
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
-    result = _collect(sink)
+    result = _collect(sink, drop_empty=True)
     result["telemetry_class"] = HOST_CLASS
     result["row_key"] = result["event_uid"]
 

@@ -107,8 +107,8 @@ def test_principals_do_not_share_a_trajectory(config: Config):
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_pipeline_with_no_model_carries_nulls_rather_than_failing(config: Config):
-    # What this fork actually ships as: no per-entity model, so nothing produces mean_abs_z. The column is
-    # absent, every drift column is null, and R-P-L5-006 fires on nothing until a model exists.
+    # A deployment without `TC5ScoreStage` or without a per-entity model: nothing produces mean_abs_z. The column
+    # is absent, every drift column is null, and R-P-L5-006 fires on nothing until a model exists.
     payload = frame([1.0, 1.2])
     del payload["mean_abs_z"]
 
@@ -258,8 +258,8 @@ def test_one_row_per_window_is_not_reported(config: Config, caplog: pytest.LogCa
 
 @pytest.mark.cpu_mode
 def test_the_scoreless_warning_is_said_once_rather_than_per_batch(config: Config, caplog: pytest.LogCaptureFixture):
-    # This fork ships with nothing producing mean_abs_z, so the scoreless branch is the branch every deployment
-    # without a model takes on every batch forever. Saying it once is what keeps it a notice rather than the
+    # In a deployment without `TC5ScoreStage` or without a model, nothing produces mean_abs_z, so the scoreless
+    # branch is the branch it takes on every batch forever. Saying it once is what keeps it a notice rather than the
     # log, and a notice drowned in its own repetition is not a notice.
     stage = TC5DriftStage(config)
     payload = frame([1.0, 1.2])

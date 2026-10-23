@@ -147,6 +147,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_input_contracts.py
     tests/morpheus/determinism/test_layer5_model_runner.py
     tests/morpheus/determinism/test_readme_inventory.py
+    tests/morpheus/determinism/test_repository_audit.py
     tests/morpheus/determinism/test_representation_invariance.py
     tests/morpheus/determinism/test_search_head_run.py
     tests/morpheus/determinism/test_segment_runners.py

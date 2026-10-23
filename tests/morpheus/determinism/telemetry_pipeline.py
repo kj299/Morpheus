@@ -90,10 +90,11 @@ import typing
 import envelope as universal_envelope
 import pandas as pd
 import stamping
-
+from corpus_pipeline import _collect
+from corpus_pipeline import build_pipeline_config  # pylint: disable=unused-import  # re-exported for callers
 from resumable import ResumableLinearPipeline
+
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
@@ -950,49 +951,6 @@ def _build_auth(rng: random.Random, extra: random.Random) -> pd.DataFrame:
         })
 
     return pd.DataFrame(rows)
-
-
-def build_pipeline_config(execution_mode=None) -> Config:
-    """
-    A pipeline configuration, defaulting to CPU mode and importable without a GPU.
-
-    Parameters
-    ----------
-    execution_mode : `morpheus.config.ExecutionMode`, optional
-        Mode to build for. Defaults to CPU, which is what every check in this harness has ever run in: the golden
-        is a CPU artifact and control 13 has only ever been asserted there. The parameter exists so the same
-        corpus and the same golden can be driven in GPU mode and the two compared, since the per-stage `gpu_mode`
-        variants are unit tests and none of them composes the pipeline.
-
-        Resolved inside the function rather than as a default argument so that importing this module still does
-        not require a GPU.
-    """
-    from morpheus.config import CppConfig
-    from morpheus.config import ExecutionMode
-
-    CppConfig.set_should_use_cpp(False)
-
-    config = Config()
-    config.execution_mode = ExecutionMode.CPU if execution_mode is None else execution_mode
-
-    return config
-
-
-def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
-    # Sibling module; imported here because this file's own directory is put on the path by whoever imports it.
-    from host_frame import to_host_frame
-
-    frames = []
-
-    for message in sink.get_messages():
-        meta = message.payload() if isinstance(message, ControlMessage) else message
-        df = meta.copy_dataframe()
-        frames.append(to_host_frame(df))
-
-    if (len(frames) == 0):
-        return pd.DataFrame()
-
-    return pd.concat(frames, ignore_index=True)
 
 
 CHAIN_ROOTS = {

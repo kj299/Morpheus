@@ -142,6 +142,45 @@ def _stanza_names() -> list:
         return re.findall(r"^\[(.+)\]\s*$", handle.read(), re.MULTILINE)
 
 
+_UNITS = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
+          "seventeen eighteen nineteen").split()
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+
+
+def _number_word(text: str):
+    """
+    The integer an English number word below a hundred names ("eleven", "fifty", "eighty-two"), or `None`.
+
+    Parsed rather than looked up in a table, because a table of the counts the README has stated so far is a list
+    kept by hand beside the thing it lists, and failed the first time the search count reached a number nobody had
+    written into it.
+    """
+    word = text.lower()
+
+    if (word in _UNITS):
+        return _UNITS.index(word)
+
+    (tens, hyphen, unit) = word.partition("-")
+
+    if (tens not in _TENS):
+        return None
+
+    if (hyphen == ""):
+        return _TENS[tens]
+
+    if (unit in _UNITS[1:10]):
+        return _TENS[tens] + _UNITS.index(unit)
+
+    return None
+
+
+def test_the_number_word_parser_reads_what_the_readme_writes():
+    words = ("eleven", "Twenty", "fifty-eight", "Eighty-two", "ninety-nine")
+
+    assert [_number_word(word) for word in words] == [11, 20, 58, 82, 99]
+    assert [_number_word(word) for word in ("twenty-eleven", "hundred", "eighty-", "")] == [None] * 4
+
+
 def test_the_app_readme_states_the_number_of_searches_it_ships():
     # The README's inventory of savedsearches.conf listed eleven of the thirteen searches by name and had done
     # since before the layer 5 detections landed. A list of contents maintained by hand beside the thing it lists
@@ -159,71 +198,9 @@ def test_the_app_readme_states_the_number_of_searches_it_ships():
 
     assert match is not None, "the app README no longer states how many searches it ships"
 
-    words = {
-        "eleven": 11,
-        "twelve": 12,
-        "thirteen": 13,
-        "fourteen": 14,
-        "fifteen": 15,
-        "sixteen": 16,
-        "seventeen": 17,
-        "eighteen": 18,
-        "nineteen": 19,
-        "twenty": 20,
-        "twenty-one": 21,
-        "twenty-two": 22,
-        "twenty-three": 23,
-        "twenty-four": 24,
-        "twenty-five": 25,
-        "twenty-six": 26,
-        "twenty-seven": 27,
-        "twenty-eight": 28,
-        "twenty-nine": 29,
-        "thirty": 30,
-        "thirty-one": 31,
-        "thirty-two": 32,
-        "thirty-three": 33,
-        "thirty-four": 34,
-        "thirty-five": 35,
-        "thirty-six": 36,
-        "thirty-seven": 37,
-        "thirty-eight": 38,
-        "thirty-nine": 39,
-        "forty": 40,
-        "forty-one": 41,
-        "forty-two": 42,
-        "forty-three": 43,
-        "forty-four": 44,
-        "forty-five": 45,
-        "forty-six": 46,
-        "forty-seven": 47,
-        "forty-eight": 48,
-        "forty-nine": 49,
-        "fifty": 50,
-        "fifty-one": 51,
-        "fifty-two": 52,
-        "fifty-three": 53,
-        "fifty-four": 54,
-        "fifty-five": 55,
-        "fifty-six": 56,
-        "fifty-seven": 57,
-        "fifty-eight": 58,
-        "fifty-nine": 59,
-        "sixty": 60,
-        "sixty-one": 61,
-        "sixty-two": 62,
-        "sixty-six": 66,
-        "seventy-two": 72,
-        "seventy-five": 75,
-        "seventy-eight": 78,
-        "seventy-nine": 79,
-        "eighty": 80,
-        "eighty-one": 81,
-        "eighty-two": 82,
-    }
+    stated = _number_word(match.group(1))
 
-    assert words.get(match.group(1).lower()) == shipped, (
-        f"the README says {match.group(1)} searches; savedsearches.conf holds {shipped}")
+    assert stated == shipped, f"the README says {match.group(1)} searches; savedsearches.conf holds {shipped}"
 
 
 def test_every_detection_search_is_named_somewhere_in_the_app_readme():
@@ -326,7 +303,9 @@ def test_every_detection_writes_its_rows_to_the_risk_index():
     # searches summed a risk_score nothing stored. Every detection now ends by collecting what it returned.
     detections = _detections()
 
-    assert len(detections) == 58
+    # A floor rather than the count: adding a detection must not fail here for bookkeeping, and the collect count
+    # below already equals the number of detections, whatever it is.
+    assert len(detections) >= 58
     assert read_text(SAVEDSEARCHES_PATH).count("| collect index=behavior_risk") == len(detections)
 
     for (name, stanza) in detections.items():

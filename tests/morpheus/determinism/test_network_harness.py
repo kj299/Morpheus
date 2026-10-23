@@ -14,12 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Control 13's six checks against the composed layer 3 pipeline, and the five rules' predicates over its corpus.
+Control 13's six checks against the composed layer 3 pipeline, and the layer 3 rules' predicates over its corpus.
 
 Layer 3 is the first layer in this fork above 2, and the first whose entity is an address rather than a piece of
 hardware or a person. Everything the other harnesses assert about determinism applies here unchanged; what is new
 is what the corpus has to prove, which is that each rule fires on the thing it names and stays quiet on the thing
-beside it. Both halves are asserted for all five, because a fan-out rule that also flagged the browser would be
+beside it. Both halves are asserted for every rule, because a fan-out rule that also flagged the browser would be
 worse than no rule -- volume nobody can triage is how a detection stops being read at all.
 """
 
@@ -60,8 +60,8 @@ FAN_IN_FLOOR = 10
 UPLOAD_FLOOR = 10
 """R-B-L3-007's floor: bytes out for each byte back."""
 
-SWEEP_PORTS = 25
-"""R-D-L3-008's threshold."""
+SWEEP_PORTS_THRESHOLD = 25
+"""R-D-L3-008's threshold. Not `np_.SWEEP_PORTS`, which is how many ports the corpus's sweeper tries."""
 
 
 @pytest.fixture(name="corpus", scope="module")
@@ -133,7 +133,7 @@ def first_contact_upload(frame: pd.DataFrame) -> pd.DataFrame:
 
 def port_sweep(frame: pd.DataFrame) -> pd.DataFrame:
     """R-D-L3-008's predicate."""
-    return frame[(frame["dst_ports_per_src"] >= SWEEP_PORTS) & _true(frame, "dst_is_private")]
+    return frame[(frame["dst_ports_per_src"] >= SWEEP_PORTS_THRESHOLD) & _true(frame, "dst_is_private")]
 
 
 def _split(frame: pd.DataFrame, parts: int) -> list:
@@ -280,7 +280,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     assert diff_frames(ordered, shuffled) is not None
 
 
-# --- The five rules, each with the case beside it that must stay quiet ------------------------------------------
+# --- The rules, each with the case beside it that must stay quiet -----------------------------------------------
 
 
 @pytest.mark.cpu_mode

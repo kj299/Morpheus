@@ -160,8 +160,8 @@ def test_the_runner_refuses_when_torch_reports_no_device(tmp_path):
 
 
 def test_the_runner_says_what_it_does_not_measure(runner_module):
-    # A reproducibility verdict is easy to read as a detection verdict, and this corpus -- a week of five
-    # principals -- cannot support the second. The disclaimer is part of the artifact rather than part of the
+    # A reproducibility verdict is easy to read as a detection verdict, and this corpus -- three weeks of a
+    # handful of principals -- cannot support the second. The disclaimer is part of the artifact rather than part of the
     # commentary so that it travels with the numbers it qualifies.
     assert "reproducibility, not detection quality" in runner_module.__doc__
 
