@@ -95,8 +95,9 @@ class GeoVelocityResult:
         This principal had no previous eligible authentication. The location is now recorded and the next one
         will be measured against it.
     out_of_order : bool
-        The authentication's event time was not after the previous one's. Nothing is measured and the recorded
-        location is left alone, because measuring backwards would report a speed for a journey in reverse.
+        The authentication's event time was before the previous one's. Nothing is measured and the recorded
+        location is left alone, because measuring backwards would report a speed for a journey in reverse. An equal
+        time is measured, with the elapsed time floored, since two places at one instant is the signal.
     """
 
     distance_km: typing.Optional[float]

@@ -14,10 +14,11 @@
 """
 The five TCP control bits the layer 4 features are built from, read out of the byte a capture reports.
 
-`examples/abp_pcap_detection/abp_pcap_preprocessing.py` extracts these by rendering the flags byte as a binary
-string and indexing into it, which is fast on a card and is the same arithmetic as a mask. This module is the
-mask, so that a CPU pipeline and a GPU one agree bit for bit and so that the extraction is testable without a
-frame library.
+Upstream's ABP pcap example, `abp_pcap_preprocessing.py`, extracts these by rendering the flags byte as a binary
+string and indexing into it, which is fast on a card and is the same arithmetic as a mask. This module is the mask,
+so that a CPU pipeline and a GPU one agree bit for bit and so that the extraction is testable without a frame
+library. The example, at upstream commit c6a3b56d:
+https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py
 
 **Only five of the eight bits are read, and that is the example's choice rather than an oversight.** The byte
 also carries URG, ECE and CWR. The thirteen features the shipped model was trained on use ACK, PSH, RST, SYN and

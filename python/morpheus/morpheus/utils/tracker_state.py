@@ -20,10 +20,10 @@ stage, in process memory. A process that stops loses all of it, and the one that
 relearning: every history-gated rule is silent and every "first seen" fires again. This module is how that memory
 leaves the process and comes back.
 
-**The state is the tracker's own attributes, not a summary of them.** A hand-written `to_state` per tracker would be
-seventeen chances to leave a field out, and a field left out is a tracker that resumes almost as it stopped, which no
-test over a short corpus would catch. `encode` walks the object instead: its instance attributes, and theirs, down
-to plain values. What the tracker holds is what the snapshot holds.
+**The state is the tracker's own attributes, not a summary of them.** A hand-written `to_state` would give every
+tracker its own chance to leave a field out, and a field left out is a tracker that resumes almost as it stopped,
+which no test over a short corpus would catch. `encode` walks the object instead: its instance attributes, and
+theirs, down to plain values. What the tracker holds is what the snapshot holds.
 
 **Order is state, and is kept.** The trackers evict the least recently seen entity, so the order of their entity maps
 decides who is dropped next. A mapping is therefore encoded as a list of pairs in its own order, never as a JSON

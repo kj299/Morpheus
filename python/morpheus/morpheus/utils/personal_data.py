@@ -1076,8 +1076,8 @@ def pseudonymize(values: typing.Sequence,
     person's history into as many people as there were runs. Stability is also exactly what keeps this
     pseudonymization rather than anonymization, and nothing downstream should be described as anonymous.
 
-    Nulls (`None`, NaN, `pandas.NA`) are preserved as nulls. Hashing the absence of a value would manufacture a value, and an entity whose
-    identifier is missing would acquire a stable identity it never had.
+    Nulls (`None`, NaN, `pandas.NA`) are preserved as nulls. Hashing the absence of a value would manufacture a
+    value, and an entity whose identifier is missing would acquire a stable identity it never had.
 
     Parameters
     ----------

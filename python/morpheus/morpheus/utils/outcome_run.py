@@ -78,7 +78,8 @@ class OutcomeRunResult:
         The sample cap is binding, so events are being evicted before the window would have expired them and both
         counts are floors rather than figures.
     out_of_order : bool
-        The attempt's event time was not after the previous one's. State is left untouched.
+        The attempt's event time was before the previous one's. State is left untouched. Attempts at the same
+        instant are accepted, since a fatigue burst stamps several on one tick.
     """
 
     attempts: int

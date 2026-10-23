@@ -108,6 +108,9 @@ class CounterTracker(StateMixin):
     max_entities : int, default = 100000
         Entities retained before the least recently seen is dropped. A dropped entity's next sample is treated as
         its first, yielding no deltas rather than a wrong one.
+    uptime_ceiling_ns : int, optional
+        Where the device uptime counter itself rolls over: `TIMETICKS_CEILING_NS` for SNMP `sysUpTime`. Unset, an
+        uptime decrease is always read as a restart.
     """
 
     def __init__(self,
