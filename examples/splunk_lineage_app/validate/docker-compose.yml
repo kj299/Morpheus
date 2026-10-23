@@ -8,7 +8,9 @@
 
 services:
   splunk:
-    image: splunk/splunk:10.2
+    # The exact build every recorded run reports (Splunk 10.2.8, build 981c2d735e4d). A floating tag would let a
+    # rerun use another version and still read as a reproduction of the recorded one.
+    image: splunk/splunk:10.2.8
     container_name: morpheus-lineage-validate
     environment:
       SPLUNK_START_ARGS: --accept-license
@@ -18,7 +20,7 @@ services:
       SPLUNK_APPS_URL: ""
     ports:
       - "8000:8000"   # web
-      - "8089:8089"   # management, which VALIDATION.md drives the searches through
+      - "8089:8089"   # management; run_search_head.py drives the searches with the splunk CLI inside the container
     volumes:
       # The app, the validation-only settings, the sample events and the runner, all read-only and all outside
       # /opt/splunk/etc. The image's provisioning changes the owner of everything under /opt/splunk/etc as it

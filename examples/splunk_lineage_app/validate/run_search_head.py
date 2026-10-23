@@ -30,7 +30,8 @@ So every timestamp is moved forward by one whole number of weeks, chosen so the 
 before the run. A whole number of weeks keeps the hour of day, the weekday and every five-minute, hourly and daily
 boundary where it was, and every search compares `_time` only with another `_time`, so what each rule decides is
 unchanged. Only the timestamp strings move; the window identifiers and buckets in the events are left as they are,
-and they are what the searches join on. The span of the events is still about sixty days, which is wider than
+which is harmless because they still agree with one another and the binding refreshes recompute each bucket from
+`_time` rather than read the stored one. The span of the events is still about sixty days, which is wider than
 layer 1's thirty-day `MAX_DAYS_AGO`, so `run_search_head.sh` installs a validation-only app whose `props.conf` raises it
 for this run alone.
 
@@ -80,7 +81,13 @@ INDEX_BY_PREFIX = (("morpheus:edge", "behavior_lineage"), ("morpheus:score:", "b
                    ("morpheus:health", "behavior_health"), ("morpheus:quarantine", "behavior_quarantine"),
                    ("morpheus:late", "behavior_late"), ("binding:", "behavior_bindings"), ("context:",
                                                                                            "behavior_context"))
-"""Where each sourcetype is indexed, as VALIDATION.md's indexing loop has it."""
+"""
+Where each sourcetype is indexed: a standard-library copy of `morpheus.utils.siem_sourcetypes.INDEX_BY_PREFIX`.
+
+The runner executes inside the container under Splunk's own Python, where Morpheus is not installed, so it cannot
+import the table. `test_the_validation_script_places_sourcetypes_the_same_way` in
+`tests/morpheus/utils/test_splunk_transport.py` holds the two equal.
+"""
 
 CALL_TIMEOUT_SECONDS = 900
 """How long one call to the splunk client may take; a search that has not finished by then is recorded as an error

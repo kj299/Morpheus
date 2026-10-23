@@ -206,16 +206,17 @@ def main() -> int:
     _health(by_sourcetype, network_pipeline, flows)
 
     # Layer 4 likewise. Its entity is a conversation rather than an address, so its records share no entity with
-    # layer 3's either, even where the two corpora use the same addresses -- which is the thing Part 4's layer 3
-    # to layer 4 hop would have to supply and does not yet.
+    # layer 3's either, even where the two corpora use the same addresses. The hop between the layers is the
+    # connection's Community ID, which the connection evidence report joins on; these two corpora are built apart
+    # and share none, so the connections it finds come from the campaign corpus below, which carries both layers.
     packets = transport_pipeline.run_pipeline(transport_pipeline.build_pipeline_config(),
                                               transport_pipeline.build_corpus())
     _scored(by_sourcetype, packets, "morpheus:score:l4")
     _health(by_sourcetype, transport_pipeline, packets)
 
-    # Layer 6 likewise, and it is the layer that makes R-C-002 expressible: the chained rule correlates a new
-    # client fingerprint here with beaconing at layer 3 on the same host. The two corpora are separate, so the
-    # rule still returns nothing -- what changed is that both halves now have producers.
+    # Layer 6 likewise. This corpus supplies the layer 6 detections, R-B-L6-001 among them. R-C-002 correlates a
+    # new client fingerprint with beaconing at layer 3 from the same host, and this corpus and the network corpus
+    # are separate, so its one chain comes from the campaign corpus below, which carries both halves.
     handshakes = presentation_pipeline.run_pipeline(presentation_pipeline.build_pipeline_config(),
                                                     presentation_pipeline.build_corpus())
     _scored(by_sourcetype, handshakes, "morpheus:score:l6")
