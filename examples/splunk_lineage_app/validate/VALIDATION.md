@@ -79,16 +79,26 @@ nineteen machines where seventeen were written: the expectation had not been der
 R-B-L4-004's hosts are seen at layers 4 and 7. The package derives it now. The ninth run differs from what is written
 in those two searches and the summary. The tenth is kept in `search_head_runs/` too.
 
-`search_head_results.json` holds the eleventh, made on 2026-10-17 on the same install over the events step 15
-regenerated, when the switch and the router became entities and R-C-003 got a chain to find: 305 device polls beside
-the estate's port polls, and the campaign's headquarters desk ports -- 292 port polls and 1125 MAC table walks on
-layers 1 and 2, which the campaign had not sent before -- with four intruders' leases and flows. It returned what is
-written for all seventy-eight over 22,410 indexed events, and the detections wrote 221 risk records, so the run
-checks that the index holds exactly those rows -- 221 -- before the searches that read them run. The three new
-detections return one row each. R-B-L2-002 and R-B-L2-006 each gain the campaign's desk ports: the rogue host is a
-second address on its port and a vendor new to its VLAN, and so are its controls, which is why the chain exists. The
-restart report reads the devices' own polls, where the storm switch restarts in three periods. The tenth run
-differs from what is written in those three searches, the two lower binding rungs and the jobs that expire them, and the summary.
+The eleventh, made on 2026-10-17 on the same install over the events step 15 regenerated, when the switch and the
+router became entities and R-C-003 got a chain to find: 305 device polls beside the estate's port polls, and the
+campaign's headquarters desk ports -- 292 port polls and 1125 MAC table walks on layers 1 and 2, which the campaign
+had not sent before -- with four intruders' leases and flows. It returned what was then written for all seventy-eight
+over 22,410 indexed events, and the detections wrote 221 risk records. The three new detections returned one row
+each. R-B-L2-002 and R-B-L2-006 each gained the campaign's desk ports: the rogue host is a second address on its port
+and a vendor new to its VLAN, and so are its controls, which is why the chain exists. The restart report reads the
+devices' own polls, where the storm switch restarts in three periods. The tenth run differs from what is written in
+those three searches, the two lower binding rungs and the jobs that expire them, and the summary. The eleventh is
+kept in `search_head_runs/`.
+
+`search_head_results.json` holds the twelfth, made on 2026-10-22 on the same install over the events regenerated when
+the host segment gained a sourcetype of its own: 1568 host frames, one per workstation per hour over three weeks,
+scored against the committed peer-group models, on `morpheus:score:host`. It returned what is written for all eighty
+over 24,146 indexed events, and the detections wrote 224 risk records, so the run checks that the index holds exactly
+those rows -- 224 -- before the searches that read them run. R-P-L3-009 returns its three host-days and writes them to
+`host_watchlist`, whose expiry job keeps all three; the summary grows by the 1568 frames, each its own group, and
+`peak_z` is a number on the 536 scored ones; and no other search moves, because the host corpus's machines share
+nothing with any other corpus's. The eleventh run differs from what is written in the summary alone, and has neither
+of the two searches this part added.
 
 ## Running it
 
@@ -101,7 +111,7 @@ SPLUNK_PASSWORD='choose-one' examples/splunk_lineage_app/validate/run_search_hea
 
 It starts the container, waits for it to report healthy, and runs [`run_search_head.py`](./run_search_head.py)
 inside it under Splunk's own interpreter. That indexes every file in `sample_events/`, makes the two checks
-below, dispatches all seventy-eight searches in the order this document prescribes, and writes
+below, dispatches all eighty searches in the order this document prescribes, and writes
 `search_head_results.json` beside this file: the Splunk version, the date, what was indexed, a row count per
 search, how many risk records the detections wrote and the index holds, and the risk on every chain that spans
 three layers. Commit it; `tests/morpheus/determinism/test_search_head_run.py` compares it with
@@ -114,7 +124,7 @@ Two adjustments make the run faithful, and both are the runner's rather than the
   itself: `MAX_DAYS_AGO` cannot exceed about thirty years, and an event outside it is silently given another time.
   The runner moves every timestamp forward by one whole number of weeks, so the newest event lands a few days
   before the run; hours of day, weekdays and every bin boundary stay where they were, and every search compares
-  `_time` only with another `_time`. The events then span fifty-seven days, more than the thirty layer 1 allows,
+  `_time` only with another `_time`. The events then span sixty days, more than the thirty layer 1 allows,
   so the runner installs `validation_app/`, a separate app whose `local/props.conf` raises `MAX_DAYS_AGO` for
   this run and whose `local/indexes.conf` gives the indexes local paths. It is never deployed.
 - **The searches look back from now**, over windows like `-2h@m` to `-5m@m`. Each is dispatched as
@@ -123,7 +133,7 @@ Two adjustments make the run faithful, and both are the runner's rather than the
   `expected_results.json` makes.
 
 The order is the one a schedule would settle into, made explicit: the binding refreshes, so the lookups exist; the
-two predictive searches, so R-B-L7-002 reads a populated watchlist; every other detection, each collecting its rows
+three predictive searches, so R-B-L7-002 and R-B-L7-004 read populated watchlists; every other detection, each collecting its rows
 into `behavior_risk`; the behavior summary; R-P-L3-005, which reads the summary; Chain assembly, which sums the
 risk; and the expiry jobs last, because each rewrites the lookup it trims and one run earlier could take away what a
 later search reads. `collect` hands its rows to the indexer and returns, so a search that reads an index another
@@ -186,6 +196,7 @@ should return nothing:
 | R-B-L3-006, fan-in onto a workstation | **1** | One notable: a finance workstation reached by fourteen internal sources where its fortnight held one. The DNS server's ordinary Mondays are busier than this one, and the application server steps when a new service is pointed at it and is a server. |
 | R-B-L3-007, first-contact upload | **1** | One notable: nine megabytes to a network the host had never reached, against a fortnight whose most lopsided hour was its nightly backup. The first download from another new network, and the backup provider sent more than ever, are each one half and quiet. |
 | R-D-L3-008, port sweep | **1** | One notable: forty ports on one internal server. A conferencing client spreads across thirty ports on an external relay, and the horizontal scan reaches eighty addresses on one port. |
+| R-P-L3-009, host drift trajectory | **3** | One host, the engineering workstation planted to drift, on the last three of its seven scored days: its daily mean against its peer group's model climbs every scored day, from 0.7 to 379, and the rule reports it from the first day the drift stage calls the trajectory mature, the fifth rising day, not the fourth that first meets the conditions. No ceiling: the host scores run into the hundreds and the acceleration into the tens, which R-P-L5-006's ceilings would read as not a trajectory. Watchlist, never a page: every firing is written to `host_watchlist`, which R-B-L7-004 reads. |
 | Connection evidence, layers 3, 4 and 6 | **1** | One connection: the campaign attacker's breach, which the flow exporter, the packet sensor and the inspection point each stamped with one Community ID. The four other breaches were seen at two layers, as was the connection R-C-002's attacker presented its new fingerprint on. A report, not a detection. |
 | Host evidence, one machine across layers | **19** | Nineteen machines under one `host_key` at two layers or more: the campaign's ten workstations, resolved from their addresses through the DHCP server's leases and the EDR inventory at layers 3, 4 and 6; seven clients the network and transport corpora both carry, which resolve the same way and so are the same workstations; and two of R-B-L4-004's hosts, whose packets and requests both resolve to them, at layers 4 and 7. The campaign's servers have static addresses no lease names, and their processes are seen at layer 7 alone. A report, not a detection. |
 | Identity walk, sign-in to switch port | **25** | Twenty-five sign-ins walked to a port through the lookups, each to the port the pipeline resolved: the estate's fifteen desk sign-ins by their 802.1X identity, and ten campaign host logins by address to a MAC and the MAC to a port. A sign-in from an address no lease named at the time is walked to nothing, as the pipeline resolved it to nothing. Run after the three refreshes. A report, not a detection. |
@@ -219,7 +230,7 @@ should return nothing:
 | R-C-002, TLS before beaconing | **1** | One chain, and the first this rule has ever returned: it now reads the scored events rather than the two detections' notables. A settled host presents a new stack to a destination and fourteen minutes later its beacon there matures. Four hosts do both halves with one condition broken and are quiet: a beacon already running an hour before, a beacon to another address, a beacon maturing after sixty-seven minutes, and a host with five handshakes behind it. The new stack and the beacon's first flow are one connection, so the pair is joined on its Community ID, `hard:community_id`. |
 | R-C-005, credential replay across the stack | **1** | One principal at two switch ports 534 km apart twenty minutes apart: the leases name the workstations behind both sign-in addresses, and the MAC bindings closed from the two sites' switches put them at headquarters and in Edinburgh. Five others are one step short and quiet -- two ports at the same site, the same journey in three hours, an address no lease names, a lease that had ended an hour before, and a refused second attempt. Nothing here rests on geolocation: both ends of the journey are ports. |
 | R-C-003, physical compromise chain | **1** | One port and one device: the walk that finds a single-board computer behind a headquarters desk port, a vendor the port has never carried, on the poll that saw its link drop, and thirteen minutes later SSH from the address its lease gave it to the switches' management interface. A fleet laptop plugged in the same way, a printer that never reaches management, and a second single-board computer behind a desk switch whose link never moves are each one step short and quiet. |
-| Behavior summary, per-layer scores | **7233** | One row per five-minute bin, layer, entity and lineage over the 15644 scored events. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5's scored week, because only `TC5ScoreStage` produces `max_abs_z` and it does not score the fortnight the models were trained on. |
+| Behavior summary, per-layer scores | **8801** | One row per five-minute bin, layer, entity and lineage over the 17212 scored events, of which 1568 are the host segment's, one per workstation per hour on `morpheus:score:host`. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5's scored week and the host segment's, because only `TC5ScoreStage` produces `max_abs_z` and it does not score the fortnight the models were trained on. |
 | Chain assembly, cross-layer risk | **0** | Correct, and now because the risk is written and is not enough. Every detection collects its rows into `behavior_risk` and this search sums them per lineage, once each. 15 of the 3742 chains span three layers -- a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there -- and two detections accuse one each: R-D-L2-003 at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, both under the 60 the search needs. The other 13 carry none; the run records all three totals. `methods` reads every hop the resolver ladder took, so the 15 name `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. |
 | Binding lookup, L2/L3 refresh | **1685** | One row per desk address and five-minute bucket its lease covers: the campaign DHCP server's acknowledgements for the eleven addresses R-C-005's sign-ins come from and the four R-C-003's intruders were given, closed by `TC2BindingStage` into leases held for the term the server granted, each naming the workstation's MAC and the switch port the relay saw. It was empty until the leases had a producer, and for a while before that was credited with 80 rows that were a MAC table under a different name. |
 | Binding lookup, L2 refresh | **1249** | One row per MAC and five-minute bucket a MAC table binding covers: the estate's 124 and the campaign's two sites' 1125, the intruders' four desk ports among them. Each names the port the MAC was behind, the rung between an address's MAC and a port. |
@@ -227,7 +238,8 @@ should return nothing:
 | Binding lookup, L1 refresh | **23** | Twenty-three port intervals across thirteen ports: eight that never changed, two on each of the two ports whose optics are swapped and on the re-patched and inserted-into ports, and three on each of the restarted switch's ports, whose neighbour was unknown for one poll. The lookup keys on port and switch with no bucket, so a port's intervals collapse to one row and the latest wins -- it answers what is in a port now, not what was in it then. |
 | Binding lookup, L1 history refresh | **7** | Seven rows, one per port whose binding was ever superseded: the two re-fitted optics, the re-patch, the insertion, and the restarted switch's three ports. The six that never changed are described for all time by the current-state row and cost the history nothing. The restart is a cost the history pays, recorded rather than hidden: the binding stage cannot tell a neighbour not yet relearned from a cable pulled. |
 | Binding lookup, L1 history expiry | **7** | Keeps every day bucket inside the retention window and rewrites the lookup with them, and every one is inside it here: the refresh keys each row on the day its own time falls in, which the run moves to the weeks before it. Its zero, and the other expiry jobs', was a bucket counted from 1970 measured against `now()`. |
-| Principal watchlist, expiry | **2** | The runner dates the events so the newest lands three to ten days before the run. R-P-L7-006's two entries are stamped with their principals' latest events, which are the newest in the corpus, so they are still inside their thirty days; R-P-L5-006's six are stamped thirty-two days earlier and are dropped. It was written as 0 until the first search-head run showed that only the undated 1970 events expire everything. Run it last: run before R-B-L7-002, it empties the list that search reads. |
+| Principal watchlist, expiry | **2** | The runner dates the events so the newest lands three to ten days before the run. R-P-L7-006's two entries are stamped with their principals' latest events, three days behind the newest in the corpus, so they are still inside their thirty days; R-P-L5-006's six are stamped more than thirty-five days behind it and are dropped. It was written as 0 until the first search-head run showed that only the undated 1970 events expire everything. Run it last: run before R-B-L7-002, it empties the list that search reads. |
+| Host watchlist, expiry | **3** | R-P-L3-009's three entries are stamped with the drifting host's last three days, which are the newest events in the corpus, so all three are inside their thirty days once the runner has dated them, and the job keeps them. Run it last, as the principals' is: run before R-B-L7-004, it empties the list that search reads. |
 | Binding lookup, L2/L3 expiry | **1685** | The same, for the address rung's five-minute buckets: it keeps all of them. |
 | Binding lookup, L2 expiry | **1249** | The same, for the MAC rung. |
 | Binding lookup, L5/L2 expiry | **59** | The same, for the 802.1X identity rung. |
@@ -238,7 +250,7 @@ should return nothing:
 | Platform baseline step | **1** | The SaaS corpus's second tenant, whose sync doubled for its last two days and held there. The identity provider's one-hour burst to twice its peak does not hold into the next window and is not a step. |
 | R-P-L5-006, drift trajectory | **6** | Two principals, neither of them behaviour, explained in `expected_results.json`: the two whose week repeats their fortnight climb on its last three days by hundredths a day, as the cadence features keep moving after their models were trained, and the rule measures that against a day-to-day spread that is nearly zero. The principals whose week does depart all cross the mean ceiling and leave. Watchlist, never a page: every firing is written to `principal_watchlist`. |
 
-**Two of the seventy-eight should return nothing.** That is the point of writing them down. An empty result is
+**Two of the eighty should return nothing.** That is the point of writing them down. An empty result is
 this app's characteristic failure, and without a list saying which emptiness is correct, a deployment cannot
 tell a rule that is working from a rule that is broken. The ratio has moved both ways, which is what makes it
 worth stating: it improved as layers 3, 4, 5, 6 and 7 gained producers, and went the other way when the L2/L3 refresh
@@ -255,7 +267,7 @@ expectation file is for.
 ## The watchlist the predictive searches write
 
 R-P-L5-006 and R-P-L7-006 write the `principal_watchlist` KV Store lookup as they run, and R-B-L7-002 reads
-it. Run the two predictive searches first, then
+it. Run the predictive searches first, then
 
 ```
 | inputlookup principal_watchlist | stats count BY rule_id reason
@@ -269,6 +281,19 @@ the severity of its notables does not move here; `test_saas_harness.py` asserts 
 Run the expiry job last: it drops R-P-L5-006's entries, whose events are more than thirty days behind the run
 once the runner has dated them, and keeps R-P-L7-006's two.
 
+The hosts have a list of their own. R-P-L3-009 writes the `host_watchlist` lookup as it runs, keyed on the host,
+the rule and the day, and R-B-L7-004 reads it by the host its rows name to raise a watched host's notables by 15.
+
+```
+| inputlookup host_watchlist | stats count BY rule_id reason
+```
+
+should return one row: `R-P-L3-009` with `host-drift-trajectory` and 3 entries, one per host-day it fired on.
+None of the hosts R-B-L7-004 reports is on it, because the host corpus's machines share nothing with the endpoint
+corpus's or the campaign's, and the severity of each of its notables stands as written here; `test_endpoint_harness.py`
+is where a watched host would be put in front of it. Its expiry job keeps all three entries, because the drifting host's last
+three days are the newest events in the corpus.
+
 ## Where the sample events come from
 
 [`make_sample_events.py`](./make_sample_events.py) runs the same `run_pipeline` the determinism tests call and
@@ -277,7 +302,8 @@ from the estate pipeline rather than the telemetry one, because a chain is decid
 together: the same events rendered from the telemetry pipeline carry chains that stop at two layers. Layers 3
 4, 6 and 7 come from their own corpora and their own pipelines, and share an entity with neither the estate
 nor each other -- an address is not a port, a conversation is not an address, and the host a handshake or a query
-was made from is not any of them. Each scored corpus's sealed output also passes through `PipelineHealthStage`, as a
+was made from is not any of them. The host segment's rows come from the host score corpus, one per workstation per
+hour, scored against the committed peer-group models, on `morpheus:score:host`. Each scored corpus's sealed output also passes through `PipelineHealthStage`, as a
 deployment's health branch would, onto `morpheus:health`; a row its sealer marked late goes to `morpheus:late`
 instead of its score sourcetype; and the records `EnvelopeValidateStage` quarantined go to `morpheus:quarantine`.
 They are checked in so

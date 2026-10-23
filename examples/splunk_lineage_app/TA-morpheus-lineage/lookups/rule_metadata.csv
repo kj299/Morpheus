@@ -38,6 +38,7 @@ R-D-L2-004,R-D-L2-004 - MAC in two places at once,"mac_address,bind_start",1h,no
 R-D-L2-005,R-D-L2-005 - Authorization without authentication,event_uid,1h,none
 R-D-L3-003,R-D-L3-003 - Reserved-range egress,event_uid,1h,none
 R-D-L3-008,R-D-L3-008 - Port sweep,src_ip,1h,none
+R-P-L3-009,R-P-L3-009 - Host drift trajectory,"host_key,day_window_id",2d,none
 R-D-L4-002,R-D-L4-002 - SYN without completion,src_ip,1h,none
 R-D-L4-003,R-D-L4-003 - RST ratio,"entity_key,refusal_direction",1h,none
 R-D-L5-003,R-D-L5-003 - Impossible travel,"user_principal,window_id",1h,none

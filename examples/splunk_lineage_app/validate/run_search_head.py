@@ -30,7 +30,7 @@ So every timestamp is moved forward by one whole number of weeks, chosen so the 
 before the run. A whole number of weeks keeps the hour of day, the weekday and every five-minute, hourly and daily
 boundary where it was, and every search compares `_time` only with another `_time`, so what each rule decides is
 unchanged. Only the timestamp strings move; the window identifiers and buckets in the events are left as they are,
-and they are what the searches join on. The span of the events is still fifty-seven days, which is wider than
+and they are what the searches join on. The span of the events is still about sixty days, which is wider than
 layer 1's thirty-day `MAX_DAYS_AGO`, so `run_search_head.sh` installs a validation-only app whose `props.conf` raises it
 for this run alone.
 
@@ -39,13 +39,13 @@ here as `| savedsearch` with an explicit time range covering every event, which 
 so a search is asked the same question its schedule would ask, over all the data at once rather than a slice.
 That is the same simplification the Python recomputation in `expected_results.json` makes.
 
-The order follows VALIDATION.md: the binding refreshes first, so the lookups exist; the two predictive searches,
-so R-B-L7-002 reads a populated watchlist; every other detection, each writing its rows into `behavior_risk`; the
-summary search, so R-P-L3-005 has something to read; R-P-L3-005; Chain assembly, which sums what the detections
-wrote; and the expiry jobs last, because each rewrites the lookup it trims and one run earlier could take away
-what a later search reads. A search that reads an index another search wrote is dispatched only once that index
-holds every row that was written to it: `collect` hands its rows to the indexer and returns, and they become
-searchable a few seconds later.
+The order follows VALIDATION.md: the binding refreshes first, so the lookups exist; the three predictive searches,
+so R-B-L7-002 and R-B-L7-004 read populated watchlists; every other detection, each writing its rows into
+`behavior_risk`; the summary search, so R-P-L3-005 has something to read; R-P-L3-005; Chain assembly, which sums
+what the detections wrote; and the expiry jobs last, because each rewrites the lookup it trims and one run earlier
+could take away what a later search reads. A search that reads an index another search wrote is dispatched only
+once that index holds every row that was written to it: `collect` hands its rows to the indexer and returns, and
+they become searchable a few seconds later.
 """
 
 import argparse
@@ -86,7 +86,9 @@ CALL_TIMEOUT_SECONDS = 900
 """How long one call to the splunk client may take; a search that has not finished by then is recorded as an error
 rather than left to hold the whole run."""
 
-PREDICTIVE = ("R-P-L5-006 - Drift trajectory", "R-P-L7-006 - Access breadth trajectory")
+PREDICTIVE = ("R-P-L5-006 - Drift trajectory",
+              "R-P-L7-006 - Access breadth trajectory",
+              "R-P-L3-009 - Host drift trajectory")
 SUMMARY = "Behavior summary - per-layer scores"
 TRAJECTORY = "R-P-L3-005 - Fan-out trajectory"
 CHAIN = "Chain assembly - cross-layer risk"
@@ -384,6 +386,10 @@ def main() -> int:
                                                    earliest,
                                                    latest,
                                                    password)
+            checks["host_watchlist"] = search("| inputlookup host_watchlist | stats count BY rule_id reason",
+                                              earliest,
+                                              latest,
+                                              password)
 
     version = splunk("version", password=password, check=False).stdout.strip()
     btool = subprocess.run([SPLUNK, "btool", "check", f"--app={APP}"],

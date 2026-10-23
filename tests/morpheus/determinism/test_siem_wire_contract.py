@@ -37,12 +37,13 @@ from morpheus.utils.siem_wire import to_wire_lines
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# pylint: disable=wrong-import-position
 import application_pipeline  # noqa: E402
 import campaign_pipeline  # noqa: E402
 import context_pipeline  # noqa: E402
 import endpoint_pipeline  # noqa: E402
 import envelope  # noqa: E402
-# pylint: disable=wrong-import-position
+import host_score_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
 import presentation_pipeline  # noqa: E402
 import saas_pipeline  # noqa: E402
@@ -140,6 +141,13 @@ def processes_fixture() -> pd.DataFrame:
     config = endpoint_pipeline.build_pipeline_config()
 
     yield endpoint_pipeline.run_pipeline(config, endpoint_pipeline.build_corpus())
+
+
+@pytest.fixture(name="hosts", scope="module")
+def hosts_fixture() -> pd.DataFrame:
+    config = host_score_pipeline.build_pipeline_config()
+
+    yield host_score_pipeline.run_pipeline(config, host_score_pipeline.build_corpus())
 
 
 @pytest.fixture(name="context", scope="module")
@@ -310,6 +318,19 @@ def test_the_campaign_pipelines_produce_a_parsable_timestamp(wire_config: Config
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_the_host_segment_produces_a_parsable_timestamp(wire_config: Config, hosts: pd.DataFrame):
+    # One row per host per hour, the frame EntityFrameStage builds rather than any collector's record, so its
+    # `event_time` is the window's start and is rendered by the segment's own envelope. The fortnight's rows carry
+    # the features and no score; the scored week's carry both, and both halves have to parse under the one stanza.
+    rows = hosts[hosts["telemetry_class"] == host_score_pipeline.HOST_CLASS].reset_index(drop=True)
+
+    assert len(rows) > 0
+    assert rows["mean_abs_z"].notna().any() and rows["mean_abs_z"].isna().any()
+
+    assert_parses_as_its_own_stanza(wire_config, rows, "morpheus:score:host")
+
+
+@pytest.mark.gpu_and_cpu_mode
 @pytest.mark.parametrize("stanza, telemetry_class",
                          [("context:identity", "tc0_identity"), ("context:asset", "tc0_asset"),
                           ("context:application", "tc0_application")])
@@ -408,6 +429,7 @@ def test_every_produced_sourcetype_is_covered_here():
         "morpheus:score:l5",
         "morpheus:score:l6",
         "morpheus:score:l7",
+        "morpheus:score:host",
         "context:identity",
         "context:asset",
         "context:application",

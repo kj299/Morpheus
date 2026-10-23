@@ -484,6 +484,7 @@ def main() -> int:
     import campaign_pipeline
     import endpoint_pipeline
     import estate_pipeline
+    import host_score_pipeline
     import network_pipeline
     import presentation_pipeline
     import saas_pipeline
@@ -550,6 +551,10 @@ def main() -> int:
                  endpoint_pipeline,
                  rules.endpoint_decisions,
                  columns="hostname"),
+        "host":
+            spec("host, collector clocks: the flow exporter, the inspection point and the EDR that feed the frame",
+                 host_score_pipeline,
+                 rules.host_decisions),
         "campaign":
             spec("campaign, collector clocks: the five chains, to three hours",
                  campaign_pipeline,

@@ -277,6 +277,7 @@ DECIDERS = ("layer_1_decisions",
             "application_decisions",
             "saas_decisions",
             "endpoint_decisions",
+            "host_decisions",
             "chain_decisions")
 
 SINGLE_CLOCK_CORPORA = ("saas", "endpoint")
@@ -338,7 +339,7 @@ def test_every_shipped_detection_is_decided_once(experiment):
 
     assert sorted(decided) == sorted(set(decided)), "a rule is decided twice"
     assert set(decided) == _shipped_detections()
-    assert len(decided) == 55
+    assert len(decided) == 56
 
 
 def test_a_sweep_over_one_clock_is_not_reported_as_a_tolerance(experiment):
@@ -392,6 +393,39 @@ def test_each_application_class_has_a_collector_of_its_own(experiment):
     # front of the services -- and the DHCP server and inventory feed the hosts resolve through.
     assert len(experiment.sources_in(corpus, experiment.COLLECTOR_CLOCKS)) == 5
     assert all(frame["collector_id"].nunique() == 1 for frame in corpus.values())
+
+
+def test_the_host_frame_is_fed_by_three_collectors_and_resolved_through_two(experiment):
+    # The host frame is the one row in which three collectors' records meet: the flow exporter's, the inspection
+    # point's and the EDR's, each the only collector of its class, with the DHCP server and the inventory feed the
+    # hosts resolve through. A collector sweep moves the three feeds apart, so R-P-L3-009 is measured against clocks
+    # that disagree rather than under a uniform shift.
+    import host_score_pipeline as hs_  # pylint: disable=import-outside-toplevel
+
+    corpus = hs_.build_corpus()
+
+    assert len(experiment.sources_in(corpus, experiment.COLLECTOR_CLOCKS)) == 5
+    assert all(corpus[name]["collector_id"].nunique() == 1 for name in hs_.FEATURE_CLASSES)
+    assert len({corpus[name]["collector_id"].iloc[0] for name in hs_.FEATURE_CLASSES}) == 3
+
+
+@pytest.mark.slow
+@pytest.mark.cpu_mode
+def test_the_host_drift_rule_holds_to_a_minute_across_the_feeds(experiment):
+    # R-P-L3-009 reads a day's mean of hourly frames, and a minute of spread between the feeds moves at most an
+    # hour's edge of records into the neighbouring frame: the three host-days it accuses are the same at a second
+    # and at a minute, and it accuses nothing new.
+    import host_score_pipeline as hs_  # pylint: disable=import-outside-toplevel
+
+    report = experiment.sweep("host, collector clocks",
+                              hs_,
+                              experiment.rules.host_decisions,
+                              magnitudes=(experiment.SECOND_NS, 60 * experiment.SECOND_NS))
+    (second, minute) = report["runs"]
+
+    assert len(report["clocks"]) == 5
+    assert report["baseline_decisions"]["R-P-L3-009"] == 3
+    assert second["rules_changed"] == [] and minute["rules_changed"] == []
 
 
 def _chains_at(experiment, corpus, seconds: float) -> dict:

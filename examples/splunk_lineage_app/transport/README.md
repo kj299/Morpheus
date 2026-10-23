@@ -36,6 +36,7 @@ files; `tests/morpheus/utils/test_splunk_transport.py` fails when the two differ
 | `morpheus:health` | `morpheus.health` | `morpheus_health.jsonlines` | `behavior_health` |
 | `morpheus:late` | `morpheus.late` | `morpheus_late.jsonlines` | `behavior_late` |
 | `morpheus:quarantine` | `morpheus.quarantine` | `morpheus_quarantine.jsonlines` | `behavior_quarantine` |
+| `morpheus:score:host` | `morpheus.score.host` | `morpheus_score_host.jsonlines` | `behavior_events` |
 | `morpheus:score:l1` | `morpheus.score.l1` | `morpheus_score_l1.jsonlines` | `behavior_events` |
 | `morpheus:score:l2` | `morpheus.score.l2` | `morpheus_score_l2.jsonlines` | `behavior_events` |
 | `morpheus:score:l3` | `morpheus.score.l3` | `morpheus_score_l3.jsonlines` | `behavior_events` |

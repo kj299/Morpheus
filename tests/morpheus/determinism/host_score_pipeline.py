@@ -109,8 +109,14 @@ TRAINING_DAYS = 14
 SCORED_DAYS = 7
 CORPUS_DAYS = TRAINING_DAYS + SCORED_DAYS
 
-EPOCH_S = 1788739200
-"""2026-09-07T00:00:00Z, a Monday: the first day of the training fortnight."""
+EPOCH_S = 39 * DAY_S
+"""1970-02-09T00:00:00Z, a Monday: the first day of the training fortnight.
+
+Counted from the epoch, as every other corpus is, because the validation package feeds all of them to one search
+head and the runner moves every timestamp by one offset: a corpus dated in another year would land fifty years from
+the rest. Placed so the scored week ends after every other corpus's last event, which puts the host watchlist's
+entries inside their thirty days when the expiry job runs.
+"""
 
 SCORES_FROM_NS = (EPOCH_S + TRAINING_DAYS * DAY_S) * NS_PER_SECOND
 """The end of the fortnight the models were fitted on, and the first instant they may score."""
@@ -221,8 +227,8 @@ SETTINGS = {
 }
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
 
-RULES: tuple = ()
-"""No shipped rule reads the host score yet; the rule that does arrives with its sourcetype."""
+RULES = ("R-P-L3-009", )
+"""The shipped rule that reads these rows: the host drift trajectory, on the `morpheus:score:host` sourcetype."""
 
 OSI_LAYER = 3
 ENTITY_COLUMNS = ["host_key"]
@@ -537,7 +543,14 @@ def merge_classes(frames: list[pd.DataFrame]) -> pd.DataFrame:
     interleave. A replay has each class whole, so it is put in event order first; otherwise every handshake would
     arrive after three weeks of flows and be late.
     """
-    merged = pd.concat([frame for frame in frames if len(frame) > 0], ignore_index=True)
+    present = [frame for frame in frames if len(frame) > 0]
+
+    if (len(present) == 0):
+        # Every class held back, which the clock quarantine does to a corpus whose collectors all sit beyond its
+        # bound: the segment has nothing to frame, and an empty stream is the answer rather than an error.
+        return pd.DataFrame()
+
+    merged = pd.concat(present, ignore_index=True)
     merged = merged.sort_values(list(DEFAULT_ORDER_COLUMNS), kind="mergesort").reset_index(drop=True)
 
     return merged
@@ -682,6 +695,17 @@ def run_pipeline(config: Config,
         if len(batches.get(name, [])) > 0
     ]
     merged = merge_classes(frames)
+
+    if (len(merged) == 0):
+        # Nothing reached the segment. Its rows would be none, and the quarantine is what the run produced.
+        result = pd.DataFrame(
+            {column: pd.Series(dtype="object")
+             for column in ("event_uid", "telemetry_class", "row_key")})
+
+        return canonicalize(envelope.with_quarantine(result, quarantined),
+                            key_columns=KEY_COLUMNS,
+                            ignore_columns=IGNORE_COLUMNS)
+
     size = -(-len(merged) // max(1, host_batches))
     sources = [merged.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(merged), size)]
 
