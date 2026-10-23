@@ -87,6 +87,7 @@ from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
+from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc7_dns_stage import TC7DnsStage
 from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
 from morpheus.stages.telemetry.tc7_service_stage import SERVICE_KEY
@@ -114,9 +115,11 @@ HTTP_CLASS = "tc7_http"
 SERVICE_CLASS = "tc7_service"
 TELEMETRY_CLASSES = (DNS_CLASS, HTTP_CLASS, SERVICE_CLASS)
 
-SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS}
+DAY_SECONDS = DAY_HOURS * PERIOD_SECONDS
+DRIFT_PREFIX = "day_"
+SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS, "day_seconds": DAY_SECONDS}
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-B-L7-001", "R-D-L7-005", "R-B-L7-007", "R-B-L7-008", "R-B-L4-004")
+RULES = ("R-B-L7-001", "R-D-L7-005", "R-B-L7-007", "R-B-L7-008", "R-B-L4-004", "R-P-L7-009")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 # The rules' own thresholds, stated once so the corpus is built to clear them deliberately.
@@ -150,8 +153,12 @@ GENERATOR = "10.0.0.36"
 STALE_SUFFIX = "10.0.0.37"
 BUSY_BROWSER = "10.0.0.38"
 LINK_CHECKER = "10.0.0.39"
+SLOW_TUNNELLER = "10.0.0.46"
+"""A client whose tunnel ramps: a few more chunks under one domain every day, never reaching R-B-L7-001's floor and
+never twice its own busiest day, which is R-P-L7-009's trajectory."""
 
 TUNNEL_DOMAIN = "evil-tunnel.com"
+SLOW_DOMAIN = "slow-tunnel.net"
 CDN_DOMAIN = "cdn-assets.net"
 TENANT_DOMAIN = "tenant-saas.com"
 SAAS_DOMAIN = "saas-provider.com"
@@ -165,6 +172,12 @@ separates them; what separates them is which of the other conditions they fail.
 Comfortably, because random names do not all clear 4.0 bits: about one in twelve of the CDN's twenty-nine-character
 names falls just under. At a hundred and ten names that left the CDN's entropy-clearing names one above the count's
 threshold, so its control -- that entropy and the count alone would have fired -- held by a single name."""
+SLOW_START = 10
+SLOW_STEP = 6
+"""The slow tunnel's chunks on its first day and the day-on-day increase: ten to fifty-two over the eight days, each
+day a little more than the one before and the last barely a tenth above its busiest."""
+SLOW_SEED = CORPUS_SEED + 1
+"""The slow tunnel's names come from a generator of their own, so adding it moved no other actor's names."""
 
 REPUTATION_HISTORY = 100
 REPUTATION_TODAY = 120
@@ -280,12 +293,12 @@ def _random_label(rng: random.Random, length: int, alphabet: str = "abcdefghijkl
     return "".join(rng.choice(alphabet) for _ in range(length))
 
 
-def _tunnel_name(rng: random.Random) -> str:
+def _tunnel_name(rng: random.Random, domain: str = TUNNEL_DOMAIN) -> str:
     """A chunk of exfiltrated data, base32-encoded the way tunnelling tools encode it -- DNS is case-insensitive,
     which is why they use base32 rather than base64 -- and split into two long labels."""
     payload = base64.b32encode(bytes(rng.randrange(256) for _ in range(45))).decode("ascii").rstrip("=").lower()
 
-    return f"{payload[:40]}.{payload[40:]}.{TUNNEL_DOMAIN}"
+    return f"{payload[:40]}.{payload[40:]}.{domain}"
 
 
 def _reputation_name(rng: random.Random) -> str:
@@ -319,7 +332,7 @@ def _build_dns(rng: random.Random) -> pd.DataFrame:
             "query_name":
                 name,
             "query_type":
-                "TXT" if name.endswith(TUNNEL_DOMAIN) else "A",
+                "TXT" if name.endswith((TUNNEL_DOMAIN, SLOW_DOMAIN)) else "A",
             "response_code":
                 response,
         })
@@ -337,6 +350,16 @@ def _build_dns(rng: random.Random) -> pd.DataFrame:
         for index in range(LINKS_HISTORY):
             response = "NXDOMAIN" if index % 10 < 7 else "NOERROR"
             add(LINK_CHECKER, f"www.linked-site{index}.org", on(day, HISTORY_HOUR, 45 + index * 15), response)
+
+    # The slow tunnel: the same shape as the tunnel below, a few chunks at a time, a few more every day of the week
+    # and on the event day. No day reaches the floor and no day is twice the one before, so R-B-L7-001 is quiet on
+    # every one; the daily trajectory is what sees it. Its names come from their own generator.
+    slow = random.Random(SLOW_SEED)
+
+    for day in range(HISTORY_DAYS + 1):
+        for index in range(SLOW_START + SLOW_STEP * day):
+            when = event(0, 400 + index * 30) if day == EVENT_DAY else on(day, HISTORY_HOUR, 20 + index * 30)
+            add(SLOW_TUNNELLER, _tunnel_name(slow, SLOW_DOMAIN), when)
 
     # The tunnel: a new, random, long-labelled name for every chunk, all under one domain, inside twenty minutes.
     for index in range(DNS_VOLUME):
@@ -655,6 +678,23 @@ def _run_class(config: Config,
                         lateness_seconds=LATENESS_SECONDS,
                         order_columns=list(DEFAULT_ORDER_COLUMNS),
                         entity_key_column=DEFAULT_ANCHOR_COLUMN))
+
+    if (telemetry_class == DNS_CLASS):
+        # The daily trajectory R-P-L7-009 reads: a second seal over days behind the hourly one, and the drift stage
+        # over each client's busiest domain of the day -- the most distinct subdomains under one registered domain
+        # in an hour -- which is a running count within the hour and so is measured by its largest value.
+        pipe.add_stage(
+            WindowSealStage(config,
+                            period_seconds=DAY_SECONDS,
+                            lateness_seconds=LATENESS_SECONDS,
+                            order_columns=list(DEFAULT_ORDER_COLUMNS),
+                            column_prefix=DRIFT_PREFIX))
+        pipe.add_stage(
+            TC5DriftStage(config,
+                          entity_column="src_ip",
+                          score_column="dns_subdomains_per_domain",
+                          window_column=f"{DRIFT_PREFIX}window_id",
+                          aggregate="max"))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()

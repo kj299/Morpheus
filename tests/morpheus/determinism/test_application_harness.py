@@ -430,6 +430,63 @@ def test_ordinary_browsing_clears_nothing(result: pd.DataFrame):
     assert (browsing["dns_mean_label_length"].astype("Float64").fillna(0) < ap_.LABEL_LENGTH_THRESHOLD).all()
 
 
+# --- R-P-L7-009: the slow tunnel, under every literal and over the trajectory ----------------------------------
+
+RISING_WINDOWS = 4
+RISE_SIGMAS = 1.5
+"""R-P-L7-009's trajectory, which is R-P-L5-006's asked of a client's busiest domain: four consecutive rising days, by
+more than one and a half of the client's own day-to-day deviations in all. The validation package reads the two
+numbers from the stanza; here they are stated, so a changed rule and a changed corpus fail differently."""
+
+
+@pytest.mark.cpu_mode
+def test_the_slow_tunnel_is_watchlisted_from_its_fifth_day(result: pd.DataFrame):
+    # A few more chunks every day than the day before: the busiest domain of each day rises by the same step, so
+    # the run of rising days is the day's number, and the rule reports the client from the fifth day, the first the
+    # drift stage calls mature, through the event day.
+    dns = _dns(result)
+    slow = dns[dns["src_ip"] == ap_.SLOW_TUNNELLER]
+    days = slow["event_time"].astype("int64") // (ap_.DAY_SECONDS * ap_.NS_PER_SECOND)
+    daily = slow.assign(day=days).groupby("day").agg(busiest=("dns_subdomains_per_domain", "max"),
+                                                     rising=("drift_rising_windows", "max"),
+                                                     rise_sigmas=("drift_rise_sigmas", "max"),
+                                                     mature=("drift_mature", "max")).reset_index()
+
+    assert list(daily["busiest"]) == [ap_.SLOW_START + ap_.SLOW_STEP * day for day in range(ap_.HISTORY_DAYS + 1)]
+    assert list(daily["rising"]) == list(range(1, ap_.HISTORY_DAYS + 2))
+
+    fired = daily[daily["mature"].astype("boolean").fillna(False) & (daily["rising"] >= RISING_WINDOWS)
+                  & (daily["rise_sigmas"].astype("Float64").fillna(0) > RISE_SIGMAS)]
+
+    assert sorted(fired["day"]) == list(range(RISING_WINDOWS, ap_.HISTORY_DAYS + 1))
+
+
+@pytest.mark.cpu_mode
+def test_the_slow_tunnel_clears_every_literal_but_the_count_and_is_never_twice_its_busiest_day(result: pd.DataFrame):
+    # Why the trajectory exists. Each chunk is as random and as long-labelled as the tunnel's, and no day reaches
+    # the hundred; by the event day the client has a week of days, and that day is a tenth above its busiest, not
+    # twice. R-B-L7-001 is quiet on every day with every condition it has, and would be with the baseline removed.
+    dns = _dns(result)
+    slow = dns[dns["src_ip"] == ap_.SLOW_TUNNELLER]
+
+    assert (slow["dns_subdomain_entropy"].astype("Float64") > ap_.ENTROPY_THRESHOLD).all()
+    assert (slow["dns_mean_label_length"].astype("Float64") > ap_.LABEL_LENGTH_THRESHOLD).all()
+    assert slow["dns_subdomains_per_domain"].astype("Int64").max() < ap_.SUBDOMAIN_THRESHOLD
+    assert ap_.SLOW_DOMAIN not in _fires_dns(dns)
+    assert ap_.SLOW_DOMAIN not in _fires_dns(dns, baseline=False)
+
+    event_day = slow[slow["event_time"].astype("int64") >= ap_.event(0)]
+
+    assert _true(event_day, "dns_subdomains_per_domain_baseline_mature").all()
+    assert 1 < event_day["dns_subdomains_per_domain_ratio"].astype("Float64").max() < ap_.BASELINE_MULTIPLE
+
+    # No other client's busiest domain rises for four days: the tunneller's week is flat and then a spike, and the
+    # reputation agent's days are as busy as each other.
+    others = dns[dns["src_ip"] != ap_.SLOW_TUNNELLER]
+
+    assert others["drift_rising_windows"].astype("Float64").max() < RISING_WINDOWS
+
+
 # --- R-D-L7-005: the enumerators, and one control per condition --------------------------------------------------
 
 

@@ -512,15 +512,24 @@ def layer_4_decisions(result: pd.DataFrame, claimed: typing.Optional[pd.DataFram
 SETTLED_HANDSHAKES = threshold("R-B-L6-001 - New TLS client fingerprint", r"ja4_client_observations\s*>=\s*([\d.]+)")
 requires("R-B-L6-001 - New TLS client fingerprint", r"ctx_found=true")
 SINGLE_ISSUER = threshold("R-D-L6-002 - Certificate issuer anomaly", r"cert_issuer_distinct\s*=\s*([\d.]+)")
+STACK_TRAJECTORY = "R-P-L6-006 - Client stack trajectory"
+STACK_RISING_WINDOWS = threshold(STACK_TRAJECTORY, r"rising_threshold\s*=\s*([\d.]+)")
+STACK_RISE_SIGMAS = threshold(STACK_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
+requires(STACK_TRAJECTORY, r"drift_mature=true")
 
 
 def layer_6_decisions(result: pd.DataFrame) -> dict:
-    """The five layer 6 rules, each a filter on the handshake row and a `stats ... BY`."""
+    """
+    The six layer 6 rules: five each a filter on the handshake row and a `stats ... BY`, and R-P-L6-006 keyed on
+    the client and the day it fired, as the search deduplicates, reading the daily drift the hourly rows carry.
+    """
     tc6 = rows(result, "tc6")
     new_stack = tc6[true(tc6, "ja4_client_first_seen") & (number(tc6, "ja4_client_observations") >= SETTLED_HANDSHAKES)
                     & true(tc6, "ctx_found")]
     intercepted = tc6[true(tc6, "cert_issuer_differs") & true(tc6, "cert_issuer_mature")
                       & (number(tc6, "cert_issuer_distinct") == SINGLE_ISSUER)]
+    creeping = tc6[true(tc6, "drift_mature") & (number(tc6, "drift_rising_windows") >= STACK_RISING_WINDOWS)
+                   & (number(tc6, "drift_rise_sigmas") > STACK_RISE_SIGMAS)]
 
     return {
         "R-B-L6-001":
@@ -534,6 +543,8 @@ def layer_6_decisions(result: pd.DataFrame) -> dict:
                  ["tls_pair_key", "src_ip", "dst_ip"]),
         "R-D-L6-005":
             keys(tc6[true(tc6, "content_category_crossed")], ["src_ip", "dst_ip"]),
+        "R-P-L6-006":
+            keys(creeping, ["src_ip", "day_window_id"]),
     }
 
 
@@ -634,6 +645,11 @@ requires(BULK, r"saas_baseline_mature=true")
 requires(ANCESTRY, r"endpoint_pair_novel=true")
 requires(BREADTH, r"saas_object_types_in_week=\*")
 requires(BREADTH, r'coalesce\(ctx_groups,\s*"none"\)')
+SUBDOMAIN_TRAJECTORY = "R-P-L7-009 - Subdomain count trajectory"
+SUBDOMAIN_RISING_WINDOWS = threshold(SUBDOMAIN_TRAJECTORY, r"rising_threshold\s*=\s*([\d.]+)")
+SUBDOMAIN_RISE_SIGMAS = threshold(SUBDOMAIN_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
+requires(SUBDOMAIN_TRAJECTORY, r"drift_mature=true")
+requires(SUBDOMAIN_TRAJECTORY, r"dns_registered_domain=\*")
 
 
 def _measured(frame: pd.DataFrame, column: str, multiple: float) -> pd.Series:
@@ -642,7 +658,11 @@ def _measured(frame: pd.DataFrame, column: str, multiple: float) -> pd.Series:
 
 
 def application_decisions(result: pd.DataFrame) -> dict:
-    """R-B-L7-001 and R-B-L7-008 over DNS, R-D-L7-005 over HTTP and R-B-L7-007 over the services."""
+    """
+    R-B-L7-001, R-B-L7-008 and R-P-L7-009 over DNS, R-D-L7-005 over HTTP and R-B-L7-007 over the services.
+    R-P-L7-009 is keyed on the client and the day it fired, as the search deduplicates, and reads the daily drift
+    the hourly DNS rows carry; a row without a registered domain is not a DNS row to it.
+    """
     dns = rows(result, "tc7_dns")
     http = rows(result, "tc7_http")
     services = rows(result, "tc7_service")
@@ -657,6 +677,9 @@ def application_decisions(result: pd.DataFrame) -> dict:
     generating = dns[(number(dns, "dns_domains_per_client") > GENERATION_DOMAINS)
                      & (number(dns, "dns_nxdomain_ratio") > GENERATION_NXDOMAIN)
                      & _measured(dns, "dns_domains_per_client", GENERATION_MULTIPLE)]
+    slow = dns[dns["dns_registered_domain"].notna() & true(dns, "drift_mature")
+               & (number(dns, "drift_rising_windows") >= SUBDOMAIN_RISING_WINDOWS)
+               & (number(dns, "drift_rise_sigmas") > SUBDOMAIN_RISE_SIGMAS)]
 
     reached = set()
     measured = services[true(services, "service_clients_baseline_mature")] if len(services) > 0 else services
@@ -677,6 +700,7 @@ def application_decisions(result: pd.DataFrame) -> dict:
         "R-D-L7-005": keys(enumerating, ["src_ip"]),
         "R-B-L7-007": reached,
         "R-B-L7-008": keys(generating, ["src_ip"]),
+        "R-P-L7-009": keys(slow, ["src_ip", "day_window_id"]),
     }
 
 

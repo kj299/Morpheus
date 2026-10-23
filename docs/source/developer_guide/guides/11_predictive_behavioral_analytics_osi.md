@@ -64,8 +64,8 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
 That is fifty-eight stages and forty-seven supporting
-modules, covered by 2,474 distinct tests, itemized in
-[Part 6](#provided). Fifty-six of the fifty-eight rules Part 3 specifies ship as saved searches, five of
+modules, covered by 2,481 distinct tests, itemized in
+[Part 6](#provided). Fifty-eight of the sixty rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
@@ -79,11 +79,13 @@ repaired. On 2026-10-09 the run over the repaired events returned what was writt
 over step 10's returned what was then written for all sixty-two, and a run that night over step 11's
 returned what was then written for all sixty-six. On 2026-10-15 a run over step 12's returned what was then written
 for all seventy-two, on 2026-10-16 a run over step 13's returned what was then written for all seventy-five, and on
-2026-10-17 a run over step 15's returned what was then written for all seventy-eight, and on 2026-10-22 a run over
-the events the host segment's sourcetype added returned what is written for all eighty the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
+2026-10-17 a run over step 15's returned what was then written for all seventy-eight, on 2026-10-22 a run over
+the events the host segment's sourcetype added returned what was then written for all eighty, and on 2026-10-23 a run
+over the events the daily drift over the TLS and DNS columns added returned what is written for all eighty-two the app
+now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
 scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
-What remains design rather than a running system: two of the fifty-eight rules (R-B-L4-001 and
+What remains design rather than a running system: two of the sixty rules (R-B-L4-001 and
 R-B-L7-003, which need a Triton endpoint), the
 hysteresis half of control 9 (its suppression half ships on every detection), controls 10 and 11 as code, the sharding router's wiring, and clock
 correction, since `clock_source` and `clock_offset_ms` are schema that nothing produces or checks. Layer 5
@@ -2152,11 +2154,27 @@ the rule.
 in a way that crosses a category boundary, for example declared `image/png` and detected as an archive.
 Strong tunneling indicator.
 
-All five of these are built and ship as saved searches, reading
+**R-P-L6-006 - Client stack trajectory.** A host's count of distinct `ja4_client` values -- the
+`ja4_client_distinct` {py:class}`~morpheus.stages.telemetry.tc6_fingerprint_stage.TC6FingerprintStage`
+keeps -- rising across four consecutive daily windows by more than 1.5 of the host's own day-to-day
+deviations. R-B-L6-001 reports each new stack a settled managed host presents as its own notable, and an
+analyst closes them one at a time; a host that has acquired a stack every day for a week is one story, and
+this is the rule that tells it. The count is a running total, so a daily
+{py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` measures each day by its largest value,
+over daily windows a second `WindowSealStage` seals behind the hourly one, and the search deduplicates on host
+and day. No ceiling and no managed-host gate: the count is not a model score, and a device nobody manages
+acquiring a stack a day is the trajectory too. It should never page. It places the host on the `host_watchlist`
+lookup R-P-L3-009 writes, under the machine the host resolved to or its address where it resolved to none, and
+R-B-L7-004 reads that lookup. It fires from the fifth rising day, the first the drift stage calls mature; the
+presentation corpus's creeping workstation is reported on the last three of its seven days, the host that
+acquires two stacks and stops is not, and R-B-L6-001 reports the creeper's six acquisitions one at a time.
+
+All six of these are built and ship as saved searches, reading
 {py:class}`~morpheus.stages.telemetry.tc6_fingerprint_stage.TC6FingerprintStage`,
 {py:class}`~morpheus.stages.telemetry.tc6_certificate_stage.TC6CertificateStage`,
 {py:class}`~morpheus.stages.telemetry.tc6_cipher_stage.TC6CipherStage` and
-{py:class}`~morpheus.stages.telemetry.tc6_content_stage.TC6ContentStage`, and each is asserted over the
+{py:class}`~morpheus.stages.telemetry.tc6_content_stage.TC6ContentStage`, the sixth through a daily
+{py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`, and each is asserted over the
 seeded corpus in `tests/morpheus/determinism/test_presentation_harness.py` together with the case beside
 it that must stay quiet. R-B-L6-001 is gated on the host being a managed endpoint, which the shipped rule had
 dropped for want of a TC-0 join at this layer (gap G76): the composed pipeline now enriches each handshake's source
@@ -2231,10 +2249,23 @@ Severity 55.
 increasing across consecutive weekly windows while the principal's role assignment in TC-0 is unchanged.
 Classic slow-burn insider indicator, invisible to any single-window rule.
 
-Four of these eight are built and ship as saved searches over the client and service measurements: R-B-L7-001
-and R-B-L7-008, reading {py:class}`~morpheus.stages.telemetry.tc7_dns_stage.TC7DnsStage`; R-D-L7-005, reading
+**R-P-L7-009 - Subdomain count trajectory.** A DNS client's busiest domain -- the most distinct subdomains
+under one registered domain in an hour, `dns_subdomains_per_domain` -- rising across four consecutive daily
+windows by more than 1.5 of the client's own day-to-day deviations, under R-B-L7-001's floor. That rule reads
+a hundred in an hour and twice the client's busiest day, and a tunnel that moves a few more chunks each day
+than the day before reaches neither: every day becomes the busiest day the next is measured against. The
+trajectory reads the rise itself, through a daily
+{py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` over the DNS class alone, each day
+measured by its largest value because the count is running within the hour. It should never page; it places
+the client's machine on the `host_watchlist` lookup, which R-B-L7-004 reads. The application corpus's slow
+tunnel clears every literal R-B-L7-001 reads but the count on all eight of its days and is a tenth above its
+busiest day on the last, and is reported from its fifth day.
+
+Five of these nine are built and ship as saved searches over the client and service measurements: R-B-L7-001,
+R-B-L7-008 and R-P-L7-009, reading {py:class}`~morpheus.stages.telemetry.tc7_dns_stage.TC7DnsStage`, the last
+through a daily {py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage`; R-D-L7-005, reading
 {py:class}`~morpheus.stages.telemetry.tc7_http_stage.TC7HttpStage`; and R-B-L7-007, reading
-{py:class}`~morpheus.stages.telemetry.tc7_service_stage.TC7ServiceStage`. All four are asserted over the seeded
+{py:class}`~morpheus.stages.telemetry.tc7_service_stage.TC7ServiceStage`. All five are asserted over the seeded
 corpus in `tests/morpheus/determinism/test_application_harness.py`, and every condition in each rule has a benign
 case beside it that the condition alone keeps quiet: a content delivery network whose labels are random but short, a
 tenant domain with random labels but too few of them, a reputation agent whose file-hash lookups clear every literal
@@ -4018,7 +4049,7 @@ Pass 4 measures each of these and records which the fork reuses.
   moved and at what width each shipped rule changed what it accuses. It runs anywhere without a card -- about six
   minutes on the machine that recorded it, as the open question below and its README say -- and answers the open
   question this document had left open since it was written.
-- R-D-L5-003 and R-D-L5-004 as saved searches, two of the fifty-six detections that now ship. Their
+- R-D-L5-003 and R-D-L5-004 as saved searches, two of the fifty-eight detections that now ship. Their
   predicates are asserted in Python over the corpus and their row counts written into the validation
   package, so an expectation cannot go stale without a test failing. Both fire on the planted cases and
   neither fires on the negative controls beside them. R-D-L5-003 ships with an empty egress exclusion
@@ -4269,7 +4300,7 @@ Pass 4 measures each of these and records which the fork reuses.
   [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
   the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
   and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **Two of the
-  eighty searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
+  eighty-two searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
   empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
   is working from a rule that is broken.
 - One rule run end to end offline, from a file to bytes a SIEM parses
@@ -4380,9 +4411,9 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | --- | --- | --- |
 | Upstream reuse decision | Small | Decided and measured, in Part 0's Pass 4: every DFP stage, the three identity-provider source stages, `MLFlowDriftStage` and `TimeSeriesStage` are rejected, each for a reason `examples/upstream_reuse/evaluate.py` measured and `test_upstream_reuse.py` holds to its artifact; the `dfencoder` `AutoEncoder` and `manual_seed` are reused, and the Azure sign-in fields are the normalization target. Closed by #67 |
 | Tracker state across a restart | Medium | Built, in step 16's first part. All twenty-one trackers under `morpheus.utils`, and the device stage's reboot counter, round-trip through `to_state` and `from_state` over plain JSON types, byte-identical for the same history whatever the hash seed; the forty stages that remember list their memory and are checked against it under every parameter the liveness registry exercises; a stop for a checkpoint keeps open windows and bindings; `CheckpointDirectory` keeps the snapshots; scored rows carry `resumed_from_state`; and control 13's seventh check stops all thirteen composed pipelines halfway and reaches each golden from the snapshot alone. The snapshot is taken when the pipeline stops rather than at a window seal, for the reason check 7 records. What is left is the runners restoring on start, which arrive with them under #66. Tracked in #68 |
-| **The per-entity learned model for hosts** | Large | The principals' half is built, in step 8. Each principal of the session corpus has a `morpheus.models.dfencoder` autoencoder trained on the CPU by `examples/layer5_model/train_models.py` on a fortnight before the week it scores, committed as plain numbers under `examples/layer5_model/models/`, loaded and checked against its recorded version by `load_models`, scored in CI by a NumPy forward pass that agrees with the upstream class wherever Torch imports, and pinned in the manifest with the end of its training data, so no model scores the rows it was fitted on; a joiner falls back to a population model fitted on the same fortnight. R-B-L5-001 and R-B-L5-002 return their first rows, 42 and 28, on a search head too. Three findings came with it and are recorded rather than tuned away: the scores are uncalibrated where the fortnight never varied a feature, a cumulative feature keeps a principal firing until the next training window, and R-D-L5-008 misses a new place whose first sign-in failed. `run_model.py` now trains on the fortnight and scores the week through the same pinned scorer; its standing card artifact, from 2026-10-03, predates that and scored the week it trained on. The hosts' half began in its own pull request: `EntityFrameStage` reduces each sealed hour of a host's flows, handshakes and process starts to one row on `host_key`, `train_models.py --hosts` fits one autoencoder per `ctx_peer_group` and one over every host as the fallback, and `TC5ScoreStage(entity_column="host_key")` scores the frame in a thirteenth composed corpus whose planted drifting host is the only one whose daily trajectory meets R-P-L3-009's conditions. The SIEM half followed in its own pull request: the frame rows reach the app on `morpheus:score:host`, Behavior summary rolls their scores into `peak_z` on the machine, R-P-L3-009 reads the trajectory, returns the drifting host's last three days on a search head and writes the `host_watchlist` R-B-L7-004 reads, and every other search returns what it did. Moving the host corpus onto the epoch timeline for that run refitted the models on the same rows in another order, and the drifting host's last day reads 379 where it read 551. Which entity classes have a learned score: principals, one model each; hosts, one per peer group; no other class yet. What remains for hosts is the daily drift over the TLS and DNS columns in the presentation and application pipelines. Tracked in #59 |
-| Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run held 94 risk records for the 94 rows the detections then returned; with the learned layer 5 models it held 166 risk records for the 166 rows the detections returned, with step 9's host baselines it held 198, and with step 10's network objects it held 209, with step 13's services and applications it held 213, with step 15's devices and physical chain it held 221, and with step 8's host segment it holds 224 risk records for the 224 rows the detections returned. Chain assembly stays empty on the sample events because the two three-layer chains a detection accuses sum 55 and 50 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
-| Clock skew where the corpora cannot measure it | Medium | Step 7's runs are recorded: the search-head runs on Splunk 10.2.8 -- all forty-eight searches on 2026-10-09, all seventy-eight on 2026-10-17 -- returned what `expected_results.json` says for every one, over events whose wire format the first run, on 2026-10-05, corrected; the conformance runs of 2026-10-09 passed every marked variant on a card, 759 of 759 before step 6 and 760 of 760 after it, the parity test over all twelve corpora among them; both results and the model artifact are committed and the documents' numbers are tested against them; the clock skew experiment decides all fifty-six detections, and did again after steps 9 to 13 and 15 and after the host segment's rule, which holds to a minute across the five collector clocks that feed and resolve the host frame; the eight step 10 added hold to a minute on collector and switch clocks, step 11 measured layer 3 on its routers' clocks, and step 12's leases and inventory reports gave layers 4 and 6 clocks a sweep can move. What it could not measure remains: the SaaS pair's corpus carries one clock and needs the context store's record time per row, layers 4 and 6 are measured only as a uniform shift until their corpora carry an exporter per packet capture and an inspection point per egress, and the 120-second join tolerance itself needs a corpus whose chain steps sit within a minute of each other on different clocks. Recorded under #58; correcting the clocks rather than measuring them is #62 |
+| **The per-entity learned model for hosts** | Large | The principals' half is built, in step 8. Each principal of the session corpus has a `morpheus.models.dfencoder` autoencoder trained on the CPU by `examples/layer5_model/train_models.py` on a fortnight before the week it scores, committed as plain numbers under `examples/layer5_model/models/`, loaded and checked against its recorded version by `load_models`, scored in CI by a NumPy forward pass that agrees with the upstream class wherever Torch imports, and pinned in the manifest with the end of its training data, so no model scores the rows it was fitted on; a joiner falls back to a population model fitted on the same fortnight. R-B-L5-001 and R-B-L5-002 return their first rows, 42 and 28, on a search head too. Three findings came with it and are recorded rather than tuned away: the scores are uncalibrated where the fortnight never varied a feature, a cumulative feature keeps a principal firing until the next training window, and R-D-L5-008 misses a new place whose first sign-in failed. `run_model.py` now trains on the fortnight and scores the week through the same pinned scorer; its standing card artifact, from 2026-10-03, predates that and scored the week it trained on. The hosts' half began in its own pull request: `EntityFrameStage` reduces each sealed hour of a host's flows, handshakes and process starts to one row on `host_key`, `train_models.py --hosts` fits one autoencoder per `ctx_peer_group` and one over every host as the fallback, and `TC5ScoreStage(entity_column="host_key")` scores the frame in a thirteenth composed corpus whose planted drifting host is the only one whose daily trajectory meets R-P-L3-009's conditions. The SIEM half followed in its own pull request: the frame rows reach the app on `morpheus:score:host`, Behavior summary rolls their scores into `peak_z` on the machine, R-P-L3-009 reads the trajectory, returns the drifting host's last three days on a search head and writes the `host_watchlist` R-B-L7-004 reads, and every other search returns what it did. Moving the host corpus onto the epoch timeline for that run refitted the models on the same rows in another order, and the drifting host's last day reads 379 where it read 551. The third part, the daily drift over the TLS and DNS columns, followed in its own pull request: a daily `WindowSealStage` and `TC5DriftStage(aggregate="max")` run over `ja4_client_distinct` per host in the presentation pipeline and over `dns_subdomains_per_domain` per client in the application pipeline, R-P-L6-006 and R-P-L7-009 read the trajectories with R-P-L5-006's two conditions and write the same `host_watchlist`, and a search head returned the creeping host's last three days and the slow tunnel's last four, with every other search returning what it did but R-B-L6-001, which fires on each stack the creeping host acquires. The slow tunnel is the traffic the trajectory exists for: 52 subdomains on its busiest day, half R-B-L7-001's floor, and 1.13 times the day before, so the rule beside it never sees it. Which entity classes have a score is tabulated below the table. Tracked in #59 |
+| Risk write path and suppression for the shipped detections | Small | Built, in step 6. Every detection collects its rows into a `behavior_risk` index and is a per-result alert suppressed on its stated deduplication key for its dispatch window, from `lookups/rule_metadata.csv`; Chain assembly sums the risk records once each over the chains the events span and reads every resolver hop from one `resolution_methods` field; the behavior summary stopped summing a risk nothing wrote; R-P-L3-005, which read a field its own `streamstats` was creating, takes two passes and fires fifteen times; and the field linter resolves a field another search creates only through an index that search collects into. A search-head run held 94 risk records for the 94 rows the detections then returned; with the learned layer 5 models it held 166 risk records for the 166 rows the detections returned, with step 9's host baselines it held 198, and with step 10's network objects it held 209, with step 13's services and applications it held 213, with step 15's devices and physical chain it held 221, and with step 8's host segment it holds 233 risk records for the 233 rows the detections returned. Chain assembly stays empty on the sample events because the two three-layer chains a detection accuses sum 55 and 50 against a threshold of 60. Hysteresis stays not built until a real model scores near a threshold. Tracked in #57 |
+| Clock skew where the corpora cannot measure it | Medium | Step 7's runs are recorded: the search-head runs on Splunk 10.2.8 -- all forty-eight searches on 2026-10-09, all seventy-eight on 2026-10-17 -- returned what `expected_results.json` says for every one, over events whose wire format the first run, on 2026-10-05, corrected; the conformance runs of 2026-10-09 passed every marked variant on a card, 759 of 759 before step 6 and 760 of 760 after it, the parity test over all twelve corpora among them; both results and the model artifact are committed and the documents' numbers are tested against them; the clock skew experiment decides all fifty-eight detections, and did again after steps 9 to 13 and 15, after the two daily trajectories over the TLS and DNS columns, which are unmoved to a minute under the one clock each reads, and after the host segment's rule, which holds to a minute across the five collector clocks that feed and resolve the host frame; the eight step 10 added hold to a minute on collector and switch clocks, step 11 measured layer 3 on its routers' clocks, and step 12's leases and inventory reports gave layers 4 and 6 clocks a sweep can move. What it could not measure remains: the SaaS pair's corpus carries one clock and needs the context store's record time per row, layers 4 and 6 are measured only as a uniform shift until their corpora carry an exporter per packet capture and an inspection point per egress, and the 120-second join tolerance itself needs a corpus whose chain steps sit within a minute of each other on different clocks. Recorded under #58; correcting the clocks rather than measuring them is #62 |
 | Host baselines at layers 3, 4 and 6 | Medium | Built, in step 9. `TC3BaselineStage` keeps each host's hourly peak fan-out, fan-in and byte asymmetry over fourteen days, with an optional group column so one address in two routing domains is two hosts, and the network corpus gained the fortnight it is measured against. R-B-L3-001 fires on a step above the source's own history with the literal fifty kept as a floor, and a DHCP server's Monday checks, which the literal fired on, are its control; R-B-L3-006 reads fan-in onto a destination the inventory calls a workstation, R-B-L3-007 a first contact more lopsided than the host has ever sent, and R-D-L3-008 a port sweep inside the estate. `community_id` is on layers 3 and 6, and a report joins one connection across layers 3, 4 and 6 on it. `normalize_hostname` keys a host in the endpoint, asset, enrichment and envelope stages and in the layer 5 target, so `FIN-01` and `fin-01` are one host and R-C-001 joins without folding case; the asset record carries `device_role`, `os_family` and `os_version`, R-C-001 requires a server, R-B-L7-004 scales its severity by criticality and carries the owner, and R-B-L6-001 is gated on a managed host again. Every host feature is read by a search or listed under [Features without a rule](#features-without-a-rule), and a test holds the list to the stages. What remains: layer 4 still has no per-host baseline beyond the per-triple envelope, `ja4_client_changed` has no rule because the corpus shows nothing a rule on it would add, R-P-L3-005 now visibly fires on every host's first minutes of the day and wants the same step condition, and the inventory is looked up on the address at layer 6 until hosts have an identity across layers (#63). Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | Built, in step 12. `TC2BindingStage` takes a grant column, so a DHCP server's acknowledgements close into leases that last the term the server granted, and an EDR agent's inventory reports into which machine each interface belongs to; the network, transport, presentation and application corpora, and the campaign's layers 3, 4 and 6, resolve each source address through both with `BindingResolverStage` and carry `mac_address`, `host_key` and each hop's binding identifier, with chains rooted on the machine. `TC7EndpointStage` writes the same `host_key` for a process, and a host identity harness seals four layers together and finds one workstation one entity and one chain, with a re-leased address as the control. `EdgeEmitStage` writes `morpheus:edge` records with both ends' identifiers and layers, the relation, the join method and the child's `lineage_id`; every estate and campaign resolver writes its binding's identifier; the SIEM gains `binding_l2` and `binding_l5_l2` with refresh and expiry jobs, a directory lookup the estate supplies, a host evidence report and an identity walk that agrees with the pipeline on all twenty-five sign-ins; and R-C-002 and R-C-004 join on `community_id` and `session_key` where present. Departures: chains stay one per layer in the single-layer corpora, which seal alone, and only the harness seals layers together; the layer 3 and 4 compositions carry `host_key` without the machine's asset context, which the harness attaches; DNS and HTTP are resolved to a machine but not to a session, because the application corpus has no sessions; and the reference corpus's flows are no longer sent to the SIEM, rather than being renamed. The DHCP and EDR collectors themselves are not Morpheus. Gaps G03, G04, G17, G43, G52 and G80 are closed by #63 |
 | Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | Built, in step 10. R-D-L1-002 reads the optical tap step, R-D-L1-003 flap instability with restarts excluded, R-D-L1-006 a neighbour the port has never had, and a `Device restart` report gathers the reboot flags into one row per device. `TC1RateStage` divides each delta by its interval into error, discard and traffic rates and `utilization` against `link_speed_bps`, from the 64-bit octet counters TC-1 now requires, and measures each port's error rate against its own peak (R-B-L1-005) and its traffic against its own peak and trough per UTC hour (R-B-L1-007). `link_key` names a link by its two ends and `Topology - LLDP adjacency` keeps the record; R-B-L2-002 leaves trunk and LAG-member ports out. `ouis_per_vlan` is keyed `site_id:vlan_id`, measured against its own history and read by R-B-L2-006; the four-part key is gone from Part 2. `TC2AuthStage` keeps each port's 99th percentile and R-B-L2-007 and 008 read its two tails. `TC2BindingStage` gains a stop column and a snapshot mode, and the corpus ends one binding `explicit` and one `snapshot_absent`. What remains: a link resolves to one name from both ends only where the LLDP identity and the key the poller builds agree, which needs TC-0's mapping; a restart splits each of its ports' layer 1 bindings for the poll its neighbour is unknown; discards have no baseline; and the hour-of-day history is untested beyond one hour of corpus. Tracked in #61 |
@@ -4397,6 +4428,27 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Graph store beside Splunk | Medium | Optional by design: nothing in Part 3 depends on it and Splunk is the detection surface. Deliberately left open. The one concrete piece worth taking early is small and is listed under the network-object detections above: an LLDP adjacency lookup over `binding:l1`, which step 10 built and the app refreshes, and an 'Entity view' SPL recipe per entity class in the app README, which is not written. Not scheduled; recorded as gap G08 |
 | Cloud control-plane sub-class (`tc7_cloud`) | Medium | CloudTrail, Azure Activity, GCP Audit and Kubernetes audit are outside the design although a role assumption or `kubectl exec` has exactly the shape `TC7SaasStage` measures. Specified in Part 2 with the baseline key extended to (principal, account, operation); the corpus, variant column set and rule wait until the service entity and normalization schemas exist. Not scheduled; recorded as gap G56 |
 
+### Which entity classes have a score
+
+Step 8 asked, at its end, which classes of entity carry a score of their own and which carry a trajectory over one. A
+learned score is `TC5ScoreStage` reading a committed autoencoder and writing `mean_abs_z` and `max_abs_z`; a trajectory
+is `TC5DriftStage` over a daily or weekly seal, writing `drift_rising_windows` and `drift_rise_sigmas` for a predictive
+rule to read; and the two layer 1 predictive rules and R-P-L3-005 read rises that their own stages or the summary count,
+with no model and no drift stage behind them.
+
+| Entity class | Learned score | Trajectory over | Rules that read it |
+| --- | --- | --- | --- |
+| Principal (`user_principal`) | One `dfencoder` autoencoder per principal, `session_pipeline` | The daily mean of its score; its weekly object-type breadth, `saas_object_types_in_week` | R-B-L5-001, R-B-L5-002, R-P-L5-006, R-P-L7-006 |
+| Host (`host_key`) | One autoencoder per `ctx_peer_group`, `host_score_pipeline` | The daily mean of its score; its daily distinct TLS stacks, `ja4_client_distinct`; the daily largest subdomain count it asks one domain for, `dns_subdomains_per_domain` | R-P-L3-009, R-P-L6-006, R-P-L7-009 |
+| Port, link and device (layers 1 and 2) | None | The optical forecast's days to threshold and the device's reboot rate, each counted by its own stage | R-P-L1-004, R-P-L1-009 |
+| Flow source (layer 3) | None | Fan-out rises counted over the behavior summary by `streamstats` | R-P-L3-005 |
+| Service, application, VLAN, transfer | None | None | -- |
+
+The host's two column trajectories are keyed on `src_ip` in the pipelines, where the handshakes and queries carry the
+address, and the searches write the watchlist under `host_key` where the lease named the machine and the address where it
+did not. HTTP behaviour and process behaviour have no trajectory: `http_distinct_paths` per client and the endpoint
+novelty count per host are the next columns a daily seal would take, and nothing here has measured them.
+
 ### Open questions this work has not answered
 
 Distinct from the table above, which lists components that are absent. These are questions the design
@@ -4404,7 +4456,7 @@ raises and should not be assumed away. Two of them have since been answered; the
 the question that produced them, rather than moving somewhere tidier, because what a question turned out
 to be is worth more to the next reader than a clean list of open ones.
 
-**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** All fifty-six shipped rules are swept over ten of the thirteen pipelines: thirty-four are measured against clocks that genuinely disagree, twenty under a uniform shift, and the SaaS pair arrive through a corpus with a single clock and are recorded as not measured. Every join here
+**How much does clock skew between nodes degrade behavioral integrity, quantitatively?** All fifty-eight shipped rules are swept over ten of the thirteen pipelines: thirty-four are measured against clocks that genuinely disagree, twenty-two under a uniform shift, and the SaaS pair arrive through a corpus with a single clock and are recorded as not measured. Every join here
 is a join on time across sources that do not share a clock, and the
 [collection section](../../../../README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
 qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0`, as it was first
@@ -4421,18 +4473,18 @@ clocks in the estate disagrees by exactly that much. A decision is keyed on what
 when, because a detection identified by its timestamp would differ under every non-zero offset and would
 measure the injection rather than the damage.
 
-What a sweep can say depends on the clocks a corpus has, and the fifty-five rules divide three ways that must
+What a sweep can say depends on the clocks a corpus has, and the fifty-eight rules divide three ways that must
 not be added together. **Thirty-four read inputs from clocks that genuinely disagree** -- the estate's collectors
 and switches for layers 1 and 2, the campaign's eleven collectors for the chains, three routers' clocks for
 layer 3, seven hosts' own clocks for process ancestry, for R-B-L6-001's managed-host gate and R-B-L4-004's
 join, the machine a handshake or a packet resolves to through leases and inventory reports on clocks of their own,
 and for R-P-L3-009 the flow exporter, the inspection point and the EDR whose records meet in one row of the host
 frame -- and of those, only R-D-L2-004
-and R-P-L3-005 move within a minute. **Twenty read inputs that all come through one clock** in a corpus with
+and R-P-L3-005 move within a minute. **Twenty-two read inputs that all come through one clock** in a corpus with
 several: every layer 5 sign-in comes through the identity provider, each application class through its own
 collector, and every packet and handshake through the one sensor and inspection point their corpora have beside
 the DHCP server and inventory feed. For them a sweep is a uniform shift, which measures boundary proximity rather
-than disagreement; all twenty are unmoved, and R-P-L5-006 once moved, for the reason below. **Two are not
+than disagreement; all twenty-two are unmoved, the two daily trajectories over the handshakes and the queries among them, and R-P-L5-006 once moved, for the reason below. **Two are not
 measured**: the SaaS corpus arrives through one collector, so the sweep gives that clock no offset, and the
 artifact records `"one clock"` for its rules rather than a tolerance nobody tested. Measuring them needs the
 context store's own record time per row, and measuring layers 4 and 6 as more than a shift needs what a

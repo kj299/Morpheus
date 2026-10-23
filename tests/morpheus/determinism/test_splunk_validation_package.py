@@ -97,6 +97,12 @@ DRIFT_MEAN_CEILING = threshold("R-P-L5-006 - Drift trajectory", r"mean_ceiling\s
 DRIFT_ACCELERATION_CEILING = threshold("R-P-L5-006 - Drift trajectory", r"acceleration_ceiling\s*=\s*([\d.]+)")
 HOST_DRIFT_RISING_THRESHOLD = threshold("R-P-L3-009 - Host drift trajectory", r"rising_threshold\s*=\s*([\d.]+)")
 HOST_DRIFT_SIGMA_THRESHOLD = threshold("R-P-L3-009 - Host drift trajectory", r"sigma_threshold\s*=\s*([\d.]+)")
+STACK_TRAJECTORY = "R-P-L6-006 - Client stack trajectory"
+SUBDOMAIN_TRAJECTORY = "R-P-L7-009 - Subdomain count trajectory"
+STACK_RISING_THRESHOLD = threshold(STACK_TRAJECTORY, r"rising_threshold\s*=\s*([\d.]+)")
+STACK_SIGMA_THRESHOLD = threshold(STACK_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
+SUBDOMAIN_RISING_THRESHOLD = threshold(SUBDOMAIN_TRAJECTORY, r"rising_threshold\s*=\s*([\d.]+)")
+SUBDOMAIN_SIGMA_THRESHOLD = threshold(SUBDOMAIN_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
 FAILURE_RUN_THRESHOLD = threshold("R-D-L5-009 - Failed authentication run ending in success",
                                   r"failure_threshold\s*=\s*([\d.]+)")
 COMPOSITE_MAX_THRESHOLD = threshold("R-B-L5-001 - Composite authentication anomaly", r"max_threshold\s*=\s*([\d.]+)")
@@ -350,6 +356,104 @@ def test_the_host_drift_rule_returns_exactly_what_is_written(expected: dict):
     assert scored and all(event.get("max_abs_z") is not None and event.get("osi_layer") == 3 for event in scored)
 
 
+def _trajectory_days(events: list, rising: float, sigmas: float) -> tuple:
+    """A trajectory rule as its search states it: the rows that carry the trajectory, and the client-days they make."""
+    fires = [
+        event for event in events
+        if event.get("window_complete") is True and event.get("drift_mature") is True and float(
+            event.get("drift_rising_windows") or 0) >= rising and float(event.get("drift_rise_sigmas") or 0) > sigmas
+    ]
+    immature = [
+        event for event in events
+        if event.get("drift_mature") is False and float(event.get("drift_rising_windows") or 0) >= rising
+        and float(event.get("drift_rise_sigmas") or 0) > sigmas
+    ]
+
+    return (fires, immature, sorted({(event["src_ip"], int(event["day_window_id"])) for event in fires}))
+
+
+def _asserts_one_client_from_its_fifth_day(entry: dict, fires: list, immature: list, client_days: list) -> None:
+    # The same shape as the principals' and the hosts' trajectories: one entity, its rising days from the first the
+    # drift stage calls mature, and the fourth rising day meeting both conditions while not yet mature.
+    assert entry["contributing_rows"] == len(fires)
+    assert entry["expected_rows"] == len(client_days)
+    assert [(row["src_ip"], row["day_window_id"]) for row in entry["key_values"]] == client_days
+    assert {client for (client, _) in client_days} == {entry["key_values"][0]["src_ip"]}
+    assert [day for (_, day) in client_days] == list(range(client_days[0][1], client_days[0][1] + len(client_days)))
+    assert {(event["src_ip"], int(event["day_window_id"]))
+            for event in immature} == {(client_days[0][0], client_days[0][1] - 1)}
+
+
+def test_the_stack_trajectory_returns_exactly_what_is_written(expected: dict):
+    # R-P-L6-006 over the layer 6 events, deduplicated as the search deduplicates. The creeping host is also
+    # R-B-L6-001's six times over, which the fingerprint test counts; here the point is that the two rules read the
+    # same handshakes and that the control which acquires two stacks and stops never reaches four rising days.
+    events = _events_of("morpheus_score_l6.jsonlines")
+    (fires, immature, host_days) = _trajectory_days(events, STACK_RISING_THRESHOLD, STACK_SIGMA_THRESHOLD)
+    entry = expected["searches"][STACK_TRAJECTORY]
+
+    _asserts_one_client_from_its_fifth_day(entry, fires, immature, host_days)
+
+    creeper = host_days[0][0]
+    by_day = collections.defaultdict(set)
+    rising = collections.defaultdict(int)
+
+    for event in events:
+        if (event.get("day_window_id") is not None):
+            by_day[(event["src_ip"], int(event["day_window_id"]))].add(event["ja4_client_distinct"])
+            rising[event["src_ip"]] = max(rising[event["src_ip"]], int(event.get("drift_rising_windows") or 0))
+
+    days = sorted(day for (host, day) in by_day if host == creeper)
+
+    assert [max(by_day[(creeper, day)]) for day in days] == list(range(1, len(days) + 1)), "one new stack a day"
+    assert rising[creeper] == len(days)
+
+    # The control rises for three days and holds; nobody else rises at all.
+    others = {host: count for (host, count) in rising.items() if host != creeper}
+
+    assert max(others.values()) < STACK_RISING_THRESHOLD
+    assert sorted(others.values())[-1] == 3 and sorted(others.values())[-2] == 1
+
+    # Every firing is a row the fingerprint rule's host, so the watchlist entry is keyed on the host the lease names.
+    assert {event.get("host_key") for event in fires} == {"ws-0-24"}
+
+
+def test_the_subdomain_trajectory_returns_exactly_what_is_written(expected: dict):
+    # R-P-L7-009 over the DNS rows of the layer 7 events, as the search reads them: `dns_registered_domain=*` is the
+    # DNS variant's row, and the HTTP and service rows carry no drift. The slow tunnel reads the same column as
+    # R-B-L7-001 and never reaches that rule's floor, which the layer 7 test asserts from the other side.
+    events = [event for event in _layer_7_events() if event.get("dns_registered_domain") is not None]
+    (fires, immature, client_days) = _trajectory_days(events, SUBDOMAIN_RISING_THRESHOLD, SUBDOMAIN_SIGMA_THRESHOLD)
+    entry = expected["searches"][SUBDOMAIN_TRAJECTORY]
+
+    _asserts_one_client_from_its_fifth_day(entry, fires, immature, client_days)
+
+    tunneller = client_days[0][0]
+    busiest = collections.defaultdict(int)
+    rising = collections.defaultdict(int)
+
+    for event in events:
+        if (event.get("day_window_id") is not None):
+            key = (event["src_ip"], int(event["day_window_id"]))
+            busiest[key] = max(busiest[key], int(event.get("dns_subdomains_per_domain") or 0))
+            rising[event["src_ip"]] = max(rising[event["src_ip"]], int(event.get("drift_rising_windows") or 0))
+
+    days = sorted(day for (client, day) in busiest if client == tunneller)
+    counts = [busiest[(tunneller, day)] for day in days]
+
+    assert counts == sorted(counts) and len(set(counts)) == len(counts), "the tunnel climbs every day"
+    assert max(counts) < TUNNEL_SUBDOMAINS, "and never reaches the literal R-B-L7-001 reads"
+    assert rising[tunneller] == len(days)
+    assert max(count for (client, count) in rising.items() if client != tunneller) < SUBDOMAIN_RISING_THRESHOLD
+
+    # The HTTP and service rows carry no trajectory, so the `dns_registered_domain=*` term costs nothing here; what it
+    # keeps out is the SaaS corpus's weekly drift, which shares the sourcetype and is R-P-L7-006's.
+    without = [event for event in _layer_7_events() if event.get("telemetry_class") in ("tc7_http", "tc7_service")]
+
+    assert without and all(event.get("drift_rising_windows") is None for event in without)
+    assert {event.get("host_key") for event in fires} == {"ws-0-46"}
+
+
 def _true(frame: pd.DataFrame, column: str) -> pd.Series:
     return frame[column].astype("boolean").fillna(False)
 
@@ -465,17 +569,24 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
 
     assert "lookup principal_watchlist user_principal OUTPUT" in _stanza_search("R-B-L7-002 - Bulk data access")
 
-    # The hosts' list is the same contract keyed on the host: the host drift rule writes it by key, and the
+    # The hosts' list is the same contract keyed on the host: the three host trajectory rules write it by key, and the
     # process-ancestry rule reads it by the host its rows name.
     host_fields = [name.strip() for name in transforms["host_watchlist"]["fields_list"].split(",")]
-    host_search = _stanza_search("R-P-L3-009 - Host drift trajectory")
 
     assert host_fields[0] == "_key" and "host_key" in host_fields
     assert {f"field.{name}" for name in host_fields[1:]} <= set(kvstore[transforms["host_watchlist"]["collection"]])
-    assert "outputlookup host_watchlist append=true key_field=_key" in host_search
 
-    for field in host_fields[1:]:
-        assert re.search(rf"\b{field}\b", host_search), f"the host drift rule writes no {field}"
+    for name in ("R-P-L3-009 - Host drift trajectory", STACK_TRAJECTORY, SUBDOMAIN_TRAJECTORY):
+        host_search = _stanza_search(name)
+
+        assert "outputlookup host_watchlist append=true key_field=_key" in host_search, name
+
+        for field in host_fields[1:]:
+            assert re.search(rf"\b{field}\b", host_search), f"{name} writes no {field}"
+
+    # The layer 6 and 7 rows name the host through the lease; a row the lease does not cover is keyed on its address.
+    for name in (STACK_TRAJECTORY, SUBDOMAIN_TRAJECTORY):
+        assert "host_key = coalesce(host_key, src_ip)" in _stanza_search(name), name
 
     assert "lookup host_watchlist host_key AS endpoint_host OUTPUT" in _stanza_search(
         "R-B-L7-004 - Process ancestry novelty")
@@ -483,6 +594,8 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
     drift = expected["searches"]["R-P-L5-006 - Drift trajectory"]
     breadth = expected["searches"]["R-P-L7-006 - Access breadth trajectory"]
     host_drift = expected["searches"]["R-P-L3-009 - Host drift trajectory"]
+    stack = expected["searches"][STACK_TRAJECTORY]
+    subdomains = expected["searches"][SUBDOMAIN_TRAJECTORY]
 
     with open(VALIDATION, encoding="utf-8") as handle:
         document = handle.read()
@@ -490,6 +603,8 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
     assert f"`R-P-L5-006` with `drift-trajectory` and {drift['expected_rows']} entries" in document
     assert f"`R-P-L7-006` with `access-breadth` and {breadth['expected_rows']}" in document
     assert f"`R-P-L3-009` with `host-drift-trajectory` and {host_drift['expected_rows']} entries" in document
+    assert f"`R-P-L6-006` with `stack-trajectory` and {stack['expected_rows']} entries" in document
+    assert f"`R-P-L7-009` with `subdomain-trajectory` and {subdomains['expected_rows']} entries" in document
 
     # None of the principals the bulk rule reports is watched, which is why its severities stand as written.
     watched = {row["user_principal"] for row in drift["key_values"] + breadth["key_values"]}
@@ -500,10 +615,16 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
     # And none of the hosts the process-ancestry rule reports is on the hosts' list: the host corpus's machines
     # share nothing with the endpoint corpus's, so R-B-L7-004's severities stand as written too.
     watched_hosts = {row["host_key"] for row in host_drift["key_values"]}
+    handshakes = _events_of("morpheus_score_l6.jsonlines")
+    queries = [event for event in _events_of("morpheus_score_l7.jsonlines") if event.get("dns_registered_domain")]
+
+    for (events, rising, sigmas) in ((handshakes, STACK_RISING_THRESHOLD, STACK_SIGMA_THRESHOLD),
+                                     (queries, SUBDOMAIN_RISING_THRESHOLD, SUBDOMAIN_SIGMA_THRESHOLD)):
+        watched_hosts |= {event["host_key"] for event in _trajectory_days(events, rising, sigmas)[0]}
     ancestry = expected["searches"]["R-B-L7-004 - Process ancestry novelty"]
     reported_hosts = {row["endpoint_host"] for row in ancestry["key_values"]}
 
-    assert watched_hosts and reported_hosts and not watched_hosts & reported_hosts
+    assert len(watched_hosts) == 3 and reported_hosts and not watched_hosts & reported_hosts
 
 
 SCAN_SYN_RATIO = 0.9
@@ -1422,6 +1543,8 @@ NUMBER_WORDS = {
     "seventy-eight": 78,
     "seventy-nine": 79,
     "eighty": 80,
+    "eighty-one": 81,
+    "eighty-two": 82,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""

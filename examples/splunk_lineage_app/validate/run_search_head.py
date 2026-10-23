@@ -39,7 +39,7 @@ here as `| savedsearch` with an explicit time range covering every event, which 
 so a search is asked the same question its schedule would ask, over all the data at once rather than a slice.
 That is the same simplification the Python recomputation in `expected_results.json` makes.
 
-The order follows VALIDATION.md: the binding refreshes first, so the lookups exist; the three predictive searches,
+The order follows VALIDATION.md: the binding refreshes first, so the lookups exist; the five predictive searches,
 so R-B-L7-002 and R-B-L7-004 read populated watchlists; every other detection, each writing its rows into
 `behavior_risk`; the summary search, so R-P-L3-005 has something to read; R-P-L3-005; Chain assembly, which sums
 what the detections wrote; and the expiry jobs last, because each rewrites the lookup it trims and one run earlier
@@ -88,7 +88,9 @@ rather than left to hold the whole run."""
 
 PREDICTIVE = ("R-P-L5-006 - Drift trajectory",
               "R-P-L7-006 - Access breadth trajectory",
-              "R-P-L3-009 - Host drift trajectory")
+              "R-P-L3-009 - Host drift trajectory",
+              "R-P-L6-006 - Client stack trajectory",
+              "R-P-L7-009 - Subdomain count trajectory")
 SUMMARY = "Behavior summary - per-layer scores"
 TRAJECTORY = "R-P-L3-005 - Fan-out trajectory"
 CHAIN = "Chain assembly - cross-layer risk"

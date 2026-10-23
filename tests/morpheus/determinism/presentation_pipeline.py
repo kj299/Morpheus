@@ -18,7 +18,8 @@ A handshake-shaped layer 6 corpus, and the composed TC-6 pipeline, for the deter
 
 The shape is what a TLS inspection point emits: one record per connection, carrying the client fingerprint, the
 negotiated suite, the certificate the server presented and how the chain validated. Records arrive in event-time
-order across three hours.
+order across a week: six days on which two hosts acquire client stacks, and a seventh whose three hours hold
+everything the five per-event rules read.
 
 **The sealing entity is the host, not the fingerprint, and that is a departure from Part 2.** The guide names
 `ja4_client` and `certificate_fingerprint_sha256` as TC-6's entity key, and both are carried on every row here
@@ -48,8 +49,13 @@ quiet:
   appliance whose self-signed certificate is ordinary;
 - a **cipher downgrade**, a pair landing on a broken suite it has never negotiated, which is R-B-L6-004, against
   a pair whose own suite varies routinely and against a legacy appliance whose floor is low and stays there;
-- and a **file moved behind a declared image**, which is R-D-L6-005, against the re-encodings an estate produces
-  in thousands.
+- a **file moved behind a declared image**, which is R-D-L6-005, against the re-encodings an estate produces
+  in thousands;
+- and a **host acquiring a new client stack every day for a week**, which is R-P-L6-006's trajectory -- the count
+  of distinct fingerprints the host has presented rising on four consecutive days -- against a host that acquires
+  two and stops. R-B-L6-001 reports each acquisition on its own; the trajectory is what says six of them are one
+  story, and it is measured over daily windows a second `WindowSealStage` seals behind the hourly one, as the
+  principals' and the host segment's trajectories are.
 
 Three of the five rules need a reference and two do not, which the corpus makes visible: the self-signed and
 content rules fire on a destination's first handshake, while the issuer and cipher rules stay quiet until their
@@ -73,8 +79,8 @@ import envelope
 import host_identity
 import pandas as pd
 import stamping
-
 from resumable import ResumableLinearPipeline
+
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
@@ -87,6 +93,7 @@ from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
+from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
 from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
 from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
@@ -101,8 +108,14 @@ from morpheus.utils.entity_key import normalize_hostname
 
 PERIOD_SECONDS = 3600
 LATENESS_SECONDS = 900
+DAY_SECONDS = 86400
 CORPUS_HOURS = 3
 CORPUS_SECONDS = CORPUS_HOURS * PERIOD_SECONDS
+"""The event day's span: the three hours every per-event rule is read over."""
+HISTORY_DAYS = 6
+"""Days before the event day on which the two stack-acquiring hosts are seen, so a daily trajectory has days."""
+EVENT_DAY = HISTORY_DAYS
+DRIFT_PREFIX = "day_"
 
 ID_COLUMNS = ["collector_id", "schema_version", "origin_hash", "collector_seq"]
 KEY_COLUMNS = ["telemetry_class", "row_key"]
@@ -118,9 +131,14 @@ SCHEMA_VERSION = "tc6.v1"
 MIN_SAMPLES = 5
 """Prior handshakes a reference needs. The stages' own default, repeated so the corpus can be built to clear it
 deliberately rather than by accident."""
-SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS, "min_samples": MIN_SAMPLES}
+SETTINGS = {
+    "period_seconds": PERIOD_SECONDS,
+    "lateness_seconds": LATENESS_SECONDS,
+    "min_samples": MIN_SAMPLES,
+    "day_seconds": DAY_SECONDS,
+}
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-B-L6-001", "R-D-L6-002", "R-D-L6-003", "R-B-L6-004", "R-D-L6-005")
+RULES = ("R-B-L6-001", "R-D-L6-002", "R-D-L6-003", "R-B-L6-004", "R-D-L6-005", "R-P-L6-006")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 # Hosts.
@@ -129,11 +147,17 @@ VARIED = "10.0.0.21"
 LEGACY_CLIENT = "10.0.0.22"
 PERSONAL_DEVICE = "10.0.0.23"
 """A phone on the corporate wireless. Settled, and then a new stack; and in no inventory."""
+CREEPER = "10.0.0.24"
+"""A managed workstation that presents one more client stack every day of the week: R-P-L6-006's trajectory."""
+UPDATED = "10.0.0.25"
+"""A managed workstation that acquires a stack on each of two days and then stops: a rise too short to watchlist."""
 
 INVENTORY = {
     MANAGED: ("workstation", "medium", "alice@example.com"),
     VARIED: ("workstation", "medium", "bob@example.com"),
     LEGACY_CLIENT: ("server", "high", "it-ops@example.com"),
+    CREEPER: ("workstation", "medium", "carol@example.com"),
+    UPDATED: ("workstation", "low", "dave@example.com"),
 }
 """The managed hosts, as the asset inventory has them: role, criticality and owner. The personal device is absent."""
 
@@ -147,6 +171,8 @@ ATTACKER = "93.184.216.37"
 APPLIANCE = "10.0.1.50"
 SHARED = "93.184.216.38"
 """A hosting provider's address, terminating two customers' names."""
+VENDOR = "93.184.216.39"
+"""A software vendor's update service, which the two stack-acquiring hosts reach every day behind one authority."""
 
 SHOP = "shop.example-hosting.net"
 MAIL = "mail.example-hosting.net"
@@ -156,6 +182,7 @@ NAMES = {
     CDN: "static.example-delivery.net",
     ROTATED: "updates.example.org",
     ATTACKER: "cdn-sync.example.net",
+    VENDOR: "updates.example-vendor.net",
 }
 """The server name each destination's handshakes ask for. The internal appliance is reached by its address."""
 
@@ -163,6 +190,20 @@ NAMES = {
 CHROME = "t13d1516h2_8daaf6152771_b186095e22b6"
 UPDATER = "t13d0312h2_55b375c5d22e_cd85d2d88918"
 NEW_STACK = "t13d3104h1_9b1e5a0f4c22_7e0fd1a83b55"
+STACKS = (
+    CHROME,
+    "t13d1517h2_8daaf6152771_02713d6af862",
+    "t13d1715h2_5b57614c22b0_3d5424432f57",
+    "t13d0912h1_c866b44c5a26_b0c3d6c5e2a1",
+    "t13d1411h2_1d37bd780c83_3f5c6b2e8d10",
+    "t12d2008h1_a09f3c656075_9b3c2b5d1e0f",
+    "t13d0611h1_1d37bd780c83_aa61e0c3d7f2",
+)
+"""The stacks the creeping host presents, one more each day; the host that stops acquires the first three."""
+DAILY_HANDSHAKES = 24
+"""Each stack-acquiring host's handshakes a day, enough that every acquisition after the first day is a settled
+host's new stack to R-B-L6-001."""
+UPDATED_STACKS = 3
 
 # Issuers.
 CORP_CA = "CN=Corp Issuing CA, O=Example, C=GB"
@@ -201,9 +242,14 @@ SHORT_VALIDITY_DAYS = 3
 anything an estate issues, so a search can put a threshold anywhere sensible and still separate them."""
 
 
+def on(day: int, hour: int, second: int = 0) -> int:
+    """Event time for an hour of a day of the corpus, in nanoseconds since the epoch."""
+    return (day * DAY_SECONDS + hour * PERIOD_SECONDS + second) * NS_PER_SECOND
+
+
 def at(hour: int, second: int = 0) -> int:
-    """Event time for an offset into the corpus, in nanoseconds since the epoch."""
-    return (hour * PERIOD_SECONDS + second) * NS_PER_SECOND
+    """Event time for an offset into the event day, in nanoseconds since the epoch."""
+    return on(EVENT_DAY, hour, second)
 
 
 def asset_versions() -> list:
@@ -275,6 +321,21 @@ def build_corpus() -> dict[str, pd.DataFrame]:
             "content_type_declared": declared,
             "content_type_detected": detected,
         })
+
+    # The creeping host: a new client stack every day for a week, each presented among the ones it already has, so
+    # its count of distinct stacks rises by one a day. Every acquisition after the first day is a settled host's new
+    # stack and R-B-L6-001 reports it; the trajectory is what reads the seven as one. Beside it, a host that acquires
+    # a stack on each of two days and then settles: a rise of three windows, one short of the rule. Both reach a
+    # vendor's update service that presents one authority throughout, so nothing else about them changes.
+    for day in range(HISTORY_DAYS + 1):
+        for index in range(DAILY_HANDSHAKES):
+            add(CREEPER, VENDOR, STACKS[index % (day + 1)], PUBLIC_CA, MODERN_SUITE, on(day, 1, 60 + index * 120))
+            add(UPDATED,
+                VENDOR,
+                STACKS[index % min(day + 1, UPDATED_STACKS)],
+                PUBLIC_CA,
+                MODERN_SUITE,
+                on(day, 1, 75 + index * 120))
 
     # The managed endpoint: one stack for two hours, then a second one it has never presented. Its destination
     # presents one authority throughout, so the fingerprint is the only thing that changes about it.
@@ -508,6 +569,21 @@ def run_pipeline(config: Config,
                         lateness_seconds=LATENESS_SECONDS,
                         order_columns=list(DEFAULT_ORDER_COLUMNS),
                         entity_key_column=DEFAULT_ANCHOR_COLUMN))
+    # The daily trajectory R-P-L6-006 reads: a second seal over days, its columns prefixed so the hourly windows
+    # keep their identity, and the drift stage over each host's count of distinct client stacks. The count is
+    # cumulative, so a day is measured by its largest value, as the SaaS corpus's weekly breadth is.
+    pipe.add_stage(
+        WindowSealStage(config,
+                        period_seconds=DAY_SECONDS,
+                        lateness_seconds=LATENESS_SECONDS,
+                        order_columns=list(DEFAULT_ORDER_COLUMNS),
+                        column_prefix=DRIFT_PREFIX))
+    pipe.add_stage(
+        TC5DriftStage(config,
+                      entity_column="src_ip",
+                      score_column="ja4_client_distinct",
+                      window_column=f"{DRIFT_PREFIX}window_id",
+                      aggregate="max"))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
