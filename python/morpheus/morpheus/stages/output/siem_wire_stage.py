@@ -20,7 +20,6 @@ import mrc
 from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
-from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
@@ -89,8 +88,9 @@ class SiemWireStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._require_columns = require_columns
         self._time_unit = time_unit
 
-        for column in self._sourcetype.time_columns:
-            self._needed_columns[column] = TypeId.STRING
+        # The time columns are deliberately not declared in `_needed_columns`. A declared column is preallocated
+        # with empty strings by the segment's source when the batch lacks it, and the presence check below would
+        # then pass a record with no anchor, which the SIEM stamps at index time without a word.
 
     @property
     def name(self) -> str:

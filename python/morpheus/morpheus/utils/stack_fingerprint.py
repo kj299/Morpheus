@@ -36,6 +36,8 @@ fingerprint that differed by spelling would be a new stack every time the collec
 
 import typing
 
+from morpheus.utils.entity_key import is_missing
+
 OPTION_ALIASES = {
     "mss": "mss",
     "maxseg": "mss",
@@ -80,7 +82,7 @@ def options_order(value: typing.Any) -> typing.Optional[str]:
         The options in their original order, each in its short form, joined by commas. An option the alias table does
         not know is kept, lowercased, so an unfamiliar stack is still a fingerprint. `None` for no options.
     """
-    if (value is None or value != value):  # pylint: disable=comparison-with-itself
+    if (is_missing(value)):
         return None
 
     parts = [part.strip().lower() for part in str(value).replace(";", ",").replace(" ", ",").split(",")]
@@ -91,7 +93,7 @@ def options_order(value: typing.Any) -> typing.Optional[str]:
 
 def _integral(value: typing.Any) -> typing.Optional[int]:
     try:
-        if (value is None or value != value):  # pylint: disable=comparison-with-itself
+        if (is_missing(value)):
             return None
 
         number = float(value)

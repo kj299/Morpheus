@@ -21,6 +21,7 @@ import pytest
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import compose_link_key
+from morpheus.utils.entity_key import is_missing
 from morpheus.utils.entity_key import mac_oui
 from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
@@ -165,3 +166,13 @@ def test_a_link_with_a_missing_end_is_none(missing):
                           (None, "b827eb000001", None), (float("nan"), "aa:30:0a:00:00:01", "aa:30:0a")])
 def test_the_oui_is_the_supplied_one_or_the_first_three_octets(supplied, mac, expected):
     assert mac_oui(supplied, mac) == expected
+
+
+@pytest.mark.parametrize("value", [None, float("nan"), np.nan, pd.NA, pd.NaT, np.float64("nan")])
+def test_every_spelling_of_a_gap_is_missing(value):
+    assert is_missing(value)
+
+
+@pytest.mark.parametrize("value", ["", "x", 0, 0.0, False, np.int64(3), [1, 2]])
+def test_a_value_is_not_missing(value):
+    assert not is_missing(value)

@@ -20,6 +20,7 @@ import pytest
 from morpheus.config import Config
 from morpheus.messages import MessageMeta
 from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
+from morpheus.utils.collector_schemas import VALIDATION_RESULTS
 from morpheus.utils.type_utils import get_df_class
 
 SECOND = 10**9
@@ -160,6 +161,23 @@ def test_a_validated_certificate_is_not_self_signed(config: Config):
     result = run(config, handshakes([CORP], validations=["ok"]))
 
     assert truthy(list(result["cert_self_signed"])[0]) is False
+
+
+@pytest.mark.gpu_and_cpu_mode
+@pytest.mark.parametrize(("raw", "self_signed"),
+                         [
+                             ("self signed certificate", True),
+                             ("self signed certificate in certificate chain", True),
+                             ("unable to get local issuer certificate", False),
+                             ("certificate has expired", False),
+                         ])
+def test_the_normalizer_s_vocabulary_is_the_stage_s(config: Config, raw: str, self_signed: bool):
+    # Held through the normalizer the fork ships for Zeek, so the two vocabularies cannot drift apart again: an
+    # issuer the verifier does not hold is not a certificate signing itself.
+    normalized = VALIDATION_RESULTS[raw]
+    result = run(config, handshakes([PROXY], validations=[normalized]))
+
+    assert truthy(list(result["cert_self_signed"])[0]) is self_signed
 
 
 @pytest.mark.gpu_and_cpu_mode

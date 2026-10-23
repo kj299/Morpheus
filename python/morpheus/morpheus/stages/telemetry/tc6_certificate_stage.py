@@ -95,7 +95,7 @@ SELF_SIGNED_RESULTS = frozenset({
     "self_signed",
     "selfsigned",
     "self signed",
-    "unable to get local issuer certificate",
+    "self-signed-chain",
     "depth zero self signed cert",
     "self signed certificate",
     "self signed certificate in certificate chain",
@@ -103,7 +103,10 @@ SELF_SIGNED_RESULTS = frozenset({
 """Validation outcomes that mean the certificate vouches for itself.
 
 The spellings OpenSSL and Zeek actually emit, rather than one canonical form, because a rule that recognized
-only the tidy spelling would silently never fire against the feed most estates have.
+only the tidy spelling would silently never fire against the feed most estates have. `self-signed-chain` is the
+spelling `morpheus.utils.collector_schemas` gives Zeek's chain variant. OpenSSL's `unable to get local issuer
+certificate` is deliberately absent: it is an issuer the verifier does not hold, not a certificate signing itself,
+and the normalizer renders it `unknown-issuer`.
 """
 
 DESTINATION_KEY = "tls_destination_key"
