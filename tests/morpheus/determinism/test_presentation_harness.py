@@ -57,6 +57,12 @@ hosts at 34 and 2, so any floor between them serves and the assertion is not on 
 SINGLE_ISSUER = 1
 """What R-D-L6-002 means by a destination with a settled authority: one it has only ever presented."""
 
+RISING_WINDOWS = 4
+RISE_SIGMAS = 1.5
+"""R-P-L6-006's trajectory, which is R-P-L5-006's asked of a host's count of client stacks: four consecutive rising
+days, by more than one and a half of the host's own day-to-day deviations in all. The validation package reads the two
+numbers from the stanza; here they are stated, so a changed rule and a changed corpus fail differently."""
+
 
 @pytest.fixture(name="corpus", scope="module")
 def corpus_fixture() -> dict[str, pd.DataFrame]:
@@ -138,9 +144,10 @@ def test_corpus_is_shaped_like_an_inspection_point(corpus: dict[str, pd.DataFram
     assert handshakes["collector_seq"].is_monotonic_increasing
     assert handshakes["event_time"].is_monotonic_increasing
 
-    # Three hours, so a reference has time to settle, be broken, and settle again.
+    # A week: six days on which two hosts acquire stacks, so a daily trajectory has days, and an event day whose
+    # three hours give a reference time to settle, be broken, and settle again.
     span_hours = (handshakes["event_time"].max() - handshakes["event_time"].min()) / (pp_.NS_PER_SECOND * 3600)
-    assert span_hours > 2
+    assert span_hours > pp_.HISTORY_DAYS * 24
 
 
 def test_the_corpus_carries_no_value_a_restart_would_change(corpus: dict[str, pd.DataFrame]):
@@ -250,12 +257,16 @@ def test_a_settled_host_acquiring_a_stack_is_the_finding_and_a_new_host_is_not(r
     # prior-handshake count the two rows are identical, which is why the count is on the row.
     novel = result[_truth(result, "ja4_client_first_seen") & (result["src_ip"] != pp_.PERSONAL_DEVICE)]
 
-    assert set(novel["src_ip"]) == {pp_.MANAGED, pp_.VARIED}
+    assert set(novel["src_ip"]) == {pp_.MANAGED, pp_.VARIED, pp_.CREEPER, pp_.UPDATED}
 
     settled = novel[novel["ja4_client_observations"] >= SETTLED_HANDSHAKES]
 
-    assert list(settled["src_ip"]) == [pp_.MANAGED]
-    assert list(settled["ja4_client"]) == [pp_.NEW_STACK]
+    # The managed endpoint's one acquisition, and every acquisition after the first day of the two hosts that acquire
+    # stacks over the week: each is a settled host's new stack to this rule, one notable at a time.
+    assert set(settled["src_ip"]) == {pp_.MANAGED, pp_.CREEPER, pp_.UPDATED}
+    assert list(settled[settled["src_ip"] == pp_.MANAGED]["ja4_client"]) == [pp_.NEW_STACK]
+    assert len(settled[settled["src_ip"] == pp_.CREEPER]) == pp_.HISTORY_DAYS
+    assert len(settled[settled["src_ip"] == pp_.UPDATED]) == pp_.UPDATED_STACKS - 1
     assert novel[novel["src_ip"] == pp_.VARIED]["ja4_client_observations"].max() < SETTLED_HANDSHAKES
 
 
@@ -266,13 +277,66 @@ def test_a_personal_device_acquiring_a_stack_is_not_a_managed_endpoint_doing_so(
     settled = result[_truth(result, "ja4_client_first_seen")
                      & (result["ja4_client_observations"] >= SETTLED_HANDSHAKES)]
 
-    assert set(settled["src_ip"]) == {pp_.MANAGED, pp_.PERSONAL_DEVICE}
+    assert set(settled["src_ip"]) == {pp_.MANAGED, pp_.PERSONAL_DEVICE, pp_.CREEPER, pp_.UPDATED}
 
     fired = settled[_truth(settled, "ctx_found")]
 
-    assert list(fired["src_ip"]) == [pp_.MANAGED]
-    assert list(fired["ctx_criticality"]) == ["medium"]
+    assert set(fired["src_ip"]) == {pp_.MANAGED, pp_.CREEPER, pp_.UPDATED}
+    assert list(fired[fired["src_ip"] == pp_.MANAGED]["ctx_criticality"]) == ["medium"]
     assert not _truth(result[result["src_ip"] == pp_.PERSONAL_DEVICE], "ctx_found").any()
+
+
+# --- R-P-L6-006: the creeping host, and the host that stops ------------------------------------------------------
+
+
+def _daily(result: pd.DataFrame) -> pd.DataFrame:
+    """One row per host per day: the day's largest count of distinct stacks and the trajectory the drift stage wrote."""
+    days = result["event_time"].astype("int64") // (pp_.DAY_SECONDS * pp_.NS_PER_SECOND)
+    daily = result.assign(day=days).groupby(["src_ip", "day"]).agg(distinct=("ja4_client_distinct", "max"),
+                                                                   rising=("drift_rising_windows", "max"),
+                                                                   rise_sigmas=("drift_rise_sigmas", "max"),
+                                                                   mature=("drift_mature", "max"))
+
+    return daily.reset_index()
+
+
+@pytest.mark.cpu_mode
+def test_the_creeping_host_is_watchlisted_from_its_fifth_day(result: pd.DataFrame):
+    # One more stack every day: the count climbs by one a day and so does the run of rising days. The rule's
+    # conditions are met from the fourth day, and the drift stage calls the trajectory mature from the fifth, so the
+    # host is reported on the fifth, sixth and seventh.
+    daily = _daily(result)
+    creeper = daily[daily["src_ip"] == pp_.CREEPER].sort_values("day")
+
+    assert list(creeper["distinct"]) == list(range(1, pp_.HISTORY_DAYS + 2))
+    assert list(creeper["rising"]) == list(range(1, pp_.HISTORY_DAYS + 2))
+
+    fired = daily[daily["mature"].astype("boolean").fillna(False) & (daily["rising"] >= RISING_WINDOWS)
+                  & (daily["rise_sigmas"].astype("Float64").fillna(0) > RISE_SIGMAS)]
+
+    assert set(fired["src_ip"]) == {pp_.CREEPER}
+    assert sorted(fired["day"]) == list(range(RISING_WINDOWS, pp_.HISTORY_DAYS + 1))
+
+    # R-B-L6-001 reports each acquisition after the first day on its own; six notables that the trajectory reads as one.
+    acquisitions = result[_truth(result, "ja4_client_first_seen") & (result["src_ip"] == pp_.CREEPER)
+                          & (result["ja4_client_observations"] >= SETTLED_HANDSHAKES)]
+
+    assert len(acquisitions) == pp_.HISTORY_DAYS
+
+
+@pytest.mark.cpu_mode
+def test_a_host_that_acquires_two_stacks_and_stops_is_a_rise_too_short_to_watchlist(result: pd.DataFrame):
+    # Three rising days, then a count that holds: the run restarts, and the rule's four are never reached.
+    daily = _daily(result)
+    updated = daily[daily["src_ip"] == pp_.UPDATED].sort_values("day")
+
+    assert list(updated["distinct"]) == [1, 2] + [pp_.UPDATED_STACKS] * (pp_.HISTORY_DAYS - 1)
+    assert updated["rising"].max() == pp_.UPDATED_STACKS < RISING_WINDOWS
+
+    # And no host of the event day has a second day to rise on.
+    others = daily[~daily["src_ip"].isin([pp_.CREEPER, pp_.UPDATED])]
+
+    assert others["rising"].max() == 1
 
 
 @pytest.mark.cpu_mode

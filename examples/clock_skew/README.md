@@ -49,7 +49,7 @@ for row.
 
 ## The result
 
-All fifty-six shipped detections are swept, each over the pipeline that feeds it, through
+All fifty-eight shipped detections are swept, each over the pipeline that feeds it, through
 [`rules.py`](./rules.py), which reduces every rule to what it accuses and reads every threshold, join tolerance
 and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hundred, one second, ten, thirty and
 sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
@@ -130,13 +130,21 @@ at every spread swept, and nothing else moved. With quarantine on, ten seconds p
 holds every record, so the segment has nothing to frame and the rule loses its three host-days and accuses nothing
 new; the pipeline now returns the quarantine alone where it raised on an empty concatenation.
 
-What a sweep can say depends on the clocks in the corpus, and the fifty-six fall into three groups that must
+It was run again on 2026-10-23 after the daily drift reached the TLS and DNS columns and two rules read it, R-P-L6-006
+and R-P-L7-009. Each reads rows that come through one collector, the handshakes the inspection point sends and the
+queries the resolver sends, so both join the uniform-shift group, twenty-two now. The trajectory is a day's largest count under a daily
+seal, and a minute of spread moves at most an hour's edge of rows across a day boundary without changing which day
+holds the largest: the creeping host's three days and the slow tunnel's four are the same at every spread swept, and
+nothing else moved. The sweeps move only the lease and inventory binding identifiers the hosts resolve through, as
+they did before.
+
+What a sweep can say depends on the clocks in the corpus, and the fifty-eight fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
 | Inputs on clocks that disagree | 34 | A tolerance, or the spread at which the rule changes |
-| Inputs on one clock, in a corpus with several | 20 | Boundary sensitivity under a uniform shift, not a tolerance |
+| Inputs on one clock, in a corpus with several | 22 | Boundary sensitivity under a uniform shift, not a tolerance |
 | Corpus with one clock | 2 | Nothing; reported as not measured |
 
 **Measured against clocks that disagree** -- the estate's six collectors and three switches for layers 1 and 2,
@@ -167,11 +175,12 @@ comes through the identity provider, so for the eight sign-in rules -- R-D-L5-00
 R-B-L5-001 and 002, and R-P-L5-006 -- the sweep moves all their inputs together; R-B-L5-005's session starts and
 ends each come through one collector too. The application corpus has five, one per class -- the resolver, the
 proxy and the load balancer -- and the DHCP server and inventory feed its hosts resolve through, and each of its
-four rules reads one class. The transport and presentation corpora have three each since step 12, but every packet
-comes through the packet sensor and every handshake through the inspection point, so three of their four layer 4
-rules and four of their five layer 6 rules read one clock. For these twenty the sweep is a uniform shift, which
-measures how close the events sit to a window edge and nothing about disagreement. All twenty are unchanged to a
-minute; R-P-L5-006 used to change at a
+five rules reads one class, the subdomain count trajectory a daily seal of what the resolver sent. The transport and
+presentation corpora have three each since step 12, but every packet comes through the packet sensor and every
+handshake through the inspection point, so three of their four layer 4 rules and five of their six layer 6 rules read
+one clock, the client stack trajectory among them: it is keyed on the address the handshake carries, and only the
+watchlist entry it writes names the machine. For these twenty-two the sweep is a uniform shift, which measures how
+close the events sit to a window edge and nothing about disagreement. All twenty-two are unchanged to a minute; R-P-L5-006 used to change at a
 millisecond, for the reason below.
 
 **On a corpus with one clock.** The SaaS corpus arrives through the provider's audit log alone, so a collector
@@ -286,8 +295,8 @@ more than one collector:
 | Session, layer 5 | No rule changes to 60s, on the hour marks or off | No change to 1s; at 10s the identity provider and the RADIUS accounting feed are held and all nine rules lose all twenty-two accusations |
 | Network, layer 3 | No rule changes to 60s | No change to 1s; at 10s the flow collector and the DHCP server are held -- 1335 records, all but the inventory feed's at the middle of the spread -- and all eight rules lose all twenty-seven accusations |
 | Transport, layer 4 | No rule changes to 60s | No change to 1s; at 10s the packet sensor and the DHCP server are held, 483 records, and all four rules lose all five accusations |
-| Presentation, layer 6 | No rule changes to 60s | No change to 1s; at 10s the inspection point and the DHCP server are held, 151 records, and all five rules lose all seven accusations |
-| Application | No rule changes to 60s | No change to 1s; at 10s every collector but the load balancer, at the middle of the spread, is held -- 4803 records -- and the three rules reading the resolver and the proxy lose all four accusations, while R-B-L7-007 keeps its one |
+| Presentation, layer 6 | No rule changes to 60s | No change to 1s; at 10s the inspection point and the DHCP server are held, 525 records, and all six rules lose all twelve accusations, the client stack trajectory's three days among them |
+| Application | No rule changes to 60s | No change to 1s; at 10s every collector but the load balancer, at the middle of the spread, is held -- 5067 records -- and the four rules reading the resolver and the proxy lose all eight accusations, the subdomain count trajectory's four days among them, while R-B-L7-007 keeps its one |
 | Campaign, the chains | No change below 800s; past it three chains **gain** a control and R-C-005 loses its attacker | No change to 1s; from 10s every collector but the HQ MAC table is held and all five chains lose their attackers |
 
 Two things are worth reading off it. Inside the bound, quarantine costs nothing: at a second's spread every clock

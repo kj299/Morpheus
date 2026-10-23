@@ -348,8 +348,9 @@ PRODUCED: dict = {
             time_column="event_time",
             time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-6 stages (fingerprint, certificate, cipher, content), with CommunityIdStage before them "
-            "and TC0EnrichStage on the source after, behind WindowSealStage; the "
-            "`tc6` class of `tests/morpheus/determinism/presentation_pipeline.py`.",
+            "and TC0EnrichStage on the source after, behind WindowSealStage and, over the daily windows a second "
+            "WindowSealStage seals, TC5DriftStage; the `tc6` class of "
+            "`tests/morpheus/determinism/presentation_pipeline.py`.",
             # The five layer 6 detections read these. `ja4_client_observations` and `cert_issuer_distinct` are
             # here because two of the rules are unusable without them: novelty alone fires on every host the
             # estate has just started seeing, and an issuer difference alone fires on every delivery host behind
@@ -357,7 +358,8 @@ PRODUCED: dict = {
             # inventory knows, and carries its criticality and owner; `community_id` is the connection evidence
             # report's join to layers 3 and 4, and `host_key` and `mac_address` the host evidence report's. `sni` is
             # what the issuer reference is kept per, with the address, and is null where the inspection point recorded
-            # no name; the application behind the destination port rides on every record.
+            # no name; the application behind the destination port rides on every record. R-P-L6-006 reads the daily
+            # trajectory TC5DriftStage stamps over each host's count of distinct client stacks.
             required_columns=("event_uid",
                               "lineage_id",
                               "osi_layer",
@@ -401,7 +403,15 @@ PRODUCED: dict = {
                               "content_category_declared",
                               "content_category_detected",
                               "content_category_crossed",
-                              "content_category_unclassified"),
+                              "content_category_unclassified",
+                              "day_window_id",
+                              "drift_mature",
+                              "drift_rising_windows",
+                              "drift_total_rise",
+                              "drift_rise_sigmas",
+                              "drift_baseline_sigma",
+                              "drift_velocity",
+                              "drift_acceleration"),
             # As on layer 4: R-C-004 joins a handshake to the session holding its address where one was resolved.
             variant_columns=(("session_key", "session_resolution"), ()),
         ),
@@ -412,8 +422,8 @@ PRODUCED: dict = {
             time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-7 DNS, HTTP and service stages behind WindowSealStage, the `tc7_dns`, `tc7_http` and "
             "`tc7_service` classes of `tests/morpheus/determinism/application_pipeline.py`, the last two enriched by "
-            "TC0EnrichStage with the CMDB's application; and TC7SaasStage, enriched by TC0EnrichStage and "
-            "followed by a weekly TC5DriftStage, the `tc7_saas` class of "
+            "TC0EnrichStage with the CMDB's application and the first followed by a daily TC5DriftStage; and "
+            "TC7SaasStage, enriched by TC0EnrichStage and followed by a weekly TC5DriftStage, the `tc7_saas` class of "
             "`tests/morpheus/determinism/saas_pipeline.py`; and TC7EndpointStage, enriched by TC0EnrichStage with the "
             "host's asset record, the `tc7_endpoint` class of `tests/morpheus/determinism/endpoint_pipeline.py`.",
             # R-B-L7-001 and R-D-L7-005 read the DNS and HTTP columns. The two count columns are here as well as the
@@ -428,6 +438,7 @@ PRODUCED: dict = {
             # R-B-L7-001, R-D-L7-005 and R-B-L7-008 read each client's baseline beside its count, and R-B-L4-004 the
             # operating system a request's user agent claims. R-B-L7-007 reads the service sub-class: a service's
             # clients against its busiest day, the client software new to it, and the application that answered.
+            # R-P-L7-009 reads the daily trajectory TC5DriftStage stamps over each DNS client's busiest domain.
             required_columns=("event_uid",
                               "entity_key",
                               "lineage_id",
@@ -452,7 +463,15 @@ PRODUCED: dict = {
                  "dns_domains_per_client_baseline_mature",
                  "dns_domains_per_client_ratio",
                  "dns_nxdomain_in_window",
-                 "dns_nxdomain_ratio"),
+                 "dns_nxdomain_ratio",
+                 "day_window_id",
+                 "drift_mature",
+                 "drift_rising_windows",
+                 "drift_total_rise",
+                 "drift_rise_sigmas",
+                 "drift_baseline_sigma",
+                 "drift_velocity",
+                 "drift_acceleration"),
                 ("src_ip",
                  "host_key",
                  "mac_address",

@@ -110,7 +110,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 80
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 82
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
@@ -127,7 +127,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     # the trajectory rule reads it.
     writers = [name for name in names if runner.writes_risk(name)]
 
-    assert len(writers) == 56
+    assert len(writers) == 58
     assert max(position[name] for name in writers) < position[runner.CHAIN]
     assert position[runner.SUMMARY] < position[runner.TRAJECTORY] < position[runner.CHAIN]
     assert min(position[name] for name in expiries) > max(position[name] for name in names if name not in expiries)
@@ -289,6 +289,19 @@ fill the two lower rungs; and the summary groups the device polls, the port poll
 flows. The three searches step 15 added are absent from the earlier runs and are not compared.
 """
 
+BEFORE_THE_TRAJECTORIES = {
+    "Behavior summary - per-layer scores": 8801,
+    "R-B-L6-001 - New TLS client fingerprint": 5,
+}
+"""What the run before the daily drift reached the TLS and DNS columns found where it changed the answer.
+
+The summary gained the presentation corpus's week of 336 handshakes and the application corpus's 248 slow-tunnel
+queries; the fingerprint rule gained the creeping host's six acquisitions and its control's two. Every earlier run is
+compared with what is written now, so the fingerprint rule's five rows differ in each of them for that reason and no
+other; each older step's summary figure overrides this one's. The two searches step 8's third part added, the stack and
+the subdomain trajectories, are absent from the earlier runs and are not compared.
+"""
+
 
 def _present(changes: dict, run: dict) -> dict:
     """The changes a later step made, restricted to the searches this run dispatched."""
@@ -332,6 +345,7 @@ def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it
     }
 
     assert differing == {
+        **_present(BEFORE_THE_TRAJECTORIES, run),
         **devices,
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
@@ -370,6 +384,7 @@ def test_the_second_run_differed_from_what_is_written_only_where_the_trajectory_
     }
 
     assert differing == {
+        **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
@@ -431,6 +446,7 @@ def test_the_fourth_run_differs_from_what_is_written_only_where_the_learned_mode
     }
 
     assert differing == {
+        **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
@@ -460,6 +476,7 @@ def test_the_fifth_run_differs_from_what_is_written_only_where_the_host_baseline
     }
 
     assert differing == {
+        **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
@@ -489,12 +506,13 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
     }
 
     assert differing == {
+        **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS
     }
-    assert len(run["searches"]) == 52 and len(expected) == 80
+    assert len(run["searches"]) == 52 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
 
 
@@ -527,12 +545,13 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
     }
 
     assert differing == {
+        **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
         **BEFORE_THE_PLATFORM
     }
-    assert len(run["searches"]) == 62 and len(expected) == 80
+    assert len(run["searches"]) == 62 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -556,8 +575,13 @@ def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arriv
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**_present(BEFORE_THE_DEVICES, run), **_present(BEFORE_THE_SERVICES, run), **BEFORE_THE_LEASES}
-    assert len(run["searches"]) == 66 and len(expected) == 80
+    assert differing == {
+        **_present(BEFORE_THE_TRAJECTORIES, run),
+        **_present(BEFORE_THE_DEVICES, run),
+        **_present(BEFORE_THE_SERVICES, run),
+        **BEFORE_THE_LEASES,
+    }
+    assert len(run["searches"]) == 66 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -581,8 +605,10 @@ def test_the_ninth_run_differs_from_what_is_written_only_where_the_services_arri
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**_present(BEFORE_THE_DEVICES, run), **BEFORE_THE_SERVICES}
-    assert len(run["searches"]) == 72 and len(expected) == 80
+    assert differing == {
+        **_present(BEFORE_THE_TRAJECTORIES, run), **_present(BEFORE_THE_DEVICES, run), **BEFORE_THE_SERVICES
+    }
+    assert len(run["searches"]) == 72 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -606,19 +632,22 @@ def test_the_tenth_run_differs_from_what_is_written_only_where_the_devices_arriv
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_DEVICES
-    assert len(run["searches"]) == 75 and len(expected) == 80
+    assert differing == {**_present(BEFORE_THE_TRAJECTORIES, run), **BEFORE_THE_DEVICES}
+    assert len(run["searches"]) == 75 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 213
 
 
 BEFORE_THE_HOSTS = {
     "Behavior summary - per-layer scores": 7233,
+    "R-B-L6-001 - New TLS client fingerprint": 5,
 }
 """What every run before the host segment's sourcetype found where it changed the answer.
 
-The summary gained the host segment's 1568 frames, one per workstation per hour and each its own group. The two
-searches step 8's second part added, the host drift rule and the host watchlist's expiry, are absent from the earlier
-runs and are not compared.
+The summary gained the host segment's 1568 frames, one per workstation per hour and each its own group, and then the
+week of handshakes and the slow tunnel's queries the daily drift over the TLS and DNS columns needed; the fingerprint
+rule gained the creeping host's six acquisitions and its control's two on that week. The two searches step 8's second
+part added, the host drift rule and the host watchlist's expiry, and the two its third part added, the stack and the
+subdomain trajectories, are absent from the earlier runs and are not compared.
 """
 
 ELEVENTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-17T0126Z.json")
@@ -627,9 +656,10 @@ ELEVENTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-17T0126Z.json
 
 def test_the_eleventh_run_differs_from_what_is_written_only_where_the_host_segment_arrived():
     # Made on 2026-10-17 when the switch and the router became entities: all seventy-eight then matched, with 221
-    # risk records. Against the host segment's events it differs in the summary alone, and has neither of the two
-    # searches the segment's sourcetype brought. Nothing else moved: the host corpus's machines share nothing with
-    # any other corpus's, and R-B-L7-004's lookup against the hosts' watchlist finds none of its hosts there.
+    # risk records. Against the host segment's events and the trajectory week's it differs in the summary and the
+    # fingerprint rule, and has none of the four searches step 8's host half brought. Nothing else moved: the host
+    # corpus's machines share nothing with any other corpus's, and R-B-L7-004's lookup against the hosts' watchlist
+    # finds none of its hosts there.
     with open(ELEVENTH_RUN, encoding="utf-8") as handle:
         run = json.load(handle)
 
@@ -642,5 +672,32 @@ def test_the_eleventh_run_differs_from_what_is_written_only_where_the_host_segme
     }
 
     assert differing == BEFORE_THE_HOSTS
-    assert len(run["searches"]) == 78 and len(expected) == 80
+    assert len(run["searches"]) == 78 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 221
+
+
+TWELFTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-22T1603Z.json")
+"""The run over the host segment's events, which matched every expectation then written."""
+
+
+def test_the_twelfth_run_differs_from_what_is_written_only_where_the_trajectory_week_arrived():
+    # Made on 2026-10-22 when the host segment gained a sourcetype: all eighty then matched, with 224 risk records.
+    # Against the events the daily drift over ja4_client_distinct and dns_subdomains_per_domain needed, it differs in
+    # the summary and the fingerprint rule, and has neither of the two trajectory searches. Nothing else moved: the
+    # slow tunnel never reaches R-B-L7-001's count, the creeping host's stacks are new to it and to nothing else, and
+    # both rules' watchlist entries expire before R-B-L7-004 could read them, whose hosts are not theirs anyway.
+    with open(TWELFTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_TRAJECTORIES
+    assert len(run["searches"]) == 80 and len(expected) == 82
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 224
+    assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009"}
