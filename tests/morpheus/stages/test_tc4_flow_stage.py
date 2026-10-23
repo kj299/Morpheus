@@ -112,6 +112,16 @@ def test_a_bin_split_across_messages_still_ends_on_the_right_number(config: Conf
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_a_record_for_a_bin_already_passed_keeps_its_bin_start_in_nanoseconds(config: Config):
+    # The late record carries no counts, but its rollup time is a timestamp like every other row's, not the bin's
+    # ordinal, which a consumer would read as an instant in 1970.
+    result = run(config, records([SYN, SYN_ACK, PSH_ACK], times=[START, START + MINUTE, START + 1]))
+
+    assert list(result["rollup_time_ns"]) == [START, START + MINUTE, START]
+    assert pd.isna(list(result["flow_ppm"])[2])
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_a_bin_is_half_open_and_labelled_by_its_start(config: Config):
     # The departure from the reference's rounding kernel, which labels a bin by its end and puts a record
     # landing exactly on a boundary into the following bin. Every window in this fork is [start, end), and a
@@ -165,6 +175,18 @@ def test_two_flows_do_not_share_a_bin(config: Config):
 
     assert result["flow_id"].nunique() == 2
     assert list(result["flow_ppm"]) == [1, 1]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_flow_dropped_at_the_bound_is_the_least_recently_seen(config: Config):
+    # Three flows through room for two: A opens, B opens, A is seen again, C opens. The flow to drop is B, which has
+    # been quiet longest, not A, which merely opened first. A then keeps its running total and B, seen again,
+    # starts over, because its partial bin was the one dropped.
+    payload = records([SYN] * 6)
+    payload["dst_port"] = [1, 2, 1, 3, 1, 2]
+    result = run(config, payload, max_flows=2)
+
+    assert list(result["flow_ppm"]) == [1, 1, 2, 1, 3, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode

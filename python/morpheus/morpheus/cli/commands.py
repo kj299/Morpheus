@@ -584,9 +584,13 @@ add_command("deserialize", "morpheus.stages.preprocess.deserialize_stage.Deseria
 add_command("determinism-stamp", "morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage", modes=ALL)
 add_command("dropna", "morpheus.stages.preprocess.drop_null_stage.DropNullStage", modes=ALL)
 add_command("edge-emit", "morpheus.stages.lineage.edge_emit_stage.EdgeEmitStage", modes=ALL)
+add_command("entity-frame", "morpheus.stages.telemetry.entity_frame_stage.EntityFrameStage", modes=ALL)
 add_command("envelope-stamp", "morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage", modes=ALL)
 add_command("envelope-validate", "morpheus.stages.lineage.envelope_validate_stage.EnvelopeValidateStage", modes=ALL)
 add_command("filter", "morpheus.stages.postprocess.filter_detections_stage.FilterDetectionsStage", modes=ALL)
+add_command("flow-normalize",
+            "morpheus.stages.telemetry.flow_record_normalize_stage.FlowRecordNormalizeStage",
+            modes=ALL)
 add_command("from-appshield", "morpheus.stages.input.appshield_source_stage.AppShieldSourceStage", modes=FIL_ONLY)
 add_command("from-arxiv", "morpheus.stages.input.arxiv_source.ArxivSource", modes=ALL)
 add_command("from-databricks-deltalake",

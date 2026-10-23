@@ -73,6 +73,7 @@ from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
+from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
@@ -308,10 +309,10 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
 
                 asymmetry.append(self._asymmetry(out_bytes[position], in_bytes[position]))
 
-            df[INTERNAL_RATIO] = ratios
+            assign_nullable_float_column(df, INTERNAL_RATIO, ratios)
             assign_nullable_int_column(df, INTERNAL_COUNT, internal_counts)
             df[RATIO_SATURATED] = ratio_saturated
-            df[BYTE_ASYMMETRY] = asymmetry
+            assign_nullable_float_column(df, BYTE_ASYMMETRY, asymmetry)
             assign_nullable_bool_column(df, ASN_FIRST_SEEN, asn_novel)
 
             for (column, values) in classified.items():

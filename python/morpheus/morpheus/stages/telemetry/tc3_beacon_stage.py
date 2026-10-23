@@ -49,6 +49,7 @@ from morpheus.utils.arrival_regularity import DEFAULT_MIN_INTERVALS
 from morpheus.utils.arrival_regularity import NS_PER_SECOND
 from morpheus.utils.arrival_regularity import ArrivalRegularityTracker
 from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
@@ -242,8 +243,8 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
             assign_str_column(df, PAIR_KEY, keys)
             assign_nullable_int_column(df, INTERVALS, intervals)
             assign_nullable_int_column(df, MEAN_INTERVAL, means)
-            df[INTERVAL_CV] = interval_cvs
-            df[SIZE_CV] = size_cvs
+            assign_nullable_float_column(df, INTERVAL_CV, interval_cvs)
+            assign_nullable_float_column(df, SIZE_CV, size_cvs)
             df[REGULARITY_MATURE] = mature
             df[REGULARITY_SATURATED] = saturated
 
