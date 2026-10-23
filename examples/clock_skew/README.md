@@ -295,8 +295,8 @@ more than one collector:
 | Session, layer 5 | No rule changes to 60s, on the hour marks or off | No change to 1s; at 10s the identity provider and the RADIUS accounting feed are held and all nine rules lose all twenty-two accusations |
 | Network, layer 3 | No rule changes to 60s | No change to 1s; at 10s the flow collector and the DHCP server are held -- 1335 records, all but the inventory feed's at the middle of the spread -- and all eight rules lose all twenty-seven accusations |
 | Transport, layer 4 | No rule changes to 60s | No change to 1s; at 10s the packet sensor and the DHCP server are held, 483 records, and all four rules lose all five accusations |
-| Presentation, layer 6 | No rule changes to 60s | No change to 1s; at 10s the inspection point and the DHCP server are held, 151 records, and all five rules lose all seven accusations |
-| Application | No rule changes to 60s | No change to 1s; at 10s every collector but the load balancer, at the middle of the spread, is held -- 4803 records -- and the three rules reading the resolver and the proxy lose all four accusations, while R-B-L7-007 keeps its one |
+| Presentation, layer 6 | No rule changes to 60s | No change to 1s; at 10s the inspection point and the DHCP server are held, 525 records, and all six rules lose all twelve accusations, the client stack trajectory's three days among them |
+| Application | No rule changes to 60s | No change to 1s; at 10s every collector but the load balancer, at the middle of the spread, is held -- 5067 records -- and the four rules reading the resolver and the proxy lose all eight accusations, the subdomain count trajectory's four days among them, while R-B-L7-007 keeps its one |
 | Campaign, the chains | No change below 800s; past it three chains **gain** a control and R-C-005 loses its attacker | No change to 1s; from 10s every collector but the HQ MAC table is held and all five chains lose their attackers |
 
 Two things are worth reading off it. Inside the bound, quarantine costs nothing: at a second's spread every clock
