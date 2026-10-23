@@ -93,10 +93,7 @@ body:
   - type: checkboxes
     id: terms
     attributes:
-      label: Code of Conduct
-      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/nv-morpheus/.github/blob/main/CODE_OF_CONDUCT.md)
+      label: Duplicate check
       options:
-        - label: I agree to follow Morpheus' Code of Conduct
-          required: true
-        - label: I have searched the [open bugs](https://github.com/nv-morpheus/Morpheus/issues?q=is%3Aopen+is%3Aissue+label%3Abug) and have found no duplicates for this bug report
+        - label: I have searched the [open bugs](https://github.com/kj299/morpheus/issues?q=is%3Aopen+is%3Aissue+label%3Abug) and have found no duplicates for this bug report
           required: true

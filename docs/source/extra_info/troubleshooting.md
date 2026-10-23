@@ -85,3 +85,40 @@ Similar to the Python launch configurations, several C++ launch configurations c
 ```bash
 CMAKE_CONFIGURE_EXTRA_ARGS="-DCMAKE_BUILD_TYPE=Debug" ./scripts/compile.sh
 ```
+
+**Running the Fork's Tests Without a GPU**
+
+Importing Morpheus loads the compiled cuDF helper, which needs a CUDA driver even to import. To run the CPU tiers on a machine with no GPU, install the pinned environment from `ci/scripts/cpu_env/linux-64-cpu.lock`, overlay the repository's Python sources onto the installed `morpheus-core` package, and load the `gpuless` pytest plugin from `ci/scripts/cpu_env`, as `.github/workflows/fork-cpu.yaml` does:
+
+```bash
+micromamba create -n morpheus -f ci/scripts/cpu_env/linux-64-cpu.lock
+micromamba activate morpheus
+
+# Repeat after every source edit; it leaves the installed _lib and _version.py alone
+python ci/scripts/cpu_env/overlay_fork_sources.py "${MORPHEUS_ROOT}"
+
+export PYTHONPATH="${MORPHEUS_ROOT}/ci/scripts/cpu_env${PYTHONPATH:+:$PYTHONPATH}"
+python -m pytest tests/morpheus/determinism -p gpuless -m "not gpu_mode" --run_slow -q -p no:cacheprovider
+```
+
+Do not load `gpuless` for a GPU run: `ci/scripts/gpu_conformance.sh` exists to exercise the real helper.
+
+**Git LFS Pointers in `tests/tests_data`**
+
+Every file under `tests/tests_data` is stored in Git LFS (refer to `.gitattributes`). In a clone where the LFS objects were not fetched, each file holds a three-line pointer beginning `version https://git-lfs.github.com/spec/v1` instead of its data, and the tests that read those fixtures fail on parse errors or skip. The fork's own determinism corpora are seeded code rather than checked-in data and are not affected. Fetch the fixtures with:
+
+```bash
+git lfs install
+scripts/fetch_data.py fetch tests validation
+```
+
+**Regenerating Golden Files After a cuDF Data Type Change**
+
+The determinism harnesses compare each composed pipeline's output with a checked-in golden file, `tests/morpheus/determinism/golden_<corpus>_expected.csv`. A change in how cuDF or pandas returns a column's data type, such as an integer column arriving as float, shows up as a golden mismatch like `404.0` against `404`. First confirm the output is collected through `tests/morpheus/determinism/host_frame.py`, which keeps integer columns as pandas `Int64`, a type that can hold a gap, in both execution modes; a golden that disagrees only on such a widening usually means a collector skipped it. If the change in output is intended, regenerate the golden deliberately with that corpus's driver in CPU mode and review the diff before committing it:
+
+```bash
+python tests/morpheus/determinism/run_<corpus>_pipeline.py tests/morpheus/determinism/golden_<corpus>_expected.csv cpu
+git diff tests/morpheus/determinism/golden_<corpus>_expected.csv
+```
+
+Every changed cell should be explained by the change you made; after a data type repair, each one should be a numerically equal value.

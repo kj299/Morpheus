@@ -49,16 +49,13 @@ body:
     attributes:
       label: Where have you looked?
       placeholder: |
-       https://github.com/nv-morpheus/Morpheus/blob/main/docs/README.md and
-       https://github.com/nv-morpheus/Morpheus/blob/main/README.md
+       https://github.com/kj299/morpheus/blob/branch-25.10/docs/README.md and
+       https://github.com/kj299/morpheus/blob/branch-25.10/README.md
 
   - type: checkboxes
     id: terms
     attributes:
-      label: Code of Conduct
-      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/nv-morpheus/.github/blob/main/CODE_OF_CONDUCT.md)
+      label: Duplicate check
       options:
-        - label: I agree to follow this project's Code of Conduct
-          required: true
-        - label: I have searched the [open documentation issues](https://github.com/nv-morpheus/Morpheus/issues?q=is%3Aopen+is%3Aissue+label%3Adoc) and have found no duplicates for this bug report
+        - label: I have searched the [open documentation issues](https://github.com/kj299/morpheus/issues?q=is%3Aopen+is%3Aissue) and have found no duplicates for this bug report
           required: true

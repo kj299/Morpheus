@@ -1,6 +1,10 @@
 # The CPU test environment this fork is verified in, as an explicit package list: micromamba 2.9.0 on linux-64,
-# python 3.12, morpheus-core 25.06 from rapidsai with its compiled library, pytest, yapf and pylint, every
-# dependency pinned to the build that was solved here. .github/workflows/fork-cpu.yaml creates the runner's
+# python 3.12, morpheus-core 25.06 with its compiled library, pytest, yapf and pylint, every dependency pinned to the
+# build that was solved here. morpheus-core, mrc and libmrc come from the nvidia channel; cudf, libcudf, pylibcudf,
+# rmm, librmm, libkvikio, pynvjitlink and rapids-dask-dependency come from rapidsai; everything else comes from
+# conda-forge. The packages trail the branch-25.10 sources on purpose: 25.06.00 is the newest morpheus-core release
+# on the nvidia channel (25.10 is published only as an alpha), and cudf 25.02 is the version dependencies.yaml pins.
+# Re-pin and regenerate when morpheus-core 25.10 is released. .github/workflows/fork-cpu.yaml creates the runner's
 # environment from this file, so CI runs the environment the tests were written against rather than whatever the
 # channels solve to on the day; a fresh solve in CI picked a libarrow build without libgflags and pyarrow would not
 # import. Regenerate with:
