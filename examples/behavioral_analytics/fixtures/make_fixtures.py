@@ -104,12 +104,16 @@ STATUS_MESSAGES = {
 VALIDATION_STRINGS = {value: key for (key, value) in collector_schemas.VALIDATION_RESULTS.items()}
 MFA_REQUIREMENTS = {value: key for (key, value) in collector_schemas.ENTRA_MFA_REQUIREMENTS.items()}
 TOKEN_TYPES = {"bearer": "none", "refresh": "primaryRefreshToken"}
+"""The contract's token types as Entra ID names them; any other value is the provider's own and passes through."""
 ENTRA_TENANT = "4f5e2b0a-3c1d-4e8f-9a7b-6c5d4e3f2a10"
 ENTRA_FAILURES = {
-    # The code Entra ID writes for each way the corpus's sign-ins fail: the second factor refused, or no second
-    # factor and the password wrong.
+    # The code Entra ID writes for each way a sign-in fails: the second factor refused, no second factor and the
+    # password wrong, or every factor passed and a policy refused the token. The corpus holds the first two.
     "denied": (500121, "Authentication failed during strong authentication request."),
     None: (50126, "Error validating credentials due to invalid username or password."),
+    "approved": (53003,
+                 "Access has been blocked by Conditional Access policies. The access policy does not allow "
+                 "token issuance."),
 }
 TLS_NAMES = {value: key for (key, value) in collector_schemas.TLS_VERSIONS.items()}
 SYSMON_PROVIDER = "<Provider Name='Microsoft-Windows-Sysmon' Guid='{5770385f-c22a-43e0-bf4c-06f5698ffbd9}'/>"
@@ -260,7 +264,7 @@ def write_signins(directory: str):
                 "mfaDetail": {
                     "authMethod": "Mobile app notification"
                 } if row["mfa_used"] else {},
-                "incomingTokenType": TOKEN_TYPES[row["token_type"]],
+                "incomingTokenType": TOKEN_TYPES.get(row["token_type"], row["token_type"]),
                 "tokenIssuerType": "AzureAD",
             }
             record = {

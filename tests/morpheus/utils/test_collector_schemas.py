@@ -180,6 +180,46 @@ def test_a_sign_in_is_read_as_the_contract_names_it(tmp_path):
     assert row["observed_time"] == row["event_time"] and row["tenant_id"] == "corp"
 
 
+def test_a_passwordless_first_factor_is_not_read_as_a_second_factor(tmp_path):
+    # A FIDO2 key or Windows Hello signs a user in with one step and no password; that step is the first factor,
+    # so a single-factor sign-in made that way carries no `mfa_result`, and a second factor is whatever follows it.
+    profile = CollectorProfile("c", "tc5_auth.v1", "corp")
+    path = tmp_path / "signins.jsonlines"
+    passwordless = {
+        "id": "sign-in-2",
+        "createdDateTime": "2026-10-17T10:00:00Z",
+        "userPrincipalName": "bob@example.com",
+        "appDisplayName": "wiki",
+        "ipAddress": "203.0.113.12",
+        "status": {
+            "errorCode": 0
+        },
+        "authenticationRequirement": "singleFactorAuthentication",
+        "authenticationDetails": [{
+            "authenticationMethod": "Windows Hello for Business", "succeeded": True
+        }],
+        "incomingTokenType": "none",
+    }
+    stepped_up = {
+        **passwordless,
+        "id":
+            "sign-in-3",
+        "authenticationRequirement":
+            "multiFactorAuthentication",
+        "authenticationDetails": [{
+            "authenticationMethod": "FIDO2 security key", "succeeded": True
+        }, {
+            "authenticationMethod": "Mobile app notification", "succeeded": True
+        }],
+    }
+    path.write_text(json.dumps(passwordless) + "\n" + json.dumps(stepped_up) + "\n", encoding="utf-8")
+
+    frame = collector_schemas.entra_signin(str(path), profile)
+
+    assert (frame.iloc[0]["mfa_used"], frame.iloc[0]["mfa_result"]) == (False, None)
+    assert (frame.iloc[1]["mfa_used"], frame.iloc[1]["mfa_result"]) == (True, "approved")
+
+
 def test_an_unknown_value_passes_through_rather_than_becoming_null(tmp_path):
     profile = CollectorProfile("c", "tc7_saas.v1", "corp")
     path = tmp_path / "audit.jsonlines"

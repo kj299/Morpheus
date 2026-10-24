@@ -422,11 +422,17 @@ def _place(value: str) -> str:
 
 
 def _mfa_result(steps: typing.Any) -> typing.Optional[str]:
-    """`approved` or `denied` from a sign-in's second-factor steps; null where none was asked for."""
+    """
+    `approved` or `denied` from a sign-in's second-factor steps; null where none was asked for.
+
+    The first step of `authenticationDetails` is the first factor, whatever method it used: a password, a FIDO2 key or
+    Windows Hello sign a passwordless user in with one step, and that step is not a second factor. Every step after
+    the first is one, and the result is `approved` only if all of them succeeded.
+    """
     if (_missing(steps) or isinstance(steps, str)):
         return None
 
-    second = [step for step in steps if step.get("authenticationMethod") != ENTRA_PASSWORD_METHOD]
+    second = list(steps)[1:]
 
     if (len(second) == 0):
         return None

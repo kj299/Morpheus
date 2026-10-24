@@ -35,14 +35,6 @@ if [[ -n "${MORPHEUS_CACHE_DIR}" ]]; then
    mkdir -p ${MORPHEUS_CACHE_DIR}
 fi
 
-if [[ ${MORPHEUS_SUPPORT_DOCA} == @(TRUE|ON) ]]; then
-   CMAKE_ARGS="-DMORPHEUS_SUPPORT_DOCA=ON ${CMAKE_ARGS}"
-
-   # Set the CMAKE_CUDA_ARCHITECTURES to just 80;86 since that is what DOCA supports for now
-   CMAKE_CUDA_ARCHITECTURES="80;86"
-
-   echo "MORPHEUS_SUPPORT_DOCA is ON. Setting CMAKE_CUDA_ARCHITECTURES to supported values: '${CMAKE_CUDA_ARCHITECTURES}'"
-fi
 
 # enable all functional blocks
 CMAKE_ARGS="-DMORPHEUS_BUILD_MORPHEUS_CORE=ON ${CMAKE_ARGS}"

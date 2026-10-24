@@ -64,7 +64,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
 That is fifty-seven stages and forty-six supporting
-modules, covered by 2,560 distinct tests, itemized in
+modules, covered by 2,561 distinct tests, itemized in
 [Part 6](#provided). Fifty-eight of the sixty rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -913,11 +913,15 @@ against the time of day would make a replay of last week's data expire everythin
 one corpus produce different output depending on when it was run. The reference that keeps replay honest is
 the stream's own progress, so a time further ahead of everything seen so far than any operational gap could
 explain is refused, the row carries no per-entity features, and the stage reports how many it refused.
-{py:mod}`~morpheus.utils.event_clock` implements this, and fourteen stages take `max_clock_skew_seconds`:
-`TC1BindingStage`, `TC2BindingStage`, `TC2AuthStage` and `TC5SessionStage` from the start, and since step 11
+{py:mod}`~morpheus.utils.event_clock` implements this, and thirty stages take `max_clock_skew_seconds`:
+`TC1BindingStage`, `TC2BindingStage`, `TC2AuthStage` and `TC5SessionStage` from the start, since step 11
 `TC1NormalizeStage`, `TC1RateStage`, `TC1OpticalStage`, `TC1ForecastStage`, `TC1FlapStage`, `TC1ChangeStage`,
-`TC2CardinalityStage`, `TC2BaselineStage` and `TC2ArpStage`, and since step 15 `TC1DeviceStage`. All but the two binding stages write `clock_refused`
-on the row they refused, which the pipeline's health record counts. The layer 3 to 7 window stages do not yet guard event time this way.
+`TC2CardinalityStage`, `TC2BaselineStage` and `TC2ArpStage`, since step 15 `TC1DeviceStage`, and since the repository
+research pass of 2026-10-24 the fifteen stateful TC-3 to TC-7 stages and `WindowSealStage`. All but the two binding
+stages write `clock_refused` on the row they refused, which the pipeline's health record counts. The guard is a bound
+on how far a row may run ahead of the rows believed before it, and the first row believed seeds it: a stream whose
+very first row comes from a broken clock is not caught here but by `EnvelopeValidateStage`, which quarantines a
+collector on the offset it reports, and by the total order the sources impose ahead of these stages.
 
 The guard has a property worth knowing before it is tuned. Its reference is the stream's own progress, so a stream
 that genuinely goes quiet for longer than the bound and then resumes is refused from then on: every later time is
