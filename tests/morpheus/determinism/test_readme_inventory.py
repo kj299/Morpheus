@@ -449,3 +449,163 @@ def test_part_2_names_the_tc5_fields_nothing_reads_yet():
     sentence = sentence[:sentence.index(". ")]
 
     assert sorted(re.findall(r"`([a-z0-9_]+)`", sentence)) == sorted(unread)
+
+
+SEARCH_HEAD_RESULTS = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "validate", "search_head_results.json")
+EXPECTED_RESULTS = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "validate", "expected_results.json")
+VALIDATION = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "validate", "VALIDATION.md")
+TELEMETRY = os.path.join(STAGES, "telemetry")
+
+HOST_ROW_RULE = "R-P-L3-009"
+"""The one layer 3 rule the README's layer 3 row leaves out of its count. It reads the host segment's trajectory
+rather than a flow feature, so the README narrates it in the host-segment paragraph under "What this fork is
+not" and the layer 3 row says so in as many words. The exception is written here so that a tenth layer 3 rule
+cannot hide behind it."""
+
+
+def readme_text() -> str:
+    with open(DOCUMENTS["README"], encoding="utf-8") as handle:
+        return handle.read()
+
+
+def shipped_rules_at(layers: str) -> list:
+    """The rule stanzas whose identifier names one of the given layer digits."""
+    (shipped, _) = shipped_rules()
+
+    return [rule for rule in shipped if re.match(rf"R-[A-Z]-L[{layers}]-", rule)]
+
+
+def layer_stages(layers: str) -> list:
+    """
+    The telemetry stage files this fork wrote for the given layers: `tc<n>_*_stage.py` for each digit, and
+    `flow_record_normalize_stage.py`, which feeds layer 3 and is the one stage of theirs not named after a class.
+    """
+    return sorted(name for name in os.listdir(TELEMETRY)
+                  if (re.match(rf"tc[{layers}]_.*_stage\.py$", name) or name == "flow_record_normalize_stage.py")
+                  and is_forks(os.path.join(TELEMETRY, name)))
+
+
+def test_the_boundary_bullet_counts_the_layer_3_4_6_7_stages_and_searches():
+    # "Seventeen stages and twenty-four detection searches ship for them" sat through the three predictive rules
+    # that took the layers to twenty-seven. Both numbers are read from the tree and the app.
+    match = re.search(r"([\w-]+) stages and ([\w-]+) detection searches ship for them", readme_text())
+
+    assert match is not None, "the README's layers 3, 4, 6 and 7 bullet no longer states its stage and search counts"
+
+    stages = layer_stages("3467")
+    rules = shipped_rules_at("3467")
+
+    assert len(stages) > 10 and len(rules) > 20
+
+    assert from_words(match.group(1)) == len(stages), (f"the README says {match.group(1)} stages ship for layers 3, "
+                                                       f"4, 6 and 7; the tree holds {len(stages)}: {stages}")
+    assert from_words(match.group(2)) == len(rules), (f"the README says {match.group(2)} detection searches ship for "
+                                                      f"layers 3, 4, 6 and 7; {len(rules)} stanzas do: {rules}")
+
+    # "all twenty-four have run on a search head" repeats the figure in the next sentence.
+    repeated = re.search(r"and all\s+([\w-]+) have run on a search head", readme_text())
+
+    assert repeated is not None, "the bullet no longer says all of those searches have run on a search head"
+    assert from_words(repeated.group(1)) == len(rules), f"the README says all {repeated.group(1)} have run"
+
+
+def test_the_siem_row_states_the_latest_search_head_run():
+    # The SIEM row ended on the 2026-10-22 run, "all eighty the app now ships, with 224", for a day after the
+    # thirteenth run returned eighty-two and wrote 233. The row's closing clause is read against the committed
+    # run, the expectations and the stanzas, so the app cannot gain a search without the row noticing.
+    import json  # pylint: disable=import-outside-toplevel
+
+    match = re.search(r"returned what is written for all ([\w-]+) the app now ships, with (\d+) \|", readme_text())
+
+    assert match is not None, "the README's SIEM row no longer ends on what the latest search-head run returned"
+
+    stated_searches = from_words(match.group(1))
+    stated_risk = int(match.group(2))
+
+    with open(SEARCH_HEAD_RESULTS, encoding="utf-8") as handle:
+        results = json.load(handle)
+
+    with open(EXPECTED_RESULTS, encoding="utf-8") as handle:
+        expected = json.load(handle)
+
+    (_, stanzas) = shipped_rules()
+
+    assert stated_searches == len(results["searches"]), (f"the README says all {match.group(1)} searches ran; "
+                                                         f"search_head_results.json holds {len(results['searches'])}")
+    assert stated_searches == len(expected["searches"]), (f"the README says all {match.group(1)}; "
+                                                          f"expected_results.json expects {len(expected['searches'])}")
+    assert stated_searches == stanzas, (f"the README says all {match.group(1)}; savedsearches.conf holds {stanzas} "
+                                        f"stanzas")
+
+    # VALIDATION.md narrates each run as "for all <N> over <events> indexed events, and the detections wrote <R>
+    # risk records"; the last such sentence is the latest run. If that phrasing ever goes, this half of the check
+    # goes with it and the assertion above against the committed run's own figure still stands.
+    with open(VALIDATION, encoding="utf-8") as handle:
+        narrated = re.findall(r"for all ([\w-]+) over [\d,]+ indexed\s+events, and the detections wrote (\d+) risk",
+                              handle.read())
+
+    assert narrated, "VALIDATION.md no longer narrates a run in the form this reads; update the pattern"
+    assert (stated_searches, stated_risk) == (from_words(narrated[-1][0]), int(narrated[-1][1])), (
+        f"the README's SIEM row says {match.group(1)} with {stated_risk}; VALIDATION.md's latest run says "
+        f"{narrated[-1][0]} with {narrated[-1][1]}")
+    assert stated_risk == results["checks"]["risk_records"]["indexed"], (
+        f"the README says {stated_risk} risk records; search_head_results.json indexed "
+        f"{results['checks']['risk_records']['indexed']}")
+
+
+def layer_row(layer: int) -> str:
+    text = readme_text()
+    start = text.index(f"| **Layer {layer} (TC-{layer})")
+
+    return text[start:text.index("\n", start)]
+
+
+@pytest.mark.parametrize("layer", [3, 4, 6])
+def test_each_layer_row_counts_the_searches_that_ship_for_it(layer: int):
+    # The layer 6 row said five detections shipped with six stanzas in the app, because R-P-L6-006 landed in the
+    # app and the guide and not here. Each row's "<N> detections ship" is read against its stanzas, with the one
+    # exception the layer 3 row states in the same sentence.
+    row = layer_row(layer)
+    match = re.search(r"([\w-]+)(?: of the ([\w-]+)) detections ship as saved searches", row) or re.search(
+        r"([\w-]+)() detections ship as saved searches", row)
+
+    assert match is not None, f"the README's layer {layer} row no longer says how many detections ship"
+
+    rules = shipped_rules_at(str(layer))
+
+    assert rules, layer
+
+    excluded = [rule for rule in rules if layer == 3 and rule == HOST_ROW_RULE]
+
+    if (excluded):
+        assert f"the ninth, {HOST_ROW_RULE}," in row, (f"the layer 3 row leaves {HOST_ROW_RULE} out of its count "
+                                                       f"and has to say so")
+
+    assert from_words(match.group(1)) == len(rules) - len(excluded), (
+        f"the README's layer {layer} row says {match.group(1)} detections ship; {len(rules)} stanzas do: {rules}"
+        + (f", of which {excluded} is counted in the host row" if excluded else ""))
+
+
+def test_the_layer_7_row_accounts_for_every_layer_7_search():
+    # The row counts its rules in three sentences -- "<N> detections ship on these", "<M> more ... on them" and
+    # "<K> more ... on it" -- and the row said four, two and one with eight stanzas in the app. Their sum is held
+    # to the stanzas.
+    row = layer_row(7)
+    counts = re.findall(r"([\w-]+) (?:detections ship on these|more detections? ships? on (?:them|it))", row)
+
+    assert len(counts) == 3, counts
+
+    rules = shipped_rules_at("7")
+
+    assert sum(from_words(count) for count in counts) == len(rules), (counts, rules)
+
+
+def test_the_host_paragraph_no_longer_defers_the_tls_and_dns_drift():
+    # "The daily drift over the TLS and DNS columns in their own pipelines comes next" outlived the pull request
+    # that shipped it by a day. The stanzas say it shipped; the sentence may not say otherwise.
+    text = readme_text()
+
+    assert "R-P-L6-006" in shipped_rules()[0] and "R-P-L7-009" in shipped_rules()[0]
+    assert re.search(
+        r"TLS and DNS columns[^.]*\bcomes next\b",
+        text) is None, ("the README still says the daily drift over the TLS and DNS columns comes next; it shipped")
