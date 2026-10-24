@@ -33,6 +33,10 @@ Into that corpus are planted the things the layer 1 and layer 2 features exist t
 - a **legitimate move**: one MAC that changes port between snapshots, so a whole cadence separates its two
   sightings and the rule that catches the spoof has something it must not fire on;
 - a **flood**: twenty gratuitous ARP replies from one host in one second, claiming the gateway;
+- a **desk spoof**: five gratuitous replies claiming the gateway from the workstation on the tapped port, six
+  minutes after the tap, so one port's chain is accused by a layer 1 and a layer 2 detection in the same
+  window -- the man-in-the-middle at a desk that the cross-layer chain search exists to assemble, where the flood
+  above accuses a different port's chain and on its own stays under that search's threshold;
 - a **reboot**: a device whose uptime and counters restart mid-corpus;
 - a **tap**: a step loss of receive power on one port, with transmit power unchanged;
 - a **failing optic**: a receive level sliding down a few hundredths of a decibel every poll until the maintenance
@@ -213,6 +217,10 @@ HUB_FROM_SECONDS = 1800
 SPOOF_AT_SECONDS = 2700
 FLOOD_AT_SECONDS = 2400
 FLOOD_PACKETS = 20
+DESK_SPOOF_AT_SECONDS = 2760
+DESK_SPOOF_PACKETS = 5
+"""The workstation on the tapped port claims the gateway in the window after the tap: its port's chain then carries
+R-D-L1-002's 50 and R-D-L2-003's 55 together, which is what `Chain assembly - cross-layer risk` sums."""
 ARP_LOSS_AT_SECONDS = 1205
 LOST_ARP_RECORDS = 3
 """The ARP sensor numbers three records it never delivers, a third of the way through the hour."""
@@ -857,6 +865,11 @@ def _build_arp(rng: random.Random) -> pd.DataFrame:
     for _ in range(FLOOD_PACKETS):
         events.append((FLOOD_AT_SECONDS, GATEWAY_IP, MAC_A, GATEWAY_IP, "reply"))
 
+    # The desk spoof: the host on the tapped port claims the gateway a few times, one tick each, after the tap. Too
+    # few to move the gratuitous proportion, so R-D-L2-003's claimant count is the only layer 2 feature that sees it.
+    for offset in range(DESK_SPOOF_PACKETS):
+        events.append((DESK_SPOOF_AT_SECONDS + offset, GATEWAY_IP, MAC_C, GATEWAY_IP, "reply"))
+
     events.sort(key=lambda event: event[0])
     rows = []
 
@@ -1277,11 +1290,9 @@ def run_classes(config: Config,
 
     if (len(bindings) > 0):
         bindings["row_key"] = [
-            event_uid("binding", *values) for values in zip(bindings["mac_address"],
-                                                            bindings["port_key"],
-                                                            bindings["bind_start"],
-                                                            bindings["bind_end"],
-                                                            bindings["bind_end_reason"])
+            event_uid("binding", *values)
+            for values in zip(bindings["mac_address"], bindings["port_key"], bindings["bind_start"],
+                              bindings["bind_end"], bindings["bind_end_reason"])
         ]
         outputs["tc2_binding"] = bindings
 

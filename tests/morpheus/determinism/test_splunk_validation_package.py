@@ -1549,12 +1549,13 @@ def test_the_fan_out_trajectory_returns_exactly_what_is_written(expected: dict):
     assert scanner and all(earlier < previous < peak for (earlier, previous, peak) in scanner)
 
 
-def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(expected: dict):
-    # An expected-empty search is only honest while its stated reason is the reason, and this one has been empty
-    # for four reasons in turn: a missing `osi_layer`, single-layer lineage, a risk sum nothing wrote, and now a
-    # risk sum that is written and is too small. Every detection collects its rows into `behavior_risk`; the one
-    # detection that accuses a lineage spanning three layers is the ARP anomaly, at 55, under the 60 the search
-    # needs. Both halves are asserted from the events, and the search-head run records the per-chain totals.
+def test_the_chain_assembly_returns_the_tapped_desk_and_not_the_flooding_host(expected: dict):
+    # The search was empty for four reasons in turn: a missing `osi_layer`, single-layer lineage, a risk sum
+    # nothing wrote, and a risk sum that was written and too small, because the two detections that accused a
+    # three-layer chain accused different chains. The desk spoof puts the ARP anomaly's 55 on the tapped port's
+    # chain beside R-D-L1-002's 50, so one chain reaches the 60 the search needs and the flooding host's, at 55,
+    # stays the quiet case beside it. Both are asserted from the events, as is the risk on every three-layer chain,
+    # and the search-head run records the per-chain totals.
 
     entry = expected["searches"]["Chain assembly - cross-layer risk"]
     chain = _search_text("Chain assembly - cross-layer risk")
@@ -1606,10 +1607,25 @@ def test_the_chain_assembly_blocker_is_the_size_of_the_risk_and_not_its_absence(
                 risk[lineage] += score
 
     totals = collections.Counter(str(int(risk.get(lineage, 0))) for lineage in three_layer)
+    accused = {lineage: risk[lineage] for lineage in three_layer if risk.get(lineage, 0) >= risk_threshold}
 
-    assert max(risk.get(lineage, 0) for lineage in three_layer) < risk_threshold
     assert entry["three_layer_chain_risk"] == dict(sorted(totals.items(), key=lambda item: int(item[0])))
-    assert entry["expected_rows"] == 0 and entry["expected_empty"] is True
+    assert entry["expected_rows"] == len(accused) == 1 and entry["expected_empty"] is False
+
+    # The one row is Carol's port in the window the tap and the desk spoof share, accused by both rules, and the
+    # flooding host's chain is the one at 55: the threshold, not the absence of a second accusation, keeps it out.
+    (lineage, total) = next(iter(accused.items()))
+    rules = sorted({
+        rule
+        for rule in LAYER_1_AND_2
+        for rows in _notables(rule) if any(row.get("lineage_id") == lineage for row in rows)
+    })
+    row = entry["key_values"][0]
+
+    assert (row["lineage_id"], row["total_risk"], row["layer_span"]) == (lineage, total, spans[lineage])
+    assert row["rules"] == rules == ["R-D-L1-002", "R-D-L2-003"]
+    assert row["methods"] == sorted(methods[lineage])
+    assert sorted(risk[lineage] for lineage in three_layer if 0 < risk.get(lineage, 0) < risk_threshold) == [55]
 
 
 def test_the_validation_document_says_the_same_thing_the_expectation_file_does(expected: dict):
@@ -1666,6 +1682,7 @@ def test_the_validation_document_says_the_same_thing_the_expectation_file_does(e
 
 
 NUMBER_WORDS = {
+    "one": 1,
     "two": 2,
     "three": 3,
     "four": 4,
@@ -1778,7 +1795,12 @@ def test_every_expected_empty_search_says_why(expected: dict):
     # and their reason had been wrong all along: an expiry rewrites the lookup with every row it keeps, and it had
     # kept none only because each refresh keyed its rows on a bucket counted from 1970. Keyed on the bucket the
     # row's own time falls in, which a validation run moves to the weeks before it, every row is kept.
-    assert len(empty) == 2
+    #
+    # One after the desk spoof. Chain assembly left last, and not because a threshold moved: the two detections
+    # that accused a three-layer chain had accused different chains, and the corpus now holds the actor the search
+    # exists for, a tapped desk whose workstation claims the gateway. The one that remains, R-D-L2-001, waits for
+    # the designation list only an estate can supply.
+    assert len(empty) == 1
 
     for (name, entry) in empty.items():
         assert entry["expected_rows"] == 0, name

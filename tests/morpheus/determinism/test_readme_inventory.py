@@ -511,45 +511,61 @@ def test_the_boundary_bullet_counts_the_layer_3_4_6_7_stages_and_searches():
 
 def test_the_siem_row_states_the_latest_search_head_run():
     # The SIEM row ended on the 2026-10-22 run, "all eighty the app now ships, with 224", for a day after the
-    # thirteenth run returned eighty-two and wrote 233. The row's closing clause is read against the committed
-    # run, the expectations and the stanzas, so the app cannot gain a search without the row noticing.
+    # thirteenth run returned eighty-two and wrote 233. The row's closing run is read against the recorded run,
+    # the expectations and the stanzas, so the app cannot gain a search without the row noticing. A recorded run
+    # is `search_head_results.json` while the expectations it matched are the ones written; once a change to the
+    # corpus or the stanzas supersedes it, the run is kept under `search_head_runs/`, the row says what was *then*
+    # written and that no run has returned the new expectation yet, and this reads the newest archived run instead.
     import json  # pylint: disable=import-outside-toplevel
 
-    match = re.search(r"returned what is written for all ([\w-]+) the app now ships, with (\d+) \|", readme_text())
+    runs = re.findall(r"returned what (is|was then) written for all ([\w-]+)(?: the app now ships)?, with (\d+)",
+                      readme_text())
 
-    assert match is not None, "the README's SIEM row no longer ends on what the latest search-head run returned"
+    assert runs, "the README's SIEM row no longer ends on what the latest search-head run returned"
 
-    stated_searches = from_words(match.group(1))
-    stated_risk = int(match.group(2))
-
-    with open(SEARCH_HEAD_RESULTS, encoding="utf-8") as handle:
-        results = json.load(handle)
+    (tense, spelled, risk) = runs[-1]
+    stated_searches = from_words(spelled)
+    stated_risk = int(risk)
 
     with open(EXPECTED_RESULTS, encoding="utf-8") as handle:
         expected = json.load(handle)
 
     (_, stanzas) = shipped_rules()
 
-    assert stated_searches == len(results["searches"]), (f"the README says all {match.group(1)} searches ran; "
-                                                         f"search_head_results.json holds {len(results['searches'])}")
-    assert stated_searches == len(expected["searches"]), (f"the README says all {match.group(1)}; "
+    if (os.path.exists(SEARCH_HEAD_RESULTS)):
+        assert tense == "is", "a recorded run is committed, so the row's last run is the one the expectations match"
+        results_path = SEARCH_HEAD_RESULTS
+    else:
+        assert tense == "was then", "no recorded run is committed, so the row's last run matched an earlier expectation"
+        assert "no run has returned" in readme_text(), "the row must say the current expectation awaits a run"
+        results_path = os.path.join(
+            os.path.dirname(SEARCH_HEAD_RESULTS),
+            "search_head_runs",
+            sorted(os.listdir(os.path.join(os.path.dirname(SEARCH_HEAD_RESULTS), "search_head_runs")))[-1])
+
+    with open(results_path, encoding="utf-8") as handle:
+        results = json.load(handle)
+
+    assert stated_searches == len(results["searches"]), (f"the README says all {spelled} searches ran; "
+                                                         f"{os.path.basename(results_path)} holds "
+                                                         f"{len(results['searches'])}")
+    assert stated_searches == len(expected["searches"]), (f"the README says all {spelled}; "
                                                           f"expected_results.json expects {len(expected['searches'])}")
-    assert stated_searches == stanzas, (f"the README says all {match.group(1)}; savedsearches.conf holds {stanzas} "
-                                        f"stanzas")
+    assert stated_searches == stanzas, f"the README says all {spelled}; savedsearches.conf holds {stanzas} stanzas"
 
     # VALIDATION.md narrates each run as "for all <N> over <events> indexed events, and the detections wrote <R>
     # risk records"; the last such sentence is the latest run. If that phrasing ever goes, this half of the check
-    # goes with it and the assertion above against the committed run's own figure still stands.
+    # goes with it and the assertion above against the recorded run's own figure still stands.
     with open(VALIDATION, encoding="utf-8") as handle:
         narrated = re.findall(r"for all ([\w-]+) over [\d,]+ indexed\s+events, and the detections wrote (\d+) risk",
                               handle.read())
 
     assert narrated, "VALIDATION.md no longer narrates a run in the form this reads; update the pattern"
     assert (stated_searches, stated_risk) == (from_words(narrated[-1][0]), int(narrated[-1][1])), (
-        f"the README's SIEM row says {match.group(1)} with {stated_risk}; VALIDATION.md's latest run says "
+        f"the README's SIEM row says {spelled} with {stated_risk}; VALIDATION.md's latest run says "
         f"{narrated[-1][0]} with {narrated[-1][1]}")
     assert stated_risk == results["checks"]["risk_records"]["indexed"], (
-        f"the README says {stated_risk} risk records; search_head_results.json indexed "
+        f"the README says {stated_risk} risk records; {os.path.basename(results_path)} indexed "
         f"{results['checks']['risk_records']['indexed']}")
 
 

@@ -338,7 +338,8 @@ the stanzas parse on a search head. Run `btool savedsearches list` after install
 The run that would settle that is packaged: `validate/run_search_head.sh` starts the validation container, indexes
 the sample events, dispatches all eighty-two searches in the order `validate/VALIDATION.md` prescribes, and writes
 `validate/search_head_results.json`, which `tests/morpheus/determinism/test_search_head_run.py` compares with
-`expected_results.json`. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:
+`expected_results.json` while it is committed; when a change supersedes a run, the run moves to
+`validate/search_head_runs/` with a test of exactly how it differs from what is now written. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:
 every one of the forty-eight searches ran without error over the pipeline's own events, and forty-six returned
 what was written. The two that did not were nulls on the wire -- a field sent as `null` is not absent to Splunk, and
 `macs_per_port_step>0` and `resolution_method=*` both let null values through. The serializer
@@ -383,8 +384,9 @@ the host watchlist's expiry the same three, and the summary 8801 rows with the h
 regenerated when the daily drift reached the TLS and DNS columns: it indexed all 24,736 events, returned what is written
 for all eighty-two -- R-P-L6-006 the creeping host's last three days, R-P-L7-009 the slow tunnel's last four, R-B-L6-001
 seven rows where it returned five, and the host watchlist holding all ten entries until its expiry kept R-P-L3-009's
-three -- held the 233 risk records the detections returned, and is `validate/search_head_results.json`; the earlier
-twelve are kept beside it.
+three -- and held the 233 risk records the detections returned. It is kept in `validate/search_head_runs/` with
+the twelve before it, because on 2026-10-24 the estate corpus gained the desk spoof, the actor Chain assembly exists
+for, and the chain search's expectation went from no rows to one; no run has returned it yet.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

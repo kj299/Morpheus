@@ -396,9 +396,10 @@ def test_r_d_l2_003_fires_on_the_flooded_gateway_and_not_on_the_redundancy_pair(
     arp = result[result["telemetry_class"] == "tc2_arp"]
     candidates = arp[(arp["macs_claiming_sender_ip"].fillna(0) > 1) & (arp["arp_sender_ip_excluded"] == False)]  # noqa: E712  pylint: disable=singleton-comparison
 
-    # The search groups by address within the window; here, one contested address in the whole corpus.
+    # The search groups by address within the window; here, one contested address in the whole corpus, claimed by
+    # the flooding host in one window and by the workstation on the tapped port in another, the router in both.
     assert set(candidates["arp_sender_ip"]) == {tp.GATEWAY_IP}
-    assert set(candidates["arp_sender_mac"]) == {tp.MAC_A, tp.ROUTER_MAC}
+    assert set(candidates["arp_sender_mac"]) == {tp.MAC_A, tp.MAC_C, tp.ROUTER_MAC}
     assert candidates["macs_claiming_sender_ip"].max() == 2
 
     # The VRRP pair is contested by design, marked excluded, and therefore not a candidate. Without the exclusion

@@ -99,8 +99,8 @@ events, and the detections wrote 224 risk records. R-P-L3-009 returned its three
 nothing with any other corpus's. The eleventh run differs from what is written in the summary and R-B-L6-001, and
 has none of the four searches the host half added. The twelfth is kept in `search_head_runs/` too.
 
-`search_head_results.json` holds the thirteenth, made on 2026-10-23 on the same install over the events regenerated
-when the daily drift reached the TLS and DNS columns: a week of handshakes from a host that acquires a stack a day and
+The thirteenth, kept in `search_head_runs/` with the twelve before it, was made on 2026-10-23 on the same install over
+the events regenerated when the daily drift reached the TLS and DNS columns: a week of handshakes from a host that acquires a stack a day and
 one that acquires two and stops, and eight days of a client tunnelling slowly under R-B-L7-001's floor. It returned
 what is written for all eighty-two over 24,736 indexed events, and the detections wrote 233 risk records, so the run
 checks that the index holds exactly those rows -- 233 -- before the searches that read them run. R-P-L6-006 returns
@@ -110,6 +110,9 @@ and R-P-L7-009's four, and the expiry job keeps R-P-L3-009's and drops the seven
 1970's timeline. R-B-L6-001 grows from five rows to seven, the creeping host and its control, and the summary by the
 584 scored events; R-B-L7-001 returns its one tunnel as before, the slow one never reaching its count. The twelfth
 run differs from what is written in the summary and R-B-L6-001, and has neither of the two searches this part added.
+The thirteenth differs from what is written in Chain assembly alone: the desk spoof planted on 2026-10-24 put the
+ARP anomaly's 55 on the tapped port's chain beside the tap's 50, so the search now expects the one row the run before
+the plant could not have returned; the anomaly's own notable count is unchanged, since the search groups by address.
 
 ## Running it
 
@@ -243,8 +246,8 @@ should return nothing:
 | R-C-002, TLS before beaconing | **1** | One chain, and the first this rule has ever returned: it now reads the scored events rather than the two detections' notables. A settled host presents a new stack to a destination and fourteen minutes later its beacon there matures. Four hosts do both halves with one condition broken and are quiet: a beacon already running an hour before, a beacon to another address, a beacon maturing after sixty-seven minutes, and a host with five handshakes behind it. The new stack and the beacon's first flow are one connection, so the pair is joined on its Community ID, `hard:community_id`. |
 | R-C-005, credential replay across the stack | **1** | One principal at two switch ports 534 km apart twenty minutes apart: the leases name the workstations behind both sign-in addresses, and the MAC bindings closed from the two sites' switches put them at headquarters and in Edinburgh. Five others are one step short and quiet -- two ports at the same site, the same journey in three hours, an address no lease names, a lease that had ended an hour before, and a refused second attempt. Nothing here rests on geolocation: both ends of the journey are ports. |
 | R-C-003, physical compromise chain | **1** | One port and one device: the walk that finds a single-board computer behind a headquarters desk port, a vendor the port has never carried, on the poll that saw its link drop, and thirteen minutes later SSH from the address its lease gave it to the switches' management interface. A fleet laptop plugged in the same way, a printer that never reaches management, and a second single-board computer behind a desk switch whose link never moves are each one step short and quiet. |
-| Behavior summary, per-layer scores | **8969** | One row per five-minute bin, layer, entity and lineage over the 17796 scored events, of which 1568 are the host segment's, one per workstation per hour on `morpheus:score:host`. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5's scored week and the host segment's, because only `TC5ScoreStage` produces `max_abs_z` and it does not score the fortnight the models were trained on. |
-| Chain assembly, cross-layer risk | **0** | Correct, and now because the risk is written and is not enough. Every detection collects its rows into `behavior_risk` and this search sums them per lineage, once each. 15 of the 3764 chains span three layers -- a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there -- and two detections accuse one each: R-D-L2-003 at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, both under the 60 the search needs. The other 13 carry none; the run records all three totals. `methods` reads every hop the resolver ladder took, so the 15 name `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. |
+| Behavior summary, per-layer scores | **8969** | One row per five-minute bin, layer, entity and lineage over the 17801 scored events, of which 1568 are the host segment's, one per workstation per hour on `morpheus:score:host`. It returned nothing until `EnvelopeStampStage` put `osi_layer` and `entity_key` on every record, and 320 until the estate pipeline rendered these events with the desk authentications beside the ports; `peak_z` is still null outside layer 5's scored week and the host segment's, because only `TC5ScoreStage` produces `max_abs_z` and it does not score the fortnight the models were trained on. |
+| Chain assembly, cross-layer risk | **1** | One chain: Carol's port, in the window the tap and the desk spoof share. Every detection collects its rows into `behavior_risk` and this search sums them per lineage, once each. 15 of the 3764 chains span three layers -- a port's layer 1 samples, the layer 2 observations resolved onto it, and the authentications of the person sitting there -- and three detections' records land on them: R-D-L1-002, the tap on Carol's port, at 50; R-D-L2-003, the gateway claimed by two MACs, at 55 on the flooding host's port and, since the workstation on the tapped port claims the gateway too, at 55 on Carol's. Carol's chain sums to 105 and is returned, naming both rules and the three methods the ladder took; the flooding host's chain stays at 55, under the 60 the search needs, and the other 13 carry none. The run records all three totals. `methods` reads every hop the resolver ladder took, so the 15 name `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. No search head has returned the row yet: the thirteenth run was made over the events before the desk spoof. |
 | Binding lookup, L2/L3 refresh | **1685** | One row per desk address and five-minute bucket its lease covers: the campaign DHCP server's acknowledgements for the eleven addresses R-C-005's sign-ins come from and the four R-C-003's intruders were given, closed by `TC2BindingStage` into leases held for the term the server granted, each naming the workstation's MAC and the switch port the relay saw. It was empty until the leases had a producer, and for a while before that was credited with 80 rows that were a MAC table under a different name. |
 | Binding lookup, L2 refresh | **1249** | One row per MAC and five-minute bucket a MAC table binding covers: the estate's 124 and the campaign's two sites' 1125, the intruders' four desk ports among them. Each names the port the MAC was behind, the rung between an address's MAC and a port. |
 | Binding lookup, L5/L2 refresh | **59** | One row per 802.1X identity and five-minute bucket a supplicant binding covers, from the estate's authenticator: the port an identity was authorized on, the rung from a person to a port once the estate's directory names the identity they present. |
@@ -263,7 +266,7 @@ should return nothing:
 | Platform baseline step | **1** | The SaaS corpus's second tenant, whose sync doubled for its last two days and held there. The identity provider's one-hour burst to twice its peak does not hold into the next window and is not a step. |
 | R-P-L5-006, drift trajectory | **6** | Two principals, neither of them behaviour, explained in `expected_results.json`: the two whose week repeats their fortnight climb on its last three days by hundredths a day, as the cadence features keep moving after their models were trained, and the rule measures that against a day-to-day spread that is nearly zero. The principals whose week does depart all cross the mean ceiling and leave. Watchlist, never a page: every firing is written to `principal_watchlist`. |
 
-**Two of the eighty-two should return nothing.** That is the point of writing them down. An empty result is
+**One of the eighty-two should return nothing.** That is the point of writing them down. An empty result is
 this app's characteristic failure, and without a list saying which emptiness is correct, a deployment cannot
 tell a rule that is working from a rule that is broken. The ratio has moved both ways, which is what makes it
 worth stating: it improved as layers 3, 4, 5, 6 and 7 gained producers, and went the other way when the L2/L3 refresh
@@ -272,10 +275,11 @@ when the DHCP leases gained a producer, and the expiry jobs left with it once ea
 their own time rather than on a bucket counted from 1970 -- and again when R-P-L3-005
 turned out to have been empty because its own SPL could not fire. R-B-L5-001 and R-B-L5-002 left the list when
 each principal gained a learned model of their own, which is what their gate had been waiting for. Chain assembly is the one worth following,
-because it has now been empty for four different reasons in turn: a missing `osi_layer`, then lineage that never
-left one layer, then a risk sum nothing wrote, and now a risk sum that is written and falls five points short on
-the one three-layer chain a detection accuses. Each fix made the next blocker visible, which is what an
-expectation file is for.
+because it was empty for four different reasons in turn: a missing `osi_layer`, then lineage that never left one
+layer, then a risk sum nothing wrote, then a risk sum that was written and fell five points short on the one
+three-layer chain a detection accused. Each fix made the next blocker visible, which is what an expectation file is
+for, and the last of them was the corpus: no planted actor was ever accused twice on one chain, so the search was
+validated only as a correct empty until the desk spoof gave it the man-in-the-middle it exists to assemble.
 
 ## The watchlist the predictive searches write
 

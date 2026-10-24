@@ -64,7 +64,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
 That is fifty-seven stages and forty-six supporting
-modules, covered by 2,559 distinct tests, itemized in
+modules, covered by 2,560 distinct tests, itemized in
 [Part 6](#provided). Fifty-eight of the sixty rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -4640,13 +4640,19 @@ person resolves earlier in the hour and not later. Both are asserted, and the ha
 naming the remote worker in the directory, rooting layer 5 on the principal, making the supplicant binding
 eternal, and sealing layer 5 apart -- with each break failing the test that exists for it.
 
-`Chain assembly - cross-layer risk` is still empty, and it is worth being exact about why, because the reason has
-changed again. Its first threshold, `dc(osi_layer) >= 3`, is met. The line after it is not: `total_risk >= 60 OR
-(layer_span >= 4 AND peak_z >= 4.0)`. Every detection now ends in `| collect index=behavior_risk`, so its rows
-outlive its job, and the chain search sums those records per lineage, once each (gap G11, issue #57). On the
-sample events one detection accuses a three-layer chain -- R-D-L2-003, the address two MACs claimed, at 55 --
-and the other fourteen carry none, so the search returns nothing for a reason the search-head run now records
-rather than infers. Before that change no detection stanza collected, raised a notable or alerted, so
+`Chain assembly - cross-layer risk` returns one row, and it is worth being exact about how, because for a long
+time it returned none and the reason kept changing. Its first threshold, `dc(osi_layer) >= 3`, has been met since
+the estate pipeline sealed layers 1, 2 and 5 together. The line after it, `total_risk >= 60 OR (layer_span >= 4 AND
+peak_z >= 4.0)`, was not: every detection ends in `| collect index=behavior_risk`, so its rows outlive its job, and
+the chain search sums those records per lineage, once each (gap G11, issue #57), but on the sample events the two
+detections that accused a three-layer chain accused different chains -- R-D-L2-003, the gateway two MACs claimed,
+at 55 on the port the flooding host sits at, and R-D-L1-002, the tap, at 50 on Carol's -- and no chain reached 60.
+The repository research pass of 2026-10-24 found the fork's headline capability validated only as a correct empty,
+and planted the actor the search exists for: the workstation on the tapped port claims the gateway in the window
+after the tap, so that port's chain carries 50 and 55 together, 105, and the search returns it, naming both rules
+and the three resolution methods the ladder took. The flooding host's chain stays at 55 beside it, the quiet case
+that proves the threshold is doing the work. The run that would return the row on a search head has not been made
+yet; the thirteenth run, over the events before the plant, is kept with the twelve before it. Before that change no detection stanza collected, raised a notable or alerted, so
 `risk_score` never landed in any index the chain search read, and three documents called that a deployment step.
 The `morpheus:edge` events carry the chain now: `EdgeEmitStage` writes each edge with its child's `lineage_id`, so
 an edge's join method is counted with the chain it belongs to.
