@@ -394,7 +394,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G69 | minor | stands → holds | systems | AppShield host snapshots named as a TC-7 source and used by nothing | #52 |
 | G70 | minor | narrowed → holds | network objects | No TC-0 context keyed on port, device or VLAN (commissioning optical level, designation, owner) | not scheduled |
 | G71 | minor | stands → closed | network objects | Stateful TC-1/TC-2 stages other than binding and auth do not guard event time | #62 |
-| G72 | minor | stands → holds | network objects | TC1FeatureStage runs in no composed pipeline, golden or sourcetype | #52 |
+| G72 | minor | stands → holds → closed | network objects | TC1FeatureStage runs in no composed pipeline, golden or sourcetype; removed 2026-10-24 (audit ruling D5) | #52 |
 | G73 | minor | stands → closed | network objects | TC-1 field names and counter contract in guide/README do not match stage inputs and outputs | #52 |
 | G74 | minor | narrowed → holds | network objects, platforms, users, applications | Index retention and `MAX_DAYS_AGO` contradict the guide's 13-month requirement for TC-1/5/6/7 | #52 |
 | G75 | minor | stands → closed | nodes | Layer 3 rows carry no exporter device column, so flow exporter clock cannot be perturbed or quarantined | #62 |

@@ -621,7 +621,6 @@ add_command("tc0-identity", "morpheus.stages.telemetry.tc0_identity_stage.TC0Ide
 add_command("tc1-binding", "morpheus.stages.telemetry.tc1_binding_stage.TC1BindingStage", modes=ALL)
 add_command("tc1-change", "morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage", modes=ALL)
 add_command("tc1-device", "morpheus.stages.telemetry.tc1_device_stage.TC1DeviceStage", modes=ALL)
-add_command("tc1-features", "morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage", modes=ALL)
 add_command("tc1-flap", "morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage", modes=ALL)
 add_command("tc1-forecast", "morpheus.stages.telemetry.tc1_forecast_stage.TC1ForecastStage", modes=ALL)
 add_command("tc1-normalize", "morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage", modes=ALL)

@@ -81,20 +81,20 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 2,412 tracked files,
-the 2,407 the passes read and the five this audit adds: the two manifests, this guide, its test and the shared
-corpus pipeline helper.
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 2,409 tracked files:
+the 2,407 the passes read and the five this audit adds (the two manifests, this guide, its test and the shared
+corpus pipeline helper), less the three files ruling D5 removed on 2026-10-24.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 1476 |
+| `remove` | 1473 |
 | `keep-dependency` | 413 |
 | `keep` | 375 |
 | `update` | 148 |
 
-Most of the removal is upstream code the fork never touched: 1,467 of the 1,476 files. Six are upstream
-organization workflows the fork modified, and three are its own: `TC1FeatureStage`, its utility module and
-its test, which `TC1ChangeStage` superseded.
+The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
+organization workflows the fork modified, and three were its own: `TC1FeatureStage`, its utility module and
+its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), so 1,473 remain marked.
 
 Between the passes, the second readers moved files in both directions:
 
@@ -201,7 +201,9 @@ insertion. Both are plan items below.
 
 The removals land as one change per ruling, in this order, each with the `update` edits its records name:
 
-1. **D5**, the smallest and entirely the fork's own.
+1. **D5**, the smallest and entirely the fork's own. Done on 2026-10-24: three files removed, and the command line,
+   CPU tier list, liveness registry, `TC1ChangeStage` and its test, the stages page, guides 11 and 12 and the stage
+   counts edited with them.
 2. **D1**, use case by use case if the change is too large to review at once.
 3. **D2**, after the fork model inventory exists to receive the two models.
 4. **D6**, then **D7**.

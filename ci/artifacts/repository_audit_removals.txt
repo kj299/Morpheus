@@ -970,13 +970,11 @@ python/morpheus/morpheus/stages/preprocess/group_by_column_stage.py
 python/morpheus/morpheus/stages/preprocess/preprocess_base_stage.py
 python/morpheus/morpheus/stages/preprocess/preprocess_fil_stage.py
 python/morpheus/morpheus/stages/preprocess/preprocess_nlp_stage.py
-python/morpheus/morpheus/stages/telemetry/tc1_feature_stage.py
 python/morpheus/morpheus/utils/cudf_subword_helper.py
 python/morpheus/morpheus/utils/env_config_value.py
 python/morpheus/morpheus/utils/logging_timer.py
 python/morpheus/morpheus/utils/onnx_to_trt.py
 python/morpheus/morpheus/utils/sql_utils.py
-python/morpheus/morpheus/utils/tc1_features.py
 python/morpheus_dfp/morpheus_dfp/modules/__init__.py
 python/morpheus_dfp/morpheus_dfp/modules/dfp_data_prep.py
 python/morpheus_dfp/morpheus_dfp/modules/dfp_deployment.py
@@ -1376,7 +1374,6 @@ tests/morpheus/stages/test_multi_port_modules_stage.py
 tests/morpheus/stages/test_preprocess_fil_stage.py
 tests/morpheus/stages/test_preprocess_nlp_stage.py
 tests/morpheus/stages/test_rss_source_stage_pipe.py
-tests/morpheus/stages/test_tc1_feature_stage.py
 tests/morpheus/stages/test_triton_inference_stage.py
 tests/morpheus/utils/test_control_message_utils.py
 tests/morpheus/utils/test_cudf_subword_helper.py
