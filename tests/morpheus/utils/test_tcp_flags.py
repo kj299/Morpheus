@@ -28,6 +28,8 @@ from morpheus.utils.tcp_flags import flags_from_byte
 def reference(flags: int) -> dict:
     """The extraction `abp_pcap_preprocessing.py` performs, transcribed.
 
+    Source: https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py
+
     It renders the byte as a five-character binary string and indexes into it. Reproduced here rather than
     described so the mask below is checked against the thing it replaces rather than against a reading of it.
     """

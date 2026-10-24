@@ -30,11 +30,13 @@ import re
 import pandas as pd
 import pytest
 
-from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.io import serializers
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
+from morpheus.pipeline import LinearPipeline
+from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
+from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
 from morpheus.utils import siem_sourcetypes
 from morpheus.utils.type_utils import get_df_class
@@ -334,12 +336,30 @@ def test_an_unknown_sourcetype_cannot_be_configured(config: Config):
 
 
 @pytest.mark.cpu_mode
-def test_the_needed_columns_are_declared_as_strings(config: Config):
+def test_the_time_columns_are_not_preallocated(config: Config):
+    # A preallocated column is filled with empty strings, which would satisfy the presence check for an absent
+    # anchor; see the pipeline test below.
     stage = SiemWireStage(config, sourcetype="binding:l2")
 
     assert stage.sourcetype == "binding:l2"
-    assert stage._needed_columns["bind_end"] == TypeId.STRING  # pylint: disable=protected-access
-    assert stage._needed_columns["bind_start"] == TypeId.STRING  # pylint: disable=protected-access
+    assert "bind_end" not in stage._needed_columns  # pylint: disable=protected-access
+    assert "bind_start" not in stage._needed_columns  # pylint: disable=protected-access
+
+
+@pytest.mark.cpu_mode
+def test_a_missing_anchor_raises_inside_a_pipeline(config: Config):
+    # Calling on_data directly always raised; composed behind a source, the anchor used to be preallocated as an
+    # empty string and the record went out with no event time and no error.
+    frame = pd.DataFrame({"bind_start": [SAMPLE_NS], "mac_address": ["aa"], "port_key": ["p"]})
+    pipeline = LinearPipeline(config)
+    pipeline.set_source(InMemorySourceStage(config, [frame]))
+    pipeline.add_stage(SiemWireStage(config, sourcetype="morpheus:score:l2"))
+    sink = pipeline.add_stage(InMemorySinkStage(config))
+
+    with pytest.raises(KeyError, match="stamped at index"):
+        pipeline.run()
+
+    assert sink.get_messages() == []
 
 
 @pytest.mark.cpu_mode

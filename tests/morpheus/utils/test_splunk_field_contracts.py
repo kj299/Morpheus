@@ -31,6 +31,7 @@ than by accident.
 """
 
 import configparser
+import glob
 import os
 import re
 
@@ -343,9 +344,7 @@ def golden_columns() -> set:
     """
     columns = set()
 
-    for name in GOLDEN_NAMES:
-        path = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism", name)
-
+    for path in GOLDEN_PATHS:
         with open(path, encoding="utf-8") as handle:
             columns.update(handle.readline().strip().split(","))
 
@@ -556,18 +555,15 @@ def test_every_field_a_search_reads_is_a_field_something_writes(name: str):
         f"it, or it belongs in KNOWN_UNPRODUCED with the reason it does not.")
 
 
-GOLDEN_NAMES = ("golden_telemetry_expected.csv",
-                "golden_lineage_expected.csv",
-                "golden_network_expected.csv",
-                "golden_transport_expected.csv",
-                "golden_presentation_expected.csv",
-                "golden_application_expected.csv",
-                "golden_campaign_expected.csv",
-                "golden_context_expected.csv",
-                "golden_endpoint_expected.csv",
-                "golden_saas_expected.csv",
-                "golden_session_expected.csv",
-                "golden_estate_expected.csv")
+GOLDEN_PATHS = tuple(
+    sorted(glob.glob(os.path.join(REPO_ROOT, "tests", "morpheus", "determinism", "golden_*_expected.csv"))))
+"""Every composed pipeline's golden. Globbed rather than listed, so a corpus whose golden is committed is read here
+without anyone having to remember to name it."""
+
+
+def test_the_goldens_are_found():
+    # An empty glob would make every golden-backed check above vacuous rather than failing.
+    assert len(GOLDEN_PATHS) > 0, "no golden_*_expected.csv found beside the determinism harnesses"
 
 
 def layer_columns() -> dict:
@@ -577,9 +573,7 @@ def layer_columns() -> dict:
 
     found = collections.defaultdict(set)
 
-    for name in GOLDEN_NAMES:
-        path = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism", name)
-
+    for path in GOLDEN_PATHS:
         with open(path, encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
                 layer = row.get("osi_layer")

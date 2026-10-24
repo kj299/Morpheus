@@ -61,10 +61,11 @@ import pandas as pd
 import session_pipeline as sp
 import stamping
 import telemetry_pipeline as tp
+from corpus_pipeline import _collect
+from corpus_pipeline import build_pipeline_config  # pylint: disable=unused-import  # re-exported for callers
 from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
 from morpheus.stages.lineage.chain_anchor_stage import DEFAULT_ANCHOR_COLUMN
@@ -260,26 +261,6 @@ def close_supplicant_bindings(config: Config, dataframes: list, impose_order: bo
                       dataframes,
                       [TC2BindingStage(config, key_column="dot1x_identity", attribute_columns=["auth_port_key"])],
                       impose_order)
-
-
-def build_pipeline_config(execution_mode=None) -> Config:
-    """A pipeline configuration, defaulting to CPU mode and importable without a GPU."""
-    return tp.build_pipeline_config(execution_mode)
-
-
-def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
-    from host_frame import to_host_frame
-
-    frames = []
-
-    for message in sink.get_messages():
-        meta = message.payload() if isinstance(message, ControlMessage) else message
-        frames.append(to_host_frame(meta.copy_dataframe()))
-
-    if (len(frames) == 0):
-        return pd.DataFrame()
-
-    return pd.concat(frames, ignore_index=True)
 
 
 def _run_class(config: Config, dataframes: list, stages: list, impose_order: bool = True) -> pd.DataFrame:

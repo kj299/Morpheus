@@ -4,6 +4,13 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
@@ -259,7 +266,6 @@ def test_the_transport_pipeline_produces_a_parsable_timestamp(wire_config: Confi
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_presentation_pipeline_produces_a_parsable_timestamp(wire_config: Config, presentation: pd.DataFrame):
-    # Layer 6 was the last of the score stanzas parsed without a producer but one. Only layer 7 is left.
     assert len(presentation) > 0, "the harness emitted no layer 6 rows"
 
     assert_parses_as_its_own_stanza(wire_config, presentation.copy(), "morpheus:score:l6")
@@ -270,8 +276,8 @@ def test_the_presentation_pipeline_produces_a_parsable_timestamp(wire_config: Co
 def test_the_application_pipeline_produces_a_parsable_timestamp(wire_config: Config,
                                                                 application: pd.DataFrame,
                                                                 telemetry_class: str):
-    # The last score stanza to get a producer. Both layer 7 classes share it, the way layer 2's classes share
-    # theirs, so each is checked against it separately rather than as one frame that could hide either.
+    # Both layer 7 classes share one score stanza, the way layer 2's classes share theirs, so each is checked
+    # against it separately rather than as one frame that could hide either.
     rows = application[application["telemetry_class"] == telemetry_class].reset_index(drop=True)
 
     assert len(rows) > 0, f"the harness emitted no {telemetry_class} rows"

@@ -47,7 +47,6 @@ does nothing at all about retention, which is a property of the index rather tha
 """
 
 import logging
-import math
 import typing
 
 import mrc
@@ -62,6 +61,7 @@ from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.entity_key import is_missing
 from morpheus.utils.personal_data import AMBIGUOUS
 from morpheus.utils.personal_data import BOUNDED_DOMAIN
 from morpheus.utils.personal_data import CATEGORIES
@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 def _missing(value: typing.Any) -> bool:
     """A gap, however the frame spelled it. NaN is one object pandas hands out again and again, so a NaN in a
     pseudonymized column matched every NaN in every kept column and the check refused a policy over a gap."""
-    return value is None or (isinstance(value, float) and math.isnan(value))
+    return is_missing(value)
 
 
 CLASS_COLUMN = "telemetry_class"

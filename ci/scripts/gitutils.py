@@ -67,6 +67,43 @@ def _git(*args):
     return _run_cmd("git", *args)
 
 
+# Matches the trailing `owner/name` of a remote URL in either the SSH form (`git@host:owner/name.git`) or the URL form
+# (`https://host/owner/name`, `ssh://git@host/owner/name.git`), with an optional `.git` suffix and trailing slash.
+_OWNER_NAME_RE = re.compile(r"[:/](?P<owner>[^/:]+)/(?P<name>[^/:]+?)(?:\.git)?/?$")
+
+
+def _parse_owner_name(url: str) -> str | None:
+    """
+    Extracts `owner/name` from a git remote URL.
+
+    Returns
+    -------
+    str | None
+        The last two path components of the URL as `owner/name`, or None when the URL does not end in `owner/name`.
+    """
+    match = _OWNER_NAME_RE.search(url.strip())
+
+    if (match is None):
+        return None
+
+    return f"{match.group('owner')}/{match.group('name')}"
+
+
+def _fetch_remotes() -> list[tuple[str, str]]:
+    """
+    Returns the `(remote name, URL)` pairs of `git remote -v` that are fetch entries, in the order git lists them.
+    """
+    remotes = []
+
+    for line in _git("remote", "-v").splitlines():
+        parts = line.split()
+
+        if (len(parts) == 3 and parts[2] == "(fetch)"):
+            remotes.append((parts[0], parts[1]))
+
+    return remotes
+
+
 class GitWrapper:
 
     @functools.lru_cache
@@ -113,15 +150,49 @@ class GitWrapper:
     @functools.lru_cache
     @staticmethod
     def get_repo_owner_name():
+        """
+        Returns the `owner/name` of the repository behind the first fetch remote that has a GitHub-style URL.
 
-        # pylint: disable=anomalous-backslash-in-string
-        return "nv-morpheus/" + _run_cmd("git remote -v | grep -oP '/\K\w*(?=\.git \(fetch\))' | head -1")  # noqa: W605
+        The owner is read from the remote URL rather than assumed, so a fork resolves to its own repository (for
+        example `kj299/Morpheus`) while an upstream clone still resolves to `nv-morpheus/Morpheus`.
+
+        Returns
+        -------
+        str
+            The `owner/name` string, or an empty string when no fetch remote has a recognizable URL.
+        """
+        for (_, url) in _fetch_remotes():
+            owner_name = _parse_owner_name(url)
+
+            if (owner_name is not None):
+                return owner_name
+
+        return ""
 
     @functools.lru_cache
     @staticmethod
     def get_repo_remote_name(repo_owner_and_name: str):
+        """
+        Returns the name of the first fetch remote whose URL points at `repo_owner_and_name`.
 
-        return _run_cmd(f"git remote -v | grep :{repo_owner_and_name} | grep \"(fetch)\" | head -1 | cut -f1")
+        Both the SSH form (`git@github.com:owner/name.git`) and the HTTPS form (`https://github.com/owner/name`) match.
+        The comparison ignores case because GitHub treats owner and repository names case-insensitively, and the
+        `gh` CLI may report a different case than the clone URL uses.
+
+        Returns
+        -------
+        str
+            The remote name, or an empty string when no fetch remote points at the repository.
+        """
+        wanted = repo_owner_and_name.lower()
+
+        for (remote_name, url) in _fetch_remotes():
+            owner_name = _parse_owner_name(url)
+
+            if (owner_name is not None and owner_name.lower() == wanted):
+                return remote_name
+
+        return ""
 
     @functools.lru_cache
     @staticmethod

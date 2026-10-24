@@ -1,6 +1,6 @@
 {
   "description": "What each shipped saved search should return when the app is deployed against sample_events/. Generated numbers come from the same run_pipeline the determinism tests call; the expected-empty entries are stated with the reason, because a search returning nothing is the failure mode this whole app is careful about and it must be possible to tell a correct empty from a broken one.",
-  "corpus": "tests/morpheus/determinism/estate_pipeline.py, lineage_pipeline.py, network_pipeline.py, transport_pipeline.py, presentation_pipeline.py, application_pipeline.py, session_pipeline.py and host_score_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
+  "corpus": "tests/morpheus/determinism/estate_pipeline.py, session_pipeline.py, network_pipeline.py, transport_pipeline.py, presentation_pipeline.py, application_pipeline.py, saas_pipeline.py, endpoint_pipeline.py, host_score_pipeline.py, campaign_pipeline.py, context_pipeline.py and telemetry_pipeline.py, rendered through SiemWireStage by make_sample_events.py",
   "searches": {
     "R-D-L1-001 - Transceiver substitution": {
       "expected_rows": 1,

@@ -83,9 +83,10 @@ nobody has looked at in a year actually has. The decades between them are where 
 HALF_WINDOW_NS = 1800 * SECOND_NS
 """Half of the layer 5 pipeline's hourly window.
 
-Forty-five of the layer 5 corpus's hundred and five authentications sit exactly on an hour mark, because the
-corpus builds its times from whole hours. An event on a boundary changes window under an offset of one
-nanosecond, so a sweep of that corpus measures how round its numbers are as much as how fragile the rules are.
+A hundred and twenty-seven of the layer 5 corpus's three hundred and eighty-five authentications sit exactly on an
+hour mark, because the corpus builds its times from whole hours. An event on a boundary changes window under an
+offset of one nanosecond, so a sweep of that corpus measures how round its numbers are as much as how fragile the
+rules are.
 Moving every clock by half a window puts the same events in the middle of theirs and changes nothing else.
 """
 

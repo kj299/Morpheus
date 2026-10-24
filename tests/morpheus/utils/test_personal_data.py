@@ -29,6 +29,7 @@ import hmac
 import os
 import re
 
+import pandas as pd
 import pytest
 
 from morpheus.utils.personal_data import ADDRESSES
@@ -230,6 +231,21 @@ def test_a_missing_identifier_is_not_given_one():
     # Hashing a null would manufacture a value, and every row without an identifier would acquire one identity
     # in common -- a person who does not exist, with everybody else's unattributed activity.
     assert pseudonymize([None, "alice@x", float("nan")], KEY) == [None, pseudonymize(["alice@x"], KEY)[0], None]
+
+
+def test_a_nullable_column_s_missing_marker_is_not_given_one():
+    # A nullable string or integer column hands out pandas.NA, whose comparison with itself raises rather than
+    # answering, so the plain NaN idiom fails on it.
+    values = pd.Series(["alice@x", None], dtype="string").tolist()
+
+    assert pseudonymize(values, KEY) == [pseudonymize(["alice@x"], KEY)[0], None]
+    assert pseudonymize(pd.Series([7, None], dtype="Int64").tolist(), KEY)[1] is None
+
+
+def test_a_widened_integer_keeps_its_pseudonym():
+    # One missing sibling row widens an integer identifier column to float; 5 and 5.0 are the same identifier.
+    assert pseudonymize([5], KEY) == pseudonymize([5.0], KEY) == pseudonymize(["5"], KEY)
+    assert pseudonymize([5.5], KEY) == pseudonymize(["5.5"], KEY)
 
 
 def test_a_short_key_is_refused():

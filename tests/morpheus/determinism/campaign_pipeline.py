@@ -17,11 +17,11 @@
 One campaign told at every layer from the switch port up, and the composed pipelines that measure it, for the chained
 rules.
 
-Every other corpus in this fork is one layer's, and they share no entity: an address in the layer 3 corpus is not a
-principal in the layer 5 one or a host in the layer 7 one. A chained rule needs the opposite -- the same source, the
-same person and the same host seen by three collectors -- so this corpus is written as one estate over nine days and
-split by collector. Each layer's records then go through that layer's own stages, exactly as a deployment would run
-them, and the chained rule is evaluated over what comes out.
+The other corpora are each written for one layer's rules or for one join across a few layers (the estate's port
+bindings, the host score's host segment); none of them follows one actor through every layer. A chained rule needs
+that -- the same source, the same person and the same host seen by several collectors -- so this corpus is written
+as one estate over nine days and split by collector. Each layer's records then go through that layer's own stages,
+exactly as a deployment would run them, and the chained rule is evaluated over what comes out.
 
 **R-C-001 - Lateral movement chain.** Within 30 minutes, in order: a source's fan-out rises above its own previous
 hour; a principal authenticates *from that source* to a host they have never logged into; and that host starts a
@@ -112,6 +112,8 @@ import saas_pipeline
 import stamping
 import telemetry_pipeline
 import transport_pipeline
+from corpus_pipeline import _collect
+from corpus_pipeline import build_pipeline_config  # pylint: disable=unused-import  # re-exported for callers
 from resumable import ResumableLinearPipeline
 
 from morpheus.config import Config
@@ -1152,26 +1154,6 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     })
 
 
-def build_pipeline_config(execution_mode=None) -> Config:
-    """
-    A pipeline configuration, defaulting to CPU mode and importable without a GPU.
-
-    Parameters
-    ----------
-    execution_mode : `morpheus.config.ExecutionMode`, optional
-        Mode to build for. Defaults to CPU, which is what the golden file is an artifact of.
-    """
-    from morpheus.config import CppConfig  # pylint: disable=import-outside-toplevel
-    from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
-
-    CppConfig.set_should_use_cpp(False)
-
-    config = Config()
-    config.execution_mode = ExecutionMode.CPU if execution_mode is None else execution_mode
-
-    return config
-
-
 LEASE_METHOD_COLUMN = "login_lease_resolution"
 PORT_METHOD_COLUMN = "login_port_resolution"
 LEASE_UID_COLUMN = "login_lease_uid"
@@ -1254,24 +1236,6 @@ def _stages(config: Config,
             7, ["hostname"])
 
 
-def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
-    from host_frame import to_host_frame
-
-    frames = []
-
-    for message in sink.get_messages():
-        meta = message.payload() if hasattr(message, "payload") else message
-        frame = meta.copy_dataframe()
-        # Integer columns are carried as nullable integers in both modes before anything is joined, so the
-        # concatenation cannot widen them to float in one mode and not the other; see `host_frame`.
-        frames.append(to_host_frame(frame))
-
-    if (len(frames) == 0):
-        return pd.DataFrame()
-
-    return pd.concat(frames, ignore_index=True)
-
-
 def close_mac_bindings(config: Config, dataframes: list[pd.DataFrame], impose_order: bool = True) -> pd.DataFrame:
     """The two sites' MAC tables, closed into bindings by the stage that closes every MAC binding in this fork."""
     pipe = ResumableLinearPipeline(config)
@@ -1346,7 +1310,7 @@ def run_pipeline(config: Config,
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
                  impose_order: bool = True) -> pd.DataFrame:
     """
-    Each collector through its own layer's pipeline, and the three outputs as one canonical frame.
+    Each collector through its own layer's pipeline, and every collector's output as one canonical frame.
 
     Parameters
     ----------
@@ -1362,7 +1326,8 @@ def run_pipeline(config: Config,
     Returns
     -------
     `pandas.DataFrame`
-        The three classes' output, tagged with `telemetry_class`, keyed by `row_key`, canonicalized.
+        Every collector's output, plus any records quarantined at validation as the `quarantine` class, tagged
+        with `telemetry_class`, keyed by `row_key`, canonicalized.
     """
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}

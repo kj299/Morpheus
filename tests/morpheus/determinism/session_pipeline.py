@@ -17,8 +17,8 @@
 The week-long layer 5 corpus, and the composed session pipeline, for the determinism harness.
 
 The layer 1 and 2 harness proved that fourteen stages in a row reach the answer a golden file holds. This module
-does the same for layer 5: the seven TC-5 stages are composed here, and the three layer 5 saved searches, two
-deterministic and the drift watchlist, are asserted against this corpus.
+does the same for layer 5: the seven TC-5 stages are composed here, and every layer 5 saved search in `RULES` is
+asserted against this corpus.
 
 **A week, not an hour.** The layer 1 and 2 corpus covers an hour because a poller's cadence is a minute. Layer 5
 is event-driven and its features are about habit: an hour-of-day histogram needs days to say anything, an
@@ -83,12 +83,13 @@ import typing
 import envelope as universal_envelope
 import pandas as pd
 import stamping
+from corpus_pipeline import _collect
+from corpus_pipeline import build_pipeline_config  # pylint: disable=unused-import  # re-exported for callers
 from resumable import ResumableLinearPipeline
 from shard_split import ShardSplitStage
 from shard_split import shard_key_fn
 
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
 from morpheus.pipeline import Pipeline
 from morpheus.stages.general.router_stage import RouterStage
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -648,44 +649,6 @@ def _build_sessions(rng: random.Random) -> pd.DataFrame:
     frame["session_end"] = frame["session_end"].astype("Int64")
 
     return frame.reset_index(drop=True)
-
-
-def build_pipeline_config(execution_mode=None) -> Config:
-    """
-    A pipeline configuration, defaulting to CPU mode and importable without a GPU.
-
-    Parameters
-    ----------
-    execution_mode : `morpheus.config.ExecutionMode`, optional
-        Mode to build for. Defaults to CPU, which is what the golden file is an artifact of. The parameter exists
-        so the same corpus and the same golden can be driven in GPU mode and the two compared. Resolved inside the
-        function rather than as a default argument so that importing this module still does not require a GPU.
-    """
-    from morpheus.config import CppConfig
-    from morpheus.config import ExecutionMode
-
-    CppConfig.set_should_use_cpp(False)
-
-    config = Config()
-    config.execution_mode = ExecutionMode.CPU if execution_mode is None else execution_mode
-
-    return config
-
-
-def _collect(sink: InMemorySinkStage) -> pd.DataFrame:
-    # Sibling module; imported here because this file's own directory is put on the path by whoever imports it.
-    from host_frame import to_host_frame
-
-    frames = []
-
-    for message in sink.get_messages():
-        meta = message.payload() if isinstance(message, ControlMessage) else message
-        frames.append(to_host_frame(meta.copy_dataframe()))
-
-    if (len(frames) == 0):
-        return pd.DataFrame()
-
-    return pd.concat(frames, ignore_index=True)
 
 
 CHAIN_ANCHORS = {

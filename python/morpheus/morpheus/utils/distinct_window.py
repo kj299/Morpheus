@@ -80,7 +80,8 @@ class DistinctWindowResult:
         The sample cap is binding, so observations are being evicted before the window would have expired them and
         `distinct` is a floor rather than the figure.
     out_of_order : bool
-        The sample's event time was not after the previous one's. State is left untouched.
+        The sample's event time was before the previous one's. State is left untouched. An equal time is
+        accepted: a MAC table snapshot reports many addresses at one instant.
     """
 
     distinct: int

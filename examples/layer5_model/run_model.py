@@ -68,7 +68,7 @@ FEATURE_COLUMNS = [
     "auth_attempts_in_window",
     "auth_failures_in_window",
 ]
-"""The numeric features the model is trained on, all produced by the five TC-5 stages.
+"""The numeric features the model trains on, all produced by three of the seven TC-5 stages (novelty, cadence, risk).
 
 Deliberately not the raw columns a collector sent. A model trained on `source_country` learns which countries an
 estate has, which is a fact about the estate; one trained on `locincrement` learns how often this principal goes
@@ -118,7 +118,7 @@ def prepare_environment(seed: int) -> None:
 
 
 def build_features():
-    """The layer 5 corpus's training fortnight, through the five TC-5 stages, as one frame per principal."""
+    """The layer 5 corpus's training fortnight, through the seven TC-5 stages, as one frame per principal."""
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
 
     import session_pipeline  # pylint: disable=import-outside-toplevel

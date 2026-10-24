@@ -34,6 +34,7 @@ Developer Guides
    ./10_modular_pipeline_digital_fingerprinting.md
    ./11_predictive_behavioral_analytics_osi.md
    ./12_behavioral_analytics_retrospective.md
+   ./13_repository_audit.md
 
 
 .. toctree::

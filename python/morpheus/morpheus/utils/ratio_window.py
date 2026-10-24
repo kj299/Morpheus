@@ -70,7 +70,8 @@ class RatioResult:
     saturated : bool
         The sample cap is binding, so the proportion describes the retained tail rather than the whole window.
     out_of_order : bool
-        The event's time was not after the previous one's. State is left untouched.
+        The event's time was before the previous one's. State is left untouched. Events at the same instant are
+        accepted, since a flood can share one tick.
     """
 
     numerator: int

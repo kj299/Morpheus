@@ -36,6 +36,8 @@ names one, and R-B-L4-004 compares only where both sides have spoken.
 import re
 import typing
 
+from morpheus.utils.entity_key import is_missing
+
 BROWSER_TOKENS = (("Edg/", "edge"), ("EdgA/", "edge"), ("Chrome/", "chrome"), ("CriOS/", "chrome"),
                   ("Firefox/", "firefox"), ("FxiOS/", "firefox"), ("Safari/", "safari"))
 """Product tokens a browser is recognized by, most specific first."""
@@ -62,7 +64,7 @@ _PRODUCT = re.compile(r"^\s*([A-Za-z][A-Za-z0-9._+-]*)")
 
 def _text(value: typing.Any) -> str:
     """The header as text, stripped; empty for a missing or blank header."""
-    if (value is None or value != value):  # pylint: disable=comparison-with-itself
+    if (is_missing(value)):
         return ""
 
     return str(value).strip()

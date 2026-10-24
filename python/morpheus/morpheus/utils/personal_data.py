@@ -134,6 +134,9 @@ import hashlib
 import hmac
 import typing
 
+from morpheus.utils.entity_key import is_missing
+from morpheus.utils.entity_key import render_integral
+
 IDENTIFIES = "identifies"
 ADDRESSES = "addresses"
 LOCATES = "locates"
@@ -146,6 +149,8 @@ CATEGORIES = (IDENTIFIES, ADDRESSES, LOCATES, PROFILES, PSEUDONYMS, OPERATIONAL)
 PERSONAL_CATEGORIES = (IDENTIFIES, ADDRESSES, LOCATES, PROFILES, PSEUDONYMS)
 """Every category except `OPERATIONAL`. What this fork emits that is about a person at all."""
 
+# yapf: disable -- yapf folds a one-line comment onto the entry above it, which would attach each note below to
+# the column before the ones it describes.
 _IDENTIFIES = (
     "ctx_manager",
     "ctx_object_owner",
@@ -157,8 +162,10 @@ _IDENTIFIES = (
     "saas_baseline_key",
     "session_id",
     "session_key",
-    "user_principal",  # The owner of the host a flow reached, from the inventory.
-    "dst_ctx_owner",  # The account an application runs as, from the CMDB, and as it rides on an event.
+    "user_principal",
+    # The owner of the host a flow reached, from the inventory.
+    "dst_ctx_owner",
+    # The account an application runs as, from the CMDB, and as it rides on an event.
     "service_account",
     "ctx_application_service_account",
 )
@@ -182,11 +189,13 @@ _ADDRESSES = (
     "tls_client_key",
     "tls_destination_key",
     "tls_pair_key",
-    "transfer_triple",  # A host's name as the inventory keys it, at layers 5 and 7.
+    "transfer_triple",
+    # A host's name as the inventory keys it, at layers 5 and 7.
     "endpoint_host",
     "target_host_key",
     # The machine a source address resolved to through the leases and the inventory, at layers 3, 4, 6 and 7.
-    "host_key",  # A DNS client, the service a connection reached, and a server the CMDB maps.
+    "host_key",
+    # A DNS client, the service a connection reached, and a server the CMDB maps.
     "dns_client_key",
     "service_key",
     "server_address",
@@ -208,7 +217,8 @@ _LOCATES = (
     "source_longitude",
     "source_region",
     "switch_id",
-    "user_location",  # The port and the neighbour port it is cabled to, at layer 1.
+    "user_location",
+    # The port and the neighbour port it is cabled to, at layer 1.
     "link_key",
 )
 
@@ -423,7 +433,8 @@ _PROFILES = (
     "weekday_share",
     "weekday_surprise_bits",
     "weekday_surprise_bits_z_loss",
-    "weekday_unseen",  # Identity context at layer 5, and each session measured against the principal's own.
+    "weekday_unseen",
+    # Identity context at layer 5, and each session measured against the principal's own.
     "account_type",
     "privilege_level",
     "ctx_account_type",
@@ -431,7 +442,8 @@ _PROFILES = (
     "session_lifecycle",
     "session_duration_baseline",
     "session_duration_ratio",
-    "session_duration_mature",  # Each host's own history at layer 3, and how far this hour stands above it.
+    "session_duration_mature",
+    # Each host's own history at layer 3, and how far this hour stands above it.
     "dsts_per_src_step",
     "dsts_per_src_baseline_max",
     "srcs_per_dst_step",
@@ -451,7 +463,8 @@ _PROFILES = (
     "bits_per_second_baseline_min",
     "bits_per_second_step",
     "utilization",
-    "auth_elapsed_ratio",  # A workstation's hour as one row: how much happened in it, and how far each part of it
+    "auth_elapsed_ratio",
+    # A workstation's hour as one row: how much happened in it, and how far each part of it
     # sits from what its peer group's model expected.
     "frame_rows",
     "endpoint_novel_pairs",
@@ -484,8 +497,10 @@ _PSEUDONYMS = (
     "origin_hash",
     "parent_process_guid",
     "process_guid",
-    "row_key",  # The inventory versions a flow's destination context rests on.
-    "dst_ctx_version_uids",  # The lease and the inventory report a record's machine was resolved through.
+    "row_key",
+    # The inventory versions a flow's destination context rests on.
+    "dst_ctx_version_uids",
+    # The lease and the inventory report a record's machine was resolved through.
     "host_inventory_uid",
     "host_lease_uid",
     # The bindings a sign-in was resolved to a port through: the directory entry and supplicant binding at the
@@ -493,8 +508,10 @@ _PSEUDONYMS = (
     "desk_binding_uid",
     "desk_identity_uid",
     "login_lease_uid",
-    "login_port_uid",  # The session interval a packet, handshake or export was placed in by its source address.
-    "session_binding_uid",  # The CMDB versions an event's application rests on.
+    "login_port_uid",
+    # The session interval a packet, handshake or export was placed in by its source address.
+    "session_binding_uid",
+    # The CMDB versions an event's application rests on.
     "ctx_application_version_uids",
 )
 
@@ -721,9 +738,11 @@ _OPERATIONAL = (
     "model_version",
     "pipeline_fingerprint",
     "resumed_from_state",
-    "rng_seed",  # A single-record session's bounds: timestamps, like event_time.
+    "rng_seed",
+    # A single-record session's bounds: timestamps, like event_time.
     "session_start",
-    "session_end",  # What kind of host an asset is, and the layer 3 destination's context and baseline maturity.
+    "session_end",
+    # What kind of host an asset is, and the layer 3 destination's context and baseline maturity.
     "device_role",
     "os_family",
     "os_version",
@@ -803,6 +822,7 @@ _OPERATIONAL = (
     "session_abandoned",
     "session_unclassified",
 )
+# yapf: enable
 
 COLUMNS: dict[str, str] = {}
 
@@ -853,6 +873,8 @@ anchor and leaving the column it was copied from is the same mistake as pseudony
 it is caught the same way.
 """
 
+# yapf: disable -- yapf folds a one-line comment onto the entry above it, which would attach each note below to
+# the column before the ones it describes.
 BOUNDED_DOMAIN = frozenset({
     "http_ua_os",
     "stack_os_family",
@@ -894,7 +916,8 @@ BOUNDED_DOMAIN = frozenset({
     "token_type",
     "travel_status",
     "validation_result",
-    "vlan_id",  # A handful of values each, so a digest of one is a lookup, not a pseudonym.
+    "vlan_id",
+    # A handful of values each, so a digest of one is a lookup, not a pseudonym.
     "account_type",
     "privilege_level",
     "ctx_account_type",
@@ -912,6 +935,7 @@ keep them or to drop them.
 Not a complete list of the weak ones, and cannot be. `site_id`, `switch_id` and `app` are bounded by the estate
 instead, which is usually small too, and no schema can say how small.
 """
+# yapf: enable
 
 DEFAULT_DIGEST_LENGTH = 32
 """Hex characters kept from each pseudonym, matching `morpheus.utils.lineage`'s own identifiers."""
@@ -1052,8 +1076,8 @@ def pseudonymize(values: typing.Sequence,
     person's history into as many people as there were runs. Stability is also exactly what keeps this
     pseudonymization rather than anonymization, and nothing downstream should be described as anonymous.
 
-    Nulls are preserved as nulls. Hashing the absence of a value would manufacture a value, and an entity whose
-    identifier is missing would acquire a stable identity it never had.
+    Nulls (`None`, NaN, `pandas.NA`) are preserved as nulls. Hashing the absence of a value would manufacture a
+    value, and an entity whose identifier is missing would acquire a stable identity it never had.
 
     Parameters
     ----------
@@ -1077,11 +1101,14 @@ def pseudonymize(values: typing.Sequence,
     digests = []
 
     for value in values:
-        if (value is None or value != value):  # pylint: disable=comparison-with-itself
+        if (is_missing(value)):
             digests.append(None)
             continue
 
-        rendered = str(value).encode("utf-8")
+        # A whole number renders as an integer whatever type carries it, so an identifier column widened to float
+        # by a missing sibling row keeps the pseudonyms it had before the widening.
+        text = render_integral(value)
+        rendered = (str(value) if text is None else text).encode("utf-8")
         digests.append(hmac.new(secret, rendered, hashlib.sha256).hexdigest()[:digest_length])
 
     return digests

@@ -358,8 +358,12 @@ CORPORA = os.path.dirname(os.path.abspath(__file__))
 
 
 def composed_pipelines() -> list:
-    """The thirteen corpora: every `*_pipeline.py` beside this file that is not a `run_` entry point."""
-    return sorted(name for name in os.listdir(CORPORA) if name.endswith("_pipeline.py") and not name.startswith("run_"))
+    """
+    The thirteen corpora: every `*_pipeline.py` beside this file that is not a `run_` entry point, nor
+    `corpus_pipeline.py`, the helpers the corpora share, which composes nothing of its own.
+    """
+    return sorted(name for name in os.listdir(CORPORA)
+                  if name.endswith("_pipeline.py") and not name.startswith("run_") and name != "corpus_pipeline.py")
 
 
 def test_every_composed_pipeline_places_the_determinism_stamp():

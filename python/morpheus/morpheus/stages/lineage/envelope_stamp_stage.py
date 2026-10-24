@@ -162,7 +162,7 @@ class EnvelopeStampStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         Raises
         ------
         KeyError
-            If an entity column is absent and no `entity_key` is already present to fall back on.
+            If an entity column is absent, even when every row already carries an `entity_key`.
         """
         meta = message.payload() if isinstance(message, ControlMessage) else message
 

@@ -332,7 +332,7 @@ arithmetic against its own sweep times and thresholds.
   "join_tolerance_ns": {"R-C-001": 120000000000, "…": "…"},
   "breaking_point": {
     "R-D-L2-004": {"estate_collectors": null, "estate_switches": {"spread": "60s"}},
-    "R-P-L5-006": {"session": {"spread": "1ms"}, "session_off_boundary": null},
+    "R-P-L5-006": {"session": null, "session_off_boundary": null},
     "R-P-L7-006": {"saas": "one clock"},
     "R-C-001": {"campaign": {"spread": "1800s"}}
   },

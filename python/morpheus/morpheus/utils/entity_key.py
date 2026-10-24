@@ -64,6 +64,26 @@ def render_integral(value: typing.Any) -> typing.Optional[str]:
         return None
 
 
+def is_missing(value: typing.Any) -> bool:
+    """
+    Whether a value read from a frame is a gap, however the frame spelled it: `None`, a float NaN, `pandas.NA` or
+    `pandas.NaT`.
+
+    The `value != value` idiom is not enough on its own: `pandas.NA != pandas.NA` is `pandas.NA`, whose truth value
+    raises, and a nullable string or integer column hands out exactly that.
+    """
+    if (value is None):
+        return True
+
+    if (isinstance(value, float)):
+        return math.isnan(value)
+
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
 def normalize_text(value: typing.Any) -> typing.Optional[str]:
     """
     Render a host value as stripped text, collapsing every flavor of missing to `None`.

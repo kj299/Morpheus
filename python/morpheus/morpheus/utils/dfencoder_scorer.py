@@ -15,10 +15,11 @@
 The per-principal autoencoder behind the `Scorer` protocol `TC5ScoreStage` takes.
 
 `TC5ScoreStage` asks one thing of a model: given the pinned version the manifest resolved for an entity and that
-entity's rows, return a per-row absolute z-score per feature. Until now the only thing answering was
-`ReferenceScorer`, frozen arithmetic that its own docstring calls not a model. This is the adapter that puts
-`morpheus.models.dfencoder` in the same slot, so the composed layer 5 pipeline can be run with the model the
-guide actually names -- on a machine that has Torch and a card, which the one this fork is developed in does not.
+entity's rows, return a per-row absolute z-score per feature. `ReferenceScorer` answers with frozen arithmetic
+that its own docstring calls not a model; this module is the adapter that puts `morpheus.models.dfencoder` in the
+same slot, so the composed layer 5 pipeline runs with the model the guide names. It scores two forms of the same
+fitted network: `NumpyAutoEncoder`, which evaluates a model committed as plain numbers and is what scores in CI,
+where there is no Torch, and the upstream Torch `AutoEncoder`, wherever Torch is installed.
 
 **Inference only, and the models arrive trained.** The adapter holds fitted models keyed by pinned version and
 never fits one. Training inside the scoring path would fit on the rows being scored, a leak no determinism

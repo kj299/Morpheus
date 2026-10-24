@@ -168,9 +168,9 @@ These are the failures this app has actually had, and both are invisible in a se
    The events are historical, so the drift should be large and negative. A drift near zero means `TIME_PREFIX`
    matched nothing and every windowed rule has quietly become a rule about when the data was loaded.
 2. **`binding_table` must be present on bucketed rows.** Run
-   `index=behavior_bindings sourcetype=binding:bucketed | stats count BY binding_table`. Two rows here,
-   `mac_table` with 124 events and `port_inventory` with 7, and no `dhcp_lease`, because this corpus has no DHCP
-   source; the run records the same two. An empty result means the refresh search selects on a field the producer
+   `index=behavior_bindings sourcetype=binding:bucketed | stats count BY binding_table`. Four rows here:
+   `dhcp_lease` with 1685 events, `dot1x_supplicant` with 59, `mac_table` with 1249 and `port_inventory` with 7.
+   The 2026-10-23 run records the same four. An empty result means the refresh search selects on a field the producer
    stopped writing, and the lookup silently stops being refreshed.
 
 ## What each search should return

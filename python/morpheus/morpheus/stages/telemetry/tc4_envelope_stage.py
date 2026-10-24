@@ -46,6 +46,7 @@ from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
+from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
@@ -275,8 +276,8 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             assign_str_column(df, TRIPLE_KEY, keys)
 
             for column in self._magnitude_columns:
-                df[f"{column}_envelope"] = envelopes[column]
-                df[f"{column}_envelope_ratio"] = ratios[column]
+                assign_nullable_float_column(df, f"{column}_envelope", envelopes[column])
+                assign_nullable_float_column(df, f"{column}_envelope_ratio", ratios[column])
                 assign_nullable_bool_column(df, f"{column}_envelope_breached", breached[column])
                 df[f"{column}_envelope_mature"] = mature[column]
 

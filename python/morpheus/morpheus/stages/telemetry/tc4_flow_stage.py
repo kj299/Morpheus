@@ -14,9 +14,11 @@
 """
 The thirteen transport features the shipped model was trained on, rolled up per flow per time bin.
 
-`examples/abp_pcap_detection/abp_pcap_preprocessing.py` is the reference the guide names, and its feature set is
-adopted here unchanged: the five flag sums, `ppm`, `data_len`, `bpp`, `all`, and the four ratios. Three things
-about how it computes them are changed deliberately, and each is a correctness point rather than a preference.
+The reference the guide names is the upstream ABP pcap preprocessing stage,
+https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py, and
+its feature set is adopted here unchanged: the five flag sums, `ppm`, `data_len`, `bpp`, `all`, and the four
+ratios. Three things about how it computes them are changed deliberately, and each is a correctness point rather
+than a preference.
 
 **The rollup is a running total, not a per-batch group.** The reference groups by `(rollup_time, flow_id)` inside
 the message it was handed. A flow's sixty-second bin that spans two messages is therefore aggregated twice, and
@@ -76,6 +78,7 @@ from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
+from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
@@ -128,8 +131,10 @@ MODEL_FEATURES = {
 }
 """The shipped `abp-pcap-xgb` feature list, mapped to the column each one is emitted as.
 
-Thirteen entries in the order `abp_pcap_preprocessing.py` declares them, so a deployment feeding the model can
-build its input frame from this rather than from a second copy of the list that will drift.
+Thirteen entries in the order the upstream preprocessing stage declares them,
+https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py, so a
+deployment feeding the model can build its input frame from this rather than from a second copy of the list that
+will drift.
 """
 
 
@@ -397,7 +402,8 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                         # A record for a bin this flow has already moved past. Reopening it would produce a
                         # second partial aggregate for a bin that was already reported complete.
                         unordered += 1
-                        bins.append(ordinal)
+                        # Nanoseconds like every other row's: the bin is still known, only the counts are not.
+                        bins.append(ordinal * self._bin_ns)
 
                         for column in COUNTS:
                             counts[column].append(None)
@@ -414,10 +420,17 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
                     state = {"bin": ordinal, "ppm": 0, "data_len": 0}
                     state.update({name: 0 for name in FLAG_NAMES})
-                    self._open[flow_id] = state
 
-                    while (len(self._open) > self._max_flows):
-                        self._open.pop(next(iter(self._open)))
+                # Removed and reinserted on every record the flow aggregates, so that the mapping's order is recency
+                # and its first key is the flow least recently seen. Assigning to a key that is already present
+                # keeps its original position, which would instead evict the flow that was opened first however
+                # busy it still is. A plain dict rather than an OrderedDict, so that a checkpoint written before
+                # this change restores to a type that still supports the reinsertion.
+                self._open.pop(flow_id, None)
+                self._open[flow_id] = state
+
+                while (len(self._open) > self._max_flows):
+                    self._open.pop(next(iter(self._open)))
 
                 for name in FLAG_NAMES:
                     state[name] += bits[name]
@@ -454,10 +467,10 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             assign_nullable_int_column(df, PPM, ppm)
             assign_nullable_int_column(df, DATA_LEN, data_len)
             assign_nullable_int_column(df, ALL_FLAGS, all_flags)
-            df[BPP] = bpp
+            assign_nullable_float_column(df, BPP, bpp)
 
             for column in RATIOS:
-                df[column] = ratios[column]
+                assign_nullable_float_column(df, column, ratios[column])
 
             self._write_stacks(df, src_ips, raw_times)
 

@@ -24,7 +24,7 @@ Nothing upstream provides it. A switch MAC table is a snapshot of what is bound 
 missing, and DHCP releases are advisory. Ends have to be inferred, and this module is where that inference lives,
 with the reason recorded on every record so a consumer can tell an observed end from a deduced one.
 
-Six things end a binding, and only the first two are facts:
+Eight things end a binding, and only the first two are facts:
 
 - **Explicit.** The source said so: an accounting stop, a release, a cleared entry. The end time is known.
 - **Granted.** The source said so in advance. A DHCP server's acknowledgement hands an address to a MAC for a stated
@@ -40,6 +40,11 @@ Six things end a binding, and only the first two are facts:
   at some point since the last one.
 - **Idle timeout.** Nothing has been heard for longer than the source's own aging interval, the safety net for the
   stop record that never arrived.
+- **Eviction.** The closer is holding more open bindings than `max_open` allows, so the least recently seen is
+  closed to make room. Nothing was observed about the binding itself; it is emitted rather than dropped because it
+  still happened.
+- **Drain.** The stream stopped, at a shutdown or the end of a replay, with the binding still open. A binding under
+  a grant ends at its term; any other ends one tick past its last observation.
 
 Where the end is inferred, it is placed at the earliest time consistent with what was observed rather than the
 latest. That choice is what makes a resolution trustworthy: closing late leaves the old binding covering a period
@@ -87,7 +92,8 @@ GRANTED = "granted"
 """The end the source stated in advance -- a DHCP lease's term -- which arrived without a renewal or a release."""
 
 INFERRED_REASONS = frozenset({DISPLACED, CONFLICT, SNAPSHOT_ABSENT, IDLE_TIMEOUT, EVICTED, DRAINED})
-"""Every reason but `EXPLICIT`. A consumer that only trusts observed ends filters on this."""
+"""Every reason but `EXPLICIT` and `GRANTED`, the two the source stated. A consumer that only trusts stated ends
+filters on this."""
 
 
 def _present(value: typing.Any) -> typing.Any:
@@ -124,8 +130,8 @@ class ClosedBinding:
     bind_end_ns : int
         End of the interval. Exclusive, so it always sits at least one tick past the last observation.
     end_reason : str
-        How the end was arrived at. Only `EXPLICIT` means the source stated it; the rest are inferred, and
-        `INFERRED_REASONS` collects them.
+        How the end was arrived at. `EXPLICIT` means the source stated it when it happened and `GRANTED` means the
+        source stated it in advance; the rest are inferred, and `INFERRED_REASONS` collects them.
     observations : int
         Samples that fell inside this binding, so a consumer can weigh a well-attested binding against one seen
         once.
@@ -162,7 +168,12 @@ class ClosedBinding:
 
     @property
     def end_observed(self) -> bool:
-        """Whether the source stated the end, rather than it being deduced."""
+        """
+        Whether the source stated the end as it happened, which is `EXPLICIT` alone.
+
+        A `GRANTED` end is stated too, but in advance, so it reads `False` here. To keep every stated end, test
+        `end_reason not in INFERRED_REASONS` instead.
+        """
         return self.end_reason == EXPLICIT
 
 
