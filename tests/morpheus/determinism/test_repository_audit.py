@@ -36,7 +36,10 @@ MANIFEST = os.path.join(REPO_ROOT, "ci", "artifacts", "repository_audit_manifest
 REMOVALS = os.path.join(REPO_ROOT, "ci", "artifacts", "repository_audit_removals.txt")
 GUIDE = os.path.join(REPO_ROOT, "docs", "source", "developer_guide", "guides", "13_repository_audit.md")
 VERDICTS = ("keep", "update", "keep-dependency", "remove")
-PACKAGE_ROOTS = ("python/morpheus/", "python/morpheus_dfp/", "python/morpheus_llm/")
+PACKAGE_ROOTS = ("python/morpheus/", "python/morpheus_dfp/")
+CHECKED_PACKAGES = ("morpheus", "morpheus_dfp", "morpheus_llm")
+"""Top-level packages whose imports must resolve to a file in the tree. `morpheus_llm` is listed although the tree no
+longer has it, so that an import of it reads as what it is: an import of something removed."""
 
 
 def _tracked() -> list:
@@ -77,23 +80,28 @@ def _module_index(paths: list) -> dict:
     index = {}
 
     for path in paths:
-        if not path.endswith(".py"):
+        # A compiled module is in the tree as its type stub, which is enough to say it exists.
+        if not path.endswith((".py", ".pyi")):
             continue
 
         for root in PACKAGE_ROOTS:
             if path.startswith(root):
-                module = path[len(root):-3].replace("/", ".")
-                index[module[:-9] if module.endswith(".__init__") else module] = path
+                module = path[len(root):path.rindex(".")].replace("/", ".")
+                index.setdefault(module[:-9] if module.endswith(".__init__") else module, path)
 
     return index
 
 
-def _imports(path: str) -> set:
+def _parse(path: str) -> ast.AST:
     try:
         with open(os.path.join(REPO_ROOT, path), encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
+            return ast.parse(handle.read())
     except (SyntaxError, UnicodeDecodeError):
-        return set()
+        return ast.Module(body=[], type_ignores=[])
+
+
+def _imports(path: str) -> set:
+    tree = _parse(path)
 
     names = set()
 
@@ -147,6 +155,55 @@ def test_a_file_the_removal_breaks_says_how_it_changes(manifest: dict):
     silent = sorted(path for path in _imports_of_removed(manifest) if not manifest[path]["action"].strip())
 
     assert silent == [], f"files importing removals with no recorded change: {silent}"
+
+
+def _unresolved(tree: ast.AST, index: dict) -> set:
+    """
+    The modules a parsed file imports, from the checked packages, that no file in the tree provides.
+
+    `import a.b` and `from a.b import c` both need `a.b` to exist. `c` may be a submodule or a name defined in `a.b`,
+    and only the first can be told apart from the tree, so a `from` import is checked down to its module and no
+    further.
+    """
+    wanted = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            wanted.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            wanted.add(node.module)
+
+    return {name for name in wanted if name.split(".")[0] in CHECKED_PACKAGES and name not in index}
+
+
+def test_nothing_kept_imports_a_module_the_tree_no_longer_has(manifest: dict):
+    # The check above sees only removals still to be made, because a file already deleted has left both the tree and
+    # the manifest. This one resolves imports against the tree itself, so a removal already carried out cannot leave
+    # a kept file importing what it took away.
+    index = _module_index(_tracked())
+    offenders = {}
+
+    for (path, row) in manifest.items():
+        if row["verdict"] == "remove" or not path.endswith(".py"):
+            continue
+
+        missing = _unresolved(_parse(path), index)
+
+        if missing:
+            offenders[path] = sorted(missing)
+
+    assert not offenders, f"kept files importing modules the tree does not have: {offenders}"
+
+
+def test_an_import_of_a_deleted_module_is_seen():
+    # The resolver itself, against a tree that has one module, so the check above cannot pass by seeing nothing.
+    index = {"morpheus.utils.entity_key": "python/morpheus/morpheus/utils/entity_key.py"}
+    source = ast.parse("import morpheus.modules.input.multi_file_source\n"
+                       "from morpheus_llm.llm import LLMEngine\n"
+                       "from morpheus.utils.entity_key import is_missing\n"
+                       "import numpy\n")
+
+    assert _unresolved(source, index) == {"morpheus.modules.input.multi_file_source", "morpheus_llm.llm"}
 
 
 def test_the_guide_quotes_the_manifest_s_counts(manifest: dict):

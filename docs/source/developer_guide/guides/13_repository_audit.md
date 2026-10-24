@@ -344,5 +344,7 @@ that replaces it. Each item says how to know it is done.
 exactly one verdict with its purpose, why it is here and reason filled in; the removal list must be the manifest's
 `remove` rows; no file marked `keep` or `keep-dependency` may import a file marked `remove`, so carrying out the
 removals cannot break what stays; every `update` row that imports a file marked `remove` must say what to change;
-and the counts in this guide must be the manifest's. A file added later fails the first check until it is given a
+no file that stays may import a `morpheus`, `morpheus_dfp` or `morpheus_llm` module the tree no longer has, so a
+removal already carried out cannot leave a dangling import either; and the counts in this guide must be the
+manifest's. A file added later fails the first check until it is given a
 verdict, which is how the audit stays an audit rather than a snapshot.
