@@ -25,7 +25,6 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - [Inference](#inference)
 - [Input](#input)
 - [Lineage](#lineage)
-- [LLM](#llm)
 - [Output](#output)
 - [Post-process](#post-process)
 - [Pre-process](#pre-process)
@@ -60,7 +59,6 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - HTTP Server Source Stage {py:class}`~morpheus.stages.input.http_server_source_stage.HttpServerSourceStage` Start an HTTP server and listens for incoming requests on a specified endpoint.
 - In Memory Source Stage {py:class}`~morpheus.stages.input.in_memory_source_stage.InMemorySourceStage` Input source that emits a pre-defined list of DataFrames.
 - Kafka Source Stage {py:class}`~morpheus.stages.input.kafka_source_stage.KafkaSourceStage` Load messages from a Kafka cluster.
-- RSS Source Stage {py:class}`~morpheus.stages.input.rss_source_stage.RSSSourceStage` Load RSS feed items into a pandas DataFrame.
 
 ## Lineage
 
@@ -78,10 +76,6 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - Total Order Stage {py:class}`~morpheus.stages.lineage.total_order_stage.TotalOrderStage` Sort every batch by `event_time`, `collector_id` and `collector_seq` before the first stateful stage, which is determinism control 8 as a stage. The telemetry stages flag out-of-order arrival rather than repairing it, so something has to impose the order once; this does, and refuses ties rather than falling back on the input's own arrangement.
 - Window Seal Stage {py:class}`~morpheus.stages.lineage.window_seal_stage.WindowSealStage` Group rows into fixed event-time windows anchored to an absolute epoch and emit each window once the event-time watermark passes its lateness horizon. Late arrivals are emitted separately, marked incomplete, and never mutate a published window; sealing is driven by the data rather than the wall clock, so replays reproduce the same windows.
 
-## LLM
-
-- LLM Engine Stage {py:class}`~morpheus_llm.stages.llm.llm_engine_stage.LLMEngineStage` Execute an LLM engine within a Morpheus pipeline.
-
 ## Output
 - HTTP Client Sink Stage {py:class}`~morpheus.stages.output.http_client_sink_stage.HttpClientSinkStage` Write all messages to an HTTP endpoint.
 - HTTP Server Sink Stage {py:class}`~morpheus.stages.output.http_server_sink_stage.HttpServerSinkStage` Start an HTTP server and listens for incoming requests on a specified endpoint.
@@ -92,7 +86,6 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - Write To Elastic Search Stage {py:class}`~morpheus.stages.output.write_to_elasticsearch_stage.WriteToElasticsearchStage` Write the messages as documents to Elasticsearch.
 - Write To File Stage {py:class}`~morpheus.stages.output.write_to_file_stage.WriteToFileStage` Write all messages to a file.
 - Write To Kafka Stage {py:class}`~morpheus.stages.output.write_to_kafka_stage.WriteToKafkaStage` Write all messages to a Kafka cluster.
-- Write To Vector DB Stage {py:class}`~morpheus.stages.output.write_to_vector_db.WriteToVectorDBStage` Write all messages to a Vector Database.
 
 ## Post-process
 
@@ -122,7 +115,6 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - TC-1 Binding Stage {py:class}`~morpheus.stages.telemetry.tc1_binding_stage.TC1BindingStage` Close layer 1 port observations into resolvable intervals, which the `binding_l1` lookup and its history are built from. The optic and the LLDP neighbour port are what is bound, so a swap or a re-patch is a new interval, and each carries the `link_key` it was cabled into.
 - TC-1 Change Stage {py:class}`~morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage` Report when a port's `transceiver_serial` or `lldp_neighbor_chassis_id` differs from the previous sample, and whether that value has ever been seen on the port before. Holds the previous value per port rather than bucketing by period, so a change is detected however far apart the samples fall; prefer this to the period-bucketed counts when the question is whether an identifier changed.
 - TC-1 Device Stage {py:class}`~morpheus.stages.telemetry.tc1_device_stage.TC1DeviceStage` Key a switch or router's own poll on `site_id:device_id` and derive what happened to the device rather than a port: a restart read from `sysUpTime`, restarts per period against the device's own history and how many periods running each held more, which R-P-L1-009 reads, a configuration change and whether it fell inside the estate's change window, which R-D-L1-008 reads, and the routing table's churn.
-- TC-1 Feature Stage {py:class}`~morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage` Count distinct `transceiver_serial` and `lldp_neighbor_chassis_id` values per port per period, so that hardware substitution and topology change read as a count above one against a steady state of one. Imposes a total row order before counting, because the underlying primitives are cumulative and an unsorted batch silently produces different features, and warns when a frame straddles a period boundary, where the count would reset and hide a change.
 - TC-1 Flap Stage {py:class}`~morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage` Count link state transitions per port per interval, using the device's own record of when the interface last changed so that a port which drops and recovers inside one polling gap is counted rather than read as stable. Every count is a lower bound, and a device restart is counted but labelled.
 - TC-1 Forecast Stage {py:class}`~morpheus.stages.telemetry.tc1_forecast_stage.TC1ForecastStage` Fit a line through each port's receive power over a trailing week and project the day it meets the optic's minimum, which R-P-L1-004 reads. The floor is looked up per transceiver type from a mapping the deployment supplies, a projection is published only where the readings sit on the line and the slope stands clear of the diagnostics' noise, and a replaced optic starts the port's history over.
 - TC-1 Normalize Stage {py:class}`~morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage` Turn the monotonic interface counters emitted by an SNMP and LLDP collector into per-interval deltas, the 64-bit traffic counters among them where the collector sends them, distinguishing a counter wrap from a device reboot and flagging samples that arrive out of order. Also writes the `site_id:device_id:port_id` entity key the per-port models are keyed on, and `link_key`, the port and the LLDP neighbour port it is cabled to. Refer to [Predictive Behavioral Analytics Across OSI Layers 1-7](../developer_guide/guides/11_predictive_behavioral_analytics_osi.md) for the telemetry classes this envelope belongs to.

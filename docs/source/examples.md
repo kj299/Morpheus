@@ -26,11 +26,6 @@ Ensure the environment is set up by following [Getting Started with Morpheus](./
 * [Root Cause Analysis Acceleration & Predictive Maintenance Example](../../examples/root_cause_analysis/README.md)
 * [SID Visualization Example](../../examples/sid_visualization/README.md)
 * [Splunk Lineage App for Morpheus Behavioral Analytics](../../examples/splunk_lineage_app/README.md)
-* Large Language Models (LLMs)
-  * [Agents](../../examples/llm/agents/README.md)
-  * [Completion](../../examples/llm/completion/README.md)
-  * [VDB Upload](../../examples/llm/vdb_upload/README.md)
-  * [Retrieval Augmented Generation (RAG)](../../examples/llm/rag/README.md)
 
 
 ## Environments

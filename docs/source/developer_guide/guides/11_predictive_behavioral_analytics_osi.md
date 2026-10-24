@@ -63,8 +63,8 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 #99, for a cause the repository does not show -- and in GPU mode on one card, where the twelve that existed then
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
-That is fifty-eight stages and forty-seven supporting
-modules, covered by 2,496 distinct tests, itemized in
+That is fifty-seven stages and forty-six supporting
+modules, covered by 2,474 distinct tests, itemized in
 [Part 6](#provided). Fifty-eight of the sixty rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -365,7 +365,7 @@ The repository ships three Python packages plus a compiled core:
 | `python/morpheus/morpheus/_lib` | C++/CUDA core exposed through pybind11: messages, stages, tensors, cuDF interoperability |
 | `python/morpheus/morpheus/_lib/doca` | Optional NVIDIA DOCA GPUNetIO path for line-rate packet capture directly into GPU memory |
 | `python/morpheus_dfp/morpheus_dfp` | Digital fingerprinting: per-entity behavioral modeling, the piece most relevant here |
-| `python/morpheus_llm/morpheus_llm` | LLM engine nodes, vector database services, retrieval-augmented enrichment |
+| [`python/morpheus_llm/morpheus_llm`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_llm/morpheus_llm) | LLM engine nodes, vector database services, retrieval-augmented enrichment; removed from this fork by the [repository audit](./13_repository_audit.md)'s ruling D1 |
 
 `docs/source/developer_guide/architecture.md` describes five conceptual layers: orchestration, pipeline,
 stage, module, and node. The practical consequence is that all nodes inside a stage are guaranteed to run
@@ -454,6 +454,7 @@ Sources (`stages/input/`): `KafkaSourceStage`, `HttpServerSourceStage`, `HttpCli
 `FileSourceStage`, `RSSSourceStage`, `DatabricksDeltaLakeSourceStage`, `ControlMessageKafkaSourceStage`,
 `ControlMessageFileSourceStage`, `AppShieldSourceStage`, `InMemorySourceStage`,
 `InMemoryDataGenStage`, `ArxivSource`, and the autoencoder sources for CloudTrail, Duo, and Azure.
+`RSSSourceStage` and `ArxivSource` served only the language-model use case and have since been removed.
 
 Preprocess (`stages/preprocess/`): `DeserializeStage`, `PreprocessNLPStage` (subword tokenization),
 `PreprocessFILStage`, `DropNullStage`, `GroupByColumnStage`.
@@ -667,7 +668,7 @@ Grepping the repository:
 | `stages/general/multi_processing_stage.py:162` | `pe_count = self._max_in_flight_messages` |
 | `stages/general/router_stage.py:102` | `engines_per_pe = self._processing_engines` |
 | `stages/doca/doca_source_stage.py:98` | `pe_count = 1` |
-| `morpheus_llm/stages/llm/llm_engine_stage.py:136` | `pe_count = 1` |
+| [`morpheus_llm/stages/llm/llm_engine_stage.py:136`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_llm/morpheus_llm/stages/llm/llm_engine_stage.py#L136) (removed) | `pe_count = 1` |
 
 Any node with `pe_count > 1` processes messages concurrently and emits them in completion order, not
 arrival order. The DFP inference and preprocessing stages have their `pe_count` lines commented out,
@@ -986,24 +987,11 @@ port's own peak catches a cable or connector going bad, and traffic against the 
 catches a port moving what it never has, or losing whatever was on it.
 
 The two novelty features ship as
-{py:class}`~morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage`, over the schema in
-{py:mod}`~morpheus.utils.tc1_features`. Both are cumulative and therefore order-dependent, so the stage
-imposes control 8's total order before counting rather than trusting the caller to have sorted; that is
-the whole reason the derivation is a stage and not a bare schema.
-
-A period-bucketed count resets at each boundary, so a change from the last poll before one to the first
-poll after it reads as one distinct value on each side and is not detected. What decides whether that
-matters is the period against the span of a frame, not anything about the estate: a boundary can only
-hide a change when it falls inside the frame being counted. Set `period` longer than one frame and there
-is no boundary for a change to hide behind. The default is monthly, which clears a daily window with
-room to spare, where the daily bucketing the primitive defaults to would put a boundary inside every
-window. Lengthening the period makes boundaries rarer but never removes them, so the stage warns when it
-sees a frame that straddles one rather than leaving the residual exposure to be assumed away. The cost of
-going longer still is drift: the count never decays within its period, so under `period="Q"` a port that
-legitimately changed optics reads above 1 for the rest of the quarter and a rule with a threshold of
-"greater than 1" fires for all of it. Closing the boundary entirely, rather than narrowing it, needs the last
-value carried across periods per entity, the way {py:mod}`~morpheus.utils.counter_delta` carries counter
-state, which is a different primitive from `DistinctIncrementColumn`.
+{py:class}`~morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage`, described below. An earlier stage
+counted distinct values per calendar period, and a change from the last poll before a period boundary to
+the first poll after it read as one distinct value on each side and went undetected. Comparing each poll
+with the port's previous value has no boundary to hide behind, so the period-bucketed stage was removed
+on 2026-10-24 under the repository audit's ruling D5.
 
 Optical power deviation ships as {py:class}`~morpheus.stages.telemetry.tc1_optical_stage.TC1OpticalStage`
 over {py:mod}`~morpheus.utils.optical_baseline`. The baseline is the median of the port's own prior
@@ -3664,8 +3652,10 @@ model that scores near a threshold, which the reference arithmetic in every ship
 
 ### Control 10: Keep LLM stages out of the decision path
 
-`morpheus_llm` is genuinely useful for enrichment: summarizing an alert, retrieving related context from
-a vector database, drafting an investigation note. It is not deterministic. Temperature 0 reduces
+This fork no longer ships `morpheus_llm`: the repository audit removed it (ruling D1), because nothing on the
+detection path used it. The control stands for any language-model enrichment a deployment adds back. Such
+enrichment is genuinely useful: summarizing an alert, retrieving related context from a vector database,
+drafting an investigation note. It is not deterministic. Temperature 0 reduces
 variance but does not eliminate it, provider-side model updates change behavior without notice, and
 retrieval results shift as the vector store is updated.
 
@@ -3674,8 +3664,8 @@ decision and add narrative. When one runs, record `llm_model`, `llm_prompt_hash`
 `llm_response_hash` so the narrative is at least auditable even though it is not reproducible, and mark
 the enriched fields with a `nondeterministic: true` flag so no downstream rule accidentally keys on them.
 
-Note that `LLMEngineStage` already sets `pe_count = 1`, which helps with ordering but does nothing for
-output stability.
+The upstream `LLMEngineStage` set `pe_count = 1`, which helps with ordering but does nothing for output
+stability.
 
 ### Control 11: Idempotent sinks
 
@@ -3947,10 +3937,9 @@ Pass 4 measures each of these and records which the fork reuses.
   counter wrap distinguished from a device reboot, and the `site_id:device_id:port_id` entity key
   ({py:mod}`~morpheus.utils.counter_delta` and
   {py:class}`~morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage`).
-- The TC-1 novelty features, transceiver substitution and neighbor change, with control 8's total order
-  imposed before the cumulative primitives run ({py:mod}`~morpheus.utils.tc1_features`,
-  {py:class}`~morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage`, and
-  `morpheus.utils.determinism.sort_for_cumulative_features`).
+- The TC-1 novelty features, transceiver substitution and neighbor change, compared against each port's
+  previous value rather than counted per period
+  ({py:class}`~morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage`).
 - TC-1 optical power deviation against a per-port rolling baseline
   ({py:mod}`~morpheus.utils.optical_baseline` and
   {py:class}`~morpheus.stages.telemetry.tc1_optical_stage.TC1OpticalStage`).

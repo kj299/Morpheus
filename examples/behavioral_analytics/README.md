@@ -41,7 +41,7 @@ example policy no principal from the inputs appears in any segment's output.
 
 ## From the `morpheus` command line
 
-Every one of the fifty-eight stages is a `morpheus run pipeline-other` command, and
+Every one of the fifty-seven stages is a `morpheus run pipeline-other` command, and
 `tests/morpheus/stages/test_lineage_stage_cli.py` builds each command and holds the compositions below to the
 CLI. The runners are the complete form: four stages take Python objects the command line cannot carry --
 `determinism-stamp` the envelope, `tc0-enrich` a context store, `binding-resolve` a binding table and `tc5-score`

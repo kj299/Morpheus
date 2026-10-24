@@ -91,7 +91,6 @@ TARGETS=(
     tests/morpheus/stages/test_tc1_binding_stage.py
     tests/morpheus/stages/test_tc1_change_stage.py
     tests/morpheus/stages/test_tc1_device_stage.py
-    tests/morpheus/stages/test_tc1_feature_stage.py
     tests/morpheus/stages/test_tc1_flap_stage.py
     tests/morpheus/stages/test_tc1_forecast_stage.py
     tests/morpheus/stages/test_tc1_normalize_stage.py

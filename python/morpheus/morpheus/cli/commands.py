@@ -592,7 +592,6 @@ add_command("flow-normalize",
             "morpheus.stages.telemetry.flow_record_normalize_stage.FlowRecordNormalizeStage",
             modes=ALL)
 add_command("from-appshield", "morpheus.stages.input.appshield_source_stage.AppShieldSourceStage", modes=FIL_ONLY)
-add_command("from-arxiv", "morpheus.stages.input.arxiv_source.ArxivSource", modes=ALL)
 add_command("from-databricks-deltalake",
             "morpheus.stages.input.databricks_deltalake_source_stage.DataBricksDeltaLakeSourceStage",
             modes=ALL)
@@ -600,7 +599,6 @@ add_command("from-file", "morpheus.stages.input.file_source_stage.FileSourceStag
 add_command("from-http", "morpheus.stages.input.http_server_source_stage.HttpServerSourceStage", modes=ALL)
 add_command("from-http-client", "morpheus.stages.input.http_client_source_stage.HttpClientSourceStage", modes=ALL)
 add_command("from-kafka", "morpheus.stages.input.kafka_source_stage.KafkaSourceStage", modes=ALL)
-add_command("from-rss", "morpheus.stages.input.rss_source_stage.RSSSourceStage", modes=ALL)
 add_command("gen-viz", "morpheus.stages.postprocess.generate_viz_frames_stage.GenerateVizFramesStage", modes=NLP_ONLY)
 add_command("inf-identity", "morpheus.stages.inference.identity_inference_stage.IdentityInferenceStage", modes=ALL)
 add_command("inf-pytorch", "morpheus.stages.inference.pytorch_inference_stage.PyTorchInferenceStage", modes=ALL)
@@ -621,7 +619,6 @@ add_command("tc0-identity", "morpheus.stages.telemetry.tc0_identity_stage.TC0Ide
 add_command("tc1-binding", "morpheus.stages.telemetry.tc1_binding_stage.TC1BindingStage", modes=ALL)
 add_command("tc1-change", "morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage", modes=ALL)
 add_command("tc1-device", "morpheus.stages.telemetry.tc1_device_stage.TC1DeviceStage", modes=ALL)
-add_command("tc1-features", "morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage", modes=ALL)
 add_command("tc1-flap", "morpheus.stages.telemetry.tc1_flap_stage.TC1FlapStage", modes=ALL)
 add_command("tc1-forecast", "morpheus.stages.telemetry.tc1_forecast_stage.TC1ForecastStage", modes=ALL)
 add_command("tc1-normalize", "morpheus.stages.telemetry.tc1_normalize_stage.TC1NormalizeStage", modes=ALL)

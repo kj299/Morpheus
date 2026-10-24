@@ -57,11 +57,11 @@ class TC1ChangeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
     """
     Report when a port's identifiers change, whenever that happens.
 
-    `morpheus.stages.telemetry.tc1_feature_stage.TC1FeatureStage` answers the same question by counting distinct
-    values per period, and the period is its limit: the count resets at each boundary, so a change from the last
-    sample before one to the first after it is a single distinct value on each side and reads as no change.
-    Lengthening the period makes boundaries rarer without removing them. This stage removes them, by holding the
-    previous value per port and comparing rather than bucketing. A substitution is detected the moment the new
+    Counting distinct values per period, the approach this stage replaced, cannot answer that question: the count
+    resets at each period boundary, so a change from the last sample before one to the first after it is a single
+    distinct value on each side and reads as no change. Lengthening the period makes boundaries rarer without
+    removing them. This stage removes them, by holding the previous value per port and comparing rather than
+    bucketing. A substitution is detected the moment the new
     value arrives, whether the samples are a minute or a year apart.
 
     Two columns per identifier, because two separately actionable questions:

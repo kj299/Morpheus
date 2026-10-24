@@ -81,20 +81,22 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 2,412 tracked files,
-the 2,407 the passes read and the five this audit adds: the two manifests, this guide, its test and the shared
-corpus pipeline helper.
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 2,185 tracked files:
+the 2,407 the passes read and the five this audit adds (the two manifests, this guide, its test and the shared
+corpus pipeline helper), less the 227 files removed since: three under ruling D5 and 224 in the language-model
+part of D1, both on 2026-10-24.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 1476 |
+| `remove` | 1249 |
 | `keep-dependency` | 413 |
 | `keep` | 375 |
 | `update` | 148 |
 
-Most of the removal is upstream code the fork never touched: 1,467 of the 1,476 files. Six are upstream
-organization workflows the fork modified, and three are its own: `TC1FeatureStage`, its utility module and
-its test, which `TC1ChangeStage` superseded.
+The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
+organization workflows the fork modified, and three were its own: `TC1FeatureStage`, its utility module and
+its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1, so 1,249
+remain marked.
 
 Between the passes, the second readers moved files in both directions:
 
@@ -201,8 +203,14 @@ insertion. Both are plan items below.
 
 The removals land as one change per ruling, in this order, each with the `update` edits its records name:
 
-1. **D5**, the smallest and entirely the fork's own.
-2. **D1**, use case by use case if the change is too large to review at once.
+1. **D5**, the smallest and entirely the fork's own. Done on 2026-10-24: three files removed, and the command line,
+   CPU tier list, liveness registry, `TC1ChangeStage` and its test, the stages page, guides 11 and 12 and the stage
+   counts edited with them.
+2. **D1**, use case by use case. The language-model and retrieval part went first, on 2026-10-24: `morpheus_llm`,
+   its examples, tests, fixtures, Conda recipe and CMake module, the RSS and `ArxivSource` stages that served it, the
+   namespace migration script, and the LLM-only dependencies (regenerated with the pinned dependency file
+   generator). The build options, documentation build, command line, test configuration, stages page and guide
+   11's citations were edited with it. DOCA, the security examples and the remaining examples follow.
 3. **D2**, after the fork model inventory exists to receive the two models.
 4. **D6**, then **D7**.
 5. **D4**'s remainder, after the evidence is cited by permalink.
@@ -326,10 +334,9 @@ that replaces it. Each item says how to know it is done.
     docs build fails CI.
 15. **A throughput baseline.** No benchmark measures the telemetry and lineage stages. Done when a benchmark tier
     records rows per second per stage and a change that halves it is visible.
-16. **Restore the fork's CI.** No fork CI run has been recorded since 2026-10-12, and the pull requests merged since
-    were not checked. The cause is a setting, not the workflow: a manual start on 2026-10-24 was refused because
-    Actions is disabled for the repository. Re-enable Actions under the repository's Settings, Actions,
-    General. Done when every pull request shows a CPU tier result.
+16. **Keep the fork's CI on.** No fork CI run was recorded from 2026-10-12 to 2026-10-24, because Actions was disabled
+    for the repository, and the pull requests merged in that time were not checked by CI. Actions was re-enabled on
+    2026-10-24 and the CPU tiers ran again on the audit branch. Done when every pull request shows a CPU tier result.
 
 ## Keeping the Manifest Honest
 

@@ -115,30 +115,6 @@ def test_a_change_across_a_month_boundary_is_detected(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
-def test_it_sees_what_the_period_bucketed_feature_cannot(config: Config):
-    """The reason this stage exists, demonstrated against the stage it supersedes rather than asserted."""
-    from morpheus.stages.telemetry.tc1_feature_stage import TC1FeatureStage
-
-    # One collector, strictly increasing sequence numbers, and a swap that straddles a month boundary.
-    payload = frame(["SN-AAA", "SN-BBB"], times=[0, 40 * DAY_NS])
-    payload["collector_id"] = ["poller-1"] * 2
-    payload["collector_seq"] = [0, 1]
-
-    df_class = get_df_class(config.execution_mode)
-
-    # TC1FeatureStage re-orders rows, so it returns a new payload rather than mutating the one it was given.
-    bucketed = TC1FeatureStage(config).on_data(MessageMeta(df_class(dict(payload))))
-
-    compared = MessageMeta(df_class(dict(payload)))
-    TC1ChangeStage(config, max_clock_skew_seconds=LONE_PORT_SKEW_SECONDS).on_data(compared)
-
-    # The distinct count reads 1 on each side of the boundary, so the substitution leaves no trace in it.
-    assert _as_list(bucketed, "transceiver_increment") == [1, 1]
-    # The same two rows, compared rather than bucketed.
-    assert _as_list(compared, "transceiver_serial_changed") == [None, True]
-
-
-@pytest.mark.gpu_and_cpu_mode
 def test_a_change_across_any_gap_is_detected(config: Config):
     # No calendar is consulted, so more than a year between polls behaves exactly like a minute.
     meta = run(config,

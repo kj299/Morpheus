@@ -74,7 +74,6 @@ from morpheus.stages.telemetry.tc0_identity_stage import TC0IdentityStage
 from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_device_stage import TC1DeviceStage
-from morpheus.stages.telemetry.tc1_feature_stage import TC1FeatureStage
 from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
 from morpheus.stages.telemetry.tc1_forecast_stage import TC1ForecastStage
 from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
@@ -356,15 +355,6 @@ def identifiers() -> dict:
         "transceiver_serial": serials,
         "lldp_neighbor_chassis_id": ["chassis-a", "chassis-a", "chassis-b", "chassis-b"],
     }
-
-
-def tied_identifiers() -> dict:
-    """Two rows a sort on the order columns cannot separate: the condition `require_total_order` exists for."""
-    frame = identifiers()
-    frame["collector_seq"] = [0, 0, 1, 2]
-    frame["event_time"] = [0, 0, HOUR, 2 * HOUR]
-
-    return frame
 
 
 def port_inventory() -> dict:
@@ -1572,33 +1562,6 @@ REGISTRY: dict = {
                      benign=["transceiver_serial"],
                      extreme=["transceiver_serial", "lldp_neighbor_chassis_id"]),
                 Knob("max_values", DIFFERS, benign=64, extreme=1),
-            ),
-        ),
-    "TC1FeatureStage":
-        Scenario(
-            stage=TC1FeatureStage,
-            frame=identifiers,
-            base={},
-            knobs=(
-                Knob("entity_key_column", INPUT_COLUMN, benign="entity_key"),
-                Knob("timestamp_column",
-                     INPUT_COLUMN,
-                     benign="event_time",
-                     also={"order_columns": ["renamed_event_time", "collector_id", "collector_seq"]}),
-                Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
-                Knob("transceiver_column", INPUT_COLUMN, benign="transceiver_serial"),
-                Knob("neighbor_column", INPUT_COLUMN, benign="lldp_neighbor_chassis_id"),
-                Knob("period", DIFFERS, benign="D", extreme="h"),
-                Knob("order_columns",
-                     DIFFERS,
-                     benign=["event_time", "collector_id", "collector_seq"],
-                     extreme=["transceiver_serial", "collector_id", "collector_seq"]),
-                Knob("require_total_order", RAISES, benign=False, extreme=True, frame=tied_identifiers),
-                Knob("preserve_columns",
-                     INERT,
-                     reason="Carries extra columns into the intermediate feature frame "
-                     "only. The stage merges its features back onto the full input frame, so every input column "
-                     "survives regardless and the parameter cannot change what this stage emits."),
             ),
         ),
     "TC2CardinalityStage":

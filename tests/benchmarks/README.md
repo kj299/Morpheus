@@ -102,19 +102,12 @@ To run all benchmarks run the following:
 ```bash
 cd tests/benchmarks
 
-pytest -s --run_benchmark --run_milvus --benchmark-enable --benchmark-warmup=on --benchmark-warmup-iterations=1 --benchmark-autosave
+pytest -s --run_benchmark --benchmark-enable --benchmark-warmup=on --benchmark-warmup-iterations=1 --benchmark-autosave
 ```
 
 The `-s` option allows outputs of pipeline execution to be displayed so you can ensure there are no errors while running your benchmarks.
 
-The `--benchmark-warmup` and `--benchmark-warmup-iterations` options are used to run the workflows once before starting measurements. This is because the models deployed to Triton are configured to convert from ONNX to TensorRT on first use. Since the conversion can take a considerable amount of time, we don't want to include it in the measurements. The `--run_milvus` flag enables benchmarks which require the Milvus database.
-
-#### Running with an existing Milvus database
-
-By default when `--run_milvus` flag is provided, pytest will start a new Milvus database. If you wish to use an existing Milvus database, you can set the `MORPHEUS_MILVUS_URI` environment variable. For a local Milvus database, running on the default port, you can set the environment variable as follows:
-```bash
-export MORPHEUS_MILVUS_URI="http://127.0.0.1:19530"
-```
+The `--benchmark-warmup` and `--benchmark-warmup-iterations` options are used to run the workflows once before starting measurements. This is because the models deployed to Triton are configured to convert from ONNX to TensorRT on first use. Since the conversion can take a considerable amount of time, we don't want to include it in the measurements.
 
 #### test_bench_e2e_pipelines.py
 
