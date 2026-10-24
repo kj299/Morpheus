@@ -332,17 +332,19 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
     assert [bool(value) for value in with_bad["clock_refused"]] == [False, False, True, False]
     assert pd.isna(with_bad["dsts_per_src_baseline_buckets"][2])
 
-    kept = with_bad.drop(index=2).drop(columns=["clock_refused"]).reset_index(drop=True)
+    kept = with_bad.drop(index=2).reset_index(drop=True)
     pd.testing.assert_frame_equal(kept, control, check_dtype=False)
 
 
 @pytest.mark.gpu_and_cpu_mode
-def test_a_frame_with_nothing_refused_does_not_gain_the_column(config: Config):
-    # The column is written only when a row is refused: the compositions carrying this stage have goldens without it,
-    # and a null an upstream guard left is not this stage's to turn into False.
+def test_a_frame_with_nothing_refused_carries_the_column_as_false(config: Config):
+    # The mark is written on every frame, so whether a frame carries the column is a property of the stage and not of
+    # which rows shared a batch; a believed row reads False, which the health record counts as 0 rather than null.
     payload = frame([3, 3, 3, 3])
 
-    assert "clock_refused" not in _drive(config, TC3BaselineStage(config, min_buckets=4), payload).columns
+    measured = _drive(config, TC3BaselineStage(config, min_buckets=4), payload)
+
+    assert [bool(value) for value in measured["clock_refused"]] == [False] * len(measured)
 
 
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):

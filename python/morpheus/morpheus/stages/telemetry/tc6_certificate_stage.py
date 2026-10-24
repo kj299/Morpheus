@@ -77,10 +77,12 @@ from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.established_value import DEFAULT_MIN_SAMPLES
 from morpheus.utils.established_value import ValueHistoryTracker
 from morpheus.utils.established_value import mode_of
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
 from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.pair_history import PairHistoryTracker
 
 logger = logging.getLogger(__name__)
@@ -198,9 +200,6 @@ class TC6CertificateStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
-        if (max_clock_skew_seconds <= 0):
-            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
-
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
 
@@ -239,10 +238,8 @@ class TC6CertificateStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                        ISSUER_NEW_TO_ESTATE):
             self._needed_columns[column] = TypeId.BOOL8
 
-        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
-        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
-        # written only when a row is refused, below.
-        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -285,12 +282,6 @@ class TC6CertificateStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
         normalized = normalize_text(value)
 
         return None if normalized is None else normalized.strip().lower() in SELF_SIGNED_RESULTS
-
-    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
-        try:
-            return to_epoch_ns(raw, time_unit=self._time_unit)
-        except ValueError:
-            return None
 
     def _validity_days(self, not_before: typing.Any, not_after: typing.Any) -> typing.Optional[float]:
         """The certificate's lifetime in days, or `None` where either bound is missing or unreadable."""
@@ -343,7 +334,6 @@ class TC6CertificateStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
 
             key_parts = {name: to_host_list(df, name) for name in key_columns}
             issuers = to_host_list(df, self._issuer_column)
-            raw_times = to_host_list(df, self._time_column)
             rows = len(issuers)
             names = (to_host_list(df, self._name_column)
                      if self._key_columns is None and self._name_column in df.columns else [None] * rows)
@@ -358,7 +348,7 @@ class TC6CertificateStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             globals_by_row = self._classify_destinations(df, ip, rows)
             # Guarded once, before either history is shown a time: a refused time becomes `None`, which the rows
             # below already treat as a handshake with nothing to compare.
-            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             keys: list = []
             established: list = []
@@ -426,17 +416,12 @@ class TC6CertificateStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             assign_nullable_float_column(df, VALIDITY_DAYS, validity)
             assign_nullable_bool_column(df, ISSUER_NEW_TO_ESTATE, new_to_estate)
 
-            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
-            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
-            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
-            if (any(refused)):
-                mark_refused(df, refused)
-                logger.warning(
-                    "TC6CertificateStage refused %d of %d handshakes whose event time was further ahead of the "
-                    "stream than max_clock_skew_seconds allows; they entered no issuer history, set clock_refused "
-                    "and expired nothing.",
-                    sum(refused),
-                    rows)
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC6CertificateStage",
+                        what="handshakes",
+                        outcome="they entered no issuer history, set clock_refused and expired nothing.")
 
             if (unusable > 0):
                 logger.warning(

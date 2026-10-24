@@ -35,10 +35,12 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_frame
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
 from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.lineage import lineage_id
 from morpheus.utils.lineage import merkle_root
 from morpheus.utils.window_seal import SEALED_BY_FLUSH
@@ -168,9 +170,6 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
-        if (max_clock_skew_seconds <= 0):
-            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
-
         if (column_prefix is None):
             raise ValueError("column_prefix must be a string; pass an empty one for unprefixed columns")
 
@@ -188,11 +187,8 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         self._sealer = WindowSealer(period_ns=period_seconds * NS_PER_SECOND,
                                     lateness_ns=lateness_seconds * NS_PER_SECOND,
                                     epoch_ns=epoch_ns)
-        # Stands in front of the sealer's watermark. `clock_refused` is deliberately not declared in
-        # `_needed_columns`: the source preallocates every declared column on every row, and two compositions add
-        # every column this stage declares to their output, either of which would put a False where the goldens hold
-        # no column at all. It is written on the refused message alone.
-        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        # Stands in front of the sealer's watermark.
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
         self._time_column = time_column
         self._time_unit = time_unit
         self._order_columns = list(order_columns) if order_columns is not None else None
@@ -208,6 +204,7 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         self._buffers: dict[int, list[pd.DataFrame]] = {}
         self._emit_control_messages: typing.Optional[bool] = None
 
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
         self._needed_columns.update({
             self._column(name): type_id
             for (name, type_id) in (
@@ -380,14 +377,7 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                                f"DataFrame. Available columns: {sorted(df.columns)}")
 
             pdf = to_host_frame(df)
-            raw_times = to_host_list(df, self._time_column)
-
-        times = []
-        for value in raw_times:
-            try:
-                times.append(to_epoch_ns(value, time_unit=self._time_unit))
-            except ValueError:
-                times.append(None)
+            times = event_times_ns(df, self._time_column, self._time_unit)
 
         invalid_count = sum(1 for t in times if t is None)
 
@@ -398,6 +388,15 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         # Guarded after the invalid rows are counted and before the sealer sees anything: a refused time becomes
         # `None`, which the sealer already treats as a row that joins no window and moves no watermark.
         (times, refused) = guard_times(self._clock, times)
+        # Marked on the whole frame before it is cut into windows, so every message this stage emits carries the
+        # column: True on the refused rows, and on every believed row whatever an upstream guard wrote, or False.
+        refuse_rows(pdf,
+                    refused,
+                    logger=logger,
+                    stage="WindowSealStage",
+                    what="rows",
+                    outcome=f"they entered no window, moved no watermark, and leave marked clock_refused with "
+                    f"sealed_by={SEALED_BY_REFUSED!r}.")
         result = self._sealer.observe(times)
 
         on_time_rows: dict[int, list[int]] = {}
@@ -443,22 +442,9 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                     self._build_window(None, [pdf.iloc[invalid_rows]], SEALED_BY_INVALID, late=False, complete=False)))
 
         if (len(refused_rows) > 0):
-            logger.warning(
-                "WindowSealStage refused %d of %d rows whose event time was further ahead of the stream than "
-                "max_clock_skew_seconds allows; they entered no window, moved no watermark, and leave marked "
-                "clock_refused with sealed_by=%r.",
-                len(refused_rows),
-                len(times),
-                SEALED_BY_REFUSED)
-            refused_df = self._build_window(None, [pdf.iloc[refused_rows]],
-                                            SEALED_BY_REFUSED,
-                                            late=False,
-                                            complete=False)
-            # Marked on the refused message alone, where every row was refused. The sealed windows are left as
-            # they arrived: a row the clock believed carries whatever an upstream guard wrote, and writing False
-            # here would turn a null into a value on compositions whose goldens hold the null.
-            mark_refused(refused_df, [True] * len(refused_rows))
-            emissions.append(self._to_message(refused_df))
+            emissions.append(
+                self._to_message(
+                    self._build_window(None, [pdf.iloc[refused_rows]], SEALED_BY_REFUSED, late=False, complete=False)))
 
         return emissions
 

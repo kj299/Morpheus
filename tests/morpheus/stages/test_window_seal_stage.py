@@ -78,6 +78,7 @@ def test_needed_columns(config: Config):
     stage = make_stage(config)
 
     assert stage.get_needed_columns() == {
+        "clock_refused": TypeId.BOOL8,
         "window_id": TypeId.INT64,
         "window_start_ns": TypeId.INT64,
         "window_end_ns": TypeId.INT64,
@@ -385,7 +386,8 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_seals_nothing(config: C
 
     assert sorted(flushed["entity"]) == ["a", "b", "d"]
     assert (flushed["sealed_by"] == "flush").all()
-    assert "clock_refused" not in flushed.columns
+    # Every message this stage emits carries the column, so a believed row reads False rather than nothing.
+    assert flushed["clock_refused"].tolist() == [False] * 3
 
 
 @pytest.mark.gpu_and_cpu_mode

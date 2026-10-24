@@ -61,7 +61,6 @@ from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.bucket_peak import DEFAULT_MAX_BUCKETS
 from morpheus.utils.bucket_peak import DEFAULT_MIN_BUCKETS
 from morpheus.utils.bucket_peak import NS_PER_SECOND
@@ -73,10 +72,12 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
 from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.event_clock import refuse_rows
 
 logger = logging.getLogger(__name__)
 
@@ -169,9 +170,6 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
-        if (max_clock_skew_seconds <= 0):
-            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
-
         if (bucket_seconds <= 0):
             raise ValueError(f"bucket_seconds must be positive, received {bucket_seconds}")
 
@@ -207,10 +205,8 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             self._needed_columns[f"{column}{MATURE_SUFFIX}"] = TypeId.BOOL8
             self._needed_columns[f"{column}{STEP_SUFFIX}"] = TypeId.INT64 if integral else TypeId.FLOAT64
 
-        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
-        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
-        # written only when a row is refused, below.
-        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -239,12 +235,6 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
     def tracked_entities(self) -> dict:
         """Hosts currently holding a history, per value column."""
         return {column: tracker.tracked_entities for (column, tracker) in self._trackers.items()}
-
-    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
-        try:
-            return to_epoch_ns(raw, time_unit=self._time_unit)
-        except ValueError:
-            return None
 
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
@@ -282,11 +272,10 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                 raise KeyError(f"TC3BaselineStage requires columns {missing} which are not present in the "
                                f"DataFrame. Available columns: {sorted(df.columns)}")
 
-            raw_times = to_host_list(df, self._time_column)
-            row_count = len(raw_times)
             # Guarded once, before any history is shown a time: a refused time becomes `None`, which `measure_rows`
             # already treats as a row with nothing to place in a period.
-            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            row_count = len(times)
             groups = to_host_list(df, self._group_column) if self._group_column else None
             keyless = 0
             unordered = 0
@@ -313,18 +302,12 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                 assign_nullable_bool_column(df, f"{value_column}{MATURE_SUFFIX}", measured.mature)
                 assign(df, f"{value_column}{STEP_SUFFIX}", measured.steps)
 
-            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
-            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
-            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
-            if (any(refused)):
-                mark_refused(df, refused)
-
-        if (any(refused)):
-            logger.warning(
-                "TC3BaselineStage refused %d of %d rows whose event time was further ahead of the stream than "
-                "max_clock_skew_seconds allows; they carry no baseline, set clock_refused and closed no period.",
-                sum(refused),
-                row_count)
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC3BaselineStage",
+                        what="rows",
+                        outcome="they carry no baseline, set clock_refused and closed no period.")
 
         if (keyless > 0):
             logger.warning(

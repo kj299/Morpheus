@@ -66,7 +66,6 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import NS_PER_SECOND
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.bucket_peak import BucketPeakTracker
 from morpheus.utils.bucket_peak import measure_rows
 from morpheus.utils.bucket_peak import ratios_to_reference
@@ -78,10 +77,12 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
 from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.ratio_window import RatioWindowTracker
 from morpheus.utils.user_agent import user_agent_family
 from morpheus.utils.user_agent import user_agent_os
@@ -181,9 +182,6 @@ class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
-        if (max_clock_skew_seconds <= 0):
-            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
-
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
 
@@ -230,10 +228,8 @@ class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         self._needed_columns[UA_OS] = TypeId.STRING
         self._needed_columns[UA_FAMILY_FIRST_SEEN] = TypeId.BOOL8
 
-        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
-        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
-        # written only when a row is refused, below.
-        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -273,12 +269,6 @@ class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
         return f"{int(number) // 100}xx"
 
-    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
-        try:
-            return to_epoch_ns(raw, time_unit=self._time_unit)
-        except ValueError:
-            return None
-
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
         Write the client key, the status class, the windowed counts and ratio, and the distinct path count.
@@ -313,12 +303,11 @@ class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             key_parts = {name: to_host_list(df, name) for name in self._key_columns}
             statuses = to_host_list(df, self._status_column)
             paths = to_host_list(df, self._path_column)
-            raw_times = to_host_list(df, self._time_column)
             agents = (to_host_list(df, self._user_agent_column) if self._user_agent_column in df.columns else [None] *
                       len(statuses))
             # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
             # below already treat as a request with nothing to count.
-            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             keys: list = []
             classes: list = []
@@ -412,16 +401,12 @@ class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             assign_str_column(df, UA_OS, systems)
             assign_nullable_bool_column(df, UA_FAMILY_FIRST_SEEN, first_seen)
 
-            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
-            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
-            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
-            if (any(refused)):
-                mark_refused(df, refused)
-                logger.warning(
-                    "TC7HttpStage refused %d of %d requests whose event time was further ahead of the stream than "
-                    "max_clock_skew_seconds allows; they entered no window, set clock_refused and expired nothing.",
-                    sum(refused),
-                    len(statuses))
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC7HttpStage",
+                        what="requests",
+                        outcome="they entered no window, set clock_refused and expired nothing.")
 
             if (unusable > 0):
                 logger.warning(

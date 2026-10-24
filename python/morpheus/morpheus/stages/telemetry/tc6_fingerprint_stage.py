@@ -60,18 +60,18 @@ from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import NS_PER_SECOND
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
 from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.value_novelty import DEFAULT_MAX_VALUES
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
@@ -132,9 +132,6 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
-        if (max_clock_skew_seconds <= 0):
-            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
-
         key_columns = ["src_ip"] if key_columns is None else list(key_columns)
 
         if (len(key_columns) == 0):
@@ -167,10 +164,8 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
         self._needed_columns[JA4_OBSERVATIONS] = TypeId.INT64
         self._needed_columns[JA4_SATURATED] = TypeId.BOOL8
 
-        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
-        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
-        # written only when a row is refused, below.
-        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -227,10 +222,9 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
 
             key_parts = {name: to_host_list(df, name) for name in self._key_columns}
             fingerprints = to_host_list(df, self._fingerprint_column)
-            raw_times = to_host_list(df, self._time_column)
             # Guarded once, before the history is shown any time: a refused time becomes `None`, which the rows
             # below already treat as a handshake that teaches the history nothing.
-            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             keys: list = []
             first_seen: list = []
@@ -280,17 +274,12 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             assign_nullable_int_column(df, JA4_OBSERVATIONS, observations)
             assign_nullable_bool_column(df, JA4_SATURATED, saturated)
 
-            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
-            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
-            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
-            if (any(refused)):
-                mark_refused(df, refused)
-                logger.warning(
-                    "TC6FingerprintStage refused %d of %d handshakes whose event time was further ahead of the "
-                    "stream than max_clock_skew_seconds allows; they entered no history, set clock_refused and "
-                    "moved no host's instant.",
-                    sum(refused),
-                    len(fingerprints))
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC6FingerprintStage",
+                        what="handshakes",
+                        outcome="they entered no history, set clock_refused and moved no host's instant.")
 
             if (unusable > 0):
                 logger.warning(
@@ -308,12 +297,6 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                     len(fingerprints))
 
         return message
-
-    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
-        try:
-            return to_epoch_ns(raw, time_unit=self._time_unit)
-        except ValueError:
-            return None
 
     def _seen(self, key: str, event_time_ns: int) -> int:
         """

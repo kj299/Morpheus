@@ -48,17 +48,18 @@ from morpheus.utils.arrival_regularity import DEFAULT_MAX_ENTITIES
 from morpheus.utils.arrival_regularity import DEFAULT_MIN_INTERVALS
 from morpheus.utils.arrival_regularity import NS_PER_SECOND
 from morpheus.utils.arrival_regularity import ArrivalRegularityTracker
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
 from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.event_clock import refuse_rows
 
 logger = logging.getLogger(__name__)
 
@@ -128,9 +129,6 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
-        if (max_clock_skew_seconds <= 0):
-            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
-
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
 
@@ -153,10 +151,8 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
         self._needed_columns[REGULARITY_MATURE] = TypeId.BOOL8
         self._needed_columns[REGULARITY_SATURATED] = TypeId.BOOL8
 
-        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
-        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
-        # written only when a row is refused, below.
-        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -213,13 +209,12 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
 
             sources = to_host_list(df, self._src_column)
             destinations = to_host_list(df, self._dst_column)
-            raw_times = to_host_list(df, self._time_column)
 
             rows = len(sources)
             sizes = to_host_list(df, self._size_column) if self._size_column in df.columns else [None] * rows
             # Guarded once, before the tracker is shown any time: a refused time becomes `None`, which the rows
             # below already treat as a flow with nothing to measure.
-            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             keys: list = []
             intervals: list = []
@@ -265,17 +260,12 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
             df[REGULARITY_MATURE] = mature
             df[REGULARITY_SATURATED] = saturated
 
-            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
-            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
-            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
-            if (any(refused)):
-                mark_refused(df, refused)
-                logger.warning(
-                    "TC3BeaconStage refused %d of %d flows whose event time was further ahead of the stream than "
-                    "max_clock_skew_seconds allows; they joined no pair's rhythm, set clock_refused and expired "
-                    "nothing.",
-                    sum(refused),
-                    rows)
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC3BeaconStage",
+                        what="flows",
+                        outcome="they joined no pair's rhythm, set clock_refused and expired nothing.")
 
             if (keyless > 0):
                 logger.warning(
@@ -293,12 +283,6 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                     rows)
 
         return message
-
-    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
-        try:
-            return to_epoch_ns(raw, time_unit=self._time_unit)
-        except ValueError:
-            return None
 
     @staticmethod
     def _size_of(value: typing.Any) -> typing.Optional[float]:

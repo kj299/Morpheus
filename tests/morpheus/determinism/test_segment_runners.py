@@ -183,23 +183,12 @@ switch's MAC table -- and a binding still open when the first run stops is close
 second. A deployment holds those bindings in the SIEM's lookups, refreshed from `binding:*`; the compositions build
 them per run, so for them this equality is not the property to ask for. Their stages restore all the same."""
 
-UNANSWERED_COUNTS = ("envelope_invalid",
-                     "clock_refused",
-                     "keyless",
-                     "unpaired",
-                     "abandoned",
-                     "unclassified",
-                     "out_of_order",
-                     "late",
-                     "unresolved",
-                     "saturated",
-                     "fallback",
-                     "seq_gap",
-                     "seq_regressed")
-"""The health counts `PipelineHealthStage` answers with null when no row of the batch carries the column, and with
-zero when one does and none is set. One run's batch is the whole replay, so a column the scored week writes is on
-every window's batch and the fortnight's windows count zero; a run stopped before that week has no such column and
-its windows answer null. Both are the right answer for the batch seen, so across a restart the two read the same."""
+UNANSWERED_FALLBACK = "fallback"
+"""The one health count still read as unanswered or zero by where the run was cut. `envelope.health` drops a column
+that is null on every row of the class before `PipelineHealthStage` sees it, so a class whose `model_fallback_used`
+is null until the scored week answers null from a run stopped before that week and zero from a run over the whole
+replay. The other counts, `clock_refused` among them, are compared as written: their stages declare the column, so
+it is on every row with a value."""
 
 
 def _files(directory: pathlib.Path) -> dict[str, list[str]]:
@@ -216,8 +205,7 @@ def _without_resume_marker(lines: dict[str, list[str]]) -> dict[str, list[str]]:
             record.pop("resumed_from_state", None)
 
             if (name == "morpheus_health"):
-                for column in UNANSWERED_COUNTS:
-                    record.setdefault(column, 0)
+                record.setdefault(UNANSWERED_FALLBACK, 0)
 
         stripped[name] = sorted(json.dumps(record, sort_keys=True) for record in records)
 

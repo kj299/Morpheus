@@ -71,16 +71,17 @@ from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
 from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.ratio_window import DEFAULT_MIN_DENOMINATOR
 from morpheus.utils.ratio_window import NS_PER_SECOND
 from morpheus.utils.ratio_window import RatioWindowTracker
@@ -167,9 +168,6 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
-        if (max_clock_skew_seconds <= 0):
-            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
-
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
 
@@ -204,10 +202,8 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
         self._needed_columns[ASN_FIRST_SEEN] = TypeId.BOOL8
         self._needed_columns[DST_MANAGEMENT] = TypeId.BOOL8
 
-        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
-        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
-        # written only when a row is refused, below.
-        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -279,7 +275,6 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
 
             classified = self._classify(df, self._dst_column)
             sources = to_host_list(df, self._src_column)
-            raw_times = to_host_list(df, self._time_column)
 
             rows = len(sources)
             asns = to_host_list(df, self._asn_column) if self._asn_column in df.columns else [None] * rows
@@ -289,7 +284,7 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                         rows)
             # Guarded once, before either tracker is shown a time: a refused time becomes `None`, which the rows
             # below already treat as a flow with nothing to measure.
-            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             ratios: list = []
             internal_counts: list = []
@@ -339,24 +334,14 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                                         DST_MANAGEMENT,
                                         [self._is_management(value) for value in to_host_list(df, self._dst_column)])
 
-            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
-            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
-            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
-            if (any(refused)):
-                mark_refused(df, refused)
-                logger.warning(
-                    "TC3ReachStage refused %d of %d flows whose event time was further ahead of the stream than "
-                    "max_clock_skew_seconds allows; they entered no window, set clock_refused and expired nothing.",
-                    sum(refused),
-                    rows)
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC3ReachStage",
+                        what="flows",
+                        outcome="they entered no window, set clock_refused and expired nothing.")
 
         return message
-
-    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
-        try:
-            return to_epoch_ns(raw, time_unit=self._time_unit)
-        except ValueError:
-            return None
 
     def _is_management(self, value: typing.Any) -> typing.Optional[bool]:
         """Whether a destination is inside one of the estate's management networks, or `None` where unanswerable:
