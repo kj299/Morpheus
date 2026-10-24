@@ -129,7 +129,7 @@ exhale_args = {
         BRIEF_MEMBER_DESC = YES
         BUILTIN_STL_SUPPORT = YES
         DOT_IMAGE_FORMAT = svg
-        EXCLUDE_PATTERNS = */tests/* */include/nvtext/* */__pycache__/* */doca/*
+        EXCLUDE_PATTERNS = */tests/* */include/nvtext/* */__pycache__/*
         EXCLUDE_SYMBOLS = "@*" "cudf*" "py::literals" "RdKafka" "mrc*" "std*" "PYBIND11_NAMESPACE*"
         EXTENSION_MAPPING = cu=C++ cuh=C++
         EXTRACT_ALL = YES

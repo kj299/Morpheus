@@ -19,7 +19,6 @@ Message classes, which contain data being transfered between pipeline stages
 # isort: off
 
 from morpheus._lib.messages import DataLoaderRegistry
-from morpheus._lib.messages import RawPacketMessage
 from morpheus.messages.memory.tensor_memory import TensorMemory
 from morpheus.messages.memory.inference_memory import InferenceMemory
 from morpheus.messages.memory.inference_memory import InferenceMemoryAE
@@ -44,7 +43,6 @@ __all__ = [
     "InferenceMemoryNLP",
     "MessageBase",
     "MessageMeta",
-    "RawPacketMessage",
     "ResponseMemory",
     "ResponseMemoryAE",
     "ResponseMemoryProbs",

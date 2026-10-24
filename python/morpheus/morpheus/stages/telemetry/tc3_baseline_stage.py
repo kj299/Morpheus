@@ -61,7 +61,6 @@ from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.bucket_peak import DEFAULT_MAX_BUCKETS
 from morpheus.utils.bucket_peak import DEFAULT_MIN_BUCKETS
 from morpheus.utils.bucket_peak import NS_PER_SECOND
@@ -73,6 +72,12 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import refuse_rows
 
 logger = logging.getLogger(__name__)
 
@@ -139,9 +144,14 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
         Committed periods required before a baseline is published. A day of active hours.
     max_buckets : int, default = 1024
         Periods retained per host whatever the window implies.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The histories
+        commit a period and expire the oldest on event time, so one flow from an exporter whose clock is wrong by
+        years would close every host's current hour and empty its fortnight at once. A refused row carries no
+        baseline from this stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_trackers", )
+    _checkpoint_attributes = ("_trackers", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -156,7 +166,8 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                  bucket_seconds: int = DEFAULT_BUCKET_SECONDS,
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_buckets: int = DEFAULT_MIN_BUCKETS,
-                 max_buckets: int = DEFAULT_MAX_BUCKETS):
+                 max_buckets: int = DEFAULT_MAX_BUCKETS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
         if (bucket_seconds <= 0):
@@ -194,6 +205,9 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             self._needed_columns[f"{column}{MATURE_SUFFIX}"] = TypeId.BOOL8
             self._needed_columns[f"{column}{STEP_SUFFIX}"] = TypeId.INT64 if integral else TypeId.FLOAT64
 
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
+
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
 
@@ -221,12 +235,6 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
     def tracked_entities(self) -> dict:
         """Hosts currently holding a history, per value column."""
         return {column: tracker.tracked_entities for (column, tracker) in self._trackers.items()}
-
-    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
-        try:
-            return to_epoch_ns(raw, time_unit=self._time_unit)
-        except ValueError:
-            return None
 
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
@@ -264,9 +272,10 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                 raise KeyError(f"TC3BaselineStage requires columns {missing} which are not present in the "
                                f"DataFrame. Available columns: {sorted(df.columns)}")
 
-            raw_times = to_host_list(df, self._time_column)
-            row_count = len(raw_times)
-            times = [self._event_time_ns(raw) for raw in raw_times]
+            # Guarded once, before any history is shown a time: a refused time becomes `None`, which `measure_rows`
+            # already treats as a row with nothing to place in a period.
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            row_count = len(times)
             groups = to_host_list(df, self._group_column) if self._group_column else None
             keyless = 0
             unordered = 0
@@ -281,14 +290,24 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
 
                 values = [_number(value, integral) for value in to_host_list(df, value_column)]
                 measured = measure_rows(self._trackers[value_column], keys, values, times)
+                # A refused row reads to `measure_rows` as one without a time; it is reported as refused, not unordered.
+                refused_here = sum(1 for (key, value, flag) in zip(keys, values, refused)
+                                   if flag and key is not None and value is not None)
                 keyless = max(keyless, measured.keyless)
-                unordered = max(unordered, measured.unordered)
+                unordered = max(unordered, measured.unordered - refused_here)
 
                 assign = assign_nullable_int_column if integral else assign_nullable_float_column
                 assign(df, f"{value_column}{BASELINE_SUFFIX}", measured.references)
                 assign_nullable_int_column(df, f"{value_column}{BUCKETS_SUFFIX}", measured.buckets)
                 assign_nullable_bool_column(df, f"{value_column}{MATURE_SUFFIX}", measured.mature)
                 assign(df, f"{value_column}{STEP_SUFFIX}", measured.steps)
+
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC3BaselineStage",
+                        what="rows",
+                        outcome="they carry no baseline, set clock_refused and closed no period.")
 
         if (keyless > 0):
             logger.warning(

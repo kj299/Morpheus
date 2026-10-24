@@ -591,7 +591,6 @@ add_command("filter", "morpheus.stages.postprocess.filter_detections_stage.Filte
 add_command("flow-normalize",
             "morpheus.stages.telemetry.flow_record_normalize_stage.FlowRecordNormalizeStage",
             modes=ALL)
-add_command("from-appshield", "morpheus.stages.input.appshield_source_stage.AppShieldSourceStage", modes=FIL_ONLY)
 add_command("from-databricks-deltalake",
             "morpheus.stages.input.databricks_deltalake_source_stage.DataBricksDeltaLakeSourceStage",
             modes=ALL)
@@ -664,6 +663,3 @@ add_command("total-order", "morpheus.stages.lineage.total_order_stage.TotalOrder
 add_command("trigger", "morpheus.stages.general.trigger_stage.TriggerStage", modes=ALL)
 add_command("validate", "morpheus.stages.postprocess.validation_stage.ValidationStage", modes=ALL)
 add_command("window-seal", "morpheus.stages.lineage.window_seal_stage.WindowSealStage", modes=ALL)
-
-add_command("from-doca-source", "morpheus.stages.doca.doca_source_stage.DocaSourceStage", modes=NLP_ONLY)
-add_command("from-doca-convert", "morpheus.stages.doca.doca_convert_stage.DocaConvertStage", modes=NLP_ONLY)

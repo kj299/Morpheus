@@ -52,13 +52,18 @@ from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import NS_PER_SECOND
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import refuse_rows
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +110,14 @@ class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
     max_samples : int, default = 4096
         Observations retained per entity regardless of the window. When this binds the count is a lower bound and
         the row is marked saturated.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The windows expire
+        sightings on event time, so one flow from an exporter whose clock is wrong by years would empty every
+        source's window at once and let a scan begin from zero. A refused row carries no count from this stage, sets
+        `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_trackers", )
+    _checkpoint_attributes = ("_trackers", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -117,7 +127,8 @@ class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                  time_column: str = "event_time",
                  time_unit: str = "ns",
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
-                 max_samples: int = 4096):
+                 max_samples: int = 4096,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
         if (window_seconds <= 0):
@@ -138,6 +149,9 @@ class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             self._needed_columns[name] = TypeId.INT64
             self._needed_columns[f"{name}_first_in_window"] = TypeId.BOOL8
             self._needed_columns[f"{name}_saturated"] = TypeId.BOOL8
+
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -195,7 +209,9 @@ class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             sources = to_host_list(df, self._src_column)
             destinations = to_host_list(df, self._dst_column)
             dst_ports = to_host_list(df, self._dst_port_column)
-            raw_times = to_host_list(df, self._time_column)
+            # Guarded once, before any window is shown a time: a refused time becomes `None`, which the rows below
+            # already treat as a flow with nothing to count.
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             counts: dict[str, list] = {name: [] for name in COUNTS}
             first: dict[str, list] = {name: [] for name in COUNTS}
@@ -209,11 +225,7 @@ class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                 # The port is normalized through the shared rule rather than through `str`, so a column widened to
                 # float by one null row does not fork port 443 into `443` and `443.0` and restart its count.
                 dst_port = normalize_text(dst_ports[position])
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 # Each count needs its own entity and its own value, and a flow missing either contributes to
                 # neither rather than to a fabricated key.
@@ -226,7 +238,7 @@ class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                 missing_here = event_time_ns is None or any(part is None for pair in pairs.values() for part in pair)
 
                 if (missing_here):
-                    keyless += 1
+                    keyless += int(not refused[position])
 
                 out_of_order = False
 
@@ -249,6 +261,13 @@ class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                 assign_nullable_int_column(df, name, counts[name])
                 assign_nullable_bool_column(df, f"{name}_first_in_window", first[name])
                 df[f"{name}_saturated"] = saturated[name]
+
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC3CardinalityStage",
+                        what="flows",
+                        outcome="they entered no window, set clock_refused and expired nothing.")
 
             if (keyless > 0):
                 logger.warning(

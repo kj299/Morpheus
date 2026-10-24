@@ -14,11 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Render six of the committed input samples in the formats real feeds write, and read them back.
+Render seven of the committed input samples in the formats real feeds write, and read them back.
 
 Each fixture is the same records as `../samples/<segment>/<class>.jsonlines`, written the way the source writes
-them: a packet capture of IPFIX from three routers, Zeek `ssl.log` and `x509.log`, `http.log` and `dns.log`,
-unified audit log records, and Sysmon events as `wevtutil` renders them. Only what the format carries is
+them: a packet capture of IPFIX from three routers, Entra ID sign-in records as Azure Monitor exports them, Zeek
+`ssl.log` and `x509.log`, `http.log` and `dns.log`, unified audit log records, and Sysmon events as `wevtutil`
+renders them. Only what the format carries is
 written; a collector's own facts are the `PROFILES` below. `normalize_all()` reads them back with
 `FlowRecordNormalizeStage` and the schemas in `morpheus.utils.collector_schemas`, and
 `tests/morpheus/utils/test_collector_schemas.py` holds the result to the samples, and the segments run over it to
@@ -56,6 +57,7 @@ ORGANIZATIONS = {"4f5e2b0a-3c1d-4e8f-9a7b-6c5d4e3f2a10": "corp", "9b8a7c6d-5e4f-
 
 PROFILES = {
     "tc3": CollectorProfile("netflow-01", "tc3.v1", "corp", "ntp_disciplined", 17),
+    "tc5_auth": CollectorProfile("idp", "TC-5/1.0.0", "corp", "ntp_disciplined", -4, first_seq=1),
     "tc6": CollectorProfile("tls-inspect-01", "tc6.v1", "corp", "ptp", -18),
     "tc7_http": CollectorProfile("proxy-01", "tc7_http.v1", "corp", "ntp_disciplined", -15),
     "tc7_dns": CollectorProfile("resolver-01", "tc7_dns.v1", "corp", "ntp_disciplined", 8),
@@ -66,6 +68,7 @@ PROFILES = {
 
 CLASSES = {
     "tc3": ("network", ["tc3.pcap"]),
+    "tc5_auth": ("session", ["signins.jsonlines"]),
     "tc6": ("presentation", ["ssl.log", "x509.log"]),
     "tc7_http": ("application", ["http.log"]),
     "tc7_dns": ("application", ["dns.log"]),
@@ -99,6 +102,19 @@ STATUS_MESSAGES = {
     500: "Internal Server Error"
 }
 VALIDATION_STRINGS = {value: key for (key, value) in collector_schemas.VALIDATION_RESULTS.items()}
+MFA_REQUIREMENTS = {value: key for (key, value) in collector_schemas.ENTRA_MFA_REQUIREMENTS.items()}
+TOKEN_TYPES = {"bearer": "none", "refresh": "primaryRefreshToken"}
+"""The contract's token types as Entra ID names them; any other value is the provider's own and passes through."""
+ENTRA_TENANT = "4f5e2b0a-3c1d-4e8f-9a7b-6c5d4e3f2a10"
+ENTRA_FAILURES = {
+    # The code Entra ID writes for each way a sign-in fails: the second factor refused, no second factor and the
+    # password wrong, or every factor passed and a policy refused the token. The corpus holds the first two.
+    "denied": (500121, "Authentication failed during strong authentication request."),
+    None: (50126, "Error validating credentials due to invalid username or password."),
+    "approved": (53003,
+                 "Access has been blocked by Conditional Access policies. The access policy does not allow "
+                 "token issuance."),
+}
 TLS_NAMES = {value: key for (key, value) in collector_schemas.TLS_VERSIONS.items()}
 SYSMON_PROVIDER = "<Provider Name='Microsoft-Windows-Sysmon' Guid='{5770385f-c22a-43e0-bf4c-06f5698ffbd9}'/>"
 
@@ -177,6 +193,98 @@ def write_flows(directory: str):
         datagrams.append((row["observed_time"], address, COLLECTOR_ADDRESS, message))
 
     ipfix.write_pcap(os.path.join(directory, "tc3.pcap"), datagrams)
+
+
+def _place_name(slug: str) -> str:
+    """A place as Entra ID writes it from the corpus's slug: `north-holland` to `North Holland`, `ny` to `NY`."""
+    return " ".join(word.upper() if len(word) <= 2 else word.capitalize() for word in slug.split("-"))
+
+
+def write_signins(directory: str):
+    """
+    `signins.jsonlines`: sign-in records as Azure Monitor exports them, each with its `properties`.
+
+    The record's `id` is the corpus's `origin_hash`, since the schema takes a sign-in's own identifier as its
+    origin; Entra ID writes a GUID there, and the schema passes either through. Case and separators are the
+    provider's: the principal's first letter upper, places as names, and the country as the alpha-2 code upper.
+    """
+    with open(os.path.join(directory, "signins.jsonlines"), "w", encoding="utf-8") as handle:
+        for row in sample("session", "tc5_auth"):
+            if (row["event_time"] % 1_000_000_000 != 0):
+                raise ValueError("the fixture writes createdDateTime to the second")
+
+            created = pd.Timestamp(row["event_time"], unit="ns", tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
+            principal = row["user_principal"]
+            (local, _) = principal.split("@", 1)
+            second_factor = row["mfa_result"]
+            succeeded = row["auth_result"] == "success"
+            (code, reason) = (0, "") if succeeded else ENTRA_FAILURES[second_factor]
+            steps = [{"authenticationMethod": "Password", "succeeded": succeeded or second_factor is not None}]
+
+            if (row["mfa_used"]):
+                steps.append({
+                    "authenticationMethod": "Mobile app notification", "succeeded": second_factor == "approved"
+                })
+
+            properties = {
+                "id": row["origin_hash"],
+                "createdDateTime": created,
+                "userDisplayName": _place_name(local),
+                "userPrincipalName": principal[0].upper() + principal[1:],
+                "appId": str(uuid.uuid5(uuid.NAMESPACE_URL, f"app:{row['app']}")),
+                "appDisplayName": row["app"],
+                "ipAddress": row["source_ip"],
+                "clientAppUsed": "Browser",
+                "correlationId": str(uuid.uuid5(uuid.NAMESPACE_URL, row["origin_hash"])),
+                "isInteractive": True,
+                "riskState": "none",
+                "resourceDisplayName": row["app"],
+                "resourceTenantId": ENTRA_TENANT,
+                "homeTenantId": ENTRA_TENANT,
+                "status": {
+                    "errorCode": code, "failureReason": reason, "additionalDetails": ""
+                },
+                "deviceDetail": {
+                    "deviceId": row["device_id"],
+                    "displayName": row["device_id"],
+                    "operatingSystem": "Windows10",
+                    "browser": "Edge 120.0.0",
+                },
+                "location": {
+                    "city": _place_name(row["source_city"]),
+                    "state": _place_name(row["source_region"]),
+                    "countryOrRegion": row["source_country"].upper(),
+                    "geoCoordinates": {
+                        "latitude": row["source_latitude"], "longitude": row["source_longitude"]
+                    },
+                },
+                "autonomousSystemNumber": int(row["source_asn"].removeprefix("as")),
+                "authenticationRequirement": MFA_REQUIREMENTS[row["mfa_used"]],
+                "authenticationDetails": steps,
+                "mfaDetail": {
+                    "authMethod": "Mobile app notification"
+                } if row["mfa_used"] else {},
+                "incomingTokenType": TOKEN_TYPES.get(row["token_type"], row["token_type"]),
+                "tokenIssuerType": "AzureAD",
+            }
+            record = {
+                "time": created,
+                "resourceId": f"/tenants/{ENTRA_TENANT}/providers/Microsoft.aadiam",
+                "operationName": "Sign-in activity",
+                "operationVersion": "1.0",
+                "category": "SignInLogs",
+                "resultType": str(code),
+                "resultSignature": "None",
+                "durationMs": 0,
+                "callerIpAddress": row["source_ip"],
+                "correlationId": properties["correlationId"],
+                "identity": properties["userDisplayName"],
+                "Level": 4,
+                "location": properties["location"]["countryOrRegion"],
+                "properties": properties,
+            }
+
+            handle.write(json.dumps(record) + "\n")
 
 
 def write_tls(directory: str):
@@ -419,6 +527,7 @@ def write_sysmon(directory: str):
 
 WRITERS = {
     "tc3": write_flows,
+    "tc5_auth": write_signins,
     "tc6": write_tls,
     "tc7_http": write_http,
     "tc7_dns": write_dns,
@@ -478,6 +587,8 @@ def normalize_all(root: str = HERE) -> dict[str, pd.DataFrame]:
     return {
         "tc3":
             normalize_flows(at("tc3", "tc3.pcap")),
+        "tc5_auth":
+            collector_schemas.entra_signin(at("tc5_auth", "signins.jsonlines"), PROFILES["tc5_auth"]),
         "tc6":
             collector_schemas.zeek_ssl(at("tc6", "ssl.log"), at("tc6", "x509.log"), PROFILES["tc6"]),
         "tc7_http":

@@ -35,6 +35,12 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_frame
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.lineage import lineage_id
 from morpheus.utils.lineage import merkle_root
 from morpheus.utils.window_seal import SEALED_BY_FLUSH
@@ -42,6 +48,12 @@ from morpheus.utils.window_seal import SEALED_BY_WATERMARK
 from morpheus.utils.window_seal import WindowSealer
 
 logger = logging.getLogger(__name__)
+
+SEALED_BY_INVALID = "invalid"
+"""The message carries rows whose event time could not be interpreted; they belong to no window."""
+
+SEALED_BY_REFUSED = "refused"
+"""The message carries rows whose event time the stage refused as further ahead of the stream than it believes."""
 
 
 @register_stage("window-seal")
@@ -66,12 +78,22 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
     - `revision`: 0 for the sealed publication, incrementing for each subsequent publication of the same window.
       Consumers keep every revision and filter to the maximum per window.
     - `sealed_by`: `watermark` normally; `flush` when the stream ended while the window was still open; `invalid`
-      on the message carrying rows whose event time could not be interpreted.
+      on the message carrying rows whose event time could not be interpreted; `refused` on the message carrying
+      rows whose event time the stage refused as implausibly far ahead of the stream.
     - `is_late`, `window_complete`: the late-arrival flags. Only `window_complete` rows are scoring inputs.
 
     Rows whose event time cannot be interpreted are emitted in their own message with `window_id = -1` and
     `sealed_by = "invalid"`, rather than being dropped: a dropped row looks like an absence of activity, which is
     the worst failure mode for a detection pipeline. Set `raise_on_invalid` to make them fatal instead.
+
+    The watermark is the one value in this stage a single row can move, and it moves every open window: a row
+    stamped years ahead by a collector whose clock has failed would seal every window in the estate at once, and
+    every real row after it would arrive late for a window already published. So the watermark sits behind an
+    `EventClock`, and a row further ahead of the stream than `max_clock_skew_seconds` is refused: it enters no
+    window, advances nothing, and is emitted in its own message with `window_id = -1`, `sealed_by = "refused"`,
+    `window_complete = False` and `clock_refused = True`, the same route the uninterpretable rows take, so it is
+    kept and visibly not scored. The row's window is not named, because the time that would name it is the thing
+    not believed. See `morpheus.utils.event_clock`.
 
     This stage is stateful and must run single-engine, which is the Morpheus default. For parallelism, shard the
     stream by entity upstream and give each shard its own instance, which is determinism control 4.
@@ -121,9 +143,15 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         lineage column is named on its own and is not prefixed.
     raise_on_invalid : bool, default = False
         When True a row with an uninterpretable event time fails the batch instead of being emitted flagged.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The sealer keeps
+        one watermark for every window, so one row from a collector whose clock is wrong by years would seal every
+        open window at once and make every later row a late arrival. A refused row enters no window, moves no
+        watermark, and leaves in its own `sealed_by = "refused"` message with `clock_refused` set. See
+        `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_sealer", "_buffers", "_emit_control_messages")
+    _checkpoint_attributes = ("_sealer", "_buffers", "_emit_control_messages", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -138,7 +166,8 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                  entity_key_column: str = None,
                  uid_column: str = "event_uid",
                  lineage_id_column: str = "lineage_id",
-                 column_prefix: str = ""):
+                 column_prefix: str = "",
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
         if (column_prefix is None):
@@ -158,6 +187,8 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         self._sealer = WindowSealer(period_ns=period_seconds * NS_PER_SECOND,
                                     lateness_ns=lateness_seconds * NS_PER_SECOND,
                                     epoch_ns=epoch_ns)
+        # Stands in front of the sealer's watermark.
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
         self._time_column = time_column
         self._time_unit = time_unit
         self._order_columns = list(order_columns) if order_columns is not None else None
@@ -173,6 +204,7 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         self._buffers: dict[int, list[pd.DataFrame]] = {}
         self._emit_control_messages: typing.Optional[bool] = None
 
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
         self._needed_columns.update({
             self._column(name): type_id
             for (name, type_id) in (
@@ -321,7 +353,8 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         -------
         list
             Zero or more messages: one per window sealed by this batch, plus one per window that received late
-            rows, plus at most one carrying rows with uninterpretable event times.
+            rows, plus at most one carrying rows with uninterpretable event times, plus at most one carrying rows
+            whose event time the clock refused.
 
         Raises
         ------
@@ -344,14 +377,7 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                                f"DataFrame. Available columns: {sorted(df.columns)}")
 
             pdf = to_host_frame(df)
-            raw_times = to_host_list(df, self._time_column)
-
-        times = []
-        for value in raw_times:
-            try:
-                times.append(to_epoch_ns(value, time_unit=self._time_unit))
-            except ValueError:
-                times.append(None)
+            times = event_times_ns(df, self._time_column, self._time_unit)
 
         invalid_count = sum(1 for t in times if t is None)
 
@@ -359,14 +385,29 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
             raise ValueError(f"{invalid_count} of {len(times)} rows have event times that cannot be interpreted "
                              f"from column {self._time_column!r}")
 
+        # Guarded after the invalid rows are counted and before the sealer sees anything: a refused time becomes
+        # `None`, which the sealer already treats as a row that joins no window and moves no watermark.
+        (times, refused) = guard_times(self._clock, times)
+        # Marked on the whole frame before it is cut into windows, so every message this stage emits carries the
+        # column: True on the refused rows, and on every believed row whatever an upstream guard wrote, or False.
+        refuse_rows(pdf,
+                    refused,
+                    logger=logger,
+                    stage="WindowSealStage",
+                    what="rows",
+                    outcome=f"they entered no window, moved no watermark, and leave marked clock_refused with "
+                    f"sealed_by={SEALED_BY_REFUSED!r}.")
         result = self._sealer.observe(times)
 
         on_time_rows: dict[int, list[int]] = {}
         late_rows: dict[int, list[int]] = {}
         invalid_rows: list[int] = []
+        refused_rows: list[int] = []
 
         for (position, assignment) in enumerate(result.assignments):
-            if (assignment.window_id is None):
+            if (refused[position]):
+                refused_rows.append(position)
+            elif (assignment.window_id is None):
                 invalid_rows.append(position)
             elif (assignment.late):
                 late_rows.setdefault(assignment.window_id, []).append(position)
@@ -398,7 +439,12 @@ class WindowSealStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                            self._time_column)
             emissions.append(
                 self._to_message(
-                    self._build_window(None, [pdf.iloc[invalid_rows]], "invalid", late=False, complete=False)))
+                    self._build_window(None, [pdf.iloc[invalid_rows]], SEALED_BY_INVALID, late=False, complete=False)))
+
+        if (len(refused_rows) > 0):
+            emissions.append(
+                self._to_message(
+                    self._build_window(None, [pdf.iloc[refused_rows]], SEALED_BY_REFUSED, late=False, complete=False)))
 
         return emissions
 

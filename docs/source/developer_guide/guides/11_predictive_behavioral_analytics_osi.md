@@ -64,7 +64,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
 That is fifty-seven stages and forty-six supporting
-modules, covered by 2,476 distinct tests, itemized in
+modules, covered by 2,566 distinct tests, itemized in
 [Part 6](#provided). Fifty-eight of the sixty rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -363,7 +363,7 @@ The repository ships three Python packages plus a compiled core:
 | --- | --- |
 | `python/morpheus/morpheus` | Core SDK: configuration, pipeline, stages, messages, modules, parsers, controllers, I/O |
 | `python/morpheus/morpheus/_lib` | C++/CUDA core exposed through pybind11: messages, stages, tensors, cuDF interoperability |
-| `python/morpheus/morpheus/_lib/doca` | Optional NVIDIA DOCA GPUNetIO path for line-rate packet capture directly into GPU memory |
+| [`python/morpheus/morpheus/_lib/doca`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/_lib/doca) | Optional NVIDIA DOCA GPUNetIO path for line-rate packet capture directly into GPU memory; removed from this fork by the [repository audit](./13_repository_audit.md)'s ruling D1 |
 | `python/morpheus_dfp/morpheus_dfp` | Digital fingerprinting: per-entity behavioral modeling, the piece most relevant here |
 | [`python/morpheus_llm/morpheus_llm`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_llm/morpheus_llm) | LLM engine nodes, vector database services, retrieval-augmented enrichment; removed from this fork by the [repository audit](./13_repository_audit.md)'s ruling D1 |
 
@@ -445,8 +445,9 @@ polluting the DataFrame.
 `mutable_dataframe()` is a context manager that acquires and releases that lock; `copy_ranges` produces a
 new `MessageMeta` from selected row ranges while preserving order.
 
-`python/morpheus/morpheus/_lib/include/morpheus/messages/raw_packet.hpp` defines `RawPacketMessage`, the
-GPU-resident packet buffer produced by the DOCA source.
+[`python/morpheus/morpheus/_lib/include/morpheus/messages/raw_packet.hpp`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/_lib/include/morpheus/messages/raw_packet.hpp)
+defined `RawPacketMessage`, the GPU-resident packet buffer produced by the DOCA source. It went with the
+DOCA path under ruling D1.
 
 #### Stage inventory
 
@@ -454,7 +455,9 @@ Sources (`stages/input/`): `KafkaSourceStage`, `HttpServerSourceStage`, `HttpCli
 `FileSourceStage`, `RSSSourceStage`, `DatabricksDeltaLakeSourceStage`, `ControlMessageKafkaSourceStage`,
 `ControlMessageFileSourceStage`, `AppShieldSourceStage`, `InMemorySourceStage`,
 `InMemoryDataGenStage`, `ArxivSource`, and the autoencoder sources for CloudTrail, Duo, and Azure.
-`RSSSourceStage` and `ArxivSource` served only the language-model use case and have since been removed.
+`RSSSourceStage` and `ArxivSource` served only the language-model use case and have since been removed, and
+[`AppShieldSourceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/appshield_source_stage.py) went with the ransomware
+use case.
 
 Preprocess (`stages/preprocess/`): `DeserializeStage`, `PreprocessNLPStage` (subword tokenization),
 `PreprocessFILStage`, `DropNullStage`, `GroupByColumnStage`.
@@ -621,15 +624,15 @@ window is satisfied, which is a deliberate choice between latency and stability.
 
 | Layer | What exists | Where |
 | --- | --- | --- |
-| 1-2 | GPU packet capture off a ConnectX NIC into device memory | `stages/doca/doca_source_stage.py`, `_lib/doca/` |
+| 1-2 | GPU packet capture off a ConnectX NIC into device memory (removed) | [`stages/doca/doca_source_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/doca/doca_source_stage.py), [`_lib/doca/`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/_lib/doca) |
 | 3-4 | Flow assembly and TCP flag features | `examples/abp_pcap_detection/abp_pcap_preprocessing.py` |
 | 3 | IP arithmetic and classification | `parsers/ip.py` |
 | 3-7 | Zeek log ingestion with typed headers | `parsers/zeek.py` |
 | 5-7 | Authentication behavior modeling | `morpheus_dfp` with Duo and Azure schemas |
 | 7 | Subword tokenization to transformer inference | `stages/preprocess/preprocess_nlp_stage.py` |
-| 7 | Named entity recognition over logs | `examples/log_parsing/` |
+| 7 | Named entity recognition over logs (removed) | [`examples/log_parsing/`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/log_parsing) |
 | 7 | Sensitive information detection, phishing | `models/sid-models`, `models/phishing-models` |
-| Host | Process, DLL, VAD, and handle snapshots | `stages/input/appshield_source_stage.py` |
+| Host | Process, DLL, VAD, and handle snapshots (removed) | [`stages/input/appshield_source_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/appshield_source_stage.py) |
 | SIEM | Splunk notable event regex parsing | `parsers/splunk_notable_parser.py` |
 
 The PCAP example is the clearest template for layer 3-4 feature engineering. It derives thirteen features
@@ -645,8 +648,9 @@ It builds `flow_id` as `"src_ip:src_port=dst_ip:dst_port"`, rolls timestamps int
 that every input message retains an output. The merge-back-and-sort-by-index pattern preserves input
 order, which is the right instinct.
 
-`AppShieldSourceStage` is the host-telemetry analogue: it reads per-snapshot plugin output and stamps
-`snapshot_id`, `timestamp`, `source`, and `plugin` onto every row, giving a natural composite key.
+`AppShieldSourceStage` was the host-telemetry analogue: it read per-snapshot plugin output and stamped
+`snapshot_id`, `timestamp`, `source`, and `plugin` onto every row, giving a natural composite key. It went
+with the ransomware use case under the [repository audit](./13_repository_audit.md)'s ruling D1.
 
 ---
 
@@ -667,7 +671,7 @@ Grepping the repository:
 | `stages/input/kafka_source_stage.py:246` | `pe_count = self._max_concurrent` |
 | `stages/general/multi_processing_stage.py:162` | `pe_count = self._max_in_flight_messages` |
 | `stages/general/router_stage.py:102` | `engines_per_pe = self._processing_engines` |
-| `stages/doca/doca_source_stage.py:98` | `pe_count = 1` |
+| [`stages/doca/doca_source_stage.py:98`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/doca/doca_source_stage.py#L98) (removed) | `pe_count = 1` |
 | [`morpheus_llm/stages/llm/llm_engine_stage.py:136`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_llm/morpheus_llm/stages/llm/llm_engine_stage.py#L136) (removed) | `pe_count = 1` |
 
 Any node with `pe_count > 1` processes messages concurrently and emits them in completion order, not
@@ -791,7 +795,7 @@ Three tiers:
 Tier 1  Collectors            Tier 2  Morpheus                  Tier 3  SIEM
 ------------------            ---------------------------       ---------------
 L1/L2 SNMP, LLDP, NAC   -->   segment_l12  ---\
-L3/L4 NetFlow, DOCA     -->   segment_l34  ----\
+L3/L4 NetFlow, IPFIX    -->   segment_l34  ----\
 L5   auth, VPN, RDP     -->   segment_l5   -----+--> segment_fuse --> Kafka --> Splunk
 L6   TLS, JA4, certs    -->   segment_l6   ----/                       |
 L7   HTTP, DNS, SaaS    -->   segment_l7   ---/                        +--> graph store
@@ -816,9 +820,9 @@ Every layer segment follows the same seven-step shape, which is the DFP pattern 
 1. **Ingest** - `KafkaSourceStage` or `HttpServerSourceStage`.
 2. **Normalize** - a `DataFrameInputSchema` built from `column_info` primitives, applied through
    `process_dataframe`. This is where `json_columns` flattening and dtype enforcement happen. Status:
-   {py:mod}`~morpheus.utils.collector_schemas` holds one for each of five layer 6 and 7 feeds (Zeek
-   `ssl.log` with `x509.log`, `http.log` and `dns.log`, the Microsoft 365 unified audit log, Windows System Monitor
-   events 1 and 7), and IPFIX flows reach layer 3 through `FlowRecordNormalizeStage`, which keeps the collector's sequence
+   {py:mod}`~morpheus.utils.collector_schemas` holds one for each of six layer 5, 6 and 7 feeds (Microsoft
+   Entra ID sign-in records, Zeek `ssl.log` with `x509.log`, `http.log` and `dns.log`, the Microsoft 365 unified audit
+   log, Windows System Monitor events 1 and 7), and IPFIX flows reach layer 3 through `FlowRecordNormalizeStage`, which keeps the collector's sequence
    across a restart; `examples/behavioral_analytics/fixtures/` holds each feed's format and the test that it
    normalizes to the committed sample.
 3. **Key and stamp** - a custom stage that computes the entity key, the deterministic `event_uid`, and
@@ -909,11 +913,15 @@ against the time of day would make a replay of last week's data expire everythin
 one corpus produce different output depending on when it was run. The reference that keeps replay honest is
 the stream's own progress, so a time further ahead of everything seen so far than any operational gap could
 explain is refused, the row carries no per-entity features, and the stage reports how many it refused.
-{py:mod}`~morpheus.utils.event_clock` implements this, and fourteen stages take `max_clock_skew_seconds`:
-`TC1BindingStage`, `TC2BindingStage`, `TC2AuthStage` and `TC5SessionStage` from the start, and since step 11
+{py:mod}`~morpheus.utils.event_clock` implements this, and thirty stages take `max_clock_skew_seconds`:
+`TC1BindingStage`, `TC2BindingStage`, `TC2AuthStage` and `TC5SessionStage` from the start, since step 11
 `TC1NormalizeStage`, `TC1RateStage`, `TC1OpticalStage`, `TC1ForecastStage`, `TC1FlapStage`, `TC1ChangeStage`,
-`TC2CardinalityStage`, `TC2BaselineStage` and `TC2ArpStage`, and since step 15 `TC1DeviceStage`. All but the two binding stages write `clock_refused`
-on the row they refused, which the pipeline's health record counts. The layer 3 to 7 window stages do not yet guard event time this way.
+`TC2CardinalityStage`, `TC2BaselineStage` and `TC2ArpStage`, since step 15 `TC1DeviceStage`, and since the repository
+research pass of 2026-10-24 the fifteen stateful TC-3 to TC-7 stages and `WindowSealStage`. All but the two binding
+stages write `clock_refused` on the row they refused, which the pipeline's health record counts. The guard is a bound
+on how far a row may run ahead of the rows believed before it, and the first row believed seeds it: a stream whose
+very first row comes from a broken clock is not caught here but by `EnvelopeValidateStage`, which quarantines a
+collector on the offset it reports, and by the total order the sources impose ahead of these stages.
 
 The guard has a property worth knowing before it is tuned. Its reference is the stream's own progress, so a stream
 that genuinely goes quiet for longer than the bound and then resumes is refused from then on: every later time is
@@ -1120,9 +1128,12 @@ the stages write -- `port_key` on every per-port count and `vlan_key` on every p
 remain what a MAC address is bound *to*, which is the binding stage's target rather than an entity with behaviour.
 
 **Behavioral features:** count of distinct MAC addresses per port over a window catches unauthorized
-hubs and switches. Count of distinct ports per MAC catches spoofing or a device physically moving.
-Ratio of gratuitous ARP replies to total ARP catches poisoning. Time-to-authorize distribution per port
-catches 802.1X bypass attempts. OUI novelty per VLAN catches unmanaged device introduction.
+hubs and switches. Count of distinct ports per MAC, `ports_per_mac`, is how many ports one address was seen
+on inside the window; the ratio of gratuitous ARP replies to total ARP, `gratuitous_arp_ratio`, is the share
+of one sender's ARP that was unprompted. Both are emitted and no shipped search reads either: R-D-L2-004
+reads a MAC in two places from the closed bindings, and R-D-L2-003 reads the claimant count, as the
+[Features without a rule](#features-without-a-rule) table in Part 6 records. Time-to-authorize distribution
+per port catches 802.1X bypass attempts. OUI novelty per VLAN catches unmanaged device introduction.
 
 The three cardinality features among those ship as
 {py:class}`~morpheus.stages.telemetry.tc2_cardinality_stage.TC2CardinalityStage` over
@@ -1289,7 +1300,7 @@ guide's own rule that a soft join against an unbounded interval is a guess.
 **Entity key:** `src_ip`, and separately the directed pair `src_ip:dst_ip`
 
 **Sources:** NetFlow v9, IPFIX, sFlow, VPC and cloud flow logs, firewall session logs, router ACL logs,
-and for full fidelity, the DOCA GPUNetIO path.
+and for full fidelity, a per-packet capture source.
 
 **Required fields:** `src_ip`, `dst_ip`, `exporter_id`, `ip_version`, `protocol`, `ip_ttl`, `ip_id`, `tos_dscp`,
 `packet_count`, `byte_count`, `flow_start`, `flow_end`, `tcp_flags_union`, `direction`,
@@ -1330,12 +1341,13 @@ explicitly in the rule documentation.
 **Entity key:** `flow_id` = `src_ip:src_port=dst_ip:dst_port` (the format already used in
 `abp_pcap_preprocessing.py`), plus `community_id` for cross-tool joins.
 
-**Sources:** the same as TC-3 with per-packet detail, plus Zeek `conn.log`, plus the DOCA path for
-line-rate capture. Status: the DOCA path cannot feed this class yet. `DocaConvertStage` emits two columns, `src_ip` and the payload as `data`, and the rest of each header stays inside the CUDA convert kernel, so the destination, the ports,
+**Sources:** the same as TC-3 with per-packet detail, plus Zeek `conn.log`, plus a per-packet
+capture source. Status: no per-packet source feeds this class. The upstream DOCA path never could: its
+`DocaConvertStage` emitted two columns, `src_ip` and the payload as `data`, so the destination, the ports,
 the TCP flags and options, the MSS, the initial window, the timestamp and the length `TC4FlowStage` reads
-never reach a DataFrame. Feeding it means extending `doca_convert_kernel.cu` and `doca_convert_stage.cpp`,
-which build only against the DOCA SDK and run only on native Linux with a ConnectX or BlueField NIC; the
-fork's one GPU machine is a WSL host without one. Tracked in #66.
+never reached a DataFrame, and it built only against the DOCA SDK on native Linux with a ConnectX or
+BlueField NIC. The [repository audit](./13_repository_audit.md)'s ruling D1 removed it, so a per-packet
+collector that emits those header fields is new work. Tracked in #66.
 
 **Required fields:** `src_port`, `dst_port`, `tcp_seq_initial`, `tcp_window_initial`, `tcp_options_order`,
 `tcp_mss`, `retransmit_count`, `out_of_order_count`, `zero_window_count`, `rtt_estimate_ms`,
@@ -1447,8 +1459,7 @@ connection says, and two ports on one server are two services. `service_key_sour
 designed and not built: `service_account` for API and `process_guid` for endpoint processes.
 
 **Sources:** HTTP proxies and WAFs, DNS resolvers, SaaS audit APIs (Microsoft 365, Salesforce,
-Workday), database audit logs, API gateways, email security gateways, EDR process telemetry, and the
-AppShield-style host snapshots supported by `AppShieldSourceStage`.
+Workday), database audit logs, API gateways, email security gateways, and EDR process telemetry.
 
 **Required fields:** for HTTP: `http_method`, `url_path`, `url_query`, `user_agent`, `referrer`,
 `status_code`, `request_bytes`, `response_bytes`, `duration_ms`, `trace_id`, `span_id`. For DNS:
@@ -1462,11 +1473,11 @@ generation algorithms. `DistinctIncrementColumn` over `target_object_type` per p
 novelty. Record-count-per-operation deviation from the principal's baseline for bulk extraction. Ratio of
 `4xx` to `2xx` per client for enumeration (`5xx` is about the server and is excluded; see R-D-L7-005). User agent novelty per principal. Process ancestry
 novelty using the parent-child pair as a categorical. The `models/` directory ships pretrained models
-usable here: `sid-models` for sensitive information detection, `phishing-models`, `log-parsing-models`
-for NER over unstructured logs, and `ransomware-models` for AppShield-style host telemetry. These are upstream
-models and sources: this fork composes none of them, R-B-L7-003 waits on a Triton path (see Part 6), and
-`AppShieldSourceStage`, named here and in Part 0 as the host-telemetry analogue, is used by nothing in this
-fork, whose endpoint class reads EDR process records instead (gap G69).
+usable here: `sid-models` for sensitive information detection and `phishing-models`. The log parsing and
+ransomware models, and `AppShieldSourceStage`, which Part 0 named as the host-telemetry analogue, were removed
+with their use cases under the [repository audit](./13_repository_audit.md)'s ruling D1. This fork composes none
+of the rest, R-B-L7-003 waits on a Triton path (see Part 6), and the endpoint class reads EDR process records
+(gap G69, closed by the removal).
 
 What is built beyond the tunnelling and enumeration measurements: every DNS and HTTP client is measured against its
 own busiest day. {py:class}`~morpheus.stages.telemetry.tc7_dns_stage.TC7DnsStage` keeps per client the daily peak of
@@ -3344,7 +3355,8 @@ reachable from this physical port in the last 24 hours" are one Cypher clause an
 an addition, not an alternative: the same Kafka topic feeds both, the graph carries no detection logic,
 and nothing in Part 3 depends on it.
 
-`examples/gnn_fraud_detection_pipeline` shows the pattern for scoring a graph with a GNN once it is
+The upstream [`examples/gnn_fraud_detection_pipeline`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/gnn_fraud_detection_pipeline), removed by the
+audit's ruling D1, showed the pattern for scoring a graph with a GNN once it is
 built. The same technique applies to scoring lineage chains directly rather than scoring their
 constituent events, which is the natural next step once the edge stream has been running long enough to
 have a labeled history.
@@ -3906,11 +3918,11 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Periodicity-based anomaly detection (`TimeSeriesStage`).
 
 Pass 4 measures each of these and records which the fork reuses.
-- Line-rate packet capture into GPU memory (DOCA).
+- Line-rate packet capture into GPU memory (DOCA; removed by the audit's ruling D1).
 - Protocol and log parsers for IP, Zeek, Windows events, URLs, and Splunk notables.
 - Kafka, Elasticsearch, HTTP, file, and Delta Lake sinks.
 - Pretrained models for sensitive information detection, phishing, log parsing, ransomware, fraud, and
-  anomalous behavior profiling.
+  anomalous behavior profiling (log parsing, ransomware and fraud removed by the audit's ruling D1).
 - Seeding utility and golden-file comparison stages.
 - Deterministic lineage identifiers ({py:mod}`~morpheus.utils.lineage` and
   {py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage`) and the Community ID flow
@@ -4097,8 +4109,9 @@ Pass 4 measures each of these and records which the fork reuses.
   flows, TLS handshakes and process starts to one row on `host_key`, and `TC5ScoreStage` scores it against the
   autoencoder its peer group shares, with a population model as the declared fallback, under the same manifest,
   stamp and daily drift as the principals. The thirteenth composed corpus plants a host that drifts a little more
-  each day and one that changes once; only the first meets R-P-L5-006's trajectory. No sourcetype carries the
-  score and no rule reads it yet.
+  each day and one that changes once; only the first meets R-P-L5-006's trajectory. The score reaches the app on
+  `morpheus:score:host`, which `examples/behavioral_analytics/run_host_score.py` writes from the three classes'
+  collector files, and R-P-L3-009 reads it.
 - The identifier ladder's last rung ({py:class}`~morpheus.stages.telemetry.tc1_binding_stage.TC1BindingStage`).
   `binding_l1` takes a switch port to a site, a transceiver and an LLDP neighbor, and nothing produced those
   records, so a chain query stopped at a port name -- a label rather than a place. It runs in the composed
@@ -4362,30 +4375,77 @@ Pass 4 measures each of these and records which the fork reuses.
 
 ### Features without a rule
 
-Every column the host-centric stages emit -- the TC-3, TC-4, TC-6 and endpoint TC-7 stages -- is read by a shipped
-search or is listed here with the reason it is not. A feature nobody reads is either evidence for an analyst, a
-model input waiting for its model, or a feature that should not have been built, and this table says which.
+Every column the feature stages of the composed corpora emit -- the TC-1 and TC-2 telemetry stages, the TC-3, TC-4
+and TC-6 host stages, the TC-5 session stages and the TC-7 DNS, HTTP, service, SaaS and endpoint stages -- is read by
+a shipped search, is an input of a committed model under `examples/layer5_model/models/`, or is listed here with the
+reason it is neither. A feature nobody reads is either evidence for an analyst, a model input waiting for its model,
+or a feature that should not have been built, and this table says which.
 `tests/morpheus/determinism/test_feature_coverage.py` builds the stages, reads the columns they declare, and fails
-when one is neither read nor listed, or when one listed here has since found a reader. The same table is in the app's
-README. Context columns are outside it: they are the inventory's, and the rules that read them name them.
+when one is neither read, a model input nor listed, or when one listed here has since found a reader. A read is a
+column named in a `search =` body; a comment that names a column to say why no search reads it is not one. The same
+table is in the app's README. Context, join and identity columns are outside it: they are the inventory's, the
+connection's and the machine's, and the rules that read them name them.
 
 | Feature | Stage | Why no rule reads it |
 | --- | --- | --- |
+| `counter_wrapped`, `sample_out_of_order` | `TC1NormalizeStage` | How a delta was arrived at: a wrapped counter still yields one, an out-of-order sample yields none. `PipelineHealthStage` counts the second per collector; the `Device restart` report reads `counter_reset`. |
+| `crc_errors_delta`, `symbol_errors_delta`, `input_discards_delta`, `output_discards_delta`, `if_hc_in_octets_delta`, `if_hc_out_octets_delta` | `TC1NormalizeStage` | The counter changes `TC1RateStage` divides by the interval. R-B-L1-005 reads `error_rate` and `discard_rate`; R-B-L1-007 reads `bits_per_second` and `utilization`. |
+| `bits_in_per_second`, `bits_out_per_second` | `TC1RateStage` | The two directions behind `bits_per_second` and `utilization`, which R-B-L1-007 reads. |
+| `error_rate_baseline_buckets`, `bits_per_second_baseline_buckets` | `TC1RateStage` | How deep each history is. R-B-L1-005 and R-B-L1-007 read `_baseline_mature`, which is this against the stage's floor. |
+| `bits_per_second_step` | `TC1RateStage` | The departure above the port's record. R-B-L1-007 fires in both directions, so it reads `bits_per_second` against `_baseline_max` and `_baseline_min` rather than the one-sided step. |
+| `optical_tx_dbm_baseline`, `optical_tx_dbm_baseline_samples` | `TC1OpticalStage` | The transmit history behind `optical_tx_dbm_deviation`, which R-D-L1-002 carries as context. The rule fires on the receive side and reads that side's baseline. |
+| `optical_rx_dbm_trend_residual_db`, `optical_rx_dbm_trend_significance` | `TC1ForecastStage` | How well the line fits and how far the slope is from flat: the figures for tuning the stage's two refusals. R-P-L1-004 reads `optical_rx_dbm_days_to_floor`. |
+| `link_flap_unpolled`, `link_flap_last_change_inconsistent` | `TC1FlapStage` | How a count was arrived at: transitions the device recorded between two polls that saw the same status, and a status change the device's own record did not show. R-D-L1-003 reads the count and `link_flap_device_reset`. |
+| `lldp_neighbor_chassis_id_distinct_count` | `TC1ChangeStage` | How many neighbours the port has ever reported: context for `_changed` and `_first_seen`, which R-D-L1-006 reads. |
+| `bind_end_observed`, `bind_provisional` | `TC1BindingStage`, `TC2BindingStage` | Whether the source reported the end itself, and whether the record is an open binding emitted before its close. The lookup refreshes load every binding; R-D-L2-004 reads `bind_end_reason` and `bind_gap_ns`. |
+| `ports_per_mac`, `ports_per_mac_first_in_window`, `ports_per_mac_saturated` | `TC2CardinalityStage` | How many ports one address was seen on inside the window, with its event flag and sample cap. R-D-L2-004 reads the same condition from the closed bindings on `binding:l2`, where `bind_gap_ns` says how close the two sightings were, and no shipped search reads the count. |
+| `ouis_per_vlan_saturated` | `TC2CardinalityStage` | The sample cap on one VLAN's vendors. R-B-L2-006 carries `ouis_per_vlan_first_in_window` and fires on the step. |
+| `macs_per_port_baseline_buckets`, `ouis_per_vlan_baseline_buckets` | `TC2BaselineStage` | How deep the history is. R-B-L2-002 and R-B-L2-006 read the step, which is null until the baseline is mature. |
+| `macs_per_port_baseline_mature` | `TC2BaselineStage` | Folded into `macs_per_port_step`, which R-B-L2-002 fires on and which is null until the baseline is mature. |
+| `arp_is_gratuitous`, `gratuitous_arp_count`, `arp_count_in_window`, `gratuitous_arp_ratio`, `gratuitous_arp_ratio_saturated` | `TC2ArpStage` | The share of one sender's ARP that was unprompted, with its per-row flag, its two counts and its sample cap. The telemetry corpus's flood raises it and the harness holds it to its counts; no shipped search reads it. R-D-L2-003 reads `macs_claiming_sender_ip`, the other shape poisoning takes. |
+| `macs_claiming_sender_ip_saturated` | `TC2ArpStage` | The sample cap on one address's claimants, which makes the count a lower bound. R-D-L2-003 fires on more than one either way. |
+| `auth_abandoned` | `TC2AuthStage` | The pending exchanges this row's arrival timed out. `PipelineHealthStage` sums it per collector into `morpheus:health`; R-D-L2-005 reads `auth_unpaired`. |
 | `dsts_per_src_first_in_window`, `srcs_per_dst_first_in_window`, `dst_ports_per_src_first_in_window` | `TC3CardinalityStage` | Says which flow raised the count. The rules read the count; this is for the analyst reading the row. |
 | `internal_dsts_in_window` | `TC3ReachStage` | The numerator of `internal_dst_ratio`, which R-B-L3-001 reads instead. |
 | `internal_dst_ratio_saturated` | `TC3ReachStage` | The ratio's sample cap. R-B-L3-001 carries `dsts_per_src_saturated`, the cap on the count it fires on. |
 | `dsts_per_src_baseline_buckets`, `srcs_per_dst_baseline_buckets`, `byte_asymmetry_baseline_buckets` | `TC3BaselineStage` | How deep the history is. The rules read `_baseline_mature`, which is this against the stage's floor. |
 | `flow_regularity_saturated` | `TC3BeaconStage` | The interval cap on one pair. A beacon is regular long before it binds. |
 | `ip_ttl_saturated` | `TC3TtlStage` | The sample cap on one source's TTL samples, which a stable path never reaches. |
+| `flow_bpp`, `flow_ppm`, `flow_psh`, `flow_fin`, `flow_ackpush_ratio`, `flow_fin_ratio`, `flow_rst_ratio`, `flow_syn_ratio` | `TC4FlowStage` | Per-flow model inputs. The searches recover the counts from their maxima rather than aggregate a running ratio -- an ordinary handshake opens with a bare SYN, so `max(flow_syn_ratio)` over it is 1.0, the scan's figure -- and no layer 4 model is pinned yet (#59). |
+| `flow_bpp_envelope` | `TC4EnvelopeStage` | The envelope R-B-L4-005 measures against; it fires on `flow_bpp_envelope_breached`. |
+| `flow_bpp_envelope_mature`, `flow_data_len_envelope_mature` | `TC4EnvelopeStage` | Folded into the `_breached` flags, which are null until the envelope is mature. |
+| `logcount_saturated`, `asns_in_window_saturated` | `TC5NoveltyStage` | The sample caps on the two windowed features, which make them lower bounds. `PipelineHealthStage` counts saturated rows per collector. |
+| `app_first_seen` | `TC5NoveltyStage` | Whether the principal has used this application before. R-D-L5-008 reads `location_first_seen` and `device_first_seen`; the application enters the score as `appincrement`. |
+| `local_weekday`, `hour_share`, `weekday_share`, `weekday_unseen` | `TC5CadenceStage` | The weekday side of the histogram, and the smoothed shares behind both surprises. R-D-L5-007 reads `hour_unseen`; the weekday enters the score as `weekday_surprise_bits`. |
+| `mfa_challenge` | `TC5RiskStage` | Whether this row was a multi-factor challenge. R-D-L5-004 reads the window counts, `mfa_attempts_in_window` and `mfa_denials_in_window`; the proportion enters the score as `mfa_ratio`. |
+| `logcount_z_loss`, `appincrement_z_loss`, `deviceincrement_z_loss`, `asns_in_window_z_loss`, `hour_surprise_bits_z_loss`, `weekday_surprise_bits_z_loss`, `mfa_ratio_z_loss`, `auth_attempts_in_window_z_loss`, `auth_failures_in_window_z_loss` | `TC5ScoreStage` | The per-feature losses behind `mean_abs_z` and `max_abs_z`, which R-B-L5-001 reads. R-B-L5-002 reads `locincrement_z_loss` alone, the feature its rule names; the rest say which feature drove a score. |
+| `drift_run_restarted` | `TC5DriftStage` | Whether a gap in the entity's windows restarted the run. The trajectory rules read `drift_rising_windows`, which the restart has already reset. |
+| `session_duration_ns` | `TC5SessionStage` | The duration in nanoseconds. R-B-L5-005 reads `session_duration_s`, the TC-5 field. |
+| `session_starts`, `session_unpaired`, `session_out_of_order`, `session_abandoned`, `session_unclassified` | `TC5SessionStage` | How the pairing went: a repeated start, a stop with no start, a stop before its start, the sessions this row's arrival timed out, an action that was neither. `PipelineHealthStage` counts them per collector into `morpheus:health`. |
 | `ja4_client_changed` | `TC6FingerprintStage` | Measured, not reasoned about: in the layer 6 corpus every change on a settled host is either a first sighting, which R-B-L6-001 reads, or the host alternating between two stacks it has always had, which is that rule's control. A rule on the change alone fires only on the control. |
 | `tls_client_key` | `TC6FingerprintStage` | The key the stage keeps a host's stacks on. Searches group by `src_ip`. |
-| `cert_destination_is_global` | `TC6CertificateStage` | One half of `cert_self_signed_external`, which R-D-L6-003 reads. |
+| `cert_self_signed`, `cert_destination_is_global` | `TC6CertificateStage` | The two halves of `cert_self_signed_external`, which R-D-L6-003 reads. The first alone returns every self-signed management interface in the estate. |
 | `cert_issuer_saturated` | `TC6CertificateStage` | The issuer cap on one destination, which a destination presenting more is already past. |
 | `cipher_rank`, `cipher_floor` | `TC6CipherStage` | The numbers behind `cipher_tier` and `cipher_floor_tier`, which R-B-L6-004 reports, and `cipher_downgraded`, which it fires on. |
 | `cipher_saturated` | `TC6CipherStage` | The suite cap on one pair. |
-| `flow_bpp`, `flow_ppm`, `flow_psh`, `flow_fin`, `flow_ackpush_ratio`, `flow_fin_ratio`, `flow_rst_ratio` | `TC4FlowStage` | Per-flow model inputs. The searches recover the counts from their maxima rather than aggregate a running ratio, and no layer 4 model is pinned yet (#59). |
-| `flow_bpp_envelope` | `TC4EnvelopeStage` | The envelope R-B-L4-005 measures against; it fires on `flow_bpp_envelope_breached`. |
-| `flow_bpp_envelope_mature`, `flow_data_len_envelope_mature` | `TC4EnvelopeStage` | Folded into the `_breached` flags, which are null until the envelope is mature. |
+| `dns_client_key` | `TC7DnsStage` | The key the stage keeps a client's windows on. Searches group by `src_ip`. |
+| `dns_subdomains_saturated`, `dns_domains_saturated` | `TC7DnsStage` | The sample caps on one domain's subdomains and one client's domains, which make the counts lower bounds. R-B-L7-001 and R-B-L7-008 fire on the counts either way. |
+| `dns_answered_in_window` | `TC7DnsStage` | The denominator of `dns_nxdomain_ratio`, which R-B-L7-008 reads with `dns_nxdomain_in_window`. |
+| `dns_subdomains_per_domain_baseline`, `dns_subdomains_per_domain_baseline_days`, `dns_domains_per_client_baseline`, `dns_domains_per_client_baseline_days` | `TC7DnsStage` | The client's busiest day and how many days it is over. R-B-L7-001 and R-B-L7-008 read the ratio against it and `_baseline_mature`. |
+| `http_client_key` | `TC7HttpStage` | The key the stage keeps a client's windows on. Searches group by `src_ip`. |
+| `http_status_class` | `TC7HttpStage` | The status reduced to its class. R-D-L7-005 reads the two counts the classes are summed into. |
+| `http_4xx_to_2xx_ratio` | `TC7HttpStage` | Null for a client with no 2xx at all, the purest enumerator there is, so R-D-L7-005 tests `http_4xx_in_window > 0.7 * http_2xx_in_window`, the same inequality with the division removed. |
+| `http_window_saturated` | `TC7HttpStage` | The sample cap on one client's requests, which makes the counts lower bounds. |
+| `http_distinct_paths_baseline`, `http_distinct_paths_baseline_days` | `TC7HttpStage` | The client's busiest day and how many days it is over. R-D-L7-005 reads the ratio against it and `_baseline_mature`. |
+| `http_ua_family_first_seen` | `TC7HttpStage` | Whether this client has sent this user agent family before. R-B-L4-004 reads `http_ua_os`; the novelty is per client rather than per principal, and no rule reads it until it is. |
+| `service_connections_in_window` | `TC7ServiceStage` | The service's connections, beside its bytes and clients. R-B-L7-007 fires on the clients and carries the bytes. |
+| `service_clients_saturated` | `TC7ServiceStage` | The sample cap on one service's connections, which makes the client count a lower bound. |
+| `service_client_fingerprints` | `TC7ServiceStage` | How many client fingerprints the service has ever seen: context for `service_client_fingerprint_first_seen`, which R-B-L7-007 reads. |
+| `service_clients_baseline_days` | `TC7ServiceStage` | How many days the busiest day is over. R-B-L7-007 reads `service_clients_baseline_mature`. |
+| `saas_baseline_key` | `TC7SaasStage` | The principal and operation the baseline is kept on. R-B-L7-002 groups by `user_principal` and `operation`. |
+| `saas_baseline_samples`, `saas_baseline_saturated` | `TC7SaasStage` | How many priors the quantile is over, and whether the cap bound. R-B-L7-002 reads `saas_baseline_mature`. |
+| `saas_operation_failed` | `TC7SaasStage` | Whether the operation reached nothing and so entered neither measurement; its ratio and breadth are null. Refusals are worth a rule of their own, which is not written. |
+| `saas_week_id` | `TC7SaasStage` | The week the breadth count is in, from the stage's own epoch. R-P-L7-006 reads the weekly seal's window beside it. |
 | `endpoint_host_seen`, `endpoint_peer_seen`, `endpoint_mature` | `TC7EndpointStage` | The halves of `endpoint_pair_novel`, which R-B-L7-004 reads. Carried so an analyst can see which half decided. |
 
 ### Must be built
@@ -4406,13 +4466,13 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Host baselines at layers 3, 4 and 6 | Medium | Built, in step 9. `TC3BaselineStage` keeps each host's hourly peak fan-out, fan-in and byte asymmetry over fourteen days, with an optional group column so one address in two routing domains is two hosts, and the network corpus gained the fortnight it is measured against. R-B-L3-001 fires on a step above the source's own history with the literal fifty kept as a floor, and a DHCP server's Monday checks, which the literal fired on, are its control; R-B-L3-006 reads fan-in onto a destination the inventory calls a workstation, R-B-L3-007 a first contact more lopsided than the host has ever sent, and R-D-L3-008 a port sweep inside the estate. `community_id` is on layers 3 and 6, and a report joins one connection across layers 3, 4 and 6 on it. `normalize_hostname` keys a host in the endpoint, asset, enrichment and envelope stages and in the layer 5 target, so `FIN-01` and `fin-01` are one host and R-C-001 joins without folding case; the asset record carries `device_role`, `os_family` and `os_version`, R-C-001 requires a server, R-B-L7-004 scales its severity by criticality and carries the owner, and R-B-L6-001 is gated on a managed host again. Every host feature is read by a search or listed under [Features without a rule](#features-without-a-rule), and a test holds the list to the stages. What remains: layer 4 still has no per-host baseline beyond the per-triple envelope, `ja4_client_changed` has no rule because the corpus shows nothing a rule on it would add, R-P-L3-005 now visibly fires on every host's first minutes of the day and wants the same step condition, and the inventory is looked up on the address at layer 6 until hosts have an identity across layers (#63). Tracked in #60 |
 | Host identity across layers, the lease producer and a real edge stream | Large | Built, in step 12. `TC2BindingStage` takes a grant column, so a DHCP server's acknowledgements close into leases that last the term the server granted, and an EDR agent's inventory reports into which machine each interface belongs to; the network, transport, presentation and application corpora, and the campaign's layers 3, 4 and 6, resolve each source address through both with `BindingResolverStage` and carry `mac_address`, `host_key` and each hop's binding identifier, with chains rooted on the machine. `TC7EndpointStage` writes the same `host_key` for a process, and a host identity harness seals four layers together and finds one workstation one entity and one chain, with a re-leased address as the control. `EdgeEmitStage` writes `morpheus:edge` records with both ends' identifiers and layers, the relation, the join method and the child's `lineage_id`; every estate and campaign resolver writes its binding's identifier; the SIEM gains `binding_l2` and `binding_l5_l2` with refresh and expiry jobs, a directory lookup the estate supplies, a host evidence report and an identity walk that agrees with the pipeline on all twenty-five sign-ins; and R-C-002 and R-C-004 join on `community_id` and `session_key` where present. Departures: chains stay one per layer in the single-layer corpora, which seal alone, and only the harness seals layers together; the layer 3 and 4 compositions carry `host_key` without the machine's asset context, which the harness attaches; DNS and HTTP are resolved to a machine but not to a session, because the application corpus has no sessions; and the reference corpus's flows are no longer sent to the SIEM, rather than being renamed. The DHCP and EDR collectors themselves are not Morpheus. Gaps G03, G04, G17, G43, G52 and G80 are closed by #63 |
 | Network-object detections on existing columns, traffic volume, VLAN, 802.1X timing, binding ends | Medium | Built, in step 10. R-D-L1-002 reads the optical tap step, R-D-L1-003 flap instability with restarts excluded, R-D-L1-006 a neighbour the port has never had, and a `Device restart` report gathers the reboot flags into one row per device. `TC1RateStage` divides each delta by its interval into error, discard and traffic rates and `utilization` against `link_speed_bps`, from the 64-bit octet counters TC-1 now requires, and measures each port's error rate against its own peak (R-B-L1-005) and its traffic against its own peak and trough per UTC hour (R-B-L1-007). `link_key` names a link by its two ends and `Topology - LLDP adjacency` keeps the record; R-B-L2-002 leaves trunk and LAG-member ports out. `ouis_per_vlan` is keyed `site_id:vlan_id`, measured against its own history and read by R-B-L2-006; the four-part key is gone from Part 2. `TC2AuthStage` keeps each port's 99th percentile and R-B-L2-007 and 008 read its two tails. `TC2BindingStage` gains a stop column and a snapshot mode, and the corpus ends one binding `explicit` and one `snapshot_absent`. What remains: a link resolves to one name from both ends only where the LLDP identity and the key the poller builds agree, which needs TC-0's mapping; a restart splits each of its ports' layer 1 bindings for the poll its neighbour is unknown; discards have no baseline; and the hour-of-day history is untested beyond one hour of corpus. Tracked in #61 |
-| Envelope validation, clock quarantine, collector and pipeline health, late-arrival delivery, platform baselines | Medium | Built, in step 11. Every corpus record carries `observed_time`, `ingest_time`, `clock_source`, `clock_offset_ms`, `sampling_policy` and `tenant_id`, and every layer 3 flow `exporter_id`. `EnvelopeValidateStage` stamps `ingest_time`, marks a missing field that has no stated reason, and quarantines a record whose clock is unsynchronized or more than a second out: the telemetry corpus's DMZ poller, three polls at 4500 ms, reaches `morpheus:quarantine` and nothing else. `CollectorSequenceStage` finds the ARP sensor's three undelivered records; `PipelineHealthStage` writes 851 `morpheus:health` records over the sample events, and its per-feed baseline steps on the SaaS corpus's doubling tenant alone. Nine more stateful stages refuse a far-future time; a late flow reaches `morpheus:late` and no detection, and every detection reads `window_complete=true`. Four reports ship with expectations, and Part 2 gains TC-P. What is not built: correcting an event time by the offset a collector reports, and guarding the layer 3 to 7 window stages' clocks |
+| Envelope validation, clock quarantine, collector and pipeline health, late-arrival delivery, platform baselines | Medium | Built, in step 11. Every corpus record carries `observed_time`, `ingest_time`, `clock_source`, `clock_offset_ms`, `sampling_policy` and `tenant_id`, and every layer 3 flow `exporter_id`. `EnvelopeValidateStage` stamps `ingest_time`, marks a missing field that has no stated reason, and quarantines a record whose clock is unsynchronized or more than a second out: the telemetry corpus's DMZ poller, three polls at 4500 ms, reaches `morpheus:quarantine` and nothing else. `CollectorSequenceStage` finds the ARP sensor's three undelivered records; `PipelineHealthStage` writes 851 `morpheus:health` records over the sample events, and its per-feed baseline steps on the SaaS corpus's doubling tenant alone. Nine more stateful stages refuse a far-future time; a late flow reaches `morpheus:late` and no detection, and every detection reads `window_complete=true`. Four reports ship with expectations, and Part 2 gains TC-P. The layer 3 to 7 window stages' clocks are guarded too: the fifteen stateful TC-3 to TC-7 stages and `WindowSealStage` take `max_clock_skew_seconds`, a row further ahead of the stream than it allows enters no window, moves no watermark and sets `clock_refused`, and the sealer emits such a row in its own `sealed_by=refused` message rather than letting one far-future row seal every open window. What is not built: correcting an event time by the offset a collector reports |
 | Device telemetry class and R-C-003 | Large | Built, in step 15. A `tc1_device` sub-class keyed `site_id:device_id` carries the device's own poll, and `TC1DeviceStage` reads a restart from `sysUpTime` as the counter normalization does, measures restarts per period against the device's own thirty days and counts the periods running that each held more, which R-P-L1-009 reads, places a configuration change against the estate's change window, which R-D-L1-008 reads, and differences the routing table. The `Device restart` report reads the device's restart first and gathers its ports' flags beside it. `TC2CardinalityStage` keeps OUI novelty per port as `oui_first_seen_on_port`, the closed binding carries `oui`, and `TC3ReachStage` writes `dst_is_management` from the estate's prefixes, with a `vlan_designations` lookup on the search head. R-C-003 ships, over a rogue-host actor in the campaign corpus, which now holds layers 1, 2 and 3 at headquarters, with three controls each one condition short. What remains: the gauges -- `cpu_util`, `mem_util`, `syslog_rate`, `bgp_peer_count` -- are carried and read by no rule; a change window is one window for the estate rather than one per device or per day; and the management prefixes are given to the stage and to the lookup separately, so the two can disagree. Tracked in #65 |
 | Service and application entity | Large | Built, in step 13. `TC7ServiceStage` keys a service on `sni:dst_port`, or `dst_ip:dst_port` without a name, and measures its connections, bytes and distinct clients per window, new client fingerprints, and its clients against its own busiest day; R-B-L7-007 reads it. DNS and HTTP clients are measured against their own busiest day, and R-B-L7-001 and R-D-L7-005 threshold the ratio with the literal as a floor; `TC7DnsStage` reads `response_code` into an NXDOMAIN ratio and counts distinct registered domains per client, and R-B-L7-008 reads both; `TC7HttpStage` reads the user agent into a family, an operating system and per-client novelty. `TC6CertificateStage` keys a destination on `dst_ip:sni`, and R-D-L6-002 groups on it. TC-0 gains an `application` kind keyed `address:port` and carrying `service_account` and `owning_team`, produced by `TC0ApplicationStage` on `context:application` and attached as `ctx_application_*` at layers 4, 6 and 7; the context corpus reassigns a server and records it late. `TC4FlowStage` carries the options, segment size and window of each SYN packet into a per-host `stack_fingerprint`, and R-B-L4-004 ships as a join on `host_key` rather than on a flow. What remains: `client_app` is still read by nothing; a SaaS application is not yet an entity of its own, only the servers that answer for one; the 5xx ratio is not measured per service; and user agent novelty is per client, not per principal. Gaps G10, G29, G49, G50, G51 and G77 are closed by #64 |
 | Triton-backed rules R-B-L4-001 and R-B-L7-003 | Medium | Specified over the `abp` features and over request bodies; no fork pipeline composes `TritonInferenceStage` and no `Scorer`-protocol adapter exists for layers 4 or 7 the way `ReferenceScorer` and `DfencoderScorer` do for layer 5. Both need a Triton endpoint and a GPU path CPU CI cannot exercise; revisit once the per-user model's CPU inference path exists as the pattern to copy. Not scheduled; recorded as gap G48 in the retrospective |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it, asserted equal to the unsharded golden under control 13. Tracked in #66 |
-| Runnable segment compositions and SIEM transport | Large | The runners are built, in step 16: `examples/behavioral_analytics/run_<segment>.py` for all nine segments reads one JSON lines file per class with `FileSourceStage`, runs the segment's composition, and ends in `MinimizationStage`, `SiemWireStage` and a new `SiemWireSinkStage`, which writes a file or a Kafka topic per sourcetype with null fields left out, as neither generic writer does. `--state` restores every stage's memory on start and checkpoints on stop, and `test_segment_runners.py` holds each runner's output to its composition line for line, restarts three segments halfway with equal output, and finds no principal in any segment's output under the example policy. Building them found two more NaN-identity defects: `TC6ContentStage` counted a missing content type as present, and `MinimizationStage`'s copy check matched a gap in a digested column to a gap in a kept one. The compositions still live beside their corpora, and the runners import them. The transport is configured: `examples/splunk_lineage_app/transport/` holds a Splunk Connect for Kafka sink over one topic per sourcetype, posting to the raw endpoint so the `props.conf` stanzas set `_time`, and an `inputs.conf` with the HEC token and a forwarder monitor per runner file, all rendered from the sourcetype inventory and held to it, to the app and to the runners' own naming by `test_splunk_transport.py`. Every one of the fifty-eight stages is a `morpheus run pipeline-other` command, and `test_lineage_stage_cli.py` builds each one and holds the nine compositions in the example README to the CLI; widening it found three constructors the CLI could not build and that an absent list option reached a stage as an empty tuple rather than its None default, which is repaired in `register_stage`. The sharding variant is built: `session_pipeline.run_pipeline(shards=N)` runs the layer 5 composition as control 4 describes, over `ShardSplitStage` and `RouterStage` keyed on `stable_shard`, and the harness holds it to the unsharded golden on every column about an entity, with the three stream-accounting columns (`sealed_by`, `day_sealed_by`, `session_abandoned`) named as the ones a branch decides for itself, and a negative control that splits a principal across branches and changes the features. The real-feed normalizations are in the row below. Tracked in #66 |
-| Per-class collector input contracts, samples and layer 3-7 normalization schemas | Medium | The contracts and samples are built, in step 16: `examples/behavioral_analytics/input_contracts.json` names the type, unit, collector-side source and whether it is required for every column of all twenty input classes, `collector_contract.md` is rendered from it, each segment's corpus is exported to `samples/<segment>/<class>.jsonlines`, and `test_input_contracts.py` holds all eleven corpus builders to the contract and the committed files to what the builders build. The normalization is built too: `FlowRecordNormalizeStage` takes IPFIX, decoded from a packet capture by `morpheus.utils.ipfix` (RFC 7011 templates scoped per exporter and observation domain, RFC 5103 reverse counters), into the TC-3 record, `exporter_id` included, and `morpheus.utils.collector_schemas` holds one `DataFrameInputSchema` per layer 6 and 7 sub-class -- Zeek `ssl.log` joined to `x509.log`, `http.log`, `dns.log`, the Microsoft 365 unified audit log and Windows System Monitor event 1 joined to the event 7 of its own image -- with Zeek read through `parsers/zeek.py`, whose pandas path could not read a standard Zeek header and now does. `examples/behavioral_analytics/fixtures/` renders six committed samples in those formats, and `test_collector_schemas.py` holds each normalized fixture to its sample column for column and the network, application, SaaS and endpoint segments run over them to the files they write from the samples, byte for byte. Zeek cannot carry what an inspecting proxy saw inside a TLS session, so `content_type_declared` and `content_type_detected` are null from it, and the test asserts that rather than excusing it. What remains is the DOCA adapter, and it is blocked rather than pending: `DocaConvertStage` emits two columns, `src_ip` and the payload as `data`, and the rest of each header stays inside the CUDA convert kernel, so no adapter in Python can recover what `TC4FlowStage` reads; the fix is a change to `doca_convert_kernel.cu` and `doca_convert_stage.cpp` that builds only against the DOCA SDK and runs only on native Linux with a ConnectX or BlueField NIC, which the fork's one GPU machine, a WSL host, does not have. The collectors themselves remain out of scope. Tracked in #66 |
+| Runnable segment compositions and SIEM transport | Large | The runners are built, in step 16: `examples/behavioral_analytics/run_<segment>.py` for all ten segments, the host segment among them, reads one JSON lines file per class with `FileSourceStage`, runs the segment's composition, and ends in `MinimizationStage`, `SiemWireStage` and a new `SiemWireSinkStage`, which writes a file or a Kafka topic per sourcetype with null fields left out, as neither generic writer does. Beside the scored stream every runner writes `morpheus:health` through `PipelineHealthStage` as `envelope.health` runs it for the harnesses, and `morpheus:edge` through `EdgeEmitStage` for a segment whose corpus module names its hops in `EDGE_HOPS`, so the two forwarder monitors that had nothing to read are fed. `--state` restores every stage's memory on start and checkpoints on stop, and `test_segment_runners.py` holds each runner's output to its composition line for line, restarts three segments halfway with equal output, and finds no principal in any segment's output under the example policy. One health count is still normalized in that restart check: `fallback`, because `envelope.health` drops a column that is null on every row of the frame it is given before `PipelineHealthStage` reads it, and `model_fallback_used` is null on the whole fortnight before the scored week, so a run stopped inside the fortnight answers nothing where the whole replay answers zero. The repair is upstream of the health stage, a score stage writing false rather than null where no manifest covers the row, and is not made yet. Building them found two more NaN-identity defects: `TC6ContentStage` counted a missing content type as present, and `MinimizationStage`'s copy check matched a gap in a digested column to a gap in a kept one. The compositions still live beside their corpora, and the runners import them. The transport is configured: `examples/splunk_lineage_app/transport/` holds a Splunk Connect for Kafka sink over one topic per sourcetype, posting to the raw endpoint so the `props.conf` stanzas set `_time`, and an `inputs.conf` with the HEC token and a forwarder monitor per runner file, all rendered from the sourcetype inventory and held to it, to the app and to the runners' own naming by `test_splunk_transport.py`. Every one of the fifty-eight stages is a `morpheus run pipeline-other` command, and `test_lineage_stage_cli.py` builds each one and holds the nine compositions in the example README to the CLI; widening it found three constructors the CLI could not build and that an absent list option reached a stage as an empty tuple rather than its None default, which is repaired in `register_stage`. The sharding variant is built: `session_pipeline.run_pipeline(shards=N)` runs the layer 5 composition as control 4 describes, over `ShardSplitStage` and `RouterStage` keyed on `stable_shard`, and the harness holds it to the unsharded golden on every column about an entity, with the three stream-accounting columns (`sealed_by`, `day_sealed_by`, `session_abandoned`) named as the ones a branch decides for itself, and a negative control that splits a principal across branches and changes the features. The real-feed normalizations are in the row below. Tracked in #66 |
+| Per-class collector input contracts, samples and layer 3-7 normalization schemas | Medium | The contracts and samples are built, in step 16: `examples/behavioral_analytics/input_contracts.json` names the type, unit, collector-side source and whether it is required for every column of all twenty input classes, `collector_contract.md` is rendered from it, each segment's corpus is exported to `samples/<segment>/<class>.jsonlines`, and `test_input_contracts.py` holds all eleven corpus builders to the contract and the committed files to what the builders build. The normalization is built too: `FlowRecordNormalizeStage` takes IPFIX, decoded from a packet capture by `morpheus.utils.ipfix` (RFC 7011 templates scoped per exporter and observation domain, RFC 5103 reverse counters), into the TC-3 record, `exporter_id` included, and `morpheus.utils.collector_schemas` holds one `DataFrameInputSchema` per layer 5, 6 and 7 sub-class -- Microsoft Entra ID sign-in records, Zeek `ssl.log` joined to `x509.log`, `http.log`, `dns.log`, the Microsoft 365 unified audit log and Windows System Monitor event 1 joined to the event 7 of its own image -- with Zeek read through `parsers/zeek.py`, whose pandas path could not read a standard Zeek header and now does. The sign-in mapping is the one `examples/upstream_reuse/evaluate.py` measures as its `azure` source, and a test holds the two to each other. `examples/behavioral_analytics/fixtures/` renders seven committed samples in those formats, and `test_collector_schemas.py` holds each normalized fixture to its sample column for column and the network, session, application, SaaS and endpoint segments run over them to the files they write from the samples, byte for byte. Zeek cannot carry what an inspecting proxy saw inside a TLS session, so `content_type_declared` and `content_type_detected` are null from it, and a cloud identity provider has no on-premises `target_host`, so that is null from the Entra ID schema; the test asserts both rather than excusing them. What remains is a per-packet source for `TC4FlowStage`. The upstream DOCA path could not be that source, since its `DocaConvertStage` emitted only `src_ip` and the payload, and the repository audit's ruling D1 removed it; a per-packet collector is new work. The collectors themselves remain out of scope. Tracked in #66 |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage`, and it consumes raw monotonic totals with sysUpTime beside them, not pre-differenced deltas. Out of scope by design; not tracked |
 | Graph store beside Splunk | Medium | Optional by design: nothing in Part 3 depends on it and Splunk is the detection surface. Deliberately left open. The one concrete piece worth taking early is small and is listed under the network-object detections above: an LLDP adjacency lookup over `binding:l1`, which step 10 built and the app refreshes, and an 'Entity view' SPL recipe per entity class in the app README, which is not written. Not scheduled; recorded as gap G08 |
 | Cloud control-plane sub-class (`tc7_cloud`) | Medium | CloudTrail, Azure Activity, GCP Audit and Kubernetes audit are outside the design although a role assumption or `kubectl exec` has exactly the shape `TC7SaasStage` measures. Specified in Part 2 with the baseline key extended to (principal, account, operation); the corpus, variant column set and rule wait until the service entity and normalization schemas exist. Not scheduled; recorded as gap G56 |
@@ -4522,7 +4582,7 @@ again.
 span at every width on both axes: fifteen still hold three layers and all fifteen desk sign-ins still resolve to
 the port they were made at, because a principal reaches a port through an 802.1X session lasting most of the
 hour. The rung below reaches through a MAC binding lasting one poll cadence, and there a minute is a large
-fraction of the interval: of 1040 ARP observations rooted on a port, ten fall back to their own address and
+fraction of the interval: of 1045 ARP observations rooted on a port, ten fall back to their own address and
 five acquire a port they did not have. Attribution moved while reach did not.
 
 Each of those findings is asserted in `tests/morpheus/determinism/test_clock_skew_experiment.py` against the
@@ -4584,13 +4644,19 @@ person resolves earlier in the hour and not later. Both are asserted, and the ha
 naming the remote worker in the directory, rooting layer 5 on the principal, making the supplicant binding
 eternal, and sealing layer 5 apart -- with each break failing the test that exists for it.
 
-`Chain assembly - cross-layer risk` is still empty, and it is worth being exact about why, because the reason has
-changed again. Its first threshold, `dc(osi_layer) >= 3`, is met. The line after it is not: `total_risk >= 60 OR
-(layer_span >= 4 AND peak_z >= 4.0)`. Every detection now ends in `| collect index=behavior_risk`, so its rows
-outlive its job, and the chain search sums those records per lineage, once each (gap G11, issue #57). On the
-sample events one detection accuses a three-layer chain -- R-D-L2-003, the address two MACs claimed, at 55 --
-and the other fourteen carry none, so the search returns nothing for a reason the search-head run now records
-rather than infers. Before that change no detection stanza collected, raised a notable or alerted, so
+`Chain assembly - cross-layer risk` returns one row, and it is worth being exact about how, because for a long
+time it returned none and the reason kept changing. Its first threshold, `dc(osi_layer) >= 3`, has been met since
+the estate pipeline sealed layers 1, 2 and 5 together. The line after it, `total_risk >= 60 OR (layer_span >= 4 AND
+peak_z >= 4.0)`, was not: every detection ends in `| collect index=behavior_risk`, so its rows outlive its job, and
+the chain search sums those records per lineage, once each (gap G11, issue #57), but on the sample events the two
+detections that accused a three-layer chain accused different chains -- R-D-L2-003, the gateway two MACs claimed,
+at 55 on the port the flooding host sits at, and R-D-L1-002, the tap, at 50 on Carol's -- and no chain reached 60.
+The repository research pass of 2026-10-24 found the fork's headline capability validated only as a correct empty,
+and planted the actor the search exists for: the workstation on the tapped port claims the gateway in the window
+after the tap, so that port's chain carries 50 and 55 together, 105, and the search returns it, naming both rules
+and the three resolution methods the ladder took. The flooding host's chain stays at 55 beside it, the quiet case
+that proves the threshold is doing the work. The run that would return the row on a search head has not been made
+yet; the thirteenth run, over the events before the plant, is kept with the twelve before it. Before that change no detection stanza collected, raised a notable or alerted, so
 `risk_score` never landed in any index the chain search read, and three documents called that a deployment step.
 The `morpheus:edge` events carry the chain now: `EdgeEmitStage` writes each edge with its child's `lineage_id`, so
 an edge's join method is counted with the chain it belongs to.

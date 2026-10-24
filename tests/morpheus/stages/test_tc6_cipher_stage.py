@@ -139,3 +139,89 @@ def test_the_pair_key_is_directed(config: Config):
 def test_a_missing_column_is_refused(config: Config):
     with pytest.raises(KeyError, match="cipher_suite"):
         run(config, {"src_ip": ["10.0.0.5"], "dst_ip": ["10.0.1.5"], "event_time": [START]})
+
+
+# --- The clock guard ------------------------------------------------------------------------------------------
+
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A collector clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
+
+def _without_row(payload: dict, position: int) -> dict:
+    """The same frame with one row left out, which is what a refused row must be indistinguishable from."""
+    return {
+        name: [value for (index, value) in enumerate(values) if index != position]
+        for (name, values) in payload.items()
+    }
+
+
+def _pandas(meta: MessageMeta) -> pd.DataFrame:
+    df = meta.copy_dataframe()
+
+    return df.to_pandas() if hasattr(df, "to_pandas") else df
+
+
+def _drive(config: Config, stage, payload: dict) -> pd.DataFrame:
+    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
+    stage.on_data(meta)
+
+    return _pandas(meta)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    # Row 6 is stamped a decade ahead. Admitted, it would drive every horizon in the stage past the rows before it
+    # and refuse the real row after it as out of order; refused, the stream reads exactly as if it had never arrived.
+    payload = handshakes([GOOD_SUITE] * 8)
+    payload["event_time"] = [START + index * SECOND
+                             for index in range(6)] + [START + YEARS_AHEAD_NS, START + 6 * SECOND]
+
+    with_bad = _drive(config, TC6CipherStage(config), payload)
+    control = _drive(config, TC6CipherStage(config), _without_row(payload, 6))
+
+    assert [bool(value)
+            for value in with_bad["clock_refused"]] == [False, False, False, False, False, False, True, False]
+    assert pd.isna(with_bad["cipher_floor"][6])
+
+    kept = with_bad.drop(index=6).reset_index(drop=True)
+    pd.testing.assert_frame_equal(kept, control, check_dtype=False)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_frame_with_nothing_refused_carries_the_column_as_false(config: Config):
+    # The mark is written on every frame, so whether a frame carries the column is a property of the stage and not of
+    # which rows shared a batch; a believed row reads False, which the health record counts as 0 rather than null.
+    payload = handshakes([GOOD_SUITE] * 8)
+
+    frame = _drive(config, TC6CipherStage(config), payload)
+
+    assert [bool(value) for value in frame["clock_refused"]] == [False] * len(frame)
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC6CipherStage(config, max_clock_skew_seconds=0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_stop_and_restore_round_trip_keeps_the_clock(config: Config):
+    # A fresh instance believes the first time it is shown, so a decade-ahead row that opens a resumed process would
+    # set its clock. The clock is part of the snapshot, and the restored instance refuses it as the stopped one would.
+    payload = handshakes([GOOD_SUITE] * 8)
+    payload["event_time"] = [START + index * SECOND
+                             for index in range(6)] + [START + YEARS_AHEAD_NS, START + 6 * SECOND]
+    (before, after) = ({
+        name: values[:6]
+        for (name, values) in payload.items()
+    }, {
+        name: values[6:]
+        for (name, values) in payload.items()
+    })
+
+    stopped = TC6CipherStage(config)
+    _drive(config, stopped, before)
+
+    resumed = TC6CipherStage(config)
+    resumed.restore_state(stopped.checkpoint_state())
+
+    assert [bool(value) for value in _drive(config, resumed, after)["clock_refused"]] == [True, False]

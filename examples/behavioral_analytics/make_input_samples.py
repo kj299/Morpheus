@@ -57,9 +57,11 @@ SEGMENTS = {
     "saas": "saas_pipeline",
     "endpoint": "endpoint_pipeline",
     "context": "context_pipeline",
+    "host_score": "host_score_pipeline",
 }
 """Each segment a deployment runs, and the corpus module whose builder holds its input. The estate and campaign
-corpora are compositions of these segments over one estate, not segments of their own."""
+corpora are compositions of these segments over one estate, not segments of their own; the host segment is one,
+reading three other segments' classes and the leases and inventory they resolve through."""
 
 NOT_INPUT_CLASSES = {
     "tc3_late_delivery": "tc3",

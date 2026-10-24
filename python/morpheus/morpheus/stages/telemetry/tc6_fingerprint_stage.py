@@ -60,13 +60,18 @@ from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.value_novelty import DEFAULT_MAX_VALUES
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
@@ -106,9 +111,15 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
         Distinct fingerprints recalled per host before the least recently seen is forgotten.
     max_entities : int, default = 100000
         Hosts tracked before the least recently seen is forgotten.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The history is
+        keyed on event time per host, so one handshake from a sensor whose clock is wrong by years would move its
+        host's latest instant into the far future and make every real handshake after it read as out of order and
+        join nothing. A refused row carries no novelty from this stage, sets `clock_refused`, and moves no instant.
+        See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_tracker", "_observations")
+    _checkpoint_attributes = ("_tracker", "_observations", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -117,7 +128,8 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                  time_column: str = "event_time",
                  time_unit: str = "ns",
                  max_values: int = DEFAULT_MAX_VALUES,
-                 max_entities: int = 100_000):
+                 max_entities: int = 100_000,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
         key_columns = ["src_ip"] if key_columns is None else list(key_columns)
@@ -151,6 +163,9 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
         self._needed_columns[JA4_DISTINCT] = TypeId.INT64
         self._needed_columns[JA4_OBSERVATIONS] = TypeId.INT64
         self._needed_columns[JA4_SATURATED] = TypeId.BOOL8
+
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -207,7 +222,9 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
 
             key_parts = {name: to_host_list(df, name) for name in self._key_columns}
             fingerprints = to_host_list(df, self._fingerprint_column)
-            raw_times = to_host_list(df, self._time_column)
+            # Guarded once, before the history is shown any time: a refused time becomes `None`, which the rows
+            # below already treat as a handshake that teaches the history nothing.
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             keys: list = []
             first_seen: list = []
@@ -221,11 +238,7 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             for (position, raw_fingerprint) in enumerate(fingerprints):
                 key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
                 fingerprint = normalize_text(raw_fingerprint)
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 keys.append(key)
 
@@ -233,7 +246,7 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                 # compute it or the record is not a handshake, and either way the history must not learn a null
                 # as though it were a stack.
                 if (key is None or fingerprint is None or event_time_ns is None):
-                    unusable += 1
+                    unusable += int(not refused[position])
                     first_seen.append(None)
                     changed.append(None)
                     distinct.append(None)
@@ -260,6 +273,13 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             assign_nullable_int_column(df, JA4_DISTINCT, distinct)
             assign_nullable_int_column(df, JA4_OBSERVATIONS, observations)
             assign_nullable_bool_column(df, JA4_SATURATED, saturated)
+
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC6FingerprintStage",
+                        what="handshakes",
+                        outcome="they entered no history, set clock_refused and moved no host's instant.")
 
             if (unusable > 0):
                 logger.warning(

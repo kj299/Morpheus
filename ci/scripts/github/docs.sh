@@ -32,7 +32,6 @@ download_artifact "wheel-${REAL_ARCH}.tar.bz"
 tar xf "${WORKSPACE_TMP}/wheel-${REAL_ARCH}.tar.bz"
 
 pip install --no-build-isolation ${MORPHEUS_ROOT}/${BUILD_DIR}/python/morpheus/dist/*.whl
-pip install --no-build-isolation ${MORPHEUS_ROOT}/${BUILD_DIR}/python/morpheus_llm/dist/*.whl
 pip install --no-build-isolation ${MORPHEUS_ROOT}/${BUILD_DIR}/python/morpheus_dfp/dist/*.whl
 
 rapids-logger "Pulling LFS assets"

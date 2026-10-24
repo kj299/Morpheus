@@ -14,12 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Six real-format fixtures, normalized, are the committed samples; and a segment run over them writes what it writes
-from the samples.
+Seven real-format fixtures, normalized, are the committed samples; and a segment run over them writes what it
+writes from the samples.
 
-`examples/behavioral_analytics/fixtures/make_fixtures.py` renders the samples of six input classes as the feeds
-write them -- IPFIX in a packet capture, Zeek `ssl.log`/`x509.log`, `http.log` and `dns.log`, unified audit log
-records and Sysmon events -- carrying only what each format carries. Reading them back through
+`examples/behavioral_analytics/fixtures/make_fixtures.py` renders the samples of seven input classes as the feeds
+write them -- IPFIX in a packet capture, Entra ID sign-in records, Zeek `ssl.log`/`x509.log`, `http.log` and
+`dns.log`, unified audit log records and Sysmon events -- carrying only what each format carries. Reading them back
+through
 `FlowRecordNormalizeStage` and the `collector_schemas` schemas has to give the samples column for column, except
 what a format cannot carry, which is named here and has to be null rather than invented.
 """
@@ -29,6 +30,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import shutil
 import sys
 
@@ -45,6 +47,7 @@ FIXTURES = os.path.join(EXAMPLE, "fixtures")
 sys.path.insert(0, FIXTURES)
 sys.path.insert(0, EXAMPLE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
+sys.path.insert(0, os.path.join(REPO_ROOT, "examples", "upstream_reuse"))
 
 # pylint: disable=wrong-import-position
 import make_fixtures  # noqa: E402
@@ -125,6 +128,98 @@ def test_the_query_string_is_stripped_and_vocabulary_mapped(normalized: dict):
     assert set(normalized["tc6"]["validation_result"]) == {"ok", "self-signed"}
 
 
+def test_the_sign_in_mapping_is_the_one_the_upstream_evaluation_measures():
+    # `evaluate.py` names the sign-in properties as the upstream stage flattens them, separators stripped; the
+    # schema names them as `json_normalize` does. One cannot move without the other.
+    import evaluate  # pylint: disable=import-outside-toplevel
+
+    measured = evaluate.SOURCE_MAPPINGS["azure"]
+    flattened = {column: re.sub("[_.{}:]", "", field) for (column, field) in collector_schemas.ENTRA_FIELDS.items()}
+
+    assert flattened == measured
+    assert set(evaluate.FORK_TC5_INPUTS) == set(collector_schemas.ENTRA_FIELDS)
+
+
+def test_a_sign_in_is_read_as_the_contract_names_it(tmp_path):
+    profile = CollectorProfile("c", "tc5_auth.v1", "corp")
+    path = tmp_path / "signins.jsonlines"
+    path.write_text(json.dumps({
+        "id": "sign-in-1",
+        "createdDateTime": "2026-10-17T10:00:00.1234567Z",
+        "userPrincipalName": "Alice@Example.com",
+        "appDisplayName": "wiki",
+        "ipAddress": "203.0.113.11",
+        "location": {
+            "city": "New York", "state": "New York", "countryOrRegion": "US"
+        },
+        "status": {
+            "errorCode": 50126
+        },
+        "autonomousSystemNumber": 7018,
+        "authenticationRequirement": "multiFactorAuthentication",
+        "authenticationDetails": [{
+            "authenticationMethod": "Password", "succeeded": True
+        }, {
+            "authenticationMethod": "Text message", "succeeded": False
+        }],
+        "incomingTokenType": "saml11",
+    }) + "\n",
+                    encoding="utf-8")
+
+    row = collector_schemas.entra_signin(str(path), profile).iloc[0]
+
+    assert row["origin_hash"] == "sign-in-1"
+    assert row["event_time"] == pd.Timestamp("2026-10-17T10:00:00.1234567Z").value
+    assert row["user_principal"] == "alice@example.com"
+    assert (row["source_country"], row["source_region"], row["source_city"]) == ("us", "new-york", "new-york")
+    assert row["source_latitude"] is pd.NA and row["device_id"] is None and row["target_host"] is None
+    assert row["source_asn"] == "as7018"
+    assert (row["auth_result"], row["mfa_used"], row["mfa_result"]) == ("failure", True, "denied")
+    # A token type the map does not know reaches the SIEM as itself.
+    assert row["token_type"] == "saml11"
+    assert row["observed_time"] == row["event_time"] and row["tenant_id"] == "corp"
+
+
+def test_a_passwordless_first_factor_is_not_read_as_a_second_factor(tmp_path):
+    # A FIDO2 key or Windows Hello signs a user in with one step and no password; that step is the first factor,
+    # so a single-factor sign-in made that way carries no `mfa_result`, and a second factor is whatever follows it.
+    profile = CollectorProfile("c", "tc5_auth.v1", "corp")
+    path = tmp_path / "signins.jsonlines"
+    passwordless = {
+        "id": "sign-in-2",
+        "createdDateTime": "2026-10-17T10:00:00Z",
+        "userPrincipalName": "bob@example.com",
+        "appDisplayName": "wiki",
+        "ipAddress": "203.0.113.12",
+        "status": {
+            "errorCode": 0
+        },
+        "authenticationRequirement": "singleFactorAuthentication",
+        "authenticationDetails": [{
+            "authenticationMethod": "Windows Hello for Business", "succeeded": True
+        }],
+        "incomingTokenType": "none",
+    }
+    stepped_up = {
+        **passwordless,
+        "id":
+            "sign-in-3",
+        "authenticationRequirement":
+            "multiFactorAuthentication",
+        "authenticationDetails": [{
+            "authenticationMethod": "FIDO2 security key", "succeeded": True
+        }, {
+            "authenticationMethod": "Mobile app notification", "succeeded": True
+        }],
+    }
+    path.write_text(json.dumps(passwordless) + "\n" + json.dumps(stepped_up) + "\n", encoding="utf-8")
+
+    frame = collector_schemas.entra_signin(str(path), profile)
+
+    assert (frame.iloc[0]["mfa_used"], frame.iloc[0]["mfa_result"]) == (False, None)
+    assert (frame.iloc[1]["mfa_used"], frame.iloc[1]["mfa_result"]) == (True, "approved")
+
+
 def test_an_unknown_value_passes_through_rather_than_becoming_null(tmp_path):
     profile = CollectorProfile("c", "tc7_saas.v1", "corp")
     path = tmp_path / "audit.jsonlines"
@@ -194,7 +289,11 @@ def test_a_process_whose_image_load_was_not_logged_has_no_signature_status():
 
 
 SEGMENT_CHECKS = {
-    "network": ["tc3"], "application": ["tc7_http", "tc7_dns"], "saas": ["tc7_saas"], "endpoint": ["tc7_endpoint"]
+    "network": ["tc3"],
+    "session": ["tc5_auth"],
+    "application": ["tc7_http", "tc7_dns"],
+    "saas": ["tc7_saas"],
+    "endpoint": ["tc7_endpoint"],
 }
 """Segments whose every normalized class carries all its columns, so their output can be asked to be identical.
 The presentation segment reads the two content columns Zeek cannot supply, and its content rule would differ."""

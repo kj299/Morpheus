@@ -238,7 +238,7 @@ fifteen desk sign-ins still resolve to the port they were made at. A principal r
 session lasting most of the hour, and a minute never takes it outside.
 
 The rung below is not so comfortable. An ARP observation reaches a port through a MAC binding that lasts one
-poll cadence, and a minute is a large fraction of that. At sixty seconds, of the 1040 ARP observations rooted
+poll cadence, and a minute is a large fraction of that. At sixty seconds, of the 1045 ARP observations rooted
 on a port, ten fall back to their own address and five acquire a port they did not have -- a net five, and
 fifteen rows whose attribution changed. It was fifteen and six before step 11 added the DMZ poller: a sixth clock in
 the spread places the other five a little differently at the same width.
