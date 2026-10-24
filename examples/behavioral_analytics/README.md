@@ -17,6 +17,7 @@ python examples/behavioral_analytics/run_network.py --output out/network --state
 | `run_saas.py` | `tc7_saas` | `morpheus:score:l7` |
 | `run_endpoint.py` | `tc7_endpoint` | `morpheus:score:l7` |
 | `run_context.py` | `tc0_identity`, `tc0_asset`, `tc0_application` | `context:identity`, `context:asset`, `context:application` |
+| `run_host_score.py` | `tc3`, `tc6`, `tc7_endpoint`, `tc3_dhcp`, `tc7_host_inventory` | `morpheus:score:host` |
 
 Every runner also writes `morpheus:late` for a row that arrived after its window sealed and
 `morpheus:quarantine` for a record whose clock could not be trusted. Each reads a directory holding one JSON lines
@@ -24,6 +25,16 @@ file per class, `samples/<segment>/` by default, with `FileSourceStage`, runs th
 its corpus module under `tests/morpheus/determinism/` holds to a golden file -- and ends in `MinimizationStage`,
 `SiemWireStage` and `SiemWireSinkStage`, one file per sourcetype or, with `--kafka`, one topic per sourcetype.
 `SiemWireSinkStage` leaves null fields out, which the generic file and Kafka writers do not.
+
+Beside the scored stream each runner writes the two branches a deployment's forwarder monitors:
+
+- `morpheus_health.jsonlines`, sourcetype `morpheus:health`: `PipelineHealthStage` over the segment's sealed rows,
+  one class at a time in window order, one record per window, collector, class and tenant, with the segment's
+  sealing period as the history's bucket. It is `envelope.health` as the corpus harnesses run it, so the file is
+  what they assert. The context segment seals nothing and writes none.
+- `morpheus_edge.jsonlines`, sourcetype `morpheus:edge`: `EdgeEmitStage` over the same rows, for a segment whose
+  corpus module names its resolution hops in an `EDGE_HOPS` constant, as `estate_pipeline.py` does for the estate.
+  A segment that names none writes no edge file; no segment's module names them yet.
 
 - **`--state DIR`** restores every stage that remembers from the latest checkpoint in `DIR` before the first row,
   and checkpoints when the run stops, keeping open windows and bindings for the next run. `--not-final` says
@@ -204,12 +215,13 @@ command line is shown to produce records and not only to parse.
 
 ## From real feeds
 
-`fixtures/` holds six of the samples as the feeds that produce them write them, and `fixtures/make_fixtures.py`
+`fixtures/` holds seven of the samples as the feeds that produce them write them, and `fixtures/make_fixtures.py`
 renders and reads them back:
 
 | Class | Fixture | Read with |
 |---|---|---|
 | `tc3` | `network/tc3.pcap`, IPFIX from three routers, one message per flow | `morpheus.utils.ipfix.read_pcap`, then `FlowRecordNormalizeStage` |
+| `tc5_auth` | `session/signins.jsonlines`, Entra ID sign-in records as Azure Monitor exports them | `collector_schemas.entra_signin` |
 | `tc6` | `presentation/ssl.log` and `x509.log` (Zeek, with the JA4 package's `ja4`) | `collector_schemas.zeek_ssl` |
 | `tc7_http` | `application/http.log` (Zeek) | `collector_schemas.zeek_http` |
 | `tc7_dns` | `application/dns.log` (Zeek) | `collector_schemas.zeek_dns` |
@@ -219,8 +231,8 @@ renders and reads them back:
 A fixture carries only what its format carries. The collector's own facts -- its identity, contract version,
 tenant, clock discipline and sampling -- are a `CollectorProfile`, the exporters' names are an inventory the stage
 is given, and `collector_seq` counts records in the order read. `tests/morpheus/utils/test_collector_schemas.py`
-holds each normalized fixture to its sample, column for column, and runs the network, application, SaaS and
-endpoint segments over them to the same files the samples give, byte for byte. Zeek does not see inside a TLS
+holds each normalized fixture to its sample, column for column, and runs the network, session, application, SaaS
+and endpoint segments over them to the same files the samples give, byte for byte. Zeek does not see inside a TLS
 session, so the two content types an inspecting proxy reports are null from the Zeek schema, and the
 presentation segment's content rule needs a feed that supplies them.
 

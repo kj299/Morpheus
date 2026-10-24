@@ -25,6 +25,12 @@ server and EDR inventory they resolve through -- and its composition is the one 
           ──► MinimizationStage ──► SiemWireStage ──► SiemWireSinkStage ──► one file, or one Kafka topic,
                                                                             per sourcetype
 
+and the two branches a deployment runs beside the scored stream: `PipelineHealthStage` over the sealed rows, one
+record per window, collector, class and tenant, on `morpheus:health`; and, for a segment whose corpus module names
+its resolution hops in `EDGE_HOPS`, `EdgeEmitStage` over the same rows, on `morpheus:edge`. Both are run exactly as
+`envelope.health` and `edge_stream.emit` run them for the corpus harnesses, so what a runner writes is what the
+harnesses assert.
+
 The input is a directory holding one JSON lines file per class, named for the class, as `samples/<segment>/` does
 and as `collector_contract.md` specifies. Each is read by `FileSourceStage` with JSON's own types kept, and an
 integer column with a gap is held as a nullable integer, as the contract says it is.
@@ -120,10 +126,22 @@ SEGMENTS: dict[str, dict] = {
             "tc0_application": "context:application",
         },
     },
+    "host_score": {
+        "module": "host_score_pipeline", "sourcetypes": {
+            "host_score": "morpheus:score:host"
+        }
+    },
 }
 """Each segment, the composition that runs it, and the sourcetype each of its classes' records go on. A row whose
 window had sealed before it arrived goes on `morpheus:late` and a quarantined record on `morpheus:quarantine`,
-whatever its class; a class not listed (the context segment's probes) is not delivered."""
+whatever its class; a class not listed (the context segment's probes, the host segment's three feature classes,
+which it frames rather than delivers) is not delivered. Every segment's health records go on `morpheus:health` and
+its edges, where its module names `EDGE_HOPS`, on `morpheus:edge`."""
+
+HEALTH_SOURCETYPE = "morpheus:health"
+EDGE_SOURCETYPE = "morpheus:edge"
+EDGE_CLASS = "edge"
+"""The group name the edges are delivered under; an edge is a record of no telemetry class."""
 
 FILE_PARSER_KWARGS = {"convert_dates": False, "dtype": False, "precise_float": True}
 """How `FileSourceStage` parses a sample: JSON's own types, no date guessing on `*_time` columns, and floats read
@@ -249,6 +267,89 @@ def route(segment: str, result) -> list[tuple[str, str, typing.Any]]:
     return groups
 
 
+def _branch(state_dir: typing.Optional[pathlib.Path], final: bool, produce: typing.Callable):
+    """
+    Run one branch's pipeline, restoring and checkpointing its stage in its own directory.
+
+    A branch is checkpointed apart from the composition, and one class's health apart from another's, because a
+    checkpoint matches segments by the order they ran in and a class that sealed nothing in one run would shift the
+    next class's history onto it. Without a state directory the branch is a replay, as the composition is.
+    """
+    if (state_dir is None):
+        return produce()
+
+    import resumable  # pylint: disable=import-outside-toplevel
+
+    with resumable.persisted(str(state_dir), final=final):
+        return produce()
+
+
+def health(module,
+           config,
+           result,
+           state_dir: typing.Optional[pathlib.Path] = None,
+           final: bool = True) -> list[tuple[str, str, typing.Any]]:
+    """
+    The segment's `morpheus:health` groups: `envelope.health` over its sealed rows, as the corpus harness runs it.
+
+    One `PipelineHealthStage` per class, each over that class's sealed rows in window order, with the module's
+    `PERIOD_SECONDS` as the history's bucket and its `HEALTH_MIN_BUCKETS`, or the stage's default, before a baseline
+    is published. Each class's history is checkpointed under `state_dir / "health" / <class>`. The records are
+    delivered one class at a time, as the sink receives every other group, because a policy is applied to one class
+    and `MinimizationStage` refuses a mixed frame. A module that names no period seals nothing (the context segment)
+    and has no health.
+    """
+    import envelope  # pylint: disable=import-outside-toplevel
+
+    from morpheus.utils.bucket_peak import DEFAULT_MIN_BUCKETS  # pylint: disable=import-outside-toplevel
+
+    period_seconds = getattr(module, "PERIOD_SECONDS", None)
+
+    if (period_seconds is None or len(result) == 0 or "window_id" not in result.columns):
+        return []
+
+    min_buckets = getattr(module, "HEALTH_MIN_BUCKETS", DEFAULT_MIN_BUCKETS)
+    sealed = result[result["window_id"].notna()]
+    groups = []
+
+    for name in sorted(set(sealed["telemetry_class"].dropna()) - {QUARANTINE_CLASS}):
+        records = _branch(
+            None if state_dir is None else state_dir / "health" / name,
+            final, lambda name=name: envelope.health(config, result, period_seconds, min_buckets, classes=[name]))
+
+        if (len(records) > 0):
+            groups.append((name, HEALTH_SOURCETYPE, records))
+
+    return groups
+
+
+def edges(module,
+          config,
+          result,
+          state_dir: typing.Optional[pathlib.Path] = None,
+          final: bool = True) -> list[tuple[str, str, typing.Any]]:
+    """
+    The segment's `morpheus:edge` group: `edge_stream.emit` with the module's `EDGE_HOPS`, as its `build_edges` does.
+
+    The stage's memory is checkpointed under `state_dir / "edges"`. A module that names no hops has no edges, and the
+    runner writes no edge file for it.
+    """
+    import edge_stream  # pylint: disable=import-outside-toplevel
+
+    hops = getattr(module, "EDGE_HOPS", None)
+
+    if (hops is None or len(result) == 0 or "event_uid" not in result.columns or result["event_uid"].isna().all()):
+        return []
+
+    records = _branch(None if state_dir is None else state_dir / "edges",
+                      final, lambda: edge_stream.emit(config, result, **hops))
+
+    if (len(records) == 0):
+        return []
+
+    return [(EDGE_CLASS, EDGE_SOURCETYPE, records)]
+
+
 def deliver(groups: list,
             output_dir: typing.Optional[pathlib.Path],
             policy: typing.Optional[dict] = None,
@@ -363,7 +464,12 @@ def run(segment: str,
         with resumable.persisted(str(state_dir), final=final):
             result = module.run_pipeline(config, corpus)
 
-    return deliver(route(segment, result), output_dir, policy, kafka_bootstrap_servers)
+    # The two branches restore and checkpoint beside the composition, so a resumed run's health history and edge
+    # memory continue from where the last run stopped, as the stages behind them do.
+    groups = (route(segment, result) + health(module, config, result, state_dir, final) +
+              edges(module, config, result, state_dir, final))
+
+    return deliver(groups, output_dir, policy, kafka_bootstrap_servers)
 
 
 def main(argv: typing.Optional[list] = None, segment: typing.Optional[str] = None) -> int:
