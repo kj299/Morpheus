@@ -327,8 +327,9 @@ that replaces it. Each item says how to know it is done.
 15. **A throughput baseline.** No benchmark measures the telemetry and lineage stages. Done when a benchmark tier
     records rows per second per stage and a change that halves it is visible.
 16. **Restore the fork's CI.** No fork CI run has been recorded since 2026-10-12, and the pull requests merged since
-    were not checked. The repository's Actions settings are the place to look. Done when every pull request shows a
-    CPU tier result.
+    were not checked. The cause is a setting, not the workflow: a manual start on 2026-10-24 was refused because
+    Actions is disabled for the repository. Re-enable Actions under the repository's Settings, Actions,
+    General. Done when every pull request shows a CPU tier result.
 
 ## Keeping the Manifest Honest
 
