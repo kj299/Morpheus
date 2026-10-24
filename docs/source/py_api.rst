@@ -23,4 +23,3 @@ Python API
 
     morpheus
     morpheus_dfp
-    morpheus_llm

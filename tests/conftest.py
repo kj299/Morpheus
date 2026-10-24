@@ -75,20 +75,6 @@ def pytest_addoption(parser: pytest.Parser):
     )
 
     parser.addoption(
-        "--run_kinetica",
-        action="store_true",
-        dest="run_kinetica",
-        help="Run kinetica tests that would otherwise be skipped",
-    )
-
-    parser.addoption(
-        "--run_milvus",
-        action="store_true",
-        dest="run_milvus",
-        help="Run milvus tests that would otherwise be skipped",
-    )
-
-    parser.addoption(
         "--run_benchmark",
         action="store_true",
         dest="run_benchmark",
@@ -149,14 +135,6 @@ def pytest_runtest_setup(item):
     if (not item.config.getoption("--run_kafka")):
         if (item.get_closest_marker("kafka") is not None):
             pytest.skip("Skipping Kafka tests by default. Use --run_kafka to enable")
-
-    if (not item.config.getoption("--run_kinetica")):
-        if (item.get_closest_marker("kinetica") is not None):
-            pytest.skip("Skipping kinetica tests by default. Use --run_kinetica to enable")
-
-    if (not item.config.getoption("--run_milvus")):
-        if (item.get_closest_marker("milvus") is not None):
-            pytest.skip("Skipping milvus tests by default. Use --run_milvus to enable")
 
     if (not item.config.getoption("--run_benchmark")):
         if (item.get_closest_marker("benchmark") is not None):
@@ -567,16 +545,6 @@ def wait_for_camouflage(host: str = "localhost", port: int = 8000, timeout: int 
     return wait_for_server(url, timeout=timeout, parse_fn=parse_fn)
 
 
-def wait_for_milvus(host: str = "localhost", port: int = 19530, timeout: int = 180):
-    url = f'http://{host}:{port}/healthz'
-
-    def parse_fn(resp: requests.Response) -> bool:
-        content = resp.content.decode('utf-8')
-        return 'OK' in content
-
-    return wait_for_server(url, timeout=timeout, parse_fn=parse_fn)
-
-
 def _set_pdeathsig(sig=signal.SIGTERM):
     """
     Helper function to ensure once parent process exits, its child processes will automatically die
@@ -976,112 +944,6 @@ def _get_random_port():
         return sckt.getsockname()[1]
 
 
-@pytest.fixture(scope="session", name="kinetica_data")
-def kinetica_data_fixture():
-    import json
-    import random
-    inital_data = [[
-        i + 1,
-        [random.random() for _ in range(3)],
-        json.dumps({"metadata": f"Sample metadata for row {i+1}"}),
-    ] for i in range(10)]
-    yield inital_data
-
-
-@pytest.fixture(scope="session", name="kinetica_type")
-def kinetica_type_fixture():
-    columns = [
-        ["id", "long", "primary_key"],
-        ["embeddings", "bytes", "vector(3)"],
-        ["metadata", "string", "json"],
-    ]
-    yield columns
-
-
-KINETICA_HOST = os.getenv("KINETICA_HOST", "http://loclahost:9191")
-KINETICA_USER = os.getenv("KINETICA_USER", "")
-KINETICA_PASSWORD = os.getenv("KINETICA_PASSWORD", "")
-KINETICA_SCHEMA = os.getenv("KINETICA_SCHEMA", "")
-
-
-@pytest.fixture(scope="session", name="kinetica_service")
-def kinetica_service_fixture(kinetica_server_uri: str = KINETICA_HOST,
-                             username: str = KINETICA_USER,
-                             password: str = KINETICA_PASSWORD,
-                             schema: str = KINETICA_SCHEMA):
-    from morpheus_llm.service.vdb.kinetica_vector_db_service import KineticaVectorDBService
-    service = KineticaVectorDBService(kinetica_server_uri, user=username, password=password, kinetica_schema=schema)
-    yield service
-
-
-@pytest.fixture(scope="session")
-def milvus_server_uri(tmp_path_factory, pymilvus: types.ModuleType):
-    """
-    Pytest fixture to start and stop a Milvus server and provide its URI for testing.
-    Due to the high startup time for Milvus users can optionally start a Milvus server before running tests and
-    define a `MORPHEUS_MILVUS_URI` environment variable to use that server instead of starting a new one.
-
-    This fixture starts a Milvus server, retrieves its URI (Uniform Resource Identifier), and provides
-    the URI as a yield value to the tests using this fixture. After all tests in the module are
-    completed, the Milvus server is stopped.
-    """
-    logger = logging.getLogger(f"morpheus.{__name__}")
-
-    uri = os.environ.get('MORPHEUS_MILVUS_URI')
-    if uri is not None:
-        yield uri
-
-    else:
-        from milvus import MilvusServer
-
-        milvus_server = MilvusServer(wait_for_started=False)
-
-        # Milvus checks for already bound ports but it doesnt seem to work for webservice_port. Use a random one
-        webservice_port = _get_random_port()
-        milvus_server.webservice_port = webservice_port
-        milvus_server.set_base_dir(tmp_path_factory.mktemp("milvus_store"))
-        with milvus_server:
-            host = milvus_server.server_address
-            port = milvus_server.listen_port
-            uri = f"http://{host}:{port}"
-
-            logger.info("Started Milvus at: %s", uri)
-            wait_for_milvus(host=host, port=webservice_port, timeout=180)
-
-            yield uri
-
-
-@pytest.fixture(scope="session", name="milvus_data")
-def milvus_data_fixture():
-    inital_data = [{"id": i, "embedding": [i / 10.0] * 3, "age": 25 + i} for i in range(10)]
-    yield inital_data
-
-
-@pytest.fixture(scope="session", name="milvus_service")
-def milvus_service_fixture(milvus_server_uri: str):
-    from morpheus_llm.service.vdb.milvus_vector_db_service import MilvusVectorDBService
-    service = MilvusVectorDBService(uri=milvus_server_uri)
-    yield service
-
-
-@pytest.fixture(scope="session", name="idx_part_collection_config")
-def idx_part_collection_config_fixture():
-    from _utils import load_json_file
-    yield load_json_file(filename="service/milvus_idx_part_collection_conf.json")
-
-
-@pytest.fixture(scope="session", name="simple_collection_config")
-def simple_collection_config_fixture():
-    from _utils import load_json_file
-    yield load_json_file(filename="service/milvus_simple_collection_conf.json")
-
-
-@pytest.fixture(scope="session", name="string_collection_config")
-def string_collection_config_fixture():
-    from _utils import load_json_file
-    yield load_json_file(filename="service/milvus_string_collection_conf.json")
-
-
 @pytest.fixture(scope="session", name="bert_cased_hash")
 def bert_cased_hash_fixture():
     from _utils import TEST_DIRS
@@ -1102,24 +964,6 @@ def morpheus_dfp_fixture(fail_missing: bool):
     yield import_or_skip("morpheus_dfp",
                          reason=OPT_DEP_SKIP_REASON.format(package="morpheus_dfp"),
                          fail_missing=fail_missing)
-
-
-@pytest.fixture(name="morpheus_llm", scope='session')
-def morpheus_llm_fixture(fail_missing: bool):
-    """
-    Fixture to ensure morpheus_llm is installed
-    """
-    yield import_or_skip("morpheus_llm",
-                         reason=OPT_DEP_SKIP_REASON.format(package="morpheus_llm"),
-                         fail_missing=fail_missing)
-
-
-@pytest.fixture(name="openai", scope='session')
-def openai_fixture(fail_missing: bool):
-    """
-    Fixture to ensure openai is installed
-    """
-    yield import_or_skip("openai", reason=OPT_DEP_SKIP_REASON.format(package="openai"), fail_missing=fail_missing)
 
 
 @pytest.fixture(scope='session')
@@ -1148,54 +992,6 @@ def mlflow(fail_missing: bool):
     yield import_or_skip("mlflow", reason=OPT_DEP_SKIP_REASON.format(package="mlflow"), fail_missing=fail_missing)
 
 
-@pytest.fixture(name="langchain", scope='session')
-def langchain_fixture(fail_missing: bool):
-    """
-    Fixture to ensure langchain is installed
-    """
-    yield import_or_skip("langchain", reason=OPT_DEP_SKIP_REASON.format(package="langchain"), fail_missing=fail_missing)
-
-
-@pytest.fixture(name="langchain_core", scope='session')
-def langchain_core_fixture(fail_missing: bool):
-    """
-    Fixture to ensure langchain_core is installed
-    """
-    yield import_or_skip("langchain_core",
-                         reason=OPT_DEP_SKIP_REASON.format(package="langchain_core"),
-                         fail_missing=fail_missing)
-
-
-@pytest.fixture(name="langchain_community", scope='session')
-def langchain_community_fixture(fail_missing: bool):
-    """
-    Fixture to ensure langchain_community is installed
-    """
-    yield import_or_skip("langchain_community",
-                         reason=OPT_DEP_SKIP_REASON.format(package="langchain_community"),
-                         fail_missing=fail_missing)
-
-
-@pytest.fixture(name="langchain_openai", scope='session')
-def langchain_openai_fixture(fail_missing: bool):
-    """
-    Fixture to ensure langchain_openai is installed
-    """
-    yield import_or_skip("langchain_openai",
-                         reason=OPT_DEP_SKIP_REASON.format(package="langchain_openai"),
-                         fail_missing=fail_missing)
-
-
-@pytest.fixture(name="langchain_nvidia_ai_endpoints", scope='session')
-def langchain_nvidia_ai_endpoints_fixture(fail_missing: bool):
-    """
-    Fixture to ensure langchain_nvidia_ai_endpoints is installed
-    """
-    yield import_or_skip("langchain_nvidia_ai_endpoints",
-                         reason=OPT_DEP_SKIP_REASON.format(package="langchain_nvidia_ai_endpoints"),
-                         fail_missing=fail_missing)
-
-
 @pytest.fixture(name="databricks", scope='session')
 def databricks_fixture(fail_missing: bool):
     """
@@ -1212,36 +1008,6 @@ def numexpr_fixture(fail_missing: bool):
     Fixture to ensure numexpr is installed
     """
     yield import_or_skip("numexpr", reason=OPT_DEP_SKIP_REASON.format(package="numexpr"), fail_missing=fail_missing)
-
-
-@pytest.fixture(name="pymilvus", scope='session')
-def pymilvus_fixture(fail_missing: bool):
-    """
-    Fixture to ensure milvus is installed
-    """
-    yield import_or_skip("pymilvus", reason=OPT_DEP_SKIP_REASON.format(package="pymilvus"), fail_missing=fail_missing)
-
-
-@pytest.fixture(name="pypdfium2", scope='session')
-def pypdfium2_fixture(fail_missing: bool):
-    """
-    Fixture to ensure pypdfium2 is installed
-    """
-    yield import_or_skip("pypdfium2", reason=OPT_DEP_SKIP_REASON.format(package="pypdfium2"), fail_missing=fail_missing)
-
-
-@pytest.mark.usefixtures("openai")
-@pytest.fixture(name="mock_chat_completion")
-def mock_chat_completion_fixture():
-    from _utils.llm import mk_mock_openai_response
-    with (mock.patch("openai.OpenAI") as mock_client, mock.patch("openai.AsyncOpenAI") as mock_async_client):
-        mock_client.return_value = mock_client
-        mock_async_client.return_value = mock_async_client
-
-        mock_client.chat.completions.create.return_value = mk_mock_openai_response(['test_output'])
-        mock_async_client.chat.completions.create = mock.AsyncMock(
-            return_value=mk_mock_openai_response(['test_output']))
-        yield (mock_client, mock_async_client)
 
 
 @pytest.fixture(name="array_pkg")

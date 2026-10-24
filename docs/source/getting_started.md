@@ -87,7 +87,7 @@ Skip ahead to the [Acquiring the Morpheus Models Container](#acquiring-the-morph
 
 ## Using Morpheus Conda Packages
 The Morpheus stages are available as libraries that are hosted on the [`nvidia`](https://anaconda.org/nvidia) Conda channel. The Morpheus Conda packages are:
-[`morpheus-core`](https://anaconda.org/nvidia/morpheus-core), [`morpheus-dfp`](https://anaconda.org/nvidia/morpheus-dfp) and [`morpheus-llm`](https://anaconda.org/nvidia/morpheus-llm).
+[`morpheus-core`](https://anaconda.org/nvidia/morpheus-core) and [`morpheus-dfp`](https://anaconda.org/nvidia/morpheus-dfp).
 
 For details on these libraries and how to use them, refer to the [Morpheus Conda Packages](./conda_packages.md) guide.
 

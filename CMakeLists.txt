@@ -24,7 +24,6 @@ option(MORPHEUS_BUILD_DOCS "Enable building of API documentation" OFF)
 option(MORPHEUS_BUILD_EXAMPLES "Whether or not to build examples" OFF)
 option(MORPHEUS_BUILD_MORPHEUS_CORE "Whether or not to build morpheus_core" ON)
 option(MORPHEUS_BUILD_MORPHEUS_DFP "Whether or not to build morpheus_dfp" ON)
-option(MORPHEUS_BUILD_MORPHEUS_LLM "Whether or not to build morpheus_llm" ON)
 option(MORPHEUS_BUILD_TESTS "Whether or not to build tests" OFF)
 option(MORPHEUS_ENABLE_DEBUG_INFO "Enable printing debug information" OFF)
 option(MORPHEUS_PYTHON_BUILD_STUBS "Whether or not to generated .pyi stub files for C++ Python modules. Disable to avoid requiring loading the NVIDIA GPU Driver during build" ON)
@@ -46,10 +45,6 @@ enable_testing()
 
 if(MORPHEUS_USE_IWYU AND MORPHEUS_USE_CCACHE)
   message(FATAL_ERROR "MORPHEUS_USE_IWYU and MORPHEUS_USE_CCACHE cannot be set simultaneously")
-endif()
-
-if (MORPHEUS_BUILD_DOCS AND NOT MORPHEUS_BUILD_MORPHEUS_LLM)
-  message(FATAL_ERROR "MORPHEUS_BUILD_MORPHEUS_LLM must be ON if MORPHEUS_BUILD_DOCS is ON")
 endif()
 
 # MRC CMake path and module extensions

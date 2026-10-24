@@ -136,7 +136,7 @@ exhale_args = {
         FILE_PATTERNS = *.c *.cc *.cpp *.h *.hpp *.cu *.cuh *.md
         HAVE_DOT = YES
         HIDE_UNDOC_MEMBERS = NO
-        INPUT = ../../python/morpheus/morpheus/_lib ../../python/morpheus_llm/morpheus_llm/_lib
+        INPUT = ../../python/morpheus/morpheus/_lib
         INTERACTIVE_SVG = YES
         SOURCE_BROWSER = YES
         ENABLE_PREPROCESSING = YES
@@ -173,12 +173,9 @@ autodoc_mock_imports = [
     "cupy",  # Avoid loading GPU libraries during the documentation build
     "databricks.connect",
     "datacompy",
-    "langchain",
-    "langchain_core",
     "morpheus.cli.commands",  # Dont document the CLI in Sphinx
     "pandas",
     "pydantic",
-    "pymilvus",
     "tensorrt",
     "torch",
     "tqdm"

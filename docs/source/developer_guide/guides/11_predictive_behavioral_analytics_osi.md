@@ -365,7 +365,7 @@ The repository ships three Python packages plus a compiled core:
 | `python/morpheus/morpheus/_lib` | C++/CUDA core exposed through pybind11: messages, stages, tensors, cuDF interoperability |
 | `python/morpheus/morpheus/_lib/doca` | Optional NVIDIA DOCA GPUNetIO path for line-rate packet capture directly into GPU memory |
 | `python/morpheus_dfp/morpheus_dfp` | Digital fingerprinting: per-entity behavioral modeling, the piece most relevant here |
-| `python/morpheus_llm/morpheus_llm` | LLM engine nodes, vector database services, retrieval-augmented enrichment |
+| [`python/morpheus_llm/morpheus_llm`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_llm/morpheus_llm) | LLM engine nodes, vector database services, retrieval-augmented enrichment; removed from this fork by the [repository audit](./13_repository_audit.md)'s ruling D1 |
 
 `docs/source/developer_guide/architecture.md` describes five conceptual layers: orchestration, pipeline,
 stage, module, and node. The practical consequence is that all nodes inside a stage are guaranteed to run
@@ -454,6 +454,7 @@ Sources (`stages/input/`): `KafkaSourceStage`, `HttpServerSourceStage`, `HttpCli
 `FileSourceStage`, `RSSSourceStage`, `DatabricksDeltaLakeSourceStage`, `ControlMessageKafkaSourceStage`,
 `ControlMessageFileSourceStage`, `AppShieldSourceStage`, `InMemorySourceStage`,
 `InMemoryDataGenStage`, `ArxivSource`, and the autoencoder sources for CloudTrail, Duo, and Azure.
+`RSSSourceStage` and `ArxivSource` served only the language-model use case and have since been removed.
 
 Preprocess (`stages/preprocess/`): `DeserializeStage`, `PreprocessNLPStage` (subword tokenization),
 `PreprocessFILStage`, `DropNullStage`, `GroupByColumnStage`.
@@ -667,7 +668,7 @@ Grepping the repository:
 | `stages/general/multi_processing_stage.py:162` | `pe_count = self._max_in_flight_messages` |
 | `stages/general/router_stage.py:102` | `engines_per_pe = self._processing_engines` |
 | `stages/doca/doca_source_stage.py:98` | `pe_count = 1` |
-| `morpheus_llm/stages/llm/llm_engine_stage.py:136` | `pe_count = 1` |
+| [`morpheus_llm/stages/llm/llm_engine_stage.py:136`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_llm/morpheus_llm/stages/llm/llm_engine_stage.py#L136) (removed) | `pe_count = 1` |
 
 Any node with `pe_count > 1` processes messages concurrently and emits them in completion order, not
 arrival order. The DFP inference and preprocessing stages have their `pe_count` lines commented out,
@@ -3651,8 +3652,10 @@ model that scores near a threshold, which the reference arithmetic in every ship
 
 ### Control 10: Keep LLM stages out of the decision path
 
-`morpheus_llm` is genuinely useful for enrichment: summarizing an alert, retrieving related context from
-a vector database, drafting an investigation note. It is not deterministic. Temperature 0 reduces
+This fork no longer ships `morpheus_llm`: the repository audit removed it (ruling D1), because nothing on the
+detection path used it. The control stands for any language-model enrichment a deployment adds back. Such
+enrichment is genuinely useful: summarizing an alert, retrieving related context from a vector database,
+drafting an investigation note. It is not deterministic. Temperature 0 reduces
 variance but does not eliminate it, provider-side model updates change behavior without notice, and
 retrieval results shift as the vector store is updated.
 
@@ -3661,8 +3664,8 @@ decision and add narrative. When one runs, record `llm_model`, `llm_prompt_hash`
 `llm_response_hash` so the narrative is at least auditable even though it is not reproducible, and mark
 the enriched fields with a `nondeterministic: true` flag so no downstream rule accidentally keys on them.
 
-Note that `LLMEngineStage` already sets `pe_count = 1`, which helps with ordering but does nothing for
-output stability.
+The upstream `LLMEngineStage` set `pe_count = 1`, which helps with ordering but does nothing for output
+stability.
 
 ### Control 11: Idempotent sinks
 

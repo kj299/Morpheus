@@ -19,7 +19,6 @@ limitations under the License.
 The Morpheus stages are the building blocks for creating pipelines. The stages are organized into libraries by use case. The current libraries are:
 - `morpheus-core`
 - `morpheus-dfp`
-- `morpheus-llm`
 
 The  libraries are hosted as Conda packages on the [`nvidia`](https://anaconda.org/nvidia/) channel.
 
@@ -90,50 +89,6 @@ MORPHEUS_DFP_PKG_DIR=$(dirname $(python -c "import morpheus_dfp; print(morpheus_
 pip install -r ${MORPHEUS_DFP_PKG_DIR}/requirements_morpheus_dfp_arch-$(arch).txt
 ```
 
-## Morpheus LLM
-The `morpheus-llm` library contains stages for Large Language Models (LLM) and  Vector Databases. These stages are used for setting up Retrieval Augmented Generation (RAG) pipelines. The `morpheus-llm` library is built from the source code in the `python/morpheus_llm` directory of the Morpheus repository.
-To set up a Conda environment with the [`morpheus-llm`](https://anaconda.org/nvidia/morpheus-dfp) library, you can run the following commands:
-
-### Create a Conda Environment
-```bash
-export CONDA_ENV_NAME=morpheus-llm
-conda create -n ${CONDA_ENV_NAME} python=3.12
-conda activate ${CONDA_ENV_NAME}
-```
-
-### Add Conda Channels
-These channels are required for installing the runtime dependencies:
-```bash
-conda config --env --add channels conda-forge &&\
-  conda config --env --add channels nvidia &&\
-  conda config --env --add channels rapidsai &&\
-  conda config --env --add channels pytorch
-```
-
-### Install the `morpheus-llm` Library
-```bash
-conda install -c nvidia morpheus-llm=25.10
-```
-The `morpheus-llm` Conda package installs the `morpheus_llm` python package. It also pulls down all the necessary Conda packages including [`morpheus-core`](https://anaconda.org/nvidia/morpheus-core).
-
-### Install Additional PyPI Dependencies
-Some of the stages in the library require additional dependencies that are hosted on PyPI. These dependencies are included as a requirements file in the `morpheus_llm` Python package. It can be installed by running the following command:
-```bash
-MORPHEUS_LLM_PKG_DIR=$(dirname $(python -c "import morpheus_llm; print(morpheus_llm.__file__)"))
-pip install -r ${MORPHEUS_LLM_PKG_DIR}/requirements_morpheus_llm_arch-$(arch).txt
-```
-
 ## Miscellaneous
 ### Morpheus Examples
 The Morpheus examples are not included in the Morpheus Conda packages. To use them, you need to clone the Morpheus repository and run the examples from source. For details, refer to the [Morpheus Examples](./examples.md).
-
-### Namespace Updates
-If you were using a Morpheus release prior to 24.10 you may need to update the namespace for the DFP, LLM, and vector database stages.
-
-A script, `scripts/morpheus_namespace_update.py`, has been provided, and can be run with following commands:
-```bash
-python scripts/morpheus_namespace_update.py --directory <directory> --dfp
-```
-```bash
-python scripts/morpheus_namespace_update.py --directory <directory> --llm
-```

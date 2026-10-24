@@ -241,7 +241,7 @@ When ready, commit both the changes to the `dependencies.yaml` file and the upda
       ```bash
       pytest --run_slow
       ```
-1. Optional: Run Kafka and Milvus tests
+1. Optional: Run Kafka tests
    - Download Kafka:
       ```bash
       python ./ci/scripts/download_kafka.py
@@ -249,12 +249,12 @@ When ready, commit both the changes to the `dependencies.yaml` file and the upda
 
    - Run all tests (this will skip over tests that require optional dependencies which are not installed):
       ```bash
-      pytest --run_slow --run_kafka --run_milvus
+      pytest --run_slow --run_kafka
       ```
 
    - Run all tests including those that require optional dependencies:
       ```bash
-      pytest --fail_missing --run_slow --run_kafka --run_milvus
+      pytest --fail_missing --run_slow --run_kafka
       ```
 
 1. Run Morpheus

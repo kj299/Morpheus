@@ -13,11 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
 import glob
 import os
-import typing
-from unittest import mock
 
 import pytest
 
@@ -109,66 +106,3 @@ def pytest_benchmark_update_json(config, benchmarks, output_json):
         bench['stats']['max_throughput_bytes'] = (byte_count * repeat) / bench['stats']['min']
         bench['stats']['mean_throughput_bytes'] = (byte_count * repeat) / bench['stats']['mean']
         bench['stats']['median_throughput_bytes'] = (byte_count * repeat) / bench['stats']['median']
-
-
-@pytest.fixture(name="mock_openai_request_time")
-def mock_openai_request_time_fixture():
-    return float(os.environ.get("MOCK_OPENAI_REQUEST_TIME", 1.265))
-
-
-@pytest.fixture(name="mock_nemollm_request_time")
-def mock_nemollm_request_time_fixture():
-    return float(os.environ.get("MOCK_NEMOLLM_REQUEST_TIME", 0.412))
-
-
-@pytest.fixture(name="mock_web_scraper_request_time")
-def mock_web_scraper_request_time_fixture():
-    return float(os.environ.get("MOCK_WEB_SCRAPER_REQUEST_TIME", 0.5))
-
-
-@pytest.fixture(name="mock_feedparser_request_time")
-def mock_feedparser_request_time_fixture():
-    return float(os.environ.get("MOCK_FEEDPARSER_REQUEST_TIME", 0.5))
-
-
-@pytest.fixture(name="mock_serpapi_request_time")
-def mock_serpapi_request_time_fixture():
-    return float(os.environ.get("MOCK_SERPAPI_REQUEST_TIME", 1.7))
-
-
-@pytest.mark.usefixtures("openai")
-@pytest.fixture(name="mock_chat_completion")
-def mock_chat_completion_fixture(mock_chat_completion: tuple[mock.MagicMock, mock.MagicMock],
-                                 mock_openai_request_time: float):
-    (mock_client, mock_async_client) = mock_chat_completion
-
-    async def sleep_first(*args, **kwargs):
-        # Sleep time is based on average request time
-        await asyncio.sleep(mock_openai_request_time)
-        return mock.DEFAULT
-
-    mock_async_client.chat.completions.create.side_effect = sleep_first
-    mock_client.chat.completions.create.side_effect = sleep_first
-
-    yield (mock_client, mock_async_client)
-
-
-@pytest.mark.usefixtures("nemollm")
-@pytest.fixture(name="mock_nemollm")
-def mock_nemollm_fixture(mock_nemollm: mock.MagicMock, mock_nemollm_request_time: float):
-
-    # The generate function is a blocking call that returns a future when return_type="async"
-    async def sleep_first(fut: asyncio.Future, value: typing.Any = mock.DEFAULT):
-        # Sleep time is based on average request time
-        await asyncio.sleep(mock_nemollm_request_time)
-        fut.set_result(value)
-
-    def create_future(*args, **kwargs) -> asyncio.Future:
-        event_loop = asyncio.get_event_loop()
-        fut = event_loop.create_future()
-        event_loop.create_task(sleep_first(fut, mock.DEFAULT))
-        return fut
-
-    mock_nemollm.generate.side_effect = create_future
-
-    yield mock_nemollm
