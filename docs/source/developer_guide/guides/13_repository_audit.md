@@ -81,22 +81,22 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 2,137 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,753 tracked files:
 the 2,407 the passes read and the five this audit adds (the two manifests, this guide, its test and the shared
-corpus pipeline helper), less the 275 files removed since: three under ruling D5, 224 in the language-model part
-of D1 and 48 in its DOCA part, all on 2026-10-24.
+corpus pipeline helper), less the 659 files removed since: three under ruling D5, and 224 in the language-model part
+of D1, 48 in its DOCA part and 384 in its security-examples part, all on 2026-10-24.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 1201 |
+| `remove` | 817 |
 | `keep-dependency` | 413 |
 | `keep` | 375 |
 | `update` | 148 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
 organization workflows the fork modified, and three were its own: `TC1FeatureStage`, its utility module and
-its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1 and the 48 of its DOCA part,
-so 1,201 remain marked.
+its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1, the 48 of its DOCA part and the
+384 of its security-examples part, so 817 remain marked.
 
 Between the passes, the second readers moved files in both directions:
 
@@ -214,7 +214,13 @@ The removals land as one change per ruling, in this order, each with the `update
    their C++ and CUDA sources, `RawPacketMessage`, the DOCA and DPDK CMake modules, the example and its page, the
    optional-dependency installer, the `MORPHEUS_SUPPORT_DOCA` build option through the Docker, Conda and compile
    scripts, and the three dependencies only DOCA needed. Guide 11 cites the removed sources by permalink and states
-   the layer 4 per-packet source as new work. The security examples and the remaining examples follow.
+   the layer 4 per-packet source as new work. The security examples went third, the same day: ransomware with
+   `AppShieldSourceStage` and the AppShield data, graph fraud detection, data loss prevention with its GLiNER model
+   and licence, log parsing, root cause, SID visualization and the ABP `nvsmi` example, with their models, training
+   and validation scripts, datasets, Triton entries, tests and documentation stubs. Two pieces of that list wait for
+   the ruling that owns their dependents: phishing, whose example guide 2 includes (D7) and whose tests and Triton
+   mocks go with D2; and the ABP `nvsmi` model and its Triton entry, which the D2 Triton tests load. The remaining
+   examples follow.
 3. **D2**, after the fork model inventory exists to receive the two models.
 4. **D6**, then **D7**.
 5. **D4**'s remainder, after the evidence is cited by permalink.

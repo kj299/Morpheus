@@ -364,8 +364,6 @@ Commands:
   deserialize     Messages are logically partitioned based on the pipeline config's `pipeline_batch_size` parameter.
   dropna          Drop null data entries from a DataFrame.
   filter          Filter message by a classification threshold.
-  from-appshield  Source stage is used to load Appshield messages from one or more plugins into a DataFrame. It normalizes nested json messages and arranges them
-                  into a DataFrame by snapshot and source.
   from-file       Load messages from a file.
   from-kafka      Load messages from a Kafka cluster.
   inf-identity    Perform inference for testing that performs a no-op.

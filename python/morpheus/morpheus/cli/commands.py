@@ -591,7 +591,6 @@ add_command("filter", "morpheus.stages.postprocess.filter_detections_stage.Filte
 add_command("flow-normalize",
             "morpheus.stages.telemetry.flow_record_normalize_stage.FlowRecordNormalizeStage",
             modes=ALL)
-add_command("from-appshield", "morpheus.stages.input.appshield_source_stage.AppShieldSourceStage", modes=FIL_ONLY)
 add_command("from-databricks-deltalake",
             "morpheus.stages.input.databricks_deltalake_source_stage.DataBricksDeltaLakeSourceStage",
             modes=ALL)

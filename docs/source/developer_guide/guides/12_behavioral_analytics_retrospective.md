@@ -391,7 +391,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G66 | minor | narrowed → closed | users | Layer 5 search thresholds hard-coded in the validation test rather than read from SPL | #53 |
 | G67 | minor | stands → closed | all | Stages reference page omits most fork stages (TC-0/3/4/6/7, scoring, drift, lineage, minimization) and guide lookup stanzas drift | #52 |
 | G68 | minor | stands → closed | users | Entity sharding router is a utility with no composed pipeline | #66 |
-| G69 | minor | stands → holds | systems | AppShield host snapshots named as a TC-7 source and used by nothing | #52 |
+| G69 | minor | stands → holds → closed | systems | AppShield host snapshots named as a TC-7 source and used by nothing; removed 2026-10-24 (audit ruling D1) | #52 |
 | G70 | minor | narrowed → holds | network objects | No TC-0 context keyed on port, device or VLAN (commissioning optical level, designation, owner) | not scheduled |
 | G71 | minor | stands → closed | network objects | Stateful TC-1/TC-2 stages other than binding and auth do not guard event time | #62 |
 | G72 | minor | stands → holds → closed | network objects | TC1FeatureStage runs in no composed pipeline, golden or sourcetype; removed 2026-10-24 (audit ruling D5) | #52 |

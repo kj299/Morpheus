@@ -546,4 +546,3 @@ dependencies:
         packages:
           - datasets=3.6
           - onnxruntime=1.22=*cuda
-          # gliner intentionally omitted due to https://github.com/urchade/GLiNER/issues/267

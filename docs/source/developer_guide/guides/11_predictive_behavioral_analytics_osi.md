@@ -455,7 +455,9 @@ Sources (`stages/input/`): `KafkaSourceStage`, `HttpServerSourceStage`, `HttpCli
 `FileSourceStage`, `RSSSourceStage`, `DatabricksDeltaLakeSourceStage`, `ControlMessageKafkaSourceStage`,
 `ControlMessageFileSourceStage`, `AppShieldSourceStage`, `InMemorySourceStage`,
 `InMemoryDataGenStage`, `ArxivSource`, and the autoencoder sources for CloudTrail, Duo, and Azure.
-`RSSSourceStage` and `ArxivSource` served only the language-model use case and have since been removed.
+`RSSSourceStage` and `ArxivSource` served only the language-model use case and have since been removed, and
+[`AppShieldSourceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/appshield_source_stage.py) went with the ransomware
+use case.
 
 Preprocess (`stages/preprocess/`): `DeserializeStage`, `PreprocessNLPStage` (subword tokenization),
 `PreprocessFILStage`, `DropNullStage`, `GroupByColumnStage`.
@@ -628,9 +630,9 @@ window is satisfied, which is a deliberate choice between latency and stability.
 | 3-7 | Zeek log ingestion with typed headers | `parsers/zeek.py` |
 | 5-7 | Authentication behavior modeling | `morpheus_dfp` with Duo and Azure schemas |
 | 7 | Subword tokenization to transformer inference | `stages/preprocess/preprocess_nlp_stage.py` |
-| 7 | Named entity recognition over logs | `examples/log_parsing/` |
+| 7 | Named entity recognition over logs (removed) | [`examples/log_parsing/`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/log_parsing) |
 | 7 | Sensitive information detection, phishing | `models/sid-models`, `models/phishing-models` |
-| Host | Process, DLL, VAD, and handle snapshots | `stages/input/appshield_source_stage.py` |
+| Host | Process, DLL, VAD, and handle snapshots (removed) | [`stages/input/appshield_source_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/appshield_source_stage.py) |
 | SIEM | Splunk notable event regex parsing | `parsers/splunk_notable_parser.py` |
 
 The PCAP example is the clearest template for layer 3-4 feature engineering. It derives thirteen features
@@ -646,8 +648,9 @@ It builds `flow_id` as `"src_ip:src_port=dst_ip:dst_port"`, rolls timestamps int
 that every input message retains an output. The merge-back-and-sort-by-index pattern preserves input
 order, which is the right instinct.
 
-`AppShieldSourceStage` is the host-telemetry analogue: it reads per-snapshot plugin output and stamps
-`snapshot_id`, `timestamp`, `source`, and `plugin` onto every row, giving a natural composite key.
+`AppShieldSourceStage` was the host-telemetry analogue: it read per-snapshot plugin output and stamped
+`snapshot_id`, `timestamp`, `source`, and `plugin` onto every row, giving a natural composite key. It went
+with the ransomware use case under the [repository audit](./13_repository_audit.md)'s ruling D1.
 
 ---
 
@@ -1449,8 +1452,7 @@ connection says, and two ports on one server are two services. `service_key_sour
 designed and not built: `service_account` for API and `process_guid` for endpoint processes.
 
 **Sources:** HTTP proxies and WAFs, DNS resolvers, SaaS audit APIs (Microsoft 365, Salesforce,
-Workday), database audit logs, API gateways, email security gateways, EDR process telemetry, and the
-AppShield-style host snapshots supported by `AppShieldSourceStage`.
+Workday), database audit logs, API gateways, email security gateways, and EDR process telemetry.
 
 **Required fields:** for HTTP: `http_method`, `url_path`, `url_query`, `user_agent`, `referrer`,
 `status_code`, `request_bytes`, `response_bytes`, `duration_ms`, `trace_id`, `span_id`. For DNS:
@@ -1464,11 +1466,11 @@ generation algorithms. `DistinctIncrementColumn` over `target_object_type` per p
 novelty. Record-count-per-operation deviation from the principal's baseline for bulk extraction. Ratio of
 `4xx` to `2xx` per client for enumeration (`5xx` is about the server and is excluded; see R-D-L7-005). User agent novelty per principal. Process ancestry
 novelty using the parent-child pair as a categorical. The `models/` directory ships pretrained models
-usable here: `sid-models` for sensitive information detection, `phishing-models`, `log-parsing-models`
-for NER over unstructured logs, and `ransomware-models` for AppShield-style host telemetry. These are upstream
-models and sources: this fork composes none of them, R-B-L7-003 waits on a Triton path (see Part 6), and
-`AppShieldSourceStage`, named here and in Part 0 as the host-telemetry analogue, is used by nothing in this
-fork, whose endpoint class reads EDR process records instead (gap G69).
+usable here: `sid-models` for sensitive information detection and `phishing-models`. The log parsing and
+ransomware models, and `AppShieldSourceStage`, which Part 0 named as the host-telemetry analogue, were removed
+with their use cases under the [repository audit](./13_repository_audit.md)'s ruling D1. This fork composes none
+of the rest, R-B-L7-003 waits on a Triton path (see Part 6), and the endpoint class reads EDR process records
+(gap G69, closed by the removal).
 
 What is built beyond the tunnelling and enumeration measurements: every DNS and HTTP client is measured against its
 own busiest day. {py:class}`~morpheus.stages.telemetry.tc7_dns_stage.TC7DnsStage` keeps per client the daily peak of
@@ -3346,7 +3348,8 @@ reachable from this physical port in the last 24 hours" are one Cypher clause an
 an addition, not an alternative: the same Kafka topic feeds both, the graph carries no detection logic,
 and nothing in Part 3 depends on it.
 
-`examples/gnn_fraud_detection_pipeline` shows the pattern for scoring a graph with a GNN once it is
+The upstream [`examples/gnn_fraud_detection_pipeline`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/gnn_fraud_detection_pipeline), removed by the
+audit's ruling D1, showed the pattern for scoring a graph with a GNN once it is
 built. The same technique applies to scoring lineage chains directly rather than scoring their
 constituent events, which is the natural next step once the edge stream has been running long enough to
 have a labeled history.
@@ -3912,7 +3915,7 @@ Pass 4 measures each of these and records which the fork reuses.
 - Protocol and log parsers for IP, Zeek, Windows events, URLs, and Splunk notables.
 - Kafka, Elasticsearch, HTTP, file, and Delta Lake sinks.
 - Pretrained models for sensitive information detection, phishing, log parsing, ransomware, fraud, and
-  anomalous behavior profiling.
+  anomalous behavior profiling (log parsing, ransomware and fraud removed by the audit's ruling D1).
 - Seeding utility and golden-file comparison stages.
 - Deterministic lineage identifiers ({py:mod}`~morpheus.utils.lineage` and
   {py:class}`~morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage`) and the Community ID flow

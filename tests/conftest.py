@@ -411,7 +411,7 @@ def import_mod(request: pytest.FixtureRequest,
 
     else:
         raise ValueError("import_mod fixture requires setting paths in markers: "
-                         "`@pytest.mark.import_mod([os.path.join(TEST_DIRS.examples_dir, 'log_parsing/messages.py')])`")
+                         "`@pytest.mark.import_mod([os.path.join(TEST_DIRS.examples_dir, 'my_example/messages.py')])`")
 
 
 def _reload_modules(modules: typing.List[typing.Any]):

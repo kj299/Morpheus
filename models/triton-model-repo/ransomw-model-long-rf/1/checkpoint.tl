@@ -1,1 +1,0 @@
-../../../ransomware-models/ransomw-model-long-rf/checkpoint.tl
