@@ -46,7 +46,6 @@ fi
 
 # enable all functional blocks
 CMAKE_ARGS="-DMORPHEUS_BUILD_MORPHEUS_CORE=ON ${CMAKE_ARGS}"
-CMAKE_ARGS="-DMORPHEUS_BUILD_MORPHEUS_LLM=ON ${CMAKE_ARGS}"
 CMAKE_ARGS="-DMORPHEUS_BUILD_MORPHEUS_DFP=ON ${CMAKE_ARGS}"
 
 CMAKE_ARGS="-DCMAKE_MESSAGE_CONTEXT_SHOW=ON ${CMAKE_ARGS}"
@@ -98,5 +97,4 @@ cmake --build ${BUILD_DIR} -j${PARALLEL_LEVEL:-$(nproc)} --target install
 
 # Install just the python wheel components
 ${PYTHON} -m pip install -vv ${BUILD_DIR}/python/morpheus/dist/*.whl
-${PYTHON} -m pip install -vv ${BUILD_DIR}/python/morpheus_llm/dist/*.whl
 ${PYTHON} -m pip install -vv ${BUILD_DIR}/python/morpheus_dfp/dist/*.whl

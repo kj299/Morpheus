@@ -50,7 +50,6 @@ log_sccache_stats
 
 rapids-logger "Installing Morpheus"
 pip install --no-build-isolation ./python/morpheus
-pip install --no-build-isolation ./python/morpheus_llm
 pip install --no-build-isolation ./python/morpheus_dfp
 
 rapids-logger "Checking copyright headers"

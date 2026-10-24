@@ -126,7 +126,6 @@ sed_runner "s|morpheus-tritonserver-models:${CURRENT_SHORT_TAG}|morpheus-tritons
    ${DOCS_MD_FILES} \
    ${EXAMPLES_MD_FILES} \
    .devcontainer/docker-compose.yml \
-   examples/sid_visualization/docker-compose.yml \
    models/triton-model-repo/README.md \
    scripts/validation/val-globals.sh \
    tests/benchmarks/README.md

@@ -61,10 +61,6 @@ RUN --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
     conda clean -afy && \
     rm -rf /tmp/conda
 
-ENV MORPHEUS_SUPPORT_DOCA=ON
-
-COPY ./.devcontainer/docker/optional_deps/doca.sh /tmp/doca/
-
 RUN --mount=type=cache,id=apt,target=/var/cache/apt \
     apt update && \
     DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC \
@@ -73,12 +69,6 @@ RUN --mount=type=cache,id=apt,target=/var/cache/apt \
         automake \
         build-essential \
         libtool
-
-RUN --mount=type=cache,id=apt,target=/var/cache/apt \
-    DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC \
-    /tmp/doca/doca.sh /tmp/doca && \
-    rm -rf /tmp/doca && \
-    apt clean
 
 # ============ test ==================
 FROM base as test
