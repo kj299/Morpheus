@@ -339,3 +339,117 @@ def test_a_prefix_keeps_two_sealers_apart(config: Config):
 def test_a_none_prefix_is_refused(config: Config):
     with pytest.raises(ValueError, match="column_prefix"):
         make_stage(config, column_prefix=None)
+
+
+# --- The clock guard ------------------------------------------------------------------------------------------
+
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A collector clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
+
+def _one_frame(messages: list) -> pd.DataFrame:
+    frames = _frames(messages)
+
+    assert len(frames) == 1, [frame["sealed_by"].tolist() for frame in frames]
+
+    return frames[0]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_seals_nothing(config: Config):
+    # The sealer keeps one watermark for every window. Admitted, the third row would carry it a decade forward and
+    # seal window 0 at once, and the row at 60s would arrive late for a window already published.
+    df_class = get_df_class(config.execution_mode)
+    stage = make_stage(config)
+
+    refused = _one_frame(
+        stage.on_data(
+            MessageMeta(
+                df_class({
+                    "event_time": [10 * SECOND_NS, 50 * SECOND_NS, YEARS_AHEAD_NS, 60 * SECOND_NS],
+                    "entity": ["a", "b", "c", "d"],
+                }))))
+
+    assert refused["entity"].tolist() == ["c"]
+    assert refused["sealed_by"].tolist() == ["refused"]
+    assert refused["window_id"].tolist() == [-1]
+    assert not refused["window_complete"].any()
+    assert not refused["is_late"].any()
+    assert refused["clock_refused"].tolist() == [True]
+
+    # The watermark is where the believed rows left it, and window 0 is still open with the three of them in it.
+    assert stage._sealer.watermark_ns == 60 * SECOND_NS  # pylint: disable=protected-access
+    assert stage._sealer.open_window_ids == [0]  # pylint: disable=protected-access
+
+    flushed = _one_frame(stage.on_completed())
+
+    assert sorted(flushed["entity"]) == ["a", "b", "d"]
+    assert (flushed["sealed_by"] == "flush").all()
+    assert "clock_refused" not in flushed.columns
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_refused_row_is_refused_however_the_stream_is_batched(config: Config):
+    # Refusal is a function of the row sequence alone, like everything else the sealer decides, so the same rows
+    # delivered in one message or in two reach the same verdict and the same windows.
+    df_class = get_df_class(config.execution_mode)
+    times = [10 * SECOND_NS, 50 * SECOND_NS, YEARS_AHEAD_NS, 60 * SECOND_NS, 400 * SECOND_NS]
+    entities = ["a", "b", "c", "d", "e"]
+
+    def run(cuts: list) -> list:
+        stage = make_stage(config)
+        emitted = []
+
+        for (start, stop) in cuts:
+            emitted.extend(
+                stage.on_data(MessageMeta(df_class({
+                    "event_time": times[start:stop], "entity": entities[start:stop]
+                }))))
+
+        emitted.extend(stage.on_completed() or [])
+
+        # A refused row leaves with the batch it arrived in, so the messages' order follows the cuts; their
+        # contents must not.
+        frames = [frame.sort_values("entity").reset_index(drop=True) for frame in _frames(emitted)]
+
+        return sorted(frames, key=lambda frame: (frame["sealed_by"].iloc[0], frame["entity"].iloc[0]))
+
+    whole = run([(0, 5)])
+    split = run([(0, 2), (2, 3), (3, 5)])
+
+    assert [frame["sealed_by"].tolist() for frame in whole] == [["flush"], ["refused"], ["watermark"] * 3]
+    assert len(split) == len(whole)
+
+    for (left, right) in zip(whole, split):
+        pd.testing.assert_frame_equal(left, right, check_dtype=False)
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        make_stage(config, max_clock_skew_seconds=0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_stop_and_restore_round_trip_keeps_the_clock(config: Config):
+    # A fresh instance believes the first time it is shown, so a decade-ahead row that opens a resumed process would
+    # set its clock and seal nothing only because nothing was open. The clock travels with the snapshot.
+    df_class = get_df_class(config.execution_mode)
+    stopped = make_stage(config)
+    stopped.on_data(MessageMeta(df_class({"event_time": [10 * SECOND_NS, 50 * SECOND_NS], "entity": ["a", "b"]})))
+    stopped.suspend_end_of_stream()
+
+    assert stopped.on_completed() is None
+
+    resumed = make_stage(config)
+    resumed.restore_state(stopped.checkpoint_state())
+
+    refused = _one_frame(resumed.on_data(MessageMeta(df_class({"event_time": [YEARS_AHEAD_NS], "entity": ["c"]}))))
+
+    assert refused["sealed_by"].tolist() == ["refused"]
+    assert resumed._sealer.watermark_ns == 50 * SECOND_NS  # pylint: disable=protected-access
+    assert resumed.sealed_through_window_id == stopped.sealed_through_window_id
+
+    # And the windows the stopped instance was holding are still the resumed one's to publish.
+    flushed = _one_frame(resumed.on_completed())
+
+    assert sorted(flushed["entity"]) == ["a", "b"]

@@ -64,6 +64,10 @@ from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.established_value import DEFAULT_MIN_SAMPLES
 from morpheus.utils.established_value import ValueHistoryTracker
 from morpheus.utils.established_value import minimum_of
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import mark_refused
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +113,15 @@ class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
         every stronger negotiation afterwards would read as though the pair had improved.
     max_samples : int, default = 512
         Handshakes retained per pair regardless of the window.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The floor is
+        taken over a window that expires handshakes on event time, so one handshake from a sensor whose clock is
+        wrong by years would empty every pair's floor at once and let a downgrade set the new one. A refused row
+        carries no floor from this stage, sets `clock_refused`, and moves no horizon; its own suite is still ranked.
+        See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_tracker", )
+    _checkpoint_attributes = ("_tracker", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -121,8 +131,12 @@ class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                  time_unit: str = "ns",
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_samples: int = DEFAULT_MIN_SAMPLES,
-                 max_samples: int = 512):
+                 max_samples: int = 512,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -151,6 +165,11 @@ class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
         for column in (CIPHER_DOWNGRADED, CIPHER_MATURE, CIPHER_SATURATED, CIPHER_UNRECOGNIZED):
             self._needed_columns[column] = TypeId.BOOL8
 
+        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
+        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
+        # written only when a row is refused, below.
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+
         self._should_log_timestamps = True
 
     @property
@@ -172,6 +191,12 @@ class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
     def supports_cpp_node(self) -> bool:
         """Whether this stage supports a C++ node."""
         return False
+
+    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
+        try:
+            return to_epoch_ns(raw, time_unit=self._time_unit)
+        except ValueError:
+            return None
 
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
@@ -207,6 +232,9 @@ class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
             key_parts = {name: to_host_list(df, name) for name in self._key_columns}
             suites = to_host_list(df, self._cipher_column)
             raw_times = to_host_list(df, self._time_column)
+            # Guarded once, before the tracker is shown any time: a refused time becomes `None`, which the rows
+            # below already treat as a handshake with nothing to compare.
+            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
 
             keys: list = []
             ranks: list = []
@@ -224,11 +252,7 @@ class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                 key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
                 suite = normalize_text(raw_suite)
                 rank = cipher_rank(suite)
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 keys.append(key)
                 ranks.append(rank)
@@ -267,6 +291,18 @@ class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
             assign_nullable_bool_column(df, CIPHER_MATURE, mature)
             assign_nullable_bool_column(df, CIPHER_SATURATED, saturated)
             assign_nullable_bool_column(df, CIPHER_UNRECOGNIZED, unrecognized)
+
+            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
+            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
+            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
+            if (any(refused)):
+                mark_refused(df, refused)
+                logger.warning(
+                    "TC6CipherStage refused %d of %d handshakes whose event time was further ahead of the stream "
+                    "than max_clock_skew_seconds allows; they entered no floor, set clock_refused and expired "
+                    "nothing.",
+                    sum(refused),
+                    len(suites))
 
             if (len(unknown_names) > 0):
                 logger.warning(

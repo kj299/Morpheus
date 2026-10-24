@@ -83,6 +83,10 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.lineage import window_id_from_timestamp
 from morpheus.utils.stack_fingerprint import stack_family
 from morpheus.utils.stack_fingerprint import stack_fingerprint
@@ -180,9 +184,15 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         Column holding the SYN's initial receive window. The column may be absent.
     max_hosts : int, default = 100000
         Sources whose stack fingerprints are remembered before the least recently seen is dropped.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. A flow's bin is
+        the record's own, so one record from a sensor whose clock is wrong by years would close the flow's current
+        bin, open one in the far future, and refuse every real record after it as a bin already passed. A refused
+        row joins no bin and teaches no host a stack, sets `clock_refused`, and moves no horizon. See
+        `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_open", "_stacks")
+    _checkpoint_attributes = ("_open", "_stacks", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -199,8 +209,12 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                  options_column: str = "tcp_options_order",
                  mss_column: str = "tcp_mss",
                  window_column: str = "tcp_window_initial",
-                 max_hosts: int = 100_000):
+                 max_hosts: int = 100_000,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (bin_seconds <= 0):
             raise ValueError(f"bin_seconds must be positive, received {bin_seconds}")
@@ -241,6 +255,11 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         self._needed_columns[STACK_FINGERPRINT] = TypeId.STRING
         self._needed_columns[STACK_OS_FAMILY] = TypeId.STRING
         self._needed_columns[STACK_FINGERPRINT_FIRST_SEEN] = TypeId.BOOL8
+
+        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
+        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
+        # written only when a row is refused, below.
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
 
         self._should_log_timestamps = True
 
@@ -353,6 +372,9 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             rows = len(src_ips)
             payloads = (to_host_list(df, self._data_len_column) if self._data_len_column in df.columns else [None] *
                         rows)
+            # Guarded once, before any bin or stack history is shown a time: a refused time becomes `None`, which
+            # the rows below already treat as a record with nothing to aggregate.
+            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
 
             flow_ids: list = []
             bins: list = []
@@ -367,17 +389,12 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
             for position in range(rows):
                 flow_id = self._flow_id(src_ips[position], src_ports[position], dst_ips[position], dst_ports[position])
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
-
+                event_time_ns = times[position]
                 bits = self._flags_for(position, byte_values, flag_columns)
                 flow_ids.append(flow_id)
 
                 if (flow_id is None or event_time_ns is None or bits is None):
-                    unusable += 1
+                    unusable += int(not refused[position])
                     bins.append(None)
 
                     for column in COUNTS:
@@ -472,7 +489,18 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             for column in RATIOS:
                 assign_nullable_float_column(df, column, ratios[column])
 
-            self._write_stacks(df, src_ips, raw_times)
+            self._write_stacks(df, src_ips, times)
+
+            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
+            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
+            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
+            if (any(refused)):
+                mark_refused(df, refused)
+                logger.warning(
+                    "TC4FlowStage refused %d of %d records whose event time was further ahead of the stream than "
+                    "max_clock_skew_seconds allows; they joined no bin, set clock_refused and closed nothing.",
+                    sum(refused),
+                    rows)
 
             if (unusable > 0):
                 logger.warning(
@@ -491,8 +519,17 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
         return message
 
-    def _write_stacks(self, df, src_ips: list, raw_times: list) -> None:
-        """Each SYN's stack fingerprint, its family, and whether its source has presented it before."""
+    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
+        try:
+            return to_epoch_ns(raw, time_unit=self._time_unit)
+        except ValueError:
+            return None
+
+    def _write_stacks(self, df, src_ips: list, times: list) -> None:
+        """Each SYN's stack fingerprint, its family, and whether its source has presented it before.
+
+        `times` are the rows' event times as the clock guard left them, so a refused SYN teaches its host nothing.
+        """
         rows = len(src_ips)
 
         def column(name: str) -> list:
@@ -510,11 +547,7 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
             fingerprints.append(fingerprint)
             families.append(stack_family(options[position]))
-
-            try:
-                event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-            except ValueError:
-                event_time_ns = None
+            event_time_ns = times[position]
 
             if (fingerprint is None or host is None or event_time_ns is None):
                 first_seen.append(None)

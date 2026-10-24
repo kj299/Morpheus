@@ -77,6 +77,10 @@ from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.ratio_window import DEFAULT_MIN_DENOMINATOR
 from morpheus.utils.ratio_window import NS_PER_SECOND
 from morpheus.utils.ratio_window import RatioWindowTracker
@@ -137,9 +141,15 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
     management_prefixes : list of str, optional
         The estate's management networks, in CIDR notation: where its network devices' own interfaces live. Given,
         `dst_is_management` says whether each flow's destination is inside one; absent, the column is null.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The proportion's
+        window expires flows on event time, so one flow from an exporter whose clock is wrong by years would empty
+        every source's window at once and make its next destination the whole of its mix. A refused row carries no
+        proportion or novelty from this stage, sets `clock_refused`, and moves no horizon; its destination is still
+        classified, since that reads the address alone. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_ratios", "_novelty")
+    _checkpoint_attributes = ("_ratios", "_novelty", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -153,8 +163,12 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_denominator: int = DEFAULT_MIN_DENOMINATOR,
                  max_samples: int = 4096,
-                 management_prefixes: list[str] = None):
+                 management_prefixes: list[str] = None,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -189,6 +203,11 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
         self._needed_columns[BYTE_ASYMMETRY] = TypeId.FLOAT64
         self._needed_columns[ASN_FIRST_SEEN] = TypeId.BOOL8
         self._needed_columns[DST_MANAGEMENT] = TypeId.BOOL8
+
+        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
+        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
+        # written only when a row is refused, below.
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
 
         self._should_log_timestamps = True
 
@@ -268,6 +287,9 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                          rows)
             in_bytes = (to_host_list(df, self._bytes_in_column) if self._bytes_in_column in df.columns else [None] *
                         rows)
+            # Guarded once, before either tracker is shown a time: a refused time becomes `None`, which the rows
+            # below already treat as a flow with nothing to measure.
+            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
 
             ratios: list = []
             internal_counts: list = []
@@ -277,12 +299,7 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
 
             for position in range(rows):
                 source = normalize_text(sources[position])
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
-
+                event_time_ns = times[position]
                 private = classified[DST_PRIVATE][position]
 
                 if (source is None or event_time_ns is None or private is None):
@@ -322,7 +339,24 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                                         DST_MANAGEMENT,
                                         [self._is_management(value) for value in to_host_list(df, self._dst_column)])
 
+            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
+            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
+            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
+            if (any(refused)):
+                mark_refused(df, refused)
+                logger.warning(
+                    "TC3ReachStage refused %d of %d flows whose event time was further ahead of the stream than "
+                    "max_clock_skew_seconds allows; they entered no window, set clock_refused and expired nothing.",
+                    sum(refused),
+                    rows)
+
         return message
+
+    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
+        try:
+            return to_epoch_ns(raw, time_unit=self._time_unit)
+        except ValueError:
+            return None
 
     def _is_management(self, value: typing.Any) -> typing.Optional[bool]:
         """Whether a destination is inside one of the estate's management networks, or `None` where unanswerable:

@@ -131,3 +131,84 @@ def test_a_missing_column_is_refused(config: Config):
 def test_an_empty_key_is_refused(config: Config):
     with pytest.raises(ValueError, match="key_columns"):
         TC3TtlStage(config, key_columns=[])
+
+
+# --- The clock guard ------------------------------------------------------------------------------------------
+
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A collector clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
+
+def _without_row(payload: dict, position: int) -> dict:
+    """The same frame with one row left out, which is what a refused row must be indistinguishable from."""
+    return {
+        name: [value for (index, value) in enumerate(values) if index != position]
+        for (name, values) in payload.items()
+    }
+
+
+def _pandas(meta: MessageMeta) -> pd.DataFrame:
+    df = meta.copy_dataframe()
+
+    return df.to_pandas() if hasattr(df, "to_pandas") else df
+
+
+def _drive(config: Config, stage, payload: dict) -> pd.DataFrame:
+    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
+    stage.on_data(meta)
+
+    return _pandas(meta)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    # Row 2 is stamped a decade ahead. Admitted, it would drive every horizon in the stage past the rows before it
+    # and refuse the real row after it as out of order; refused, the stream reads exactly as if it had never arrived.
+    payload = flows([64, 64, 64, 64])
+    payload["event_time"] = [START, START + SECOND, START + YEARS_AHEAD_NS, START + 2 * SECOND]
+
+    with_bad = _drive(config, TC3TtlStage(config), payload)
+    control = _drive(config, TC3TtlStage(config), _without_row(payload, 2))
+
+    assert [bool(value) for value in with_bad["clock_refused"]] == [False, False, True, False]
+    assert pd.isna(with_bad["ip_ttl_distinct"][2])
+
+    kept = with_bad.drop(index=2).drop(columns=["clock_refused"]).reset_index(drop=True)
+    pd.testing.assert_frame_equal(kept, control, check_dtype=False)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_frame_with_nothing_refused_does_not_gain_the_column(config: Config):
+    # The column is written only when a row is refused: the compositions carrying this stage have goldens without it,
+    # and a null an upstream guard left is not this stage's to turn into False.
+    payload = flows([64, 64, 64, 64])
+
+    assert "clock_refused" not in _drive(config, TC3TtlStage(config), payload).columns
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC3TtlStage(config, max_clock_skew_seconds=0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_stop_and_restore_round_trip_keeps_the_clock(config: Config):
+    # A fresh instance believes the first time it is shown, so a decade-ahead row that opens a resumed process would
+    # set its clock. The clock is part of the snapshot, and the restored instance refuses it as the stopped one would.
+    payload = flows([64, 64, 64, 64])
+    payload["event_time"] = [START, START + SECOND, START + YEARS_AHEAD_NS, START + 2 * SECOND]
+    (before, after) = ({
+        name: values[:2]
+        for (name, values) in payload.items()
+    }, {
+        name: values[2:]
+        for (name, values) in payload.items()
+    })
+
+    stopped = TC3TtlStage(config)
+    _drive(config, stopped, before)
+
+    resumed = TC3TtlStage(config)
+    resumed.restore_state(stopped.checkpoint_state())
+
+    assert [bool(value) for value in _drive(config, resumed, after)["clock_refused"]] == [True, False]

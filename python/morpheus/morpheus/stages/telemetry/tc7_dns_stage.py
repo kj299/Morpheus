@@ -79,6 +79,10 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.query_entropy import mean_label_length
 from morpheus.utils.query_entropy import registered_domain
 from morpheus.utils.query_entropy import subdomain
@@ -160,9 +164,15 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
         How far back those periods reach.
     baseline_min_days : int, default = 7
         Periods of history a client needs before its baselines are published.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. Every window and
+        every day here expires on event time, so one query from a resolver whose clock is wrong by years would empty
+        each domain's subdomains and each client's domains, answers and days at once. A refused row carries no
+        windowed measurement from this stage, sets `clock_refused`, and moves no horizon; its name is still split
+        and its entropy read, since those need no history. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_tracker", "_domains", "_answers", "_baselines")
+    _checkpoint_attributes = ("_tracker", "_domains", "_answers", "_baselines", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -177,8 +187,12 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
                  min_queries: int = DEFAULT_MIN_QUERIES,
                  baseline_bucket_seconds: int = DEFAULT_BASELINE_BUCKET_SECONDS,
                  baseline_window_seconds: int = DEFAULT_BASELINE_WINDOW_SECONDS,
-                 baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS):
+                 baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -234,6 +248,11 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
             self._needed_columns[column + BASELINE_DAYS_SUFFIX] = TypeId.INT64
             self._needed_columns[column + BASELINE_MATURE_SUFFIX] = TypeId.BOOL8
             self._needed_columns[column + RATIO_SUFFIX] = TypeId.FLOAT64
+
+        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
+        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
+        # written only when a row is refused, below.
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
 
         self._should_log_timestamps = True
 
@@ -293,6 +312,9 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
             key_parts = {name: to_host_list(df, name) for name in self._key_columns}
             responses = (to_host_list(df, self._response_column) if self._response_column in df.columns else [None] *
                          len(names))
+            # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
+            # below already treat as a query with nothing to count.
+            (times, clock_refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
 
             domains: list = []
             below: list = []
@@ -301,7 +323,6 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
             per_domain: list = []
             saturated: list = []
             keys: list = []
-            times: list = []
             per_client: list = []
             client_saturated: list = []
             refused: list = []
@@ -317,15 +338,10 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
                 below.append(part)
                 entropies.append(subdomain_entropy(name))
                 label_means.append(mean_label_length(part))
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 key = compose_key([normalize_text(key_parts[column][position]) for column in self._key_columns])
                 keys.append(key)
-                times.append(event_time_ns)
 
                 self._observe_client(key,
                                      event_time_ns,
@@ -367,6 +383,17 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
                 assign_nullable_bool_column(df, column + BASELINE_MATURE_SUFFIX, measured.mature)
                 assign_nullable_float_column(df, column + RATIO_SUFFIX, ratios_to_reference(measured, values))
 
+            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
+            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
+            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
+            if (any(clock_refused)):
+                mark_refused(df, clock_refused)
+                logger.warning(
+                    "TC7DnsStage refused %d of %d queries whose event time was further ahead of the stream than "
+                    "max_clock_skew_seconds allows; they entered no window, set clock_refused and expired nothing.",
+                    sum(clock_refused),
+                    len(names))
+
             if (unordered > 0):
                 logger.warning(
                     "TC7DnsStage saw %d of %d queries arrive earlier than their registered domain's previous one; "
@@ -376,6 +403,12 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
                     len(names))
 
         return message
+
+    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
+        try:
+            return to_epoch_ns(raw, time_unit=self._time_unit)
+        except ValueError:
+            return None
 
     def _observe_client(self, key, event_time_ns, domain, response, outputs: tuple) -> None:
         """The client's distinct registered domains and its NXDOMAIN share, appended to `outputs`."""

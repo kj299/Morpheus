@@ -55,6 +55,10 @@ from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import mark_refused
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +105,14 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
         Arrivals retained per pair regardless of the window.
     max_entities : int, default = 500000
         Pairs retained before the least recently seen is dropped.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The window
+        expires arrivals on event time, so one flow from an exporter whose clock is wrong by years would empty every
+        pair's day of arrivals at once and reset the rhythm a beacon had built. A refused row carries no regularity
+        from this stage, sets `clock_refused`, and moves no horizon. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_tracker", )
+    _checkpoint_attributes = ("_tracker", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -115,8 +124,12 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_intervals: int = DEFAULT_MIN_INTERVALS,
                  max_samples: int = 4096,
-                 max_entities: int = DEFAULT_MAX_ENTITIES):
+                 max_entities: int = DEFAULT_MAX_ENTITIES,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -139,6 +152,11 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
         self._needed_columns[SIZE_CV] = TypeId.FLOAT64
         self._needed_columns[REGULARITY_MATURE] = TypeId.BOOL8
         self._needed_columns[REGULARITY_SATURATED] = TypeId.BOOL8
+
+        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
+        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
+        # written only when a row is refused, below.
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
 
         self._should_log_timestamps = True
 
@@ -199,6 +217,9 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
 
             rows = len(sources)
             sizes = to_host_list(df, self._size_column) if self._size_column in df.columns else [None] * rows
+            # Guarded once, before the tracker is shown any time: a refused time becomes `None`, which the rows
+            # below already treat as a flow with nothing to measure.
+            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
 
             keys: list = []
             intervals: list = []
@@ -212,16 +233,12 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
 
             for position in range(rows):
                 key = compose_key([normalize_text(sources[position]), normalize_text(destinations[position])])
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 keys.append(key)
 
                 if (key is None or event_time_ns is None):
-                    keyless += 1
+                    keyless += int(not refused[position])
                     intervals.append(None)
                     means.append(None)
                     interval_cvs.append(None)
@@ -248,6 +265,18 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
             df[REGULARITY_MATURE] = mature
             df[REGULARITY_SATURATED] = saturated
 
+            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
+            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
+            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
+            if (any(refused)):
+                mark_refused(df, refused)
+                logger.warning(
+                    "TC3BeaconStage refused %d of %d flows whose event time was further ahead of the stream than "
+                    "max_clock_skew_seconds allows; they joined no pair's rhythm, set clock_refused and expired "
+                    "nothing.",
+                    sum(refused),
+                    rows)
+
             if (keyless > 0):
                 logger.warning(
                     "TC3BeaconStage left %d of %d flows unmeasured for want of an address pair or a usable "
@@ -264,6 +293,12 @@ class TC3BeaconStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                     rows)
 
         return message
+
+    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
+        try:
+            return to_epoch_ns(raw, time_unit=self._time_unit)
+        except ValueError:
+            return None
 
     @staticmethod
     def _size_of(value: typing.Any) -> typing.Optional[float]:

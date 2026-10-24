@@ -69,6 +69,10 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
 logger = logging.getLogger(__name__)
@@ -200,9 +204,15 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         How far back those periods reach.
     baseline_min_days : int, default = 7
         Periods of history a service needs before `service_clients_baseline` is published.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. Every window and
+        every day here expires on event time, so one connection from a sensor whose clock is wrong by years would
+        empty each service's connections, clients and days at once and refuse every real connection after it as out
+        of order. A refused row carries no measurement from this stage, sets `clock_refused`, and moves no horizon;
+        its service key is still composed, since that needs no history. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_clients", "_fingerprints", "_baseline", "_sums")
+    _checkpoint_attributes = ("_clients", "_fingerprints", "_baseline", "_sums", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -219,8 +229,12 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                  max_entities: int = 100_000,
                  baseline_bucket_seconds: int = DEFAULT_BASELINE_BUCKET_SECONDS,
                  baseline_window_seconds: int = DEFAULT_BASELINE_WINDOW_SECONDS,
-                 baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS):
+                 baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -267,6 +281,11 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         self._needed_columns[CLIENTS_BASELINE_DAYS] = TypeId.INT64
         self._needed_columns[CLIENTS_BASELINE_MATURE] = TypeId.BOOL8
         self._needed_columns[CLIENTS_RATIO] = TypeId.FLOAT64
+
+        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
+        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
+        # written only when a row is refused, below.
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
 
         self._should_log_timestamps = True
 
@@ -316,6 +335,12 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
 
         return (key, KEYED_BY_ADDRESS) if key is not None else (None, None)
 
+    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
+        try:
+            return to_epoch_ns(raw, time_unit=self._time_unit)
+        except ValueError:
+            return None
+
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
         Write the service key and the service's window counts, client novelty and baseline.
@@ -356,10 +381,12 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
             sizes = to_host_list(df, self._bytes_column) if self._bytes_column in df.columns else [None] * rows
             fingerprints = (to_host_list(df, self._fingerprint_column)
                             if self._fingerprint_column in df.columns else [None] * rows)
+            # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
+            # below already treat as a connection with nothing to count.
+            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
 
             keys: list = []
             sources: list = []
-            times: list = []
             connections: list = []
             volumes: list = []
             reached_by: list = []
@@ -371,20 +398,15 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
 
             for position in range(rows):
                 (key, source) = self.service_key(addresses[position], ports[position], names[position])
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 keys.append(key)
                 sources.append(source)
-                times.append(event_time_ns)
 
                 client = normalize_text(clients[position])
 
                 if (key is None or event_time_ns is None):
-                    unusable += 1
+                    unusable += int(not refused[position])
 
                     for column in (connections, volumes, reached_by, first_seen, known):
                         column.append(None)
@@ -429,6 +451,18 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
             assign_nullable_int_column(df, CLIENTS_BASELINE_DAYS, measured.buckets)
             assign_nullable_bool_column(df, CLIENTS_BASELINE_MATURE, measured.mature)
             assign_nullable_float_column(df, CLIENTS_RATIO, ratios_to_reference(measured, reached_by))
+
+            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
+            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
+            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
+            if (any(refused)):
+                mark_refused(df, refused)
+                logger.warning(
+                    "TC7ServiceStage refused %d of %d connections whose event time was further ahead of the stream "
+                    "than max_clock_skew_seconds allows; they entered no window, set clock_refused and expired "
+                    "nothing.",
+                    sum(refused),
+                    rows)
 
             if (unusable > 0):
                 logger.warning(

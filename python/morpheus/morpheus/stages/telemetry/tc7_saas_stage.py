@@ -65,6 +65,10 @@ from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
 from morpheus.utils.determinism import quantize_value
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import EventClock
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import mark_refused
 from morpheus.utils.lineage import window_id_from_timestamp
 from morpheus.utils.transfer_envelope import DEFAULT_MIN_SAMPLES
 from morpheus.utils.transfer_envelope import DEFAULT_QUANTILE
@@ -135,9 +139,15 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         Baselines and weekly tallies retained before the least recently seen is forgotten.
     decimals : int, default = 4
         Decimal places the baseline and ratio are rounded to, under determinism control 9.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The baseline
+        expires operations on event time and the week's tally restarts on a later week, so one record from a tenant
+        whose clock is wrong by years would empty every principal's thirty days and start every week over at once.
+        A refused row carries no baseline, week or breadth from this stage, sets `clock_refused`, and moves no
+        horizon. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_baselines", "_weeks")
+    _checkpoint_attributes = ("_baselines", "_weeks", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -154,8 +164,12 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                  week_epoch: str = DEFAULT_WEEK_EPOCH,
                  max_samples: int = 4096,
                  max_entities: int = 500_000,
-                 decimals: int = DEFAULT_FLOAT_DECIMALS):
+                 decimals: int = DEFAULT_FLOAT_DECIMALS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
+
+        if (max_clock_skew_seconds <= 0):
+            raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
 
         if (baseline_days <= 0):
             raise ValueError(f"baseline_days must be positive, received {baseline_days}")
@@ -201,6 +215,11 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         self._needed_columns[WEEK_ID] = TypeId.INT64
         self._needed_columns[OBJECT_TYPES_IN_WEEK] = TypeId.INT64
 
+        # `clock_refused` is deliberately not declared in `_needed_columns`: the source preallocates every declared
+        # column on every row, which would put a False where the compositions' goldens hold no column at all. It is
+        # written only when a row is refused, below.
+        self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+
         self._should_log_timestamps = True
 
     @property
@@ -225,6 +244,12 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
     def _round(self, value: typing.Optional[float]) -> typing.Optional[float]:
         return None if value is None else quantize_value(value, self._decimals)
+
+    def _event_time_ns(self, raw: typing.Any) -> typing.Optional[int]:
+        try:
+            return to_epoch_ns(raw, time_unit=self._time_unit)
+        except ValueError:
+            return None
 
     def _tally(self, principal: str, week_id: int, object_type: typing.Optional[str]) -> typing.Optional[int]:
         """The distinct types this principal has reached so far in this week, or `None` for an earlier week."""
@@ -290,6 +315,9 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             raw_times = to_host_list(df, self._time_column)
             outcomes = (to_host_list(df, self._result_column) if self._result_column in df.columns else [None] *
                         len(principals))
+            # Guarded once, before the baseline or any week is shown a time: a refused time becomes `None`, which
+            # the rows below already treat as an operation with nothing to measure.
+            (times, refused) = guard_times(self._clock, [self._event_time_ns(raw) for raw in raw_times])
 
             keys: list = []
             baselines: list = []
@@ -308,11 +336,7 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                 key = compose_key([principal, operations[position]])
                 outcome = normalize_text(outcomes[position])
                 did_fail = outcome is not None and outcome.lower() in FAILED_RESULTS
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 keys.append(key)
                 failed.append(did_fail)
@@ -321,7 +345,7 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                 weeks.append(week_id)
 
                 if (principal is None or event_time_ns is None):
-                    unusable += 1
+                    unusable += int(not refused[position])
                     baselines.append(None)
                     ratios.append(None)
                     samples.append(None)
@@ -361,6 +385,18 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             assign_nullable_bool_column(df, OPERATION_FAILED, failed)
             assign_nullable_int_column(df, WEEK_ID, weeks)
             assign_nullable_int_column(df, OBJECT_TYPES_IN_WEEK, breadth)
+
+            # Written only when a row was refused. Unconditional marking would add the column, or turn a null into
+            # False, on every frame this stage touches, and the committed goldens of the compositions that carry
+            # this stage do not hold it; a frame with nothing refused leaves the column as it arrived.
+            if (any(refused)):
+                mark_refused(df, refused)
+                logger.warning(
+                    "TC7SaasStage refused %d of %d operations whose event time was further ahead of the stream than "
+                    "max_clock_skew_seconds allows; they joined no baseline or week, set clock_refused and expired "
+                    "nothing.",
+                    sum(refused),
+                    len(principals))
 
             if (unusable > 0):
                 logger.warning(
