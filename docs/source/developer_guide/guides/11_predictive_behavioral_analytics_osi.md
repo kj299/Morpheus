@@ -363,7 +363,7 @@ The repository ships three Python packages plus a compiled core:
 | --- | --- |
 | `python/morpheus/morpheus` | Core SDK: configuration, pipeline, stages, messages, modules, parsers, controllers, I/O |
 | `python/morpheus/morpheus/_lib` | C++/CUDA core exposed through pybind11: messages, stages, tensors, cuDF interoperability |
-| `python/morpheus/morpheus/_lib/doca` | Optional NVIDIA DOCA GPUNetIO path for line-rate packet capture directly into GPU memory |
+| [`python/morpheus/morpheus/_lib/doca`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/_lib/doca) | Optional NVIDIA DOCA GPUNetIO path for line-rate packet capture directly into GPU memory; removed from this fork by the [repository audit](./13_repository_audit.md)'s ruling D1 |
 | `python/morpheus_dfp/morpheus_dfp` | Digital fingerprinting: per-entity behavioral modeling, the piece most relevant here |
 | [`python/morpheus_llm/morpheus_llm`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_llm/morpheus_llm) | LLM engine nodes, vector database services, retrieval-augmented enrichment; removed from this fork by the [repository audit](./13_repository_audit.md)'s ruling D1 |
 
@@ -445,8 +445,9 @@ polluting the DataFrame.
 `mutable_dataframe()` is a context manager that acquires and releases that lock; `copy_ranges` produces a
 new `MessageMeta` from selected row ranges while preserving order.
 
-`python/morpheus/morpheus/_lib/include/morpheus/messages/raw_packet.hpp` defines `RawPacketMessage`, the
-GPU-resident packet buffer produced by the DOCA source.
+[`python/morpheus/morpheus/_lib/include/morpheus/messages/raw_packet.hpp`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/_lib/include/morpheus/messages/raw_packet.hpp)
+defined `RawPacketMessage`, the GPU-resident packet buffer produced by the DOCA source. It went with the
+DOCA path under ruling D1.
 
 #### Stage inventory
 
@@ -621,7 +622,7 @@ window is satisfied, which is a deliberate choice between latency and stability.
 
 | Layer | What exists | Where |
 | --- | --- | --- |
-| 1-2 | GPU packet capture off a ConnectX NIC into device memory | `stages/doca/doca_source_stage.py`, `_lib/doca/` |
+| 1-2 | GPU packet capture off a ConnectX NIC into device memory (removed) | [`stages/doca/doca_source_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/doca/doca_source_stage.py), [`_lib/doca/`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/_lib/doca) |
 | 3-4 | Flow assembly and TCP flag features | `examples/abp_pcap_detection/abp_pcap_preprocessing.py` |
 | 3 | IP arithmetic and classification | `parsers/ip.py` |
 | 3-7 | Zeek log ingestion with typed headers | `parsers/zeek.py` |
@@ -667,7 +668,7 @@ Grepping the repository:
 | `stages/input/kafka_source_stage.py:246` | `pe_count = self._max_concurrent` |
 | `stages/general/multi_processing_stage.py:162` | `pe_count = self._max_in_flight_messages` |
 | `stages/general/router_stage.py:102` | `engines_per_pe = self._processing_engines` |
-| `stages/doca/doca_source_stage.py:98` | `pe_count = 1` |
+| [`stages/doca/doca_source_stage.py:98`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/doca/doca_source_stage.py#L98) (removed) | `pe_count = 1` |
 | [`morpheus_llm/stages/llm/llm_engine_stage.py:136`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_llm/morpheus_llm/stages/llm/llm_engine_stage.py#L136) (removed) | `pe_count = 1` |
 
 Any node with `pe_count > 1` processes messages concurrently and emits them in completion order, not
@@ -791,7 +792,7 @@ Three tiers:
 Tier 1  Collectors            Tier 2  Morpheus                  Tier 3  SIEM
 ------------------            ---------------------------       ---------------
 L1/L2 SNMP, LLDP, NAC   -->   segment_l12  ---\
-L3/L4 NetFlow, DOCA     -->   segment_l34  ----\
+L3/L4 NetFlow, IPFIX    -->   segment_l34  ----\
 L5   auth, VPN, RDP     -->   segment_l5   -----+--> segment_fuse --> Kafka --> Splunk
 L6   TLS, JA4, certs    -->   segment_l6   ----/                       |
 L7   HTTP, DNS, SaaS    -->   segment_l7   ---/                        +--> graph store
@@ -1289,7 +1290,7 @@ guide's own rule that a soft join against an unbounded interval is a guess.
 **Entity key:** `src_ip`, and separately the directed pair `src_ip:dst_ip`
 
 **Sources:** NetFlow v9, IPFIX, sFlow, VPC and cloud flow logs, firewall session logs, router ACL logs,
-and for full fidelity, the DOCA GPUNetIO path.
+and for full fidelity, a per-packet capture source.
 
 **Required fields:** `src_ip`, `dst_ip`, `exporter_id`, `ip_version`, `protocol`, `ip_ttl`, `ip_id`, `tos_dscp`,
 `packet_count`, `byte_count`, `flow_start`, `flow_end`, `tcp_flags_union`, `direction`,
@@ -1330,12 +1331,13 @@ explicitly in the rule documentation.
 **Entity key:** `flow_id` = `src_ip:src_port=dst_ip:dst_port` (the format already used in
 `abp_pcap_preprocessing.py`), plus `community_id` for cross-tool joins.
 
-**Sources:** the same as TC-3 with per-packet detail, plus Zeek `conn.log`, plus the DOCA path for
-line-rate capture. Status: the DOCA path cannot feed this class yet. `DocaConvertStage` emits two columns, `src_ip` and the payload as `data`, and the rest of each header stays inside the CUDA convert kernel, so the destination, the ports,
+**Sources:** the same as TC-3 with per-packet detail, plus Zeek `conn.log`, plus a per-packet
+capture source. Status: no per-packet source feeds this class. The upstream DOCA path never could: its
+`DocaConvertStage` emitted two columns, `src_ip` and the payload as `data`, so the destination, the ports,
 the TCP flags and options, the MSS, the initial window, the timestamp and the length `TC4FlowStage` reads
-never reach a DataFrame. Feeding it means extending `doca_convert_kernel.cu` and `doca_convert_stage.cpp`,
-which build only against the DOCA SDK and run only on native Linux with a ConnectX or BlueField NIC; the
-fork's one GPU machine is a WSL host without one. Tracked in #66.
+never reached a DataFrame, and it built only against the DOCA SDK on native Linux with a ConnectX or
+BlueField NIC. The [repository audit](./13_repository_audit.md)'s ruling D1 removed it, so a per-packet
+collector that emits those header fields is new work. Tracked in #66.
 
 **Required fields:** `src_port`, `dst_port`, `tcp_seq_initial`, `tcp_window_initial`, `tcp_options_order`,
 `tcp_mss`, `retransmit_count`, `out_of_order_count`, `zero_window_count`, `rtt_estimate_ms`,
@@ -3906,7 +3908,7 @@ What Morpheus provides versus what has to be built, stated plainly.
 - Periodicity-based anomaly detection (`TimeSeriesStage`).
 
 Pass 4 measures each of these and records which the fork reuses.
-- Line-rate packet capture into GPU memory (DOCA).
+- Line-rate packet capture into GPU memory (DOCA; removed by the audit's ruling D1).
 - Protocol and log parsers for IP, Zeek, Windows events, URLs, and Splunk notables.
 - Kafka, Elasticsearch, HTTP, file, and Delta Lake sinks.
 - Pretrained models for sensitive information detection, phishing, log parsing, ransomware, fraud, and
@@ -4412,7 +4414,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Triton-backed rules R-B-L4-001 and R-B-L7-003 | Medium | Specified over the `abp` features and over request bodies; no fork pipeline composes `TritonInferenceStage` and no `Scorer`-protocol adapter exists for layers 4 or 7 the way `ReferenceScorer` and `DfencoderScorer` do for layer 5. Both need a Triton endpoint and a GPU path CPU CI cannot exercise; revisit once the per-user model's CPU inference path exists as the pattern to copy. Not scheduled; recorded as gap G48 in the retrospective |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it, asserted equal to the unsharded golden under control 13. Tracked in #66 |
 | Runnable segment compositions and SIEM transport | Large | The runners are built, in step 16: `examples/behavioral_analytics/run_<segment>.py` for all nine segments reads one JSON lines file per class with `FileSourceStage`, runs the segment's composition, and ends in `MinimizationStage`, `SiemWireStage` and a new `SiemWireSinkStage`, which writes a file or a Kafka topic per sourcetype with null fields left out, as neither generic writer does. `--state` restores every stage's memory on start and checkpoints on stop, and `test_segment_runners.py` holds each runner's output to its composition line for line, restarts three segments halfway with equal output, and finds no principal in any segment's output under the example policy. Building them found two more NaN-identity defects: `TC6ContentStage` counted a missing content type as present, and `MinimizationStage`'s copy check matched a gap in a digested column to a gap in a kept one. The compositions still live beside their corpora, and the runners import them. The transport is configured: `examples/splunk_lineage_app/transport/` holds a Splunk Connect for Kafka sink over one topic per sourcetype, posting to the raw endpoint so the `props.conf` stanzas set `_time`, and an `inputs.conf` with the HEC token and a forwarder monitor per runner file, all rendered from the sourcetype inventory and held to it, to the app and to the runners' own naming by `test_splunk_transport.py`. Every one of the fifty-eight stages is a `morpheus run pipeline-other` command, and `test_lineage_stage_cli.py` builds each one and holds the nine compositions in the example README to the CLI; widening it found three constructors the CLI could not build and that an absent list option reached a stage as an empty tuple rather than its None default, which is repaired in `register_stage`. The sharding variant is built: `session_pipeline.run_pipeline(shards=N)` runs the layer 5 composition as control 4 describes, over `ShardSplitStage` and `RouterStage` keyed on `stable_shard`, and the harness holds it to the unsharded golden on every column about an entity, with the three stream-accounting columns (`sealed_by`, `day_sealed_by`, `session_abandoned`) named as the ones a branch decides for itself, and a negative control that splits a principal across branches and changes the features. The real-feed normalizations are in the row below. Tracked in #66 |
-| Per-class collector input contracts, samples and layer 3-7 normalization schemas | Medium | The contracts and samples are built, in step 16: `examples/behavioral_analytics/input_contracts.json` names the type, unit, collector-side source and whether it is required for every column of all twenty input classes, `collector_contract.md` is rendered from it, each segment's corpus is exported to `samples/<segment>/<class>.jsonlines`, and `test_input_contracts.py` holds all eleven corpus builders to the contract and the committed files to what the builders build. The normalization is built too: `FlowRecordNormalizeStage` takes IPFIX, decoded from a packet capture by `morpheus.utils.ipfix` (RFC 7011 templates scoped per exporter and observation domain, RFC 5103 reverse counters), into the TC-3 record, `exporter_id` included, and `morpheus.utils.collector_schemas` holds one `DataFrameInputSchema` per layer 6 and 7 sub-class -- Zeek `ssl.log` joined to `x509.log`, `http.log`, `dns.log`, the Microsoft 365 unified audit log and Windows System Monitor event 1 joined to the event 7 of its own image -- with Zeek read through `parsers/zeek.py`, whose pandas path could not read a standard Zeek header and now does. `examples/behavioral_analytics/fixtures/` renders six committed samples in those formats, and `test_collector_schemas.py` holds each normalized fixture to its sample column for column and the network, application, SaaS and endpoint segments run over them to the files they write from the samples, byte for byte. Zeek cannot carry what an inspecting proxy saw inside a TLS session, so `content_type_declared` and `content_type_detected` are null from it, and the test asserts that rather than excusing it. What remains is the DOCA adapter, and it is blocked rather than pending: `DocaConvertStage` emits two columns, `src_ip` and the payload as `data`, and the rest of each header stays inside the CUDA convert kernel, so no adapter in Python can recover what `TC4FlowStage` reads; the fix is a change to `doca_convert_kernel.cu` and `doca_convert_stage.cpp` that builds only against the DOCA SDK and runs only on native Linux with a ConnectX or BlueField NIC, which the fork's one GPU machine, a WSL host, does not have. The collectors themselves remain out of scope. Tracked in #66 |
+| Per-class collector input contracts, samples and layer 3-7 normalization schemas | Medium | The contracts and samples are built, in step 16: `examples/behavioral_analytics/input_contracts.json` names the type, unit, collector-side source and whether it is required for every column of all twenty input classes, `collector_contract.md` is rendered from it, each segment's corpus is exported to `samples/<segment>/<class>.jsonlines`, and `test_input_contracts.py` holds all eleven corpus builders to the contract and the committed files to what the builders build. The normalization is built too: `FlowRecordNormalizeStage` takes IPFIX, decoded from a packet capture by `morpheus.utils.ipfix` (RFC 7011 templates scoped per exporter and observation domain, RFC 5103 reverse counters), into the TC-3 record, `exporter_id` included, and `morpheus.utils.collector_schemas` holds one `DataFrameInputSchema` per layer 6 and 7 sub-class -- Zeek `ssl.log` joined to `x509.log`, `http.log`, `dns.log`, the Microsoft 365 unified audit log and Windows System Monitor event 1 joined to the event 7 of its own image -- with Zeek read through `parsers/zeek.py`, whose pandas path could not read a standard Zeek header and now does. `examples/behavioral_analytics/fixtures/` renders six committed samples in those formats, and `test_collector_schemas.py` holds each normalized fixture to its sample column for column and the network, application, SaaS and endpoint segments run over them to the files they write from the samples, byte for byte. Zeek cannot carry what an inspecting proxy saw inside a TLS session, so `content_type_declared` and `content_type_detected` are null from it, and the test asserts that rather than excusing it. What remains is a per-packet source for `TC4FlowStage`. The upstream DOCA path could not be that source, since its `DocaConvertStage` emitted only `src_ip` and the payload, and the repository audit's ruling D1 removed it; a per-packet collector is new work. The collectors themselves remain out of scope. Tracked in #66 |
 | TC-1 and TC-2 collectors | Medium | The SNMP, LLDP, DHCP, and 802.1X polling itself. Tier 1 is not Morpheus; the counter normalization those collectors feed does ship, as `TC1NormalizeStage`, and it consumes raw monotonic totals with sysUpTime beside them, not pre-differenced deltas. Out of scope by design; not tracked |
 | Graph store beside Splunk | Medium | Optional by design: nothing in Part 3 depends on it and Splunk is the detection surface. Deliberately left open. The one concrete piece worth taking early is small and is listed under the network-object detections above: an LLDP adjacency lookup over `binding:l1`, which step 10 built and the app refreshes, and an 'Entity view' SPL recipe per entity class in the app README, which is not written. Not scheduled; recorded as gap G08 |
 | Cloud control-plane sub-class (`tc7_cloud`) | Medium | CloudTrail, Azure Activity, GCP Audit and Kubernetes audit are outside the design although a role assumption or `kubectl exec` has exactly the shape `TC7SaasStage` measures. Specified in Part 2 with the baseline key extended to (principal, account, operation); the corpus, variant column set and rule wait until the service entity and normalization schemas exist. Not scheduled; recorded as gap G56 |

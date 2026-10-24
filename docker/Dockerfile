@@ -200,22 +200,9 @@ RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locke
     MORPHEUS_PYTHON_BUILD_STUBS=OFF CONDA_TOKEN=${CONDA_TOKEN} CONDA_BLD_PATH=/opt/conda/conda-bld ./ci/conda/recipes/run_conda_build.sh morpheus-core ${CONDA_UPLOAD}
 
 # ============ Stage: base_extended ============
-# Base environment with any optional extensions. ex. DOCA libs
+# Extension point for optional environmental elements layered over conda_env.
+# Empty today; later stages build from it so additions land in one place.
 FROM --platform=$TARGETPLATFORM conda_env AS base_extended
-
-# Add one or more optional dependencies to the base environment
-ARG MORPHEUS_ROOT_HOST
-ARG MORPHEUS_SUPPORT_DOCA="FALSE"
-# Set this environment variable so it auto builds DOCA
-ENV MORPHEUS_SUPPORT_DOCA=${MORPHEUS_SUPPORT_DOCA}
-
-# Copy all of the optional dependency scripts
-COPY ${MORPHEUS_ROOT_HOST}/.devcontainer/docker/optional_deps docker/optional_deps
-
-# Install DOCA (If requested)
-RUN --mount=type=cache,id=doca,target=/tmp/doca,sharing=locked \
-    --mount=type=cache,id=apt,target=/var/cache/apt \
-    ./docker/optional_deps/doca.sh /tmp/doca
 
 # ============ Stage: conda_env_dev ============
 # Create the development conda environment

@@ -131,7 +131,6 @@ if [[ ${NUMARGS} == 0 ]]; then
 fi
 
 if hasArg morpheus; then
-   export MORPHEUS_SUPPORT_DOCA=${MORPHEUS_SUPPORT_DOCA:-OFF}
    # Set GIT_VERSION to set the project version inside of meta.yaml
    export GIT_VERSION="$(get_version)"
 

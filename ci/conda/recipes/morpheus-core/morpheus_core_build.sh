@@ -37,8 +37,7 @@ fi
 # Enable core. Core is enabled by default and this is to just highlight that it is on
 CMAKE_ARGS="-DMORPHEUS_BUILD_MORPHEUS_CORE=ON ${CMAKE_ARGS}"
 
-# Disable dfp and doca
-CMAKE_ARGS="-DMORPHEUS_SUPPORT_DOCA=OFF ${CMAKE_ARGS}"
+# Disable dfp
 CMAKE_ARGS="-DMORPHEUS_BUILD_MORPHEUS_DFP=OFF ${CMAKE_ARGS}"
 
 if [[ "${USE_SCCACHE}" == "1" ]]; then

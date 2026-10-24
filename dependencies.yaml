@@ -269,14 +269,12 @@ dependencies:
           - gxx=12.1
 
           # Non-Compiler Dependencies
-          - automake=1.16.5 # Needed for DOCA build
           - c-ares=1.32 # 1.33 causes an undefined symbol error
           - ccache
           - cmake=3.27
           - cuda-cudart-dev=12.8
           - cuda-version=12.8
           - indicators=2.3 # C++ library for displaying progress bars
-          - libtool # Needed for DOCA build
           - ninja=1.11
           - pkg-config=0.29 # for mrc cmake
           - sysroot_linux-64>=2.28
@@ -301,7 +299,6 @@ dependencies:
           - pybind11-stubgen=0.10.5
           - pylibcudf=25.02
           - rapidjson=1.1.0
-          - rdma-core>=48 # Needed for DOCA.
           - scikit-build=0.17.6
           - versioneer-518
 
