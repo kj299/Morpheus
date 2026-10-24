@@ -463,7 +463,7 @@ minute of spread changing nothing. Under the learned models a millisecond still 
 longer moves what the rule accuses. Boundary proximity is the variable, not the size of the error. **Two are not
 measured**, because the SaaS corpus arrives through a single collector and a lone clock cannot disagree with itself;
 the artifact says `"one clock"` for them rather than reporting a tolerance it never tested. The cross-layer chains
-keep their span at every width, while fifteen of 1040 ARP observations change their attribution -- ten fall back
+keep their span at every width, while fifteen of 1045 ARP observations change their attribution -- ten fall back
 to their own address and five acquire a port --
 reach and attribution are different properties and do not fail together.
 

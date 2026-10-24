@@ -4582,7 +4582,7 @@ again.
 span at every width on both axes: fifteen still hold three layers and all fifteen desk sign-ins still resolve to
 the port they were made at, because a principal reaches a port through an 802.1X session lasting most of the
 hour. The rung below reaches through a MAC binding lasting one poll cadence, and there a minute is a large
-fraction of the interval: of 1040 ARP observations rooted on a port, ten fall back to their own address and
+fraction of the interval: of 1045 ARP observations rooted on a port, ten fall back to their own address and
 five acquire a port they did not have. Attribution moved while reach did not.
 
 Each of those findings is asserted in `tests/morpheus/determinism/test_clock_skew_experiment.py` against the
