@@ -310,12 +310,19 @@ def health(module,
 
     min_buckets = getattr(module, "HEALTH_MIN_BUCKETS", DEFAULT_MIN_BUCKETS)
     sealed = result[result["window_id"].notna()]
+    names = set(sealed["telemetry_class"].dropna()) - {QUARANTINE_CLASS}
+
+    # A class that reached an earlier run and not this one still has a history, and on the final run an open window
+    # in it to seal: its stage is restored and run over nothing, which is what flushes it.
+    if (state_dir is not None and (state_dir / "health").is_dir()):
+        names |= {path.name for path in (state_dir / "health").iterdir() if path.is_dir()}
+
     groups = []
 
-    for name in sorted(set(sealed["telemetry_class"].dropna()) - {QUARANTINE_CLASS}):
+    for name in sorted(names):
         records = _branch(
             None if state_dir is None else state_dir / "health" / name,
-            final, lambda name=name: envelope.health(config, result, period_seconds, min_buckets, classes=[name]))
+            final, lambda name=name: envelope.health(config, sealed, period_seconds, min_buckets, classes=[name]))
 
         if (len(records) > 0):
             groups.append((name, HEALTH_SOURCETYPE, records))
@@ -378,7 +385,9 @@ def deliver(groups: list,
         pipe = LinearPipeline(config)
         pipe.set_source(InMemorySourceStage(config, dataframes=[rows.reset_index(drop=True)]))
 
-        if (policy is not None):
+        # An edge record carries identifiers and a lineage id and names no class, and a policy's class-dependent
+        # categories cannot be read against it; there is nothing in it to drop or pseudonymize.
+        if (policy is not None and sourcetype != EDGE_SOURCETYPE):
             pipe.add_stage(
                 MinimizationStage(config,
                                   drop=policy["drop"] or None,
