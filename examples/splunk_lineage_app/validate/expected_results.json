@@ -126,18 +126,44 @@
       "expected_rows": 6,
       "expected_empty": false,
       "contributing_rows": 76,
-      "why": "One notable, for the pair 10.0.0.70:93.184.216.34, which exchanges a 512-byte message every five minutes for four hours. The negative control is 10.0.0.80, which makes plenty of flows to one file server at the ragged intervals a person produces and whose coefficient of variation is above 1.0 -- an order of magnitude above the 0.15 threshold. Grouped by flow_pair_key rather than by src_ip, because a host that beacons to one address and browses to five hundred others would have the beacon averaged away by a search keyed on the host. Five more pairs come from the campaign corpus, R-C-002's five hosts each sending a 512-byte message every sixty seconds; the rule reports all five on their regularity alone, and 40 more mature rows contribute."
+      "why": "One notable, for the pair 10.0.0.70:93.184.216.34, which exchanges a 512-byte message every five minutes for four hours. The negative control is 10.0.0.80, which makes plenty of flows to one file server at the ragged intervals a person produces and whose coefficient of variation is above 1.0 -- an order of magnitude above the 0.15 threshold. Grouped by flow_pair_key rather than by src_ip, because a host that beacons to one address and browses to five hundred others would have the beacon averaged away by a search keyed on the host. Five more pairs come from the campaign corpus, R-C-002's five hosts each sending a 512-byte message every sixty seconds; the rule reports all five on their regularity alone, and 40 more mature rows contribute.",
+      "key_values": [
+        "10.0.0.70:93.184.216.34",
+        "10.20.2.5:203.0.113.100",
+        "10.20.2.6:203.0.113.101",
+        "10.20.2.7:203.0.113.112",
+        "10.20.2.8:203.0.113.103",
+        "10.20.2.9:203.0.113.104"
+      ]
     },
     "R-D-L3-003 - Reserved-range egress": {
       "expected_rows": 1,
       "expected_empty": false,
-      "why": "One flow, to 240.0.0.1. Low volume and high signal by nature, which is only true if the classification is right about everything else -- so what this number really asserts is that the other 410 flows are correctly classified as ordinary. The classification is parsers/ip.py's, through TC3ReachStage, so the search holds no copy of the reserved ranges."
+      "why": "One flow, to 240.0.0.1. Low volume and high signal by nature, which is only true if the classification is right about everything else -- so what this number really asserts is that the other 1536 flows are correctly classified as ordinary. The classification is parsers/ip.py's, through TC3ReachStage, so the search holds no copy of the reserved ranges.",
+      "key_values": [
+        {
+          "src_ip": "10.0.0.90",
+          "dst_ip": "240.0.0.1",
+          "destination_class": "reserved"
+        }
+      ]
     },
     "R-B-L3-004 - TTL fingerprint shift": {
       "expected_rows": 1,
       "expected_empty": false,
       "contributing_rows": 12,
-      "why": "One notable, for 10.0.0.100, whose traffic starts arriving one hop short from the third hour onward: twelve flows, every one of them shifted by exactly -1, which is what a single interposed device costs. The control is 10.0.0.110, whose TTL never moves. The aggregate threshold of three shifted flows is what makes this a statement about a distribution rather than about a packet, which is what the guide's rule asks for; a single shifted flow is noise."
+      "why": "One notable, for 10.0.0.100, whose traffic starts arriving one hop short from the third hour onward: twelve flows, every one of them shifted by exactly -1, which is what a single interposed device costs. The control is 10.0.0.110, whose TTL never moves. The aggregate threshold of three shifted flows is what makes this a statement about a distribution rather than about a packet, which is what the guide's rule asks for; a single shifted flow is noise.",
+      "key_values": [
+        {
+          "src_ip": "10.0.0.100",
+          "shifted_flows": 12,
+          "shifts": [
+            -1
+          ],
+          "established_ttl": 64,
+          "distinct_ttls": 2
+        }
+      ]
     },
     "R-P-L3-005 - Fan-out trajectory": {
       "expected_rows": 43,
@@ -409,10 +435,10 @@
     "TLS table coverage - unrecognized values": {
       "expected_rows": 1,
       "expected_empty": false,
-      "contributing_rows": 105,
+      "contributing_rows": 649,
       "why": "One summary row, and the value is in the numbers rather than in whether it fired. Both zero here, which is what makes the five counts above mean what they claim: a corpus that had drifted outside the cipher ordering or the media type map would make those rules fire less and say nothing about why. In a real estate this is the search that reveals an inspection point emitting OpenSSL short names rather than IANA ones, which lands the entire cipher feed in unrecognized_ciphers.",
       "key_values": {
-        "handshakes": 105,
+        "handshakes": 649,
         "unrecognized_ciphers": 0,
         "unclassified_content_types": 0
       }
@@ -677,12 +703,44 @@
     "Principal watchlist - expiry": {
       "expected_rows": 2,
       "expected_empty": false,
-      "why": "A maintenance search that keeps only the watchlist entries whose expires has not passed. Its answer depends on how far the events sit behind the clock, and run_search_head.py places them: every timestamp moves by whole weeks so the newest event lands three to ten days before the run. R-P-L7-006 stamps each principal's entry with that principal's latest event, and both of its principals' latest events are three days behind the newest in the corpus, which is the host segment's last hour, so their thirty-day expiries are still ahead and the two entries survive. R-P-L5-006 stamps each principal-day it fired, and the latest of those days is more than thirty-five days behind the newest, so its six entries have passed and are dropped. Against the unshifted 1970 events every entry would expire, which is what this note said before the first search-head run showed otherwise. Run it last: run before R-B-L7-002, it empties the list that search reads."
+      "why": "A maintenance search that keeps only the watchlist entries whose expires has not passed. Its answer depends on how far the events sit behind the clock, and run_search_head.py places them: every timestamp moves by whole weeks so the newest event lands three to ten days before the run. R-P-L7-006 stamps each principal's entry with that principal's latest event, and both of its principals' latest events are three days behind the newest in the corpus, which is the host segment's last hour, so their thirty-day expiries are still ahead and the two entries survive. R-P-L5-006 stamps each principal-day it fired, and the latest of those days is more than thirty-five days behind the newest, so its six entries have passed and are dropped. Against the unshifted 1970 events every entry would expire, which is what this note said before the first search-head run showed otherwise. Run it last: run before R-B-L7-002, it empties the list that search reads.",
+      "key_values": [
+        {
+          "user_principal": "ivy@example.com",
+          "rule_id": "R-P-L7-006",
+          "reason": "access-breadth"
+        },
+        {
+          "user_principal": "kate@example.com",
+          "rule_id": "R-P-L7-006",
+          "reason": "access-breadth"
+        }
+      ]
     },
     "Host watchlist - expiry": {
       "expected_rows": 3,
       "expected_empty": false,
-      "why": "The hosts' list, trimmed as the principals' is. R-P-L3-009 stamps each host-day it fired with the day's latest row, and the drifting host's last three days are the newest events in the corpus, so once run_search_head.py has dated them they are three to ten days behind the run and all three entries are inside their thirty days. R-P-L6-006's three entries and R-P-L7-009's four are stamped with their hosts' latest rows in the presentation and application corpora's first week, more than fifty days behind the newest event, so all seven have passed and are dropped, as R-P-L5-006's are from the principals' list. Run it last: run before R-B-L7-004, it empties the list that search reads."
+      "why": "The hosts' list, trimmed as the principals' is. R-P-L3-009 stamps each host-day it fired with the day's latest row, and the drifting host's last three days are the newest events in the corpus, so once run_search_head.py has dated them they are three to ten days behind the run and all three entries are inside their thirty days. R-P-L6-006's three entries and R-P-L7-009's four are stamped with their hosts' latest rows in the presentation and application corpora's first week, more than fifty days behind the newest event, so all seven have passed and are dropped, as R-P-L5-006's are from the principals' list. Run it last: run before R-B-L7-004, it empties the list that search reads.",
+      "key_values": [
+        {
+          "host_key": "ws-2-24",
+          "rule_id": "R-P-L3-009",
+          "reason": "host-drift-trajectory",
+          "day_window_id": 57
+        },
+        {
+          "host_key": "ws-2-24",
+          "rule_id": "R-P-L3-009",
+          "reason": "host-drift-trajectory",
+          "day_window_id": 58
+        },
+        {
+          "host_key": "ws-2-24",
+          "rule_id": "R-P-L3-009",
+          "reason": "host-drift-trajectory",
+          "day_window_id": 59
+        }
+      ]
     },
     "Binding lookup - L2/L3 expiry": {
       "expected_rows": 1685,
@@ -697,7 +755,59 @@
     "Binding lookup - L5/L2 expiry": {
       "expected_rows": 59,
       "expected_empty": false,
-      "why": "The 802.1X identity rung's maintenance search. It keeps every bucket inside the retention window and rewrites the lookup with them, so it returns what it kept, and every bucket here is inside it: the runner moves the events to the weeks before the run, and the refresh keys each row on the bucket its own time falls in. It was expected empty for as long as the refreshes keyed on the stored ordinal, a bucket counted from 1970 that an expiry measured against now() dropped; that zero was the epoch, not the job."
+      "why": "The 802.1X identity rung's maintenance search. It keeps every bucket inside the retention window and rewrites the lookup with them, so it returns what it kept, and every bucket here is inside it: the runner moves the events to the weeks before the run, and the refresh keys each row on the bucket its own time falls in. It was expected empty for as long as the refreshes keyed on the stored ordinal, a bucket counted from 1970 that an expiry measured against now() dropped; that zero was the epoch, not the job.",
+      "key_values": [
+        {
+          "dot1x_identity": "aa:bb:cc:00:00:07",
+          "port_key": "hq:sw1:Gi1/0/5",
+          "kept_buckets": 1
+        },
+        {
+          "dot1x_identity": "alice-ws",
+          "port_key": "hq:sw1:Gi1/0/1",
+          "kept_buckets": 10
+        },
+        {
+          "dot1x_identity": "bench-01",
+          "port_key": "hq:sw1:Gi1/0/19",
+          "kept_buckets": 12
+        },
+        {
+          "dot1x_identity": "bench-02",
+          "port_key": "hq:sw1:Gi1/0/20",
+          "kept_buckets": 12
+        },
+        {
+          "dot1x_identity": "bob-ws",
+          "port_key": "hq:sw1:Gi1/0/2",
+          "kept_buckets": 10
+        },
+        {
+          "dot1x_identity": "carol-ws",
+          "port_key": "hq:sw1:Gi1/0/3",
+          "kept_buckets": 10
+        },
+        {
+          "dot1x_identity": "desk-4021",
+          "port_key": "hq:sw1:Gi1/0/4",
+          "kept_buckets": 1
+        },
+        {
+          "dot1x_identity": "phone-4021",
+          "port_key": "hq:sw1:Gi1/0/4",
+          "kept_buckets": 1
+        },
+        {
+          "dot1x_identity": "unknown-supplicant",
+          "port_key": "hq:sw1:Gi1/0/2",
+          "kept_buckets": 1
+        },
+        {
+          "dot1x_identity": "unknown-supplicant",
+          "port_key": "hq:sw1:Gi1/0/5",
+          "kept_buckets": 1
+        }
+      ]
     },
     "Binding health - unresolved rate": {
       "expected_rows": 1,

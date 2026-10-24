@@ -27,6 +27,7 @@ head agrees with it.
 
 import collections
 import datetime
+import importlib.util
 import json
 import os
 import re
@@ -135,6 +136,8 @@ PHYSICAL_WINDOW_SECONDS = int(threshold(PHYSICAL, r"t_vendor - t_port <= (\d+)")
 SLOW_RATIO = threshold(SLOW, r"auth_elapsed_ratio\s*>=\s*([\d.]+)")
 SLOW_ATTEMPTS = threshold(SLOW, r"auth_attempts\s*>=\s*([\d.]+)")
 INSTANT_RATIO = threshold(INSTANT, r"auth_elapsed_ratio\s*<=\s*([\d.]+)")
+TTL_SHIFT = "R-B-L3-004 - TTL fingerprint shift"
+TTL_SHIFTED_FLOWS = threshold(TTL_SHIFT, r"shifted_flows\s*>=\s*([\d.]+)")
 """The thresholds the saved searches state, read from the stanzas rather than repeated here."""
 
 
@@ -964,6 +967,132 @@ def test_the_issuer_anomaly_returns_exactly_what_is_written(expected: dict):
                                                 for (key, rows) in grouped.items()}
 
 
+def test_the_self_signed_rule_returns_exactly_what_is_written(expected: dict):
+    # R-D-L6-003 grouped on the destination, as the search groups it, with `count` and `min(cert_validity_days)` as
+    # the search aggregates them. The self-signed certificates it leaves alone are the control: every one is on a
+    # destination the classification calls not globally routable, which is the management interface nobody bought
+    # a certificate for.
+    handshakes = _events_of("morpheus_score_l6.jsonlines")
+    external: dict = collections.defaultdict(list)
+
+    for event in handshakes:
+        if (event.get("cert_self_signed_external") is True):
+            external[event["dst_ip"]].append(event)
+
+    entry = expected["searches"]["R-D-L6-003 - Self-signed to external destination"]
+
+    assert entry["contributing_rows"] == sum(len(rows) for rows in external.values())
+    assert entry["expected_rows"] == len(external)
+    assert [entry["key_values"]] == [{
+        "dst_ip": dst_ip,
+        "connections": len(rows),
+        "shortest_validity_days": min(row["cert_validity_days"] for row in rows),
+    } for (dst_ip, rows) in sorted(external.items())]
+
+    internal = [
+        event for event in handshakes
+        if event.get("cert_self_signed") is True and event.get("cert_self_signed_external") is not True
+    ]
+
+    assert internal and all(event.get("cert_destination_is_global") is False for event in internal)
+    assert len({event["dst_ip"] for event in internal}) == 1
+
+
+def test_the_cipher_downgrade_returns_exactly_what_is_written(expected: dict):
+    # R-B-L6-004 grouped on the pair, as the search groups it; `values()` of the tier and the floor are one value
+    # each here, which is what the written entry states them as. The two controls the expectation names are in the
+    # mature rows the rule leaves alone: a pair that moves between suites without ever falling below its floor, and
+    # a pair sitting at a legacy floor permanently.
+    handshakes = _events_of("morpheus_score_l6.jsonlines")
+    downgraded: dict = collections.defaultdict(list)
+
+    for event in handshakes:
+        if (event.get("cipher_downgraded") is True and event.get("cipher_mature") is True):
+            downgraded[(event["tls_pair_key"], event["src_ip"], event["dst_ip"])].append(event)
+
+    entry = expected["searches"]["R-B-L6-004 - Cipher downgrade"]
+    written = entry["key_values"]
+
+    assert entry["contributing_rows"] == sum(len(rows) for rows in downgraded.values())
+    assert entry["expected_rows"] == len(downgraded)
+
+    ((pair, _, _), rows), = downgraded.items()
+
+    assert pair == written["tls_pair_key"] == f"{rows[0]['src_ip']}:{rows[0]['dst_ip']}"
+    assert {row["cipher_tier"] for row in rows} == {written["negotiated_tier"]}
+    assert {row["cipher_floor_tier"] for row in rows} == {written["historical_floor"]}
+
+    quiet = [
+        event for event in handshakes if event.get("cipher_mature") is True and event.get("cipher_downgraded") is False
+    ]
+    suites: dict = collections.defaultdict(set)
+
+    for event in quiet:
+        suites[event["tls_pair_key"]].add(event["cipher_suite"])
+
+    assert any(len(negotiated) > 1 for negotiated in suites.values()), "the varied host"
+    assert any(event["cipher_tier"] == event["cipher_floor_tier"] == "legacy" for event in quiet), "the appliance"
+
+
+def test_the_content_mismatch_returns_exactly_what_is_written(expected: dict):
+    # R-D-L6-005 grouped on the source and destination, as the search groups it. Every transfer the comparison
+    # reached is accounted for: the one that crossed a category, and the re-encodings, whose two types differ
+    # inside one category and which a rule comparing types rather than categories would return as well.
+    handshakes = _events_of("morpheus_score_l6.jsonlines")
+    crossed: dict = collections.defaultdict(list)
+
+    for event in handshakes:
+        if (event.get("content_category_crossed") is True):
+            crossed[(event["src_ip"], event["dst_ip"])].append(event)
+
+    entry = expected["searches"]["R-D-L6-005 - Content type mismatch"]
+    written = entry["key_values"]
+
+    assert entry["contributing_rows"] == sum(len(rows) for rows in crossed.values())
+    assert entry["expected_rows"] == len(crossed)
+
+    ((src_ip, dst_ip), rows), = crossed.items()
+
+    assert (src_ip, dst_ip) == (written["src_ip"], written["dst_ip"])
+
+    for (column, name) in (("content_type_declared", "declared_type"), ("content_type_detected", "detected_type"),
+                           ("content_category_declared", "declared_category"), ("content_category_detected",
+                                                                                "detected_category")):
+        assert {row[column] for row in rows} == {written[name]}, name
+
+    compared = [
+        event for event in handshakes if event.get("content_type_declared") and event.get("content_type_detected")
+    ]
+    recoded = [event for event in compared if event.get("content_category_crossed") is False]
+
+    assert len(recoded) + len(rows) == len(compared)
+    assert all(event["content_type_declared"] != event["content_type_detected"] for event in compared)
+    assert recoded and all(event["content_category_declared"] == event["content_category_detected"]
+                           for event in recoded)
+
+
+def test_the_tls_table_coverage_counts_exactly_what_is_written(expected: dict):
+    # One summary row over every complete layer 6 row, and the value is in the numbers. The search sums
+    # `if(<column>="true", 1, 0)`, which over a column the wire dropped is zero -- the same answer as a corpus
+    # entirely inside the two tables -- so the two columns are asserted present on every row, as booleans, before
+    # their counts are. Written as 105 handshakes when the layer 6 corpus was 105 rows; the recorded run reports the
+    # one row and not its numbers, and nothing here had derived them until now.
+    handshakes = [event for event in _events_of("morpheus_score_l6.jsonlines") if event.get("window_complete") is True]
+    entry = expected["searches"]["TLS table coverage - unrecognized values"]
+    written = entry["key_values"]
+    search = _stanza_search("TLS table coverage - unrecognized values")
+
+    for column in ("cipher_unrecognized", "content_category_unclassified"):
+        assert f'if({column}="true", 1, 0)' in search, column
+        assert all(isinstance(event.get(column), bool) for event in handshakes), column
+
+    assert entry["expected_rows"] == 1 and " BY " not in search.split("| stats", 1)[1].split("|", 1)[0]
+    assert entry["contributing_rows"] == written["handshakes"] == len(handshakes)
+    assert written["unrecognized_ciphers"] == sum(1 for event in handshakes if event["cipher_unrecognized"] is True)
+    assert written["unclassified_content_types"] == sum(1 for event in handshakes
+                                                        if event["content_category_unclassified"] is True)
+
+
 def test_the_saas_detections_return_exactly_what_is_written(expected: dict):
     # Evaluated over the events the app is fed, the way the two searches read them. R-B-L7-002 reads one row and
     # takes its severity from the classification the enrichment attached; R-P-L7-006 reads every week of a
@@ -1113,6 +1242,57 @@ def test_the_fingerprint_and_beacon_detections_count_exactly_what_is_written(exp
 
     assert entry["contributing_rows"] == len(beacons)
     assert entry["expected_rows"] == len({event["flow_pair_key"] for event in beacons})
+    assert entry["key_values"] == sorted({event["flow_pair_key"] for event in beacons})
+
+
+def test_the_reserved_range_egress_returns_exactly_what_is_written(expected: dict):
+    # R-D-L3-003 writes one risk record per flow, classed as the search's `if()` classes it: reserved first,
+    # multicast otherwise. The flows it leaves alone are asserted classified rather than merely absent, because a
+    # stage that stopped writing the two flags would leave the base clause matching nothing, which reads as a
+    # clean corpus.
+    flows = _events_of("morpheus_score_l3.jsonlines")
+    egress = [event for event in flows if event.get("dst_is_reserved") is True or event.get("dst_is_multicast") is True]
+    ordinary = [
+        event for event in flows if event.get("dst_is_reserved") is False and event.get("dst_is_multicast") is False
+    ]
+    entry = expected["searches"]["R-D-L3-003 - Reserved-range egress"]
+
+    assert entry["expected_rows"] == len(egress)
+    assert entry["key_values"] == [{
+        "src_ip": event["src_ip"],
+        "dst_ip": event["dst_ip"],
+        "destination_class": "reserved" if event["dst_is_reserved"] is True else "multicast",
+    } for event in egress]
+    assert len(ordinary) + len(egress) == len(flows), "a flow the classification did not decide"
+
+
+def test_the_ttl_shift_returns_exactly_what_is_written(expected: dict):
+    # R-B-L3-004's `stats ... BY src_ip` over the shifted, mature rows, then its `where` on the aggregate, with the
+    # floor read from the stanza. The aggregate is what makes it a statement about a distribution: a source whose
+    # TTL moved on fewer flows than the floor is in the data and is not reported.
+    shifted: dict = collections.defaultdict(list)
+
+    for event in _events_of("morpheus_score_l3.jsonlines"):
+        if (event.get("ip_ttl_shifted") is True and event.get("ip_ttl_mature") is True):
+            shifted[event["src_ip"]].append(event)
+
+    sources = {src_ip: rows for (src_ip, rows) in shifted.items() if len(rows) >= TTL_SHIFTED_FLOWS}
+    entry = expected["searches"][TTL_SHIFT]
+
+    assert entry["contributing_rows"] == sum(len(rows) for rows in sources.values())
+    assert entry["expected_rows"] == len(sources)
+    assert entry["key_values"] == [{
+        "src_ip": src_ip,
+        "shifted_flows": len(rows),
+        "shifts": sorted({row["ip_ttl_shift"]
+                          for row in rows}),
+        "established_ttl": max(row["ip_ttl_established"] for row in rows),
+        "distinct_ttls": max(row["ip_ttl_distinct"] for row in rows),
+    } for (src_ip, rows) in sorted(sources.items())]
+
+    # The control the expectation names never moves: every source with a mature TTL that is not reported has no
+    # shifted row at all, so the floor is not what keeps it quiet.
+    assert not {src_ip for src_ip in shifted if src_ip not in sources}
 
 
 def test_the_layer_3_host_baseline_detections_return_exactly_what_is_written(expected: dict):
@@ -1753,6 +1933,7 @@ def test_the_thresholds_are_read_from_the_stanzas_and_not_remembered():
     assert (TRAVEL_KMH_THRESHOLD, MFA_CHALLENGE_THRESHOLD, MFA_DENIAL_THRESHOLD) == (900, 5, 4)
     assert (DRIFT_RISING_THRESHOLD, DRIFT_SIGMA_THRESHOLD, DRIFT_MEAN_CEILING) == (4, 1.5, 2.0)
     assert (GAP_THRESHOLD_NS, FORECAST_DAYS_THRESHOLD) == (60 * 10**9, 14)
+    assert TTL_SHIFTED_FLOWS == 3
 
 
 def test_the_binding_health_rows_are_the_classes_that_resolve_bindings(expected: dict):
@@ -2271,3 +2452,245 @@ def test_the_identity_walk_reaches_the_port_the_pipeline_resolved(expected: dict
     assert {row["rung"] for row in walked} == {"dot1x_identity", "address"}
     assert entry["expected_rows"] == len(walked)
     assert entry["walked_by_rung"] == dict(sorted(collections.Counter(row["rung"] for row in walked).items()))
+
+
+# --- The expiry jobs, as far as a run without a KV Store can evaluate them ---------------------------------------
+
+
+def _runner():
+    """`run_search_head.py` as a module, for where it places the events before a run; nothing runs at import."""
+    spec = importlib.util.spec_from_file_location("run_search_head", os.path.join(VALIDATE, "run_search_head.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    return module
+
+
+def _seconds(event_time: str) -> float:
+    stamp = datetime.datetime.strptime(event_time.replace("UTC", ""), "%Y-%m-%dT%H:%M:%S.%f")
+
+    return stamp.replace(tzinfo=datetime.timezone.utc).timestamp()
+
+
+def _newest_timestamp() -> float:
+    """The newest timestamp in the sample events, found as the runner finds it: it is the one the runner lands."""
+    lines = [
+        line for (name, content) in _event_files().items() if name.endswith(".jsonlines")
+        for line in content.splitlines()
+    ]
+
+    return _runner().newest_and_oldest(lines)[0]
+
+
+def _kept_by_the_run(age_seconds: float, retention_seconds: float, bucket_seconds: float = 0.0) -> bool:
+    """
+    Whether an expiry measured against `now()` keeps a row this far behind the newest event, on the run the runner
+    makes. The runner moves every timestamp by whole weeks so the newest lands between `LANDING_SECONDS` and a week
+    more before the run, so where in that band the run falls is not known here. A row is kept whatever the day when
+    its age is at most the retention less the band's far edge, and dropped whatever the day when its age is more
+    than the retention less the near edge -- plus one bucket, for an expiry that compares buckets rather than
+    seconds. A row between the two is kept or dropped by the day of the run, and an expectation for it cannot be
+    stated, so this fails rather than guesses.
+    """
+    runner = _runner()
+    kept_whatever_the_day = retention_seconds - (runner.LANDING_SECONDS + runner.WEEK_SECONDS)
+    dropped_whatever_the_day = retention_seconds - runner.LANDING_SECONDS + bucket_seconds
+
+    assert age_seconds <= kept_whatever_the_day or age_seconds > dropped_whatever_the_day, (
+        f"a row {age_seconds / 86400:.1f} days behind the newest event is kept or dropped by the day of the run")
+
+    return age_seconds <= kept_whatever_the_day
+
+
+def _watchlist_terms(name: str) -> tuple:
+    """A predictive rule's `reason` and how long its entries live, as its stanza states them."""
+    search = _stanza_search(name)
+
+    return (re.search(r'reason = "([\w-]+)"', search).group(1),
+            float(re.search(r"expires = _time \+ (\d+)", search).group(1)))
+
+
+def _entries(name: str, groups: dict, rule_id: str, key: str) -> list:
+    """The watchlist rows one rule writes: one per group, stamped with the group's `_time` and the rule's terms."""
+    (reason, retention) = _watchlist_terms(name)
+
+    return [{
+        key: entity,
+        "rule_id": rule_id,
+        "reason": reason,
+        "day_window_id": day,
+        "added": added,
+        "expires": added + retention
+    } for ((entity, day), added) in sorted(groups.items())]
+
+
+def _latest_per_day(rows: list, key: str) -> dict:
+    """`dedup <key> day_window_id` over a search that returns newest first keeps each group's latest row."""
+    latest: dict = collections.defaultdict(float)
+
+    for event in rows:
+        group = (event[key], int(event["day_window_id"]))
+        latest[group] = max(latest[group], _seconds(event["event_time"]))
+
+    return latest
+
+
+def _principal_watchlist() -> list:
+    """
+    The rows the two principal rules write, each stamped as its writer stamps it: R-P-L5-006 the latest row of each
+    principal-day it fired, R-P-L7-006 the `latest(_time)` of each watched principal's SaaS rows, with no day.
+    """
+    drift = [
+        event for event in _events_of("morpheus_score_l5.jsonlines")
+        if event.get("window_complete") is True and event.get("drift_mature") is True
+        and float(event.get("drift_rising_windows") or 0) >= DRIFT_RISING_THRESHOLD
+        and float(event.get("drift_rise_sigmas") or 0) > DRIFT_SIGMA_THRESHOLD and float(event.get("mean_abs_z") or 0) <
+        DRIFT_MEAN_CEILING and abs(float(event.get("drift_acceleration") or 0)) < DRIFT_ACCELERATION_CEILING
+    ]
+    entries = _entries("R-P-L5-006 - Drift trajectory",
+                       _latest_per_day(drift, "user_principal"),
+                       "R-P-L5-006",
+                       "user_principal")
+
+    rising: dict = collections.defaultdict(int)
+    roles: dict = collections.defaultdict(set)
+    latest: dict = collections.defaultdict(float)
+
+    for event in _layer_7_events():
+        if (event.get("saas_object_types_in_week") is None):
+            continue
+
+        principal = event["user_principal"]
+        rising[principal] = max(rising[principal], event.get("drift_rising_windows") or 0)
+        roles[principal].add(event.get("ctx_groups") or "none")
+        latest[principal] = max(latest[principal], _seconds(event["event_time"]))
+
+    weeks = threshold("R-P-L7-006 - Access breadth trajectory", r"rising_weeks\s*>=\s*([\d.]+)")
+    breadth = {
+        (principal, None): latest[principal]
+        for principal in rising if rising[principal] >= weeks and len(roles[principal]) == 1
+    }
+
+    return entries + _entries("R-P-L7-006 - Access breadth trajectory", breadth, "R-P-L7-006", "user_principal")
+
+
+def _host_watchlist() -> list:
+    """The rows the three host rules write: the latest row of each host-day each fired, keyed as the stanzas key them,
+    on the host the lease names or the address where no lease covers the row."""
+    drift = [
+        event for event in _events_of("morpheus_score_host.jsonlines")
+        if event.get("window_complete") is True and event.get("drift_mature") is True
+        and float(event.get("drift_rising_windows") or 0) >= HOST_DRIFT_RISING_THRESHOLD
+        and float(event.get("drift_rise_sigmas") or 0) > HOST_DRIFT_SIGMA_THRESHOLD
+    ]
+    entries = _entries("R-P-L3-009 - Host drift trajectory",
+                       _latest_per_day(drift, "host_key"),
+                       "R-P-L3-009",
+                       "host_key")
+    queries = [event for event in _layer_7_events() if event.get("dns_registered_domain") is not None]
+
+    for (name, rule_id, events, rising, sigmas) in ((STACK_TRAJECTORY,
+                                                     "R-P-L6-006",
+                                                     _events_of("morpheus_score_l6.jsonlines"),
+                                                     STACK_RISING_THRESHOLD,
+                                                     STACK_SIGMA_THRESHOLD),
+                                                    (SUBDOMAIN_TRAJECTORY,
+                                                     "R-P-L7-009",
+                                                     queries,
+                                                     SUBDOMAIN_RISING_THRESHOLD,
+                                                     SUBDOMAIN_SIGMA_THRESHOLD)):
+        fires = [
+            dict(event, host_key=event.get("host_key") or event["src_ip"])
+            for event in _trajectory_days(events, rising, sigmas)[0]
+        ]
+        entries += _entries(name, _latest_per_day(fires, "host_key"), rule_id, "host_key")
+
+    return entries
+
+
+def _asserts_the_expiry_keeps_what_is_written(name: str, entries: list, expected: dict, key: str,
+                                              writers: dict) -> None:
+    """
+    An expiry job as far as a run without a KV Store can evaluate it: the entries the writers put on the list are
+    recomputed from the events, and each is kept or dropped as its `expires` compares with the run's clock where
+    `run_search_head.py` places the events. What is not reproduced is the lookup itself. A search head's list holds
+    what every earlier run appended too; the expectation is for a list the predictive searches have just written,
+    which is the state the runner dispatches them in.
+    """
+    newest = _newest_timestamp()
+    kept = [entry for entry in entries if _kept_by_the_run(newest - entry["added"], entry["expires"] - entry["added"])]
+    dropped = [entry for entry in entries if entry not in kept]
+    written = expected["searches"][name]
+
+    assert "where expires >= now()" in _stanza_search(name)
+    assert collections.Counter(entry["rule_id"] for entry in entries) == {
+        rule_id: expected["searches"][writer]["expected_rows"] for (rule_id, writer) in writers.items()
+    }, "the lists hold one entry per row the writers return"
+    assert written["expected_rows"] == len(kept)
+    assert written["key_values"] == [{
+        field: entry[field]
+        for field in (key, "rule_id", "reason", "day_window_id") if entry[field] is not None
+    } for entry in kept]
+    assert {entry["rule_id"] for entry in kept} and {entry["rule_id"] for entry in dropped}, "both outcomes occur"
+    assert not {entry["rule_id"] for entry in kept} & {entry["rule_id"] for entry in dropped}, "and by rule"
+
+
+def test_the_principal_watchlist_expiry_keeps_exactly_what_is_written(expected: dict):
+    # The two principals R-P-L7-006 watched are stamped with their latest SaaS rows, days behind the newest event, so
+    # their thirty days are ahead of any run; R-P-L5-006's six principal-days are more than five weeks behind it, so
+    # they are gone whatever the day. Nothing is near the band where the run's date would decide.
+    _asserts_the_expiry_keeps_what_is_written(
+        "Principal watchlist - expiry",
+        _principal_watchlist(),
+        expected,
+        "user_principal", {
+            "R-P-L5-006": "R-P-L5-006 - Drift trajectory", "R-P-L7-006": "R-P-L7-006 - Access breadth trajectory"
+        })
+
+
+def test_the_host_watchlist_expiry_keeps_exactly_what_is_written(expected: dict):
+    # The drifting host's three days are the newest events in the corpus; the stack and subdomain trajectories'
+    # seven host-days are in their corpora's first week, more than seven weeks behind, so the hosts' list keeps
+    # R-P-L3-009's entries and nothing else.
+    _asserts_the_expiry_keeps_what_is_written(
+        "Host watchlist - expiry",
+        _host_watchlist(),
+        expected,
+        "host_key",
+        {
+            "R-P-L3-009": "R-P-L3-009 - Host drift trajectory",
+            "R-P-L6-006": STACK_TRAJECTORY,
+            "R-P-L7-009": SUBDOMAIN_TRAJECTORY
+        })
+
+
+def test_the_l5_l2_expiry_keeps_exactly_what_is_written(expected: dict):
+    """
+    'Binding lookup - L5/L2 expiry' as far as a run without a KV Store can evaluate it: the lookup's rows are the
+    refresh's, one per identity and bucket from the supplicant bindings, and each is kept or dropped by the bucket
+    its own time falls in against the retention the stanza states, where `run_search_head.py` places the events.
+    The job returns every row it keeps, so its rows are the lookup's, named here by identity and port. What is not
+    reproduced is the store: a search head's lookup also holds what earlier refreshes appended.
+    """
+    name = "Binding lookup - L5/L2 expiry"
+    search = _stanza_search(name)
+    retention = float(re.search(r"bucket >= floor\(\(now\(\) - (\d+)\)", search).group(1))
+    bucket_seconds = float(re.search(r"now\(\) - \d+\) / (\d+)\)", search).group(1))
+    rows = _bucketed("dot1x_supplicant")
+    newest = _newest_timestamp()
+
+    # The refresh computes the bucket the expiry compares from `_time`, which `props.conf` stamps from `bucket_start`,
+    # so the stored ordinal is that bucket and the arithmetic here is the search's.
+    assert rows and all(row["bucket"] == int(_seconds(row["bucket_start"]) // bucket_seconds) for row in rows)
+    assert bucket_seconds == 300
+
+    kept = [row for row in rows if _kept_by_the_run(newest - _seconds(row["bucket_start"]), retention, bucket_seconds)]
+    entry = expected["searches"][name]
+
+    # A corpus two months long against a retention of more than a year: every bucket is inside it, whatever the day.
+    assert entry["expected_rows"] == len(kept) == len(
+        rows) == expected["searches"]["Binding lookup - L5/L2 refresh"]["expected_rows"]
+    assert entry["key_values"] == [{
+        "dot1x_identity": identity, "port_key": port_key, "kept_buckets": count
+    } for ((identity, port_key),
+           count) in sorted(collections.Counter((row["dot1x_identity"], row["auth_port_key"]) for row in kept).items())]
