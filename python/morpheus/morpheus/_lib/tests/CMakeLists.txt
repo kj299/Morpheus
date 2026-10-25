@@ -79,7 +79,6 @@ function(add_morpheus_test)
       GTest::gtest_main
       morpheus_test_utilities
       pybind11::embed
-      TritonClient::httpclient_static
   )
 
   gtest_discover_tests(test_${MORPHEUS_TEST_NAME})
@@ -159,24 +158,9 @@ add_morpheus_test(
 )
 
 add_morpheus_test(
-  NAME stages
-  FILES
-    stages/test_preprocess_nlp.cpp
-    stages/test_preprocess_fil.cpp
-    stages/test_add_scores.cpp
-    stages/test_add_classification.cpp
-)
-
-add_morpheus_test(
   NAME tensor
   FILES
     test_tensor.cpp
-)
-
-add_morpheus_test(
-  NAME triton_inference_stage
-  FILES
-    stages/test_triton_inference_stage.cpp
 )
 
 add_morpheus_test(

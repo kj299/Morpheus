@@ -1,0 +1,103 @@
+{
+ "models": {
+  "abp-pcap-xgb": {
+   "rule": "R-B-L4-001",
+   "version": "abp-pcap-xgb:c3e05a33fdc02a04",
+   "files": {
+    "model": {
+     "path": "abp-pcap-xgb/abp-pcap-xgb.json",
+     "sha256": "c3e05a33fdc02a041899b70aa70fd5ca5ae168146aa8f027e17375338143ed53"
+    },
+    "conversion_check": {
+     "path": "abp-pcap-xgb/conversion_check.json",
+     "sha256": "7132da8c4f693fa04ee43940937f6996c63c6eeea687b17802362063c63b3b39"
+    }
+   },
+   "settings": {
+    "format": "xgboost-json",
+    "objective": "binary:logistic",
+    "features": [
+     "ack",
+     "psh",
+     "rst",
+     "syn",
+     "fin",
+     "ppm",
+     "data_len",
+     "bpp",
+     "all",
+     "ackpush/all",
+     "rst/all",
+     "syn/all",
+     "fin/all"
+    ],
+    "threshold": 0.5
+   },
+   "provenance": {
+    "upstream_path": "examples/abp_pcap_detection/abp-pcap-xgb/1/abp-pcap-xgb.bst",
+    "upstream_commit": "c6a3b56db1c77c2f375ae0833a65a7b6d2272269",
+    "upstream_sha256": "c9c437221b4140a22c2ee5e1d0b0de6fbbc053e98ccd6a8c6d664c85de4317bb",
+    "upstream_config": "examples/abp_pcap_detection/abp-pcap-xgb/config.pbtxt (sha256 e41ac015d614003ecb76853dd7224eb46ff9f314d4e3e5b99fe90ccf7a52fe20): Triton FIL backend, 13 FP32 inputs, model_type xgboost, output_class true, threshold 0.5",
+    "features_from": "examples/abp_pcap_detection/abp_pcap_preprocessing.py at the same commit",
+    "conversion": "The upstream file is XGBoost's legacy binary format, which XGBoost 3 no longer reads. It was loaded with XGBoost 1.7.6 and saved with Booster.save_model as JSON; conversion_check.json holds 220 rows scored by 1.7.6 from the original file, and XGBoost 3.4.2 reproduces every margin and probability from the JSON exactly."
+   }
+  },
+  "sid-minibert-20230424": {
+   "rule": "R-B-L7-003",
+   "version": "sid-minibert-20230424:d12f31d6dcebd03d",
+   "files": {
+    "model": {
+     "path": "sid-minibert/sid-minibert-20230424.onnx",
+     "sha256": "d12f31d6dcebd03dab1824c850ebe928b5f5b76d3e9029e9b160f593c12bea9e"
+    },
+    "vocabulary": {
+     "path": "sid-minibert/bert-base-uncased-vocab.txt",
+     "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3"
+    },
+    "labels": {
+     "path": "sid-minibert/labels.txt",
+     "sha256": "ae118329a447774a985a57765e052525ae99b8a2e2a608c7f0fb13508474efee"
+    },
+    "gpu_hash_table": {
+     "path": "sid-minibert/bert-base-uncased-hash.txt",
+     "sha256": "137870d94ea1cc8d35e4cd6c54e34a2291bf04fe8b35f237172d5b89865d5970"
+    },
+    "validation": {
+     "path": "sid-minibert/validation.csv",
+     "sha256": "18c7101f3fedbed990159229558aa7f597cfb78f65a8943937ca4529a3965472"
+    }
+   },
+   "settings": {
+    "format": "onnx",
+    "inputs": [
+     "input_ids",
+     "attention_mask"
+    ],
+    "tokenizer": {
+     "lower_case": true,
+     "max_length": 256,
+     "stride": 64,
+     "truncation": false,
+     "special_tokens": false
+    },
+    "threshold": 0.5,
+    "validation": {
+     "rows": 2000,
+     "rows_longer_than_max_length": 38,
+     "labels_wrong": 18,
+     "rows_wrong": 18
+    }
+   },
+   "provenance": {
+    "upstream_path": "models/sid-models/sid-minibert-20230424.onnx",
+    "upstream_commit": "c6a3b56db1c77c2f375ae0833a65a7b6d2272269",
+    "base_model": "google/bert_uncased_L-4_H-256_A-4, fine-tuned on synthetic payloads (models/training-tuning-scripts/sid-models/sid-minibert-20230424-script.py at the same commit)",
+    "tokenizer_settings_from": "models/model-information.csv at the same commit, the sid-minibert row: bert-base-uncased, max_length 256, stride 64, do_lower TRUE, do_truncate FALSE",
+    "vocabulary_from": "models/data/bert-base-uncased-vocab.txt at the same commit (google bert-base-uncased)",
+    "labels_from": "models/data/labels_nlp.txt at the same commit",
+    "gpu_hash_table": "models/data/bert-base-uncased-hash.txt at the same commit: the vocabulary compiled for cuDF's GPU subword tokenizer, which upstream's PreprocessNLPStage read. Nothing here reads it; it is kept beside the vocabulary it was compiled from as the record of what the GPU path used",
+    "validation_from": "models/datasets/validation-data/sid-validation-data.csv at the same commit"
+   }
+  }
+ }
+}

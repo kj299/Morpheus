@@ -1,10 +1,3 @@
-# Mlflow
-mlruns/
-outputs/
-
-# Ignore changes in the Triton repo to allow local customizations. To make changes to triton-model-repo, you need to force add `git add -f ...`
-triton-model-repo/*
-
 # Mac
 .DS_Store
 

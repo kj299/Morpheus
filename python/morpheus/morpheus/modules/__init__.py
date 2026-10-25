@@ -21,7 +21,6 @@ from morpheus.modules import file_batcher
 from morpheus.modules import file_to_df
 from morpheus.modules import filter_cm_failed
 from morpheus.modules import filter_control_message
-from morpheus.modules import filter_detections
 from morpheus.modules import from_control_message
 from morpheus.modules import mlflow_model_writer
 from morpheus.modules import payload_batcher
@@ -35,7 +34,6 @@ __all__ = [
     "file_to_df",
     "filter_cm_failed",
     "filter_control_message",
-    "filter_detections",
     "from_control_message",
     "mlflow_model_writer",
     "modules",

@@ -364,7 +364,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G45 | major | narrowed → narrowed | nodes | Layer 3 is per-IP with no subnet/asset-group roll-up and no TC-0 join for infrastructure nodes | #60 |
 | G46 | major | narrowed → closed | all | Sourcetype `required_columns` are narrower than the columns the shipped searches read, group and join on | #53 |
 | G47 | major | stands → closed | nodes, all | R-P-L3-005 and Chain assembly depend on Splunk-side state (`behavior_summary`, risk) the validation package never produces | #57 |
-| G48 | major | stands → holds | applications | Model-dependent rules R-B-L7-003 and R-B-L4-001 have no inference path or scorer stub | not scheduled |
+| G48 | major | stands → holds → narrowed | applications | Model-dependent rules R-B-L7-003 and R-B-L4-001 have no inference path or scorer stub; both models score on the CPU from the model inventory since 2026-10-25 (audit ruling D2), and no saved search reads either score yet | not scheduled |
 | G49 | major | stands → narrowed | applications | User-agent novelty, DGA/NXDOMAIN and 5xx ratio TC-7 features have no producer | #64 |
 | G50 | major | stands → closed | applications | DNS and HTTP clients have no per-entity baseline; R-B-L7-001 is fixed thresholds | #64 |
 | G51 | major | stands → closed | applications | TC-0 has no application-to-server or service-account-to-team kind | #64 |
@@ -517,8 +517,11 @@ gap table's Check column and the two dated passages beside the matrix and the ta
 **Left open on purpose.** Collectors stay out of scope, as the design says, with two exceptions the
 verification turned up: the bucketed `dhcp_lease` rows and the per-class input contracts are promised by
 the fork's own Splunk app and per-layer pattern, so fork code must emit them. Cloud and Kubernetes audit,
-a graph store, threshold-tuning tooling, a Triton inference path for the two model rules and TC-0 context
-for ports and VLAN objects are recorded as gaps and not scheduled.
+a graph store, threshold-tuning tooling, an inference path for the two model rules and TC-0 context
+for ports and VLAN objects are recorded as gaps and not scheduled. The inference path has since been built
+without Triton: the repository audit's ruling D2 moved both models into a digest-pinned inventory, and
+`TC4AbpScoreStage` and `TC7SidScoreStage` score them on the CPU; the saved searches that would read the scores
+are not scheduled.
 
 ## What the completeness review found
 

@@ -206,9 +206,6 @@ viz_frames*
 # Ignore user-defined clangd settings
 .clangd
 
-# Ignore saved benchmark data
-tests/benchmarks/.benchmarks/
-
 # Ignore the third-party Vale style packages that `vale sync` downloads. Only the project's own
 # vocabularies under ci/vale/styles/config/ are tracked.
 ci/vale/styles/*/

@@ -27,12 +27,6 @@ add_library(morpheus
   src/io/loaders/rest.cpp
   src/io/serializers.cpp
   src/messages/control.cpp
-  src/messages/memory/inference_memory_fil.cpp
-  src/messages/memory/inference_memory_nlp.cpp
-  src/messages/memory/inference_memory.cpp
-  src/messages/memory/inference_memory.cpp
-  src/messages/memory/response_memory_probs.cpp
-  src/messages/memory/response_memory.cpp
   src/messages/memory/tensor_memory.cpp
   src/messages/meta.cpp
   src/modules/data_loader_module.cpp
@@ -49,19 +43,11 @@ add_library(morpheus
   src/objects/tensor_object.cpp
   src/objects/tensor.cpp
   src/objects/wrapped_tensor.cpp
-  src/stages/add_classification.cpp
-  src/stages/add_scores_stage_base.cpp
-  src/stages/add_scores.cpp
   src/stages/deserialize.cpp
   src/stages/file_source.cpp
-  src/stages/filter_detections.cpp
   src/stages/http_server_source_stage.cpp
-  src/stages/inference_client_stage.cpp
   src/stages/kafka_source.cpp
-  src/stages/preprocess_fil.cpp
-  src/stages/preprocess_nlp.cpp
   src/stages/serialize.cpp
-  src/stages/triton_inference.cpp
   src/stages/write_to_file.cpp
   src/utilities/cudf_util.cpp
   src/utilities/cupy_util.cpp
@@ -88,7 +74,6 @@ target_link_libraries(morpheus
     glog::glog
     mrc::pymrc
     RDKAFKA::RDKAFKA
-    TritonClient::httpclient_static
 )
 
 target_include_directories(morpheus

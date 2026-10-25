@@ -36,28 +36,13 @@ Results = collections.namedtuple('Results', ['total_rows', 'diff_rows', 'error_p
 
 
 def calc_error_val(results_file):
-    """Based on the `calc_error_val` function in `val-utils.sh`."""
+    """The row count, differing rows and error percentage `ValidationStage` wrote to its results file."""
     with open(results_file, encoding='UTF-8') as fh:
         results = json.load(fh)
 
     total_rows = results['total_rows']
     diff_rows = results['diff_rows']
     return Results(total_rows=total_rows, diff_rows=diff_rows, error_pct=(diff_rows / total_rows) * 100)
-
-
-def compare_class_to_scores(file_name, field_names, class_prefix, score_prefix, threshold):
-    """
-    Checks for expected columns in the dataframe which should be added by the `AddClassificationsStage` and
-    `AddScoresStage` stages, and ensuring that the values produced by the `AddClassificationsStage` are consistent
-    with the values produced by the `AddScoresStage` when the threshold is applied.
-    """
-    df = read_file_to_df(file_name, df_type='pandas')
-    for field_name in field_names:
-        class_field = f"{class_prefix}{field_name}"
-        score_field = f"{score_prefix}{field_name}"
-        above_thresh = df[score_field] > threshold
-
-        assert all(above_thresh == df[class_field]), f"Mismatch on {field_name}"
 
 
 def assert_path_exists(filename: str, retry_count: int = 5, delay_ms: int = 500):
@@ -168,16 +153,6 @@ def make_mock_response(mock_request_session: mock.MagicMock,
     mock_request_session.return_value = mock_request_session
     mock_request_session.request.return_value = mock_response
     return mock_response
-
-
-def mk_async_infer(inf_results: np.ndarray) -> typing.Callable:
-    mock_infer_result = mock.MagicMock()
-    mock_infer_result.as_numpy.side_effect = inf_results
-
-    def async_infer(callback=None, **_):
-        callback(mock_infer_result, None)
-
-    return async_infer
 
 
 def remove_module(mod_to_remove: str):

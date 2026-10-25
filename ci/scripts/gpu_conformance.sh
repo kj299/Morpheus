@@ -110,6 +110,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc3_cardinality_stage.py
     tests/morpheus/stages/test_tc3_reach_stage.py
     tests/morpheus/stages/test_tc3_ttl_stage.py
+    tests/morpheus/stages/test_tc4_abp_score_stage.py
     tests/morpheus/stages/test_tc4_envelope_stage.py
     tests/morpheus/stages/test_tc4_flow_stage.py
     tests/morpheus/stages/test_tc6_certificate_stage.py
@@ -128,6 +129,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc5_score_stage.py
     tests/morpheus/stages/test_tc5_session_stage.py
     tests/morpheus/stages/test_tc5_travel_stage.py
+    tests/morpheus/stages/test_tc7_sid_score_stage.py
     tests/morpheus/stages/test_total_order_stage.py
     tests/morpheus/stages/test_window_seal_stage.py
     tests/morpheus/utils/test_column_assign.py
@@ -157,6 +159,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_verdict_artifacts.py
     tests/morpheus/stages/test_lineage_stage_cli.py
     tests/morpheus/stages/test_stage_checkpoint.py
+    tests/morpheus/utils/test_abp_scorer.py
     tests/morpheus/utils/test_arrival_regularity.py
     tests/morpheus/utils/test_binding_closer.py
     tests/morpheus/utils/test_cipher_strength.py
@@ -178,6 +181,7 @@ UNMARKED=(
     tests/morpheus/utils/test_dfencoder_scorer.py
     tests/morpheus/utils/test_gpu_conformance_targets.py
     tests/morpheus/utils/test_lineage.py
+    tests/morpheus/utils/test_model_inventory.py
     tests/morpheus/utils/test_model_manifest.py
     tests/morpheus/utils/test_lineage_cudf.py
     tests/morpheus/utils/test_link_flap.py
@@ -186,6 +190,7 @@ UNMARKED=(
     tests/morpheus/utils/test_optical_forecast.py
     tests/morpheus/utils/test_pair_history.py
     tests/morpheus/utils/test_query_entropy.py
+    tests/morpheus/utils/test_sid_scorer.py
     tests/morpheus/utils/test_tcp_flags.py
     tests/morpheus/utils/test_transfer_envelope.py
     tests/morpheus/utils/test_outcome_run.py
@@ -208,6 +213,7 @@ UNMARKED=(
     tests/morpheus/utils/test_user_agent.py
     tests/morpheus/utils/test_value_novelty.py
     tests/morpheus/utils/test_window_seal.py
+    tests/morpheus/utils/test_wordpiece.py
 )
 # The wider suite, which is context rather than this fork's verdict: upstream stages, upstream fixtures. It reads
 # files stored in Git LFS, so it is skipped rather than failed on a checkout without them.

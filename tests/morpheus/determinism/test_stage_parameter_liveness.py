@@ -38,6 +38,7 @@ parameter added later cannot ship without an entry here.
 
 import dataclasses
 import inspect
+import json
 import os
 import tempfile
 import typing
@@ -89,6 +90,7 @@ from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
 from morpheus.stages.telemetry.tc3_cardinality_stage import TC3CardinalityStage
 from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
 from morpheus.stages.telemetry.tc3_ttl_stage import TC3TtlStage
+from morpheus.stages.telemetry.tc4_abp_score_stage import TC4AbpScoreStage
 from morpheus.stages.telemetry.tc4_envelope_stage import TC4EnvelopeStage
 from morpheus.stages.telemetry.tc4_flow_stage import TC4FlowStage
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
@@ -107,6 +109,7 @@ from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
 from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage
 from morpheus.stages.telemetry.tc7_service_stage import TC7ServiceStage
+from morpheus.stages.telemetry.tc7_sid_score_stage import TC7SidScoreStage
 from morpheus.utils.binding_table import Binding
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.bitemporal import MEMBERSHIP
@@ -1396,6 +1399,56 @@ def _binding_table(values=("hq:sw1:Gi1/0/1", )) -> BindingTable:
 
 # --- The registry ---------------------------------------------------------------------------------------------
 
+INVENTORY = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "models", "inventory", "inventory.json"))
+
+
+def inventory_with_threshold(model: str, threshold: float) -> str:
+    """A copy of the inventory whose one difference is the model's threshold, written once per process.
+
+    The model's own files are named by absolute path, so the copy verifies the same bytes and differs only in the
+    setting. A stage that reads the inventory it is given decides differently under it; one that ignored the path
+    and read the repository's inventory would not.
+    """
+    with open(INVENTORY, encoding="utf-8") as handle:
+        inventory = json.load(handle)
+
+    root = os.path.dirname(INVENTORY)
+
+    for entry in inventory["models"].values():
+        for record in entry["files"].values():
+            record["path"] = os.path.join(root, record["path"])
+
+    inventory["models"][model]["settings"]["threshold"] = threshold
+    path = os.path.join(tempfile.mkdtemp(prefix="inventory-"), "inventory.json")
+
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(inventory, handle)
+
+    return path
+
+
+def abp_flows() -> dict:
+    """Flow features for rows the booster scores either side of 0.5 and close to 0.9."""
+    from morpheus.stages.telemetry.tc4_flow_stage import MODEL_FEATURES  # pylint: disable=import-outside-toplevel
+
+    with open(os.path.join(os.path.dirname(INVENTORY), "abp-pcap-xgb", "conversion_check.json"),
+              encoding="utf-8") as handle:
+        check = json.load(handle)
+
+    rows = check["rows"][:3] + check["probes"]["rows"][:40]
+
+    return {column: [row["features"][index] for row in rows] for (index, column) in enumerate(MODEL_FEATURES.values())}
+
+
+def bodies() -> dict:
+    """A key, a key behind enough text to need a second window, plain text, and nothing."""
+    filler = " ".join(["the weather report said clouds again today"] * 50)
+    key = "aws_secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+    return {"body": [key, f"{filler} {key}", "the weather report said clouds again today", ""]}
+
+
 REGISTRY: dict = {
     "TC1NormalizeStage":
         Scenario(
@@ -1793,6 +1846,17 @@ REGISTRY: dict = {
                      Knob("max_hosts", DIFFERS, benign=100000, extreme=1, frame=_two_stacks),
                      Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
+    "TC4AbpScoreStage":
+        Scenario(stage=TC4AbpScoreStage,
+                 frame=abp_flows,
+                 base={"inventory_path": INVENTORY},
+                 knobs=(
+                     Knob("inventory_path",
+                          DIFFERS,
+                          benign=INVENTORY,
+                          extreme=inventory_with_threshold("abp-pcap-xgb", 0.92)),
+                     Knob("model_name", RAISES, benign="abp-pcap-xgb", extreme="abp-nvsmi-xgb"),
+                 )),
     "TC4EnvelopeStage":
         Scenario(stage=TC4EnvelopeStage,
                  frame=transfers,
@@ -2020,6 +2084,18 @@ REGISTRY: dict = {
                           also={"baseline_min_days": 1}),
                      Knob("baseline_min_days", DIFFERS, benign=7, extreme=1, frame=_service_days),
                      Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
+                 )),
+    "TC7SidScoreStage":
+        Scenario(stage=TC7SidScoreStage,
+                 frame=bodies,
+                 base={"inventory_path": INVENTORY},
+                 knobs=(
+                     Knob("inventory_path",
+                          DIFFERS,
+                          benign=INVENTORY,
+                          extreme=inventory_with_threshold("sid-minibert-20230424", 0.999999)),
+                     Knob("text_column", INPUT_COLUMN, benign="body"),
+                     Knob("model_name", RAISES, benign="sid-minibert-20230424", extreme="sid-minibert-onnx"),
                  )),
     "TC7SaasStage":
         Scenario(

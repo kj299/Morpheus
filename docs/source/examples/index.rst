@@ -20,12 +20,6 @@ Examples
 ========
 
 .. toctree::
-   :maxdepth: 20
-
-   abp_pcap_detection/README.md
-   nlp_si_detection/README.md
-
-.. toctree::
    :hidden:
 
    ../examples

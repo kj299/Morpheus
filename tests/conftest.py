@@ -652,28 +652,6 @@ def _stop_camouflage(popen: subprocess.Popen, shutdown_timeout: int = 5, console
 
 
 @pytest.fixture(scope="session")
-def _triton_camouflage_is_running():
-    """
-    Responsible for actually starting and shutting down Camouflage running with the mocks in the `mock_triton_server`
-    dir. This has the scope of 'session' so we only start/stop Camouflage once per testing session. This fixture should
-    not be used directly. Instead use `launch_mock_triton`
-
-    Yields
-    ------
-    bool
-        Whether or not we are using Camouflage or an actual Triton server
-    """
-
-    from _utils import TEST_DIRS
-
-    root_dir = TEST_DIRS.mock_triton_servers_dir
-    (is_running, popen, console_log_fh) = _start_camouflage(root_dir=root_dir, port=8000)
-    yield is_running
-    if popen is not None:
-        _stop_camouflage(popen, console_log_fh=console_log_fh)
-
-
-@pytest.fixture(scope="session")
 def _rest_camouflage_is_running():
     """
     Responsible for actually starting and shutting down Camouflage running with the mocks in the `mock_rest_server` dir.
@@ -694,27 +672,6 @@ def _rest_camouflage_is_running():
     yield is_running
     if popen is not None:
         _stop_camouflage(popen, console_log_fh=console_log_fh)
-
-
-@pytest.fixture(scope="function")
-def launch_mock_triton(_triton_camouflage_is_running):
-    """
-    Launches a mock triton server using camouflage (https://testinggospels.github.io/camouflage/).
-
-    This function will wait for up to `timeout` seconds for camoflauge to startup
-
-    This function is a no-op if the `MORPHEUS_NO_LAUNCH_CAMOUFLAGE` environment variable is defined, which can
-    be useful during test development to run camouflage by hand.
-    """
-
-    # Check if we are using Camouflage or not. If so, send the reset command to reset the state
-    if _triton_camouflage_is_running:
-        # Reset the mock server (necessary to set counters = 0)
-        resp = requests.post("http://localhost:8000/reset", timeout=2.0)
-
-        assert resp.ok, "Failed to reset Camouflage server state"
-
-    yield
 
 
 @pytest.fixture(scope="function")
@@ -892,7 +849,7 @@ def dataset_pandas():
     Yields a DatasetLoader instance with pandas as the default DataFrame type.
 
     Note: This fixture won't prevent a user from writing a test requiring C++ mode execution and requesting Pandas
-    dataframes. This is quite useful for tests like `tests/test_add_scores_stage_pipe.py` where we want to test with
+    dataframes. This is quite useful for tests where we want to test with
     both Python & C++ executions, but we use Pandas to build up the expected DataFrame to validate the test against.
 
     In addition to this, users can use this fixture to explicitly request a cudf Dataframe as well, allowing for a test
@@ -942,18 +899,6 @@ def _get_random_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sckt:
         sckt.bind(('', 0))
         return sckt.getsockname()[1]
-
-
-@pytest.fixture(scope="session", name="bert_cased_hash")
-def bert_cased_hash_fixture():
-    from _utils import TEST_DIRS
-    yield os.path.join(TEST_DIRS.data_dir, 'bert-base-cased-hash.txt')
-
-
-@pytest.fixture(scope="session", name="bert_cased_vocab")
-def bert_cased_vocab_fixture():
-    from _utils import TEST_DIRS
-    yield os.path.join(TEST_DIRS.data_dir, 'bert-base-cased-vocab.txt')
 
 
 @pytest.fixture(name="morpheus_dfp", scope='session')

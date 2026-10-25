@@ -109,7 +109,4 @@ EXAMPLES_MD_FILES=$(find -P ./examples/ -type f -iname "*.md")
 sed_runner "s|morpheus-tritonserver-models:${CURRENT_SHORT_TAG}|morpheus-tritonserver-models:${NEXT_SHORT_TAG}|g" \
    ${DOCS_MD_FILES} \
    ${EXAMPLES_MD_FILES} \
-   .devcontainer/docker-compose.yml \
-   models/triton-model-repo/README.md \
-   scripts/validation/val-globals.sh \
-   tests/benchmarks/README.md
+   .devcontainer/docker-compose.yml

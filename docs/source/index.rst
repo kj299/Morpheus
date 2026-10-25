@@ -82,7 +82,7 @@ Using Morpheus
  * :doc:`basics/building_a_pipeline` - Introduction to building a pipeline using the command line interface
  * :doc:`basics/cpu_only_mode` - Running Morpheus and designing stages for CPU-only execution mode
  * :doc:`Morpheus Examples <examples>` - Example pipelines using both the Python API and command line interface
- * :doc:`Pretrained Models <models_and_datasets>` - Pretrained models with corresponding training, validation scripts, and datasets
+ * :doc:`Models <models_and_datasets>` - The models the fork's stages score with, and how each score is pinned to its model
  * :doc:`Developer Guides <developer_guide/guides>` - Covers extending Morpheus with custom stages
  * :doc:`Predictive Behavioral Analytics Across OSI Layers 1-7 <developer_guide/guides/11_predictive_behavioral_analytics_osi>` - The design guide this fork implements, and the ledger of what is built
  * :doc:`Behavioral Analytics Retrospective <developer_guide/guides/12_behavioral_analytics_retrospective>` - What the fork can say about each class of entity on a network, the verified gaps, and the plan

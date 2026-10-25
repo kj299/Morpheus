@@ -31,7 +31,6 @@ from morpheus.cli.utils import parse_log_level
 from morpheus.cli.utils import prepare_command
 from morpheus.config import Config
 from morpheus.config import ConfigFIL
-from morpheus.config import ConfigOnnxToTRT
 from morpheus.config import CppConfig
 from morpheus.config import ExecutionMode
 from morpheus.config import PipelineModes
@@ -198,31 +197,6 @@ def tools(ctx: click.Context, **kwargs):
     pass
 
 
-@tools.command(short_help="Converts an ONNX model to a TRT engine")
-@click.option("--input_model", type=click.Path(exists=True, readable=True), required=True)
-@click.option("--output_model", type=click.Path(exists=False, writable=True), required=True)
-@click.option('--batches', type=(int, int), required=True, multiple=True)
-@click.option('--seq_length', type=int, required=True)
-@click.option('--max_workspace_size', type=int, default=16000)
-@prepare_command()
-def onnx_to_trt(ctx: click.Context, **kwargs):
-    """Converts an ONNX model to a TRT engine"""
-    logger.info("Generating onnx file")
-
-    # Convert batches to a list
-    kwargs["batches"] = list(kwargs["batches"])
-
-    c = ConfigOnnxToTRT()
-
-    for (param, val) in kwargs.items():
-        if hasattr(c, param):
-            setattr(c, param, val)
-
-    from morpheus.utils.onnx_to_trt import gen_engine
-
-    gen_engine(c)
-
-
 @tools.group(short_help="Utility for installing/updating/removing shell completion for Morpheus", no_args_is_help=True)
 def autocomplete(**kwargs):
     """Utility for installing/updating/removing shell completion for Morpheus"""
@@ -341,7 +315,7 @@ def run(ctx: click.Context, **kwargs):
                     "overflowing token-ids. Default value is 256"))
 @click.option('--label', type=str, default=None, multiple=True, help=("Specify output labels."))
 @click.option('--labels_file',
-              default="data/labels_nlp.txt",
+              default=None,
               type=MorpheusRelativePath(dir_okay=False, exists=True, file_okay=True, resolve_path=True),
               help=("Specifies a file to read labels from in order to convert class IDs into labels. "
                     "A label file is a simple text file where each line corresponds to a label."
@@ -362,14 +336,12 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
     output of each stage will become the input for the next stage. For example, to read, classify and write to a file,
     the following stages could be used
 
-    pipeline from-file --filename=my_dataset.json deserialize preprocess inf-triton --model_name=my_model
-    --server_url=localhost:8001 filter --threshold=0.5 to-file --filename=classifications.json
+    pipeline from-file --filename=flows.jsonlines deserialize tc4-flow tc4-abp-score
+    --inventory_path=models/inventory/inventory.json serialize to-file --filename=scored.jsonlines
 
     Pipelines must follow a few rules:
     1. Data must originate in a source stage. Current options are `from-file` or `from-kafka`
     2. A `deserialize` stage must be placed between the source stages and the rest of the pipeline
-    3. Only one inference stage can be used. Zero is also fine
-    4. The following stages must come after an inference stage: `add-class`, `filter`, `gen-viz`
 
     """
 
@@ -382,7 +354,7 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
     labels = kwargs['label']
     if len(labels):
         config.class_labels = list(labels)
-    else:
+    elif (kwargs.get("labels_file") is not None):
         config.class_labels = load_labels_file(kwargs["labels_file"])
         logger.debug("Loaded labels file. Current labels: [%s]", str(config.class_labels))
 
@@ -432,14 +404,12 @@ def pipeline_fil(ctx: click.Context, **kwargs):
     output of each stage will become the input for the next stage. For example, to read, classify and write to a file,
     the following stages could be used
 
-    pipeline from-file --filename=my_dataset.json deserialize preprocess inf-triton --model_name=my_model
-    --server_url=localhost:8001 filter --threshold=0.5 to-file --filename=classifications.json
+    pipeline from-file --filename=flows.jsonlines deserialize tc4-flow tc4-abp-score
+    --inventory_path=models/inventory/inventory.json serialize to-file --filename=scored.jsonlines
 
     Pipelines must follow a few rules:
     1. Data must originate in a source stage. Current options are `from-file` or `from-kafka`
     2. A `deserialize` stage must be placed between the source stages and the rest of the pipeline
-    3. Only one inference stage can be used. Zero is also fine
-    4. The following stages must come after an inference stage: `add-class`, `filter`, `gen-viz`
 
     """
 
@@ -504,14 +474,12 @@ def pipeline_other(ctx: click.Context, **kwargs):
     output of each stage will become the input for the next stage. For example, to read, classify and write to a file,
     the following stages could be used
 
-    pipeline from-file --filename=my_dataset.json deserialize preprocess inf-triton --model_name=my_model
-    --server_url=localhost:8001 filter --threshold=0.5 to-file --filename=classifications.json
+    pipeline from-file --filename=flows.jsonlines deserialize tc4-flow tc4-abp-score
+    --inventory_path=models/inventory/inventory.json serialize to-file --filename=scored.jsonlines
 
     Pipelines must follow a few rules:
     1. Data must originate in a source stage. Current options are `from-file` or `from-kafka`
     2. A `deserialize` stage must be placed between the source stages and the rest of the pipeline
-    3. Only one inference stage can be used. Zero is also fine
-    4. The following stages must come after an inference stage: `add-class`, `filter`, `gen-viz`
 
     """
 
@@ -568,12 +536,9 @@ run.add_command(pipeline_fil)
 run.add_command(pipeline_other)
 
 ALL = (PipelineModes.NLP, PipelineModes.FIL, PipelineModes.OTHER)
-FIL_ONLY = (PipelineModes.FIL, )
 NLP_ONLY = (PipelineModes.NLP, )
 
 # Keep these sorted!!!
-add_command("add-class", "morpheus.stages.postprocess.add_classifications_stage.AddClassificationsStage", modes=ALL)
-add_command("add-scores", "morpheus.stages.postprocess.add_scores_stage.AddScoresStage", modes=ALL)
 add_command("binding-resolve", "morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage", modes=ALL)
 add_command("buffer", "morpheus.stages.general.buffer_stage.BufferStage", modes=ALL)
 add_command("chain-anchor", "morpheus.stages.lineage.chain_anchor_stage.ChainAnchorStage", modes=ALL)
@@ -587,7 +552,6 @@ add_command("edge-emit", "morpheus.stages.lineage.edge_emit_stage.EdgeEmitStage"
 add_command("entity-frame", "morpheus.stages.telemetry.entity_frame_stage.EntityFrameStage", modes=ALL)
 add_command("envelope-stamp", "morpheus.stages.lineage.envelope_stamp_stage.EnvelopeStampStage", modes=ALL)
 add_command("envelope-validate", "morpheus.stages.lineage.envelope_validate_stage.EnvelopeValidateStage", modes=ALL)
-add_command("filter", "morpheus.stages.postprocess.filter_detections_stage.FilterDetectionsStage", modes=ALL)
 add_command("flow-normalize",
             "morpheus.stages.telemetry.flow_record_normalize_stage.FlowRecordNormalizeStage",
             modes=ALL)
@@ -599,16 +563,11 @@ add_command("from-http", "morpheus.stages.input.http_server_source_stage.HttpSer
 add_command("from-http-client", "morpheus.stages.input.http_client_source_stage.HttpClientSourceStage", modes=ALL)
 add_command("from-kafka", "morpheus.stages.input.kafka_source_stage.KafkaSourceStage", modes=ALL)
 add_command("gen-viz", "morpheus.stages.postprocess.generate_viz_frames_stage.GenerateVizFramesStage", modes=NLP_ONLY)
-add_command("inf-identity", "morpheus.stages.inference.identity_inference_stage.IdentityInferenceStage", modes=ALL)
-add_command("inf-pytorch", "morpheus.stages.inference.pytorch_inference_stage.PyTorchInferenceStage", modes=ALL)
-add_command("inf-triton", "morpheus.stages.inference.triton_inference_stage.TritonInferenceStage", modes=ALL)
 add_command("lineage-stamp", "morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage", modes=ALL)
 add_command("minimize", "morpheus.stages.lineage.minimization_stage.MinimizationStage", modes=ALL)
 add_command("mlflow-drift", "morpheus.stages.postprocess.ml_flow_drift_stage.MLFlowDriftStage", modes=ALL)
 add_command("monitor", "morpheus.stages.general.monitor_stage.MonitorStage", modes=ALL)
 add_command("pipeline-health", "morpheus.stages.lineage.pipeline_health_stage.PipelineHealthStage", modes=ALL)
-add_command("preprocess", "morpheus.stages.preprocess.preprocess_fil_stage.PreprocessFILStage", modes=FIL_ONLY)
-add_command("preprocess", "morpheus.stages.preprocess.preprocess_nlp_stage.PreprocessNLPStage", modes=NLP_ONLY)
 add_command("serialize", "morpheus.stages.postprocess.serialize_stage.SerializeStage", modes=ALL)
 add_command("siem-wire", "morpheus.stages.output.siem_wire_stage.SiemWireStage", modes=ALL)
 add_command("tc0-application", "morpheus.stages.telemetry.tc0_application_stage.TC0ApplicationStage", modes=ALL)
@@ -633,6 +592,7 @@ add_command("tc3-beacon", "morpheus.stages.telemetry.tc3_beacon_stage.TC3BeaconS
 add_command("tc3-cardinality", "morpheus.stages.telemetry.tc3_cardinality_stage.TC3CardinalityStage", modes=ALL)
 add_command("tc3-reach", "morpheus.stages.telemetry.tc3_reach_stage.TC3ReachStage", modes=ALL)
 add_command("tc3-ttl", "morpheus.stages.telemetry.tc3_ttl_stage.TC3TtlStage", modes=ALL)
+add_command("tc4-abp-score", "morpheus.stages.telemetry.tc4_abp_score_stage.TC4AbpScoreStage", modes=ALL)
 add_command("tc4-envelope", "morpheus.stages.telemetry.tc4_envelope_stage.TC4EnvelopeStage", modes=ALL)
 add_command("tc4-flow", "morpheus.stages.telemetry.tc4_flow_stage.TC4FlowStage", modes=ALL)
 add_command("tc5-cadence", "morpheus.stages.telemetry.tc5_cadence_stage.TC5CadenceStage", modes=ALL)
@@ -650,6 +610,7 @@ add_command("tc7-dns", "morpheus.stages.telemetry.tc7_dns_stage.TC7DnsStage", mo
 add_command("tc7-endpoint", "morpheus.stages.telemetry.tc7_endpoint_stage.TC7EndpointStage", modes=ALL)
 add_command("tc7-http", "morpheus.stages.telemetry.tc7_http_stage.TC7HttpStage", modes=ALL)
 add_command("tc7-saas", "morpheus.stages.telemetry.tc7_saas_stage.TC7SaasStage", modes=ALL)
+add_command("tc7-sid-score", "morpheus.stages.telemetry.tc7_sid_score_stage.TC7SidScoreStage", modes=ALL)
 add_command("tc7-service", "morpheus.stages.telemetry.tc7_service_stage.TC7ServiceStage", modes=ALL)
 add_command("to-elasticsearch",
             "morpheus.stages.output.write_to_elasticsearch_stage.WriteToElasticsearchStage",

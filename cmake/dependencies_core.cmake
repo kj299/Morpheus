@@ -47,8 +47,4 @@ morpheus_utils_configure_mrc()
 # =====
 morpheus_utils_configure_cudf()
 
-# Triton-client
-# =====
-morpheus_utils_configure_tritonclient()
-
 list(POP_BACK CMAKE_MESSAGE_CONTEXT)

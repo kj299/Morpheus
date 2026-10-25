@@ -64,6 +64,7 @@ dependencies:
 - numba=0.60
 - numba=0.60.0
 - numpydoc=1.5
+- onnxruntime
 - pip
 - pip=25.2
 - pkg-config=0.29
@@ -93,13 +94,13 @@ dependencies:
 - sqlalchemy<2.0
 - sysroot_linux-64>=2.28
 - tqdm=4
-- tritonclient=2.34
 - typing_utils=0.1
 - urllib3>=2.3,<3
 - versioneer
 - versioneer-518
 - watchdog=3.0
 - websockets
+- xgboost
 - yaml=0.2
 - yapf=0.43
 - pip:

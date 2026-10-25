@@ -18,18 +18,12 @@
 #include "morpheus/messages/control.hpp"                 // for ControlMessage
 #include "morpheus/messages/meta.hpp"                    // for MessageMeta
 #include "morpheus/objects/file_types.hpp"               // for FileTypes
-#include "morpheus/stages/add_classification.hpp"        // for AddClassificationsStage, AddClassificationStageInter...
-#include "morpheus/stages/add_scores.hpp"                // for AddScoresStage, AddScoresStageInterfaceProxy
 #include "morpheus/stages/deserialize.hpp"               // for DeserializeStage, DeserializeStageInterfaceProxy
 #include "morpheus/stages/file_source.hpp"               // for FileSourceStage, FileSourceStageInterfaceProxy
-#include "morpheus/stages/filter_detections.hpp"         // for FilterDetectionsStage, FilterDetectionStageInterface...
 #include "morpheus/stages/http_server_source_stage.hpp"  // for HttpServerSourceStage, HttpServerSourceStageInterfac...
-#include "morpheus/stages/inference_client_stage.hpp"    // for InferenceClientStage, InferenceClientStageInterfaceP...
 #include "morpheus/stages/kafka_source.hpp"              // for KafkaSourceStage, KafkaSourceStageInterfaceProxy
 #include "morpheus/stages/monitor.hpp"                   // for MonitorStage, MonitorStageInterfaceProxy
 #include "morpheus/stages/preallocate.hpp"               // for PreallocateStage, PreallocateStageInterfaceProxy
-#include "morpheus/stages/preprocess_fil.hpp"            // for PreprocessFILStage, PreprocessFILStageInterfaceProxy
-#include "morpheus/stages/preprocess_nlp.hpp"            // for PreprocessNLPStage, PreprocessNLPStageInterfaceProxy
 #include "morpheus/stages/serialize.hpp"                 // for SerializeStage, SerializeStageInterfaceProxy
 #include "morpheus/stages/write_to_file.hpp"             // for WriteToFileStage, WriteToFileStageInterfaceProxy
 #include "morpheus/utilities/http_server.hpp"            // for DefaultMaxPayloadSize
@@ -72,25 +66,6 @@ PYBIND11_MODULE(stages, _module)
 
     // Import the mrc coro module
     mrc::pymrc::import(_module, "mrc.core.coro");
-
-    mrc::pymrc::from_import(_module, "morpheus._lib.common", "FilterSource");
-
-    py::class_<mrc::segment::Object<AddClassificationsStage>,
-               mrc::segment::ObjectProperties,
-               std::shared_ptr<mrc::segment::Object<AddClassificationsStage>>>(
-        _module, "AddClassificationsStage", py::multiple_inheritance())
-        .def(py::init<>(&AddClassificationStageInterfaceProxy::init),
-             py::arg("builder"),
-             py::arg("name"),
-             py::arg("idx2label"),
-             py::arg("threshold"));
-
-    py::class_<mrc::segment::Object<AddScoresStage>,
-               mrc::segment::ObjectProperties,
-               std::shared_ptr<mrc::segment::Object<AddScoresStage>>>(
-        _module, "AddScoresStage", py::multiple_inheritance())
-        .def(
-            py::init<>(&AddScoresStageInterfaceProxy::init), py::arg("builder"), py::arg("name"), py::arg("idx2label"));
 
     py::class_<mrc::segment::Object<DeserializeStage>,
                mrc::segment::ObjectProperties,
@@ -136,32 +111,6 @@ PYBIND11_MODULE(stages, _module)
              py::arg("filter_null"),
              py::arg("filter_null_columns"),
              py::arg("parser_kwargs"));
-
-    py::class_<mrc::segment::Object<FilterDetectionsStage>,
-               mrc::segment::ObjectProperties,
-               std::shared_ptr<mrc::segment::Object<FilterDetectionsStage>>>(
-        _module, "FilterDetectionsStage", py::multiple_inheritance())
-        .def(py::init<>(&FilterDetectionStageInterfaceProxy::init),
-             py::arg("builder"),
-             py::arg("name"),
-             py::arg("threshold"),
-             py::arg("copy"),
-             py::arg("filter_source"),
-             py::arg("field_name") = "probs");
-
-    py::class_<mrc::segment::Object<InferenceClientStage>,
-               mrc::segment::ObjectProperties,
-               std::shared_ptr<mrc::segment::Object<InferenceClientStage>>>(
-        _module, "InferenceClientStage", py::multiple_inheritance())
-        .def(py::init<>(&InferenceClientStageInterfaceProxy::init),
-             py::arg("builder"),
-             py::arg("name"),
-             py::arg("server_url"),
-             py::arg("model_name"),
-             py::arg("needs_logits"),
-             py::arg("force_convert_inputs"),
-             py::arg("input_mapping")  = py::dict(),
-             py::arg("output_mapping") = py::dict());
 
     py::class_<mrc::segment::Object<KafkaSourceStage>,
                mrc::segment::ObjectProperties,
@@ -235,30 +184,6 @@ PYBIND11_MODULE(stages, _module)
              py::arg("builder"),
              py::arg("name"),
              py::arg("needed_columns"));
-
-    py::class_<mrc::segment::Object<PreprocessFILStage>,
-               mrc::segment::ObjectProperties,
-               std::shared_ptr<mrc::segment::Object<PreprocessFILStage>>>(
-        _module, "PreprocessFILStage", py::multiple_inheritance())
-        .def(py::init<>(&PreprocessFILStageInterfaceProxy::init),
-             py::arg("builder"),
-             py::arg("name"),
-             py::arg("features"));
-
-    py::class_<mrc::segment::Object<PreprocessNLPStage>,
-               mrc::segment::ObjectProperties,
-               std::shared_ptr<mrc::segment::Object<PreprocessNLPStage>>>(
-        _module, "PreprocessNLPStage", py::multiple_inheritance())
-        .def(py::init<>(&PreprocessNLPStageInterfaceProxy::init),
-             py::arg("builder"),
-             py::arg("name"),
-             py::arg("vocab_hash_file"),
-             py::arg("sequence_length"),
-             py::arg("truncation"),
-             py::arg("do_lower_case"),
-             py::arg("add_special_token"),
-             py::arg("stride"),
-             py::arg("column"));
 
     py::class_<mrc::segment::Object<HttpServerSourceStage<MessageMeta>>,
                mrc::segment::ObjectProperties,
