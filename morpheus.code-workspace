@@ -486,9 +486,6 @@
             "--init-hook=import sys; sys.path.append(\"${workspaceFolder}\")"
         ],
         "pylint.importStrategy": "fromEnvironment",
-        "python.analysis.extraPaths": [
-            "./examples/digital_fingerprinting/production/morpheus"
-        ],
         "python.analysis.inlayHints.pytestParameters": true,
         "python.testing.pytestArgs": [
             "-s",

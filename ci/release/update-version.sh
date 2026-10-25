@@ -65,7 +65,6 @@ function sed_runner() {
 }
 
 # .gitmodules
-git submodule set-branch -b branch-${NEXT_SHORT_TAG} external/morpheus-visualizations
 git submodule set-branch -b branch-${NEXT_SHORT_TAG} external/utilities
 
 if [[ "$(git diff --name-only | grep .gitmodules)" != "" ]]; then
@@ -82,16 +81,9 @@ sed_runner "s|branch-${CURRENT_SHORT_TAG}|branch-${NEXT_SHORT_TAG}|g" manifest.y
 
 # Depedencies file
 sed_runner "s/mrc=${CURRENT_SHORT_TAG}/mrc=${NEXT_SHORT_TAG}/g" dependencies.yaml
-sed_runner "s/morpheus-dfp=${CURRENT_SHORT_TAG}/morpheus-dfp=${NEXT_SHORT_TAG}/g" dependencies.yaml
 
 # Generate the environment files based upon the updated dependencies.yaml
 conda run -n base --live-stream rapids-dependency-file-generator
-
-# examples/digital_fingerprinting
-sed_runner "s/v${CURRENT_FULL_VERSION}-runtime/v${NEXT_FULL_VERSION}-runtime/g" \
-   examples/digital_fingerprinting/production/docker-compose.yml \
-   examples/digital_fingerprinting/production/Dockerfile
-sed_runner "s/v${CURRENT_FULL_VERSION}-runtime/v${NEXT_FULL_VERSION}-runtime/g" examples/digital_fingerprinting/production/Dockerfile
 
 # examples/developer_guide
 sed_runner 's/'"VERSION ${CURRENT_FULL_VERSION}.*"'/'"VERSION ${NEXT_FULL_VERSION}"'/g' \

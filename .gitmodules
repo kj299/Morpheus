@@ -1,7 +1,3 @@
-[submodule "external/morpheus-visualizations"]
-	path = external/morpheus-visualizations
-	url = https://github.com/nv-morpheus/morpheus-visualizations.git
-	branch = branch-25.10
 [submodule "external/utilities"]
 	path = external/utilities
 	url = https://github.com/nv-morpheus/utilities.git
