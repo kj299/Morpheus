@@ -94,9 +94,11 @@ def file_sha256(path: str) -> str:
         head = handle.read(len(LFS_POINTER_PREFIX))
 
         if (head == LFS_POINTER_PREFIX):
-            raise ModelFileUnavailable(f"{path} is a Git LFS pointer, not the file. Fetch it with "
-                                       f"`git lfs install && git lfs pull --include=\"{path}\"` from the "
-                                       f"repository root")
+            # The repository's .lfsconfig excludes every LFS path from a fetch, and an exclusion wins over an
+            # inclusion, so the command has to clear it or it downloads nothing and still succeeds.
+            raise ModelFileUnavailable(f"{path} is a Git LFS pointer, not the file. Fetch the inventory with "
+                                       f"`git lfs install && git lfs pull --exclude=\"\" "
+                                       f"--include=\"models/inventory/**\"` from the repository root")
 
         digest.update(head)
 

@@ -90,7 +90,8 @@ def test_an_lfs_pointer_is_named_as_one_with_the_command_that_fetches_it(tmp_pat
     pointer = tmp_path / "model.onnx"
     pointer.write_text(LFS_POINTER, encoding="utf-8")
 
-    with pytest.raises(ModelFileUnavailable, match="git lfs pull"):
+    # Without --exclude="" the repository's .lfsconfig, which excludes every path, makes the pull a silent no-op.
+    with pytest.raises(ModelFileUnavailable, match='git lfs pull --exclude="" --include="models/inventory/\\*\\*"'):
         file_sha256(str(pointer))
 
 

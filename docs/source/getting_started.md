@@ -156,7 +156,7 @@ the CPU inside the pipeline; no inference server is involved. They are in `model
 settings of each file; refer to the [model inventory](../../models/inventory/README.md). The SID model and its
 validation set are stored in Git LFS:
 ```bash
-git lfs pull --include="models/inventory/**"
+git lfs pull --exclude="" --include="models/inventory/**"
 ```
 
 ## Running Morpheus

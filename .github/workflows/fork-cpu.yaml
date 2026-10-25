@@ -60,10 +60,15 @@ jobs:
           path: .git/lfs/objects
           key: model-inventory-lfs-${{ hashFiles('models/inventory/**') }}
 
+      # The repository's .lfsconfig sets fetchexclude = *, and an exclusion wins over an inclusion, so without
+      # --exclude="" this pull downloads nothing and exits 0. ls-files marks a file still a pointer with "-", and the
+      # step fails on one rather than letting the SID tests find it.
       - name: Fetch the model inventory's LFS files
         run: |
           git lfs install --local
-          git lfs pull --include="models/inventory/**"
+          git lfs pull --exclude="" --include="models/inventory/**"
+          git lfs ls-files --include="models/inventory/**"
+          ! git lfs ls-files --include="models/inventory/**" | grep -q " - "
 
       - name: Create the environment
         uses: mamba-org/setup-micromamba@v2

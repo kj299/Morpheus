@@ -67,7 +67,10 @@ scorer says so rather than reporting a digest mismatch. To fetch only these:
 
 ```bash
 git lfs install
-git lfs pull --include="models/inventory/**"
+git lfs pull --exclude="" --include="models/inventory/**"
 ```
+
+The `--exclude=""` is needed: the repository's `.lfsconfig` excludes every LFS path from a fetch, and without it
+the pull downloads nothing and still reports success.
 
 The CPU workflow does the same before the tiers, caching the objects by their pointers.
