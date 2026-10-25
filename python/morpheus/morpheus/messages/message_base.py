@@ -26,7 +26,7 @@ class MessageImpl(abc.ABCMeta):
     """
     Metaclass to switch between Python & C++ message implementations at construction time.
     Note: some classes don't have a C++ implementation, but do inherit from a class that
-    does (ex UserMessageMeta & InferenceMemoryAE) these classes also need this metaclass
+    does (ex UserMessageMeta) these classes also need this metaclass
     to prevent creating instances of their parent's C++ impl.
     """
 

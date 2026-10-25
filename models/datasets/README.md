@@ -163,7 +163,7 @@ This data contains 2000 synthetic PCAP payloads generated to mimic sensitive and
 - [`sid-sample-training-data.csv`](./training-data/sid-sample-training-data.csv)
 
 ### Pipeline Validation Data
-- [`sid-validation-data.csv`](./validation-data/sid-validation-data.csv)
+- [`validation.csv`](../inventory/sid-minibert/validation.csv), moved into the model inventory beside the SID model
 
 
 ## Disclaimer

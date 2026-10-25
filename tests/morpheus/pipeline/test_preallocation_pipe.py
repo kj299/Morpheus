@@ -30,7 +30,6 @@ from morpheus.pipeline import LinearPipeline
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.compare_dataframe_stage import CompareDataFrameStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
-from morpheus.stages.postprocess.add_scores_stage import AddScoresStage
 from morpheus.stages.postprocess.serialize_stage import SerializeStage
 from morpheus.stages.preprocess.deserialize_stage import DeserializeStage
 from morpheus.utils.type_aliases import DataFrameType
@@ -106,7 +105,7 @@ def test_preallocation_multi_segment_pipe(config: Config, filter_probs_df: DataF
 @pytest.mark.gpu_mode
 def test_preallocation_error(config, filter_probs_df):
     """
-    Verify that we get a raised exception when add_scores attempts to use columns that don't exist
+    Verify that we get a raised exception when a stage needs columns it did not ask to have preallocated
     """
     config.class_labels = ['frogs', 'lizards', 'toads', 'turtles']
 
@@ -114,25 +113,20 @@ def test_preallocation_error(config, filter_probs_df):
     mem_src = pipe.set_source(InMemorySourceStage(config, [filter_probs_df]))
     pipe.add_stage(DeserializeStage(config, ensure_sliceable_index=True))
     pipe.add_stage(ConvMsg(config, columns=list(filter_probs_df.columns), probs_type='f4'))
-    add_scores = pipe.add_stage(AddScoresStage(config))
+    check = pipe.add_stage(CheckPreAlloc(config, probs_type=TypeId.FLOAT32))
     pipe.add_stage(SerializeStage(config, include=[f"^{c}$" for c in config.class_labels]))
     mem_sink = pipe.add_stage(InMemorySinkStage(config))
 
     assert len(mem_src.get_needed_columns()) == 0
-    assert len(add_scores.get_needed_columns()) > 0
-    add_scores._needed_columns = {}
-    assert len(add_scores.get_needed_columns()) == 0
+    assert len(check.get_needed_columns()) > 0
+    check._needed_columns = {}
+    assert len(check.get_needed_columns()) == 0
 
     try:
         pipe.run()
     except Exception as e:
-        assert isinstance(e, RuntimeError)
-
-        # Ensure the error mentioned populating the needed_columns and using a stage with the PreallocatorMixin
-        # Without depending on a specific string
-        assert "frogs" in str(e)
-        assert "PreallocatorMixin" in str(e)
-        assert "needed_columns" in str(e)
+        # CheckPreAlloc asserts each label column is present; with nothing preallocated, none is
+        assert isinstance(e, (AssertionError, RuntimeError))
 
     assert len(mem_src.get_needed_columns()) == 0
     assert len(mem_sink.get_messages()) == 0

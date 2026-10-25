@@ -17,13 +17,8 @@ __all__ = [
     "ControlMessageType",
     "DataLoaderRegistry",
     "DataTable",
-    "InferenceMemory",
-    "InferenceMemoryFIL",
-    "InferenceMemoryNLP",
     "MessageMeta",
     "MutableTableCtxMgr",
-    "ResponseMemory",
-    "ResponseMemoryProbs",
     "TensorMemory",
     "cupy"
 ]
@@ -143,38 +138,6 @@ class TensorMemory():
         :type: list[str]
         """
     pass
-class InferenceMemory(TensorMemory):
-    def __init__(self, *, count: int, tensors: object = None) -> None: ...
-    def get_input(self, name: str) -> object: ...
-    def set_input(self, name: str, tensor: object) -> None: ...
-    pass
-class InferenceMemoryNLP(InferenceMemory, TensorMemory):
-    def __init__(self, *, count: int, input_ids: object, input_mask: object, seq_ids: object) -> None: ...
-    @property
-    def input_ids(self) -> object:
-        """
-        :type: object
-        """
-    @input_ids.setter
-    def input_ids(self, arg1: object) -> None:
-        pass
-    @property
-    def input_mask(self) -> object:
-        """
-        :type: object
-        """
-    @input_mask.setter
-    def input_mask(self, arg1: object) -> None:
-        pass
-    @property
-    def seq_ids(self) -> object:
-        """
-        :type: object
-        """
-    @seq_ids.setter
-    def seq_ids(self, arg1: object) -> None:
-        pass
-    pass
 class MessageMeta():
     def __init__(self, df: object) -> None: ...
     def copy_dataframe(self) -> object: ...
@@ -213,40 +176,5 @@ class MutableTableCtxMgr():
     def __getitem__(self, *args, **kwargs) -> None: ...
     def __setattr__(self, *args, **kwargs) -> None: ...
     def __setitem__(self, *args, **kwargs) -> None: ...
-    pass
-class ResponseMemory(TensorMemory):
-    def __init__(self, *, count: int, tensors: object = None) -> None: ...
-    def get_output(self, name: str) -> object: ...
-    def set_output(self, name: str, tensor: object) -> None: ...
-    pass
-class ResponseMemoryProbs(ResponseMemory, TensorMemory):
-    def __init__(self, *, count: int, probs: object) -> None: ...
-    @property
-    def probs(self) -> object:
-        """
-        :type: object
-        """
-    @probs.setter
-    def probs(self, arg1: object) -> None:
-        pass
-    pass
-class InferenceMemoryFIL(InferenceMemory, TensorMemory):
-    def __init__(self, *, count: int, input__0: object, seq_ids: object) -> None: ...
-    @property
-    def input__0(self) -> object:
-        """
-        :type: object
-        """
-    @input__0.setter
-    def input__0(self, arg1: object) -> None:
-        pass
-    @property
-    def seq_ids(self) -> object:
-        """
-        :type: object
-        """
-    @seq_ids.setter
-    def seq_ids(self, arg1: object) -> None:
-        pass
     pass
 __version__ = '25.10.0'

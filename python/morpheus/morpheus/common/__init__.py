@@ -17,7 +17,6 @@ Module for common utilities and classes in the Morpheus library.
 # Export symbols from the morpheus._lib.common module. Users should never be directly importing morpheus._lib
 from morpheus._lib.common import FiberQueue
 from morpheus._lib.common import FileTypes
-from morpheus._lib.common import FilterSource
 from morpheus._lib.common import HttpEndpoint
 from morpheus._lib.common import HttpServer
 from morpheus._lib.common import IndicatorsFontStyle
@@ -35,7 +34,6 @@ __all__ = [
     "determine_file_type",
     "FiberQueue",
     "FileTypes",
-    "FilterSource",
     "HttpEndpoint",
     "HttpServer",
     "IndicatorsFontStyle",

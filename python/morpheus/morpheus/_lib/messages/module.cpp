@@ -17,11 +17,6 @@
 
 #include "morpheus/io/data_loader_registry.hpp"
 #include "morpheus/messages/control.hpp"
-#include "morpheus/messages/memory/inference_memory.hpp"
-#include "morpheus/messages/memory/inference_memory_fil.hpp"
-#include "morpheus/messages/memory/inference_memory_nlp.hpp"
-#include "morpheus/messages/memory/response_memory.hpp"
-#include "morpheus/messages/memory/response_memory_probs.hpp"
 #include "morpheus/messages/memory/tensor_memory.hpp"
 #include "morpheus/messages/meta.hpp"
 #include "morpheus/objects/data_table.hpp"
@@ -150,56 +145,6 @@ PYBIND11_MODULE(messages, _module)
         .def("set_tensors", &TensorMemoryInterfaceProxy::set_tensors, py::arg("tensors"))
         .def("get_tensor", &TensorMemoryInterfaceProxy::get_tensor, py::arg("name"), py::return_value_policy::move)
         .def("set_tensor", &TensorMemoryInterfaceProxy::set_tensor, py::arg("name"), py::arg("tensor"));
-
-    py::class_<InferenceMemory, TensorMemory, std::shared_ptr<InferenceMemory>>(_module, "InferenceMemory")
-        .def(py::init<>(&InferenceMemoryInterfaceProxy::init),
-             py::kw_only(),
-             py::arg("count"),
-             py::arg("tensors") = py::none())
-        .def("get_input", &InferenceMemoryInterfaceProxy::get_tensor, py::arg("name"), py::return_value_policy::move)
-        .def("set_input", &InferenceMemoryInterfaceProxy::set_tensor, py::arg("name"), py::arg("tensor"));
-
-    py::class_<InferenceMemoryFIL, InferenceMemory, std::shared_ptr<InferenceMemoryFIL>>(_module, "InferenceMemoryFIL")
-        .def(py::init<>(&InferenceMemoryFILInterfaceProxy::init),
-             py::kw_only(),
-             py::arg("count"),
-             py::arg("input__0"),
-             py::arg("seq_ids"))
-        .def_property("input__0",
-                      &InferenceMemoryFILInterfaceProxy::get_input__0,
-                      &InferenceMemoryFILInterfaceProxy::set_input__0)
-        .def_property(
-            "seq_ids", &InferenceMemoryFILInterfaceProxy::get_seq_ids, &InferenceMemoryFILInterfaceProxy::set_seq_ids);
-
-    py::class_<InferenceMemoryNLP, InferenceMemory, std::shared_ptr<InferenceMemoryNLP>>(_module, "InferenceMemoryNLP")
-        .def(py::init<>(&InferenceMemoryNLPInterfaceProxy::init),
-             py::kw_only(),
-             py::arg("count"),
-             py::arg("input_ids"),
-             py::arg("input_mask"),
-             py::arg("seq_ids"))
-        .def_property("input_ids",
-                      &InferenceMemoryNLPInterfaceProxy::get_input_ids,
-                      &InferenceMemoryNLPInterfaceProxy::set_input_ids)
-        .def_property("input_mask",
-                      &InferenceMemoryNLPInterfaceProxy::get_input_mask,
-                      &InferenceMemoryNLPInterfaceProxy::set_input_mask)
-        .def_property(
-            "seq_ids", &InferenceMemoryNLPInterfaceProxy::get_seq_ids, &InferenceMemoryNLPInterfaceProxy::set_seq_ids);
-
-    py::class_<ResponseMemory, TensorMemory, std::shared_ptr<ResponseMemory>>(_module, "ResponseMemory")
-        .def(py::init<>(&ResponseMemoryInterfaceProxy::init),
-             py::kw_only(),
-             py::arg("count"),
-             py::arg("tensors") = py::none())
-        .def("get_output", &ResponseMemoryInterfaceProxy::get_tensor, py::arg("name"), py::return_value_policy::move)
-        .def("set_output", &ResponseMemoryInterfaceProxy::set_tensor, py::arg("name"), py::arg("tensor"));
-
-    py::class_<ResponseMemoryProbs, ResponseMemory, std::shared_ptr<ResponseMemoryProbs>>(_module,
-                                                                                          "ResponseMemoryProbs")
-        .def(py::init<>(&ResponseMemoryProbsInterfaceProxy::init), py::kw_only(), py::arg("count"), py::arg("probs"))
-        .def_property(
-            "probs", &ResponseMemoryProbsInterfaceProxy::get_probs, &ResponseMemoryProbsInterfaceProxy::set_probs);
 
     // Context manager for Mutable Dataframes. Attempting to use it outside of a with block will raise an exception
     py::class_<MutableTableCtxMgr, std::shared_ptr<MutableTableCtxMgr>>(_module, "MutableTableCtxMgr")

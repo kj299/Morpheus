@@ -10,7 +10,7 @@
 # import. Regenerate with:
 #   micromamba env export -n morpheus --explicit > ci/scripts/cpu_env/linux-64-cpu.lock
 # after creating the environment with:
-#   micromamba create -n morpheus -c conda-forge -c rapidsai -c nvidia python=3.12 morpheus-core=25.06 pytest pytest-asyncio yapf pylint
+#   micromamba create -n morpheus -c conda-forge -c rapidsai -c nvidia python=3.12 morpheus-core=25.06 pytest pytest-asyncio yapf pylint xgboost onnxruntime
 # platform: linux-64
 @EXPLICIT
 https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.2.0-he0feb66_7.conda#d904c7ddd95e026254b4b80808ee9e12
@@ -385,6 +385,7 @@ https://conda.anaconda.org/conda-forge/linux-64/libhwloc-2.9.2-default_h554bfaf_
 https://conda.anaconda.org/conda-forge/linux-64/nlohmann_json-3.11.3-he02047a_1.conda#e46f7ac4917215b49df2ea09a694a3fa
 https://conda.anaconda.org/nvidia/linux-64/libmrc-25.06.00-cuda_12.8_h4e7434a_0.conda#36a41dc51151efabbc37845c70857b20
 https://conda.anaconda.org/conda-forge/linux-64/librdkafka-2.6.1-h3bdeaa6_0.conda#03d010619dee589bf80205336d6414c0
+https://conda.anaconda.org/conda-forge/linux-64/libxgboost-3.4.2-cpu_hcb71bd3_0.conda#69c8822d1036ceb7c64f0fedd58f7012
 https://conda.anaconda.org/conda-forge/linux-64/libxslt-1.1.39-h76b75d6_0.conda#e71f31f8cfb0a91439f2086fc8aa0461
 https://conda.anaconda.org/conda-forge/linux-64/lxml-5.3.0-py312he28fd5a_2.conda#3acf38086326f49afed094df4ba7c9d9
 https://conda.anaconda.org/conda-forge/noarch/pyparsing-3.3.3-pyh5ded981_0.conda#8bf43ae1312e9b966063459e04c20fa7
@@ -433,12 +434,16 @@ https://conda.anaconda.org/conda-forge/noarch/tritonclient-2.34.0-pyhff2d567_0.c
 https://conda.anaconda.org/conda-forge/noarch/typing_utils-0.1.0-pyhd8ed1ab_1.conda#f6d7aa696c67756a650e91e15e88223c
 https://conda.anaconda.org/conda-forge/linux-64/watchdog-3.0.0-py312h7900ff3_1.conda#6efb26e8a58a6a56f4fee7f21f892532
 https://conda.anaconda.org/nvidia/linux-64/morpheus-core-25.06.00-cuda_12.8_py3.12_gaa56cbbb_0.conda#1644c2d61a7254224441203e229937ff
+https://conda.anaconda.org/conda-forge/noarch/python-flatbuffers-25.12.19-pyh9d96877_0.conda#3a28cf4d2187c1dfb0c31aedbf275b8c
+https://conda.anaconda.org/conda-forge/linux-64/onnxruntime-1.31.0-py312h16c82da_0_cpu.conda#f4ae72c4271f3e18645759e31509c159
 https://conda.anaconda.org/conda-forge/noarch/wheel-0.48.0-pyhd8ed1ab_0.conda#9a2124517bfd5d792e0f7b86eefdfeb8
 https://conda.anaconda.org/conda-forge/noarch/pip-26.2.1-pyh8b19718_0.conda#77b6cf3b0689d9fc68561df0db9b856d
 https://conda.anaconda.org/conda-forge/noarch/py-cpuinfo-9.0.0-pyhd8ed1ab_1.conda#46830ee16925d5ed250850503b5dc3a8
+https://conda.anaconda.org/conda-forge/noarch/py-xgboost-3.4.2-cpu_pyh718b53a_0.conda#633a51f1bbc0ee8cb41e4349e72ebb47
 https://conda.anaconda.org/conda-forge/noarch/tomlkit-0.15.1-pyhcf101f3_0.conda#e4942e2de7436ff28be7f5645cf3c8d6
 https://conda.anaconda.org/conda-forge/noarch/pylint-4.1.1-pyh5ded981_0.conda#ba14e3313bfe03aef4cc38de980a20ef
 https://conda.anaconda.org/conda-forge/noarch/pytest-8.0.2-pyhd8ed1ab_0.conda#40bd3ef942b9642a3eb20b0bbf92469b
 https://conda.anaconda.org/conda-forge/noarch/pytest-asyncio-0.23.8-pyhd8ed1ab_0.conda#c6d4ba9595f5e54f32b2e68ac7f97df0
 https://conda.anaconda.org/conda-forge/noarch/pytest-benchmark-4.0.0-pyhd8ed1ab_0.tar.bz2#8c3168375e2ac100c17b133f4e2eb536
+https://conda.anaconda.org/conda-forge/noarch/xgboost-3.4.2-cpu_pyhb39878e_0.conda#47fd06b1468d3ad95419fa9d5e952ac4
 https://conda.anaconda.org/conda-forge/noarch/yapf-0.43.0-pyhd8ed1ab_1.conda#ad1a2c858e3c14deae4f274580123151

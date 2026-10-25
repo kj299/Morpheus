@@ -40,7 +40,6 @@ namespace morpheus {
 
 /**
  * @brief Container for holding a collection of named `TensorObject`s in a `std::map` keyed by name.
- * Base class for `InferenceMemory` & `ResponseMemory`
  *
  */
 class MORPHEUS_EXPORT TensorMemory

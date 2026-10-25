@@ -86,35 +86,6 @@ Similar to the run command, we can get help on the tools:
 
    Commands:
    autocomplete  Utility for installing/updating/removing shell completion for Morpheus
-   onnx-to-trt   Converts an ONNX model to a TRT engine
-
-
-The help text will show arguments, options and all possible sub-commands. Help for each of these sub-commands can be
-queried in the same manner:
-
-.. code-block:: console
-
-   $ morpheus tools onnx-to-trt --help
-   Usage: morpheus tools onnx-to-trt [OPTIONS]
-
-   Converts an ONNX model to a TRT engine
-
-   Options:
-   --input_model PATH              [required]
-   --output_model PATH             [required]
-   --batches <INTEGER INTEGER>...  [required]
-   --seq_length INTEGER            [required]
-   --max_workspace_size INTEGER    [default: 16000]
-   --help                          Show this message and exit.
-
-ONNX To TensorRT
-----------------
-The ONNX to TensorRT (TRT) conversion utility requires additional packages, which can be installed using the following command:
-```bash
-conda env update --solver=libmamba -n morpheus --file conda/environments/model-utils_cuda-128_arch-$(arch).yaml
-```
-
-Example usage of the ONNX to TRT conversion utility can be found in `models/README.md <https://github.com/nv-morpheus/Morpheus/blob/branch-25.10/models/README.md#generating-trt-models-from-onnx>`_.
 
 AutoComplete
 ------------

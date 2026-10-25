@@ -32,7 +32,6 @@ More advanced users, or those who are interested in using the latest pre-release
 - [CUDA 12.8](https://developer.nvidia.com/cuda-12-8-0-download-archive)
 - [Docker](https://docs.docker.com/get-docker/)
 - [The NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation)
-- [NVIDIA Triton Inference Server](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/tritonserver) `24.09` or higher
 - NVIDIA Driver >=525,<580 (currently Morpheus is not compatible with NVIDIA Driver versions 580+ due to a known issue with Numba refer to [#2305](https://github.com/nv-morpheus/Morpheus/issues/2305))
 
 > **Note for Arm64/AArch64 users:**
@@ -51,10 +50,6 @@ More advanced users, or those who are interested in using the latest pre-release
 1. Download the selected version, for example for `25.10`:
     ```bash
     docker pull nvcr.io/nvidia/morpheus/morpheus:25.10-runtime
-    ```
-1. Optional: Many of the examples require NVIDIA Triton Inference Server to be running with the included models. To download the Morpheus Triton Server Models container, ensure that the version number matches that of the Morpheus container you downloaded in the previous step, then run:
-    ```bash
-    docker pull nvcr.io/nvidia/morpheus/morpheus-tritonserver-models:25.10
     ```
 
 > **Note about Morpheus versions:**
@@ -75,15 +70,10 @@ Note about some of the flags above:
 | ---- | ----------- |
 | `--runtime=nvidia` | Choose the NVIDIA docker runtime. This enables access to the GPU inside the container. This flag isn't needed if the `nvidia` runtime is already set as the default runtime for Docker. |
 | `--gpus=all` | Specify which GPUs the container has access to. Alternately, a specific GPU could be chosen with `--gpus=<gpu-id>` |
-| `--net=host` | Most of the Morpheus pipelines utilize [NVIDIA Triton Inference Server](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/tritonserver), which will be running in another container. For simplicity, we will give the container access to the host system's network; production deployments may opt for an explicit network configuration. |
-| `-v /var/run/docker.sock:/var/run/docker.sock` | Enables access to the Docker socket file from within the running container. This allows launching other Docker containers from within the Morpheus container. This flag is required for launching Triton with access to the included Morpheus models. Users with their own models can omit this. |
+| `--net=host` | Gives the container the host system's network, so pipelines can reach services such as Kafka running elsewhere on the host; production deployments may opt for an explicit network configuration. |
+| `-v /var/run/docker.sock:/var/run/docker.sock` | Enables access to the Docker socket file from within the running container. This allows launching other Docker containers from within the Morpheus container. |
 
-Once launched, users wishing to launch Triton using the included Morpheus models will need to install the Docker tools in the Morpheus container by running:
-```bash
-./external/utilities/docker/install_docker.sh
-```
-
-Skip ahead to the [Acquiring the Morpheus Models Container](#acquiring-the-morpheus-models-container) section.
+Skip ahead to the [Models](#models) section.
 
 ## Using Morpheus Conda Packages
 The Morpheus stages are available as libraries that are hosted on the [`nvidia`](https://anaconda.org/nvidia) Conda channel. The Morpheus Conda packages are:
@@ -159,58 +149,14 @@ The `./docker/run_container_release.sh` script accepts the same `DOCKER_IMAGE_NA
 DOCKER_IMAGE_TAG="v25.10.00-runtime" ./docker/run_container_release.sh
 ```
 
-## Acquiring the Morpheus Models Container
+## Models
 
-Many of the validation tests and example workflows require a Triton server to function. For simplicity, Morpheus provides a pre-built models container, which contains both the Triton and Morpheus models. Users implementing a release version of Morpheus can download the corresponding Triton models container from NGC with the following command:
+The two shipped models this fork's stages score with, the ABP flow classifier and the SID payload classifier, run on
+the CPU inside the pipeline; no inference server is involved. They are in `models/inventory`, with the digest and
+settings of each file; refer to the [model inventory](../../models/inventory/README.md). The SID model and its
+validation set are stored in Git LFS:
 ```bash
-docker pull nvcr.io/nvidia/morpheus/morpheus-tritonserver-models:25.10
-```
-
-Users working with an unreleased development version of Morpheus can build the Triton models container from the Morpheus repository. To build the Triton models container, run the following command from the root of the Morpheus repository:
-```bash
-models/docker/build_container.sh
-```
-
-## Launching Triton Server
-
-In a new terminal, use the following command to launch a Docker container for Triton loading all of the included pre-trained models:
-```bash
-docker run --rm -ti --gpus=all -p8000:8000 -p8001:8001 -p8002:8002 \
-  nvcr.io/nvidia/morpheus/morpheus-tritonserver-models:25.10 \
-  tritonserver --model-repository=/models/triton-model-repo \
-    --exit-on-error=false \
-    --log-info=true \
-    --strict-readiness=false \
-    --disable-auto-complete-config
-```
-
-This will launch Triton using the default network ports (8000 for HTTP, 8001 for GRPC, and 8002 for metrics), loading all of the example models in the Morpheus repo.
-
-Note: The above command is useful for testing out Morpheus, however it does load several models into GPU memory, which at the time of this writing consumes roughly 2GB of GPU memory. Production users should consider only loading the specific models they plan on using with the `--model-control-mode=explicit` and `--load-model` flags. For example, to launch Triton only loading the `abp-nvsmi-xgb` model:
-```bash
-docker run --rm -ti --gpus=all -p8000:8000 -p8001:8001 -p8002:8002 \
-  nvcr.io/nvidia/morpheus/morpheus-tritonserver-models:25.10  \
-  tritonserver --model-repository=/models/triton-model-repo \
-    --exit-on-error=false \
-    --log-info=true \
-    --strict-readiness=false \
-    --disable-auto-complete-config \
-    --model-control-mode=explicit \
-    --load-model abp-nvsmi-xgb
-```
-
-Alternately, for users who have checked out the Morpheus git repository, launching the Triton server container directly, mounting the models from the repository is an option. This approach is most useful for users training their own models. From the root of the Morpheus repo, use the following command to launch a Docker container for Triton loading all of the included pre-trained models:
-```bash
-docker run --rm -ti --gpus=all -p8000:8000 -p8001:8001 -p8002:8002 \
-  -v $PWD/models:/models \
-  nvcr.io/nvidia/tritonserver:24.09-py3 \
-  tritonserver --model-repository=/models/triton-model-repo \
-    --exit-on-error=false \
-    --log-info=true \
-    --strict-readiness=false \
-    --disable-auto-complete-config \
-    --model-control-mode=explicit \
-    --load-model abp-nvsmi-xgb
+git lfs pull --include="models/inventory/**"
 ```
 
 ## Running Morpheus
@@ -252,28 +198,20 @@ Commands:
 Each command in the CLI has its own help information. Use `morpheus [command] [...sub-command] --help` to get instructions for each command and sub-command. For example:
 
 ```bash
-$ morpheus run pipeline-nlp inf-triton --help
+$ morpheus run pipeline-nlp tc7-sid-score --help
 Configuring Pipeline via CLI
-Usage: morpheus run pipeline-nlp inf-triton [OPTIONS]
+Usage: morpheus run pipeline-nlp tc7-sid-score [OPTIONS]
+
+  Stateless, so it may run at any concurrency.
 
 Options:
-  --model_name TEXT               Model name in Triton to send messages to
-                                  [required]
-  --server_url TEXT               Triton server URL (IP:Port)  [required]
-  --force_convert_inputs BOOLEAN  Instructs this stage to forcibly convert all
-                                  input types to match what Triton is
-                                  expecting. Even if this is set to `False`,
-                                  automatic conversion will be done only if
-                                  there would be no data loss (i.e. int32 ->
-                                  int64).  [default: False]
-  --use_shared_memory BOOLEAN     Whether or not to use CUDA Shared IPC Memory
-                                  for transferring data to Triton. Using CUDA
-                                  IPC reduces network transfer time but
-                                  requires that Morpheus and Triton are
-                                  located on the same machine  [default:
-                                  False]
-  --help                          Show this message and exit.  [default:
-                                  False]
+  --inventory_path TEXT  The model inventory document,
+                         `models/inventory/inventory.json` in a checkout of
+                         this repository.  [required]
+  --text_column TEXT     Column holding the text to score.  [default: body]
+  --model_name TEXT      The inventory entry to score with.  [default: sid-
+                         minibert-20230424]
+  --help                 Show this message and exit.
 ```
 
 Several examples on using the Morpheus CLI can be found in the [Basic Usage](./basics/overview.rst) guide along with the other [Morpheus Examples](./examples.md).
@@ -326,22 +264,15 @@ Usage: morpheus run pipeline-nlp [OPTIONS] COMMAND1 [ARGS]... [COMMAND2 [ARGS]..
 <Help Paragraph Omitted>
 
 Commands:
-  add-class     Add detected classifications to each message.
-  add-scores    Add probability scores to each message.
   buffer        (Deprecated) Buffer results.
   delay         (Deprecated) Delay results for a certain duration.
   deserialize   Messages are logically partitioned based on the pipeline config's `pipeline_batch_size` parameter.
   dropna        Drop null data entries from a DataFrame.
-  filter        Filter message by a classification threshold.
   from-file     Load messages from a file.
   from-kafka    Load messages from a Kafka cluster.
   gen-viz       (Deprecated) Write out visualization DataFrames.
-  inf-identity  Perform inference for testing that performs a no-op.
-  inf-pytorch   Perform inference with PyTorch.
-  inf-triton    Perform inference with Triton Inference Server.
   mlflow-drift  Report model drift statistics to ML Flow.
   monitor       Display throughput numbers at a specific point in the pipeline.
-  preprocess    Prepare NLP input DataFrames for inference.
   serialize     Includes & excludes columns from messages.
   to-file       Write all messages to a file.
   to-kafka      Write all messages to a Kafka cluster.
@@ -357,21 +288,14 @@ Usage: morpheus run pipeline-fil [OPTIONS] COMMAND1 [ARGS]... [COMMAND2 [ARGS]..
 <Help Paragraph Omitted>
 
 Commands:
-  add-class       Add detected classifications to each message.
-  add-scores      Add probability scores to each message.
   buffer          (Deprecated) Buffer results.
   delay           (Deprecated) Delay results for a certain duration.
   deserialize     Messages are logically partitioned based on the pipeline config's `pipeline_batch_size` parameter.
   dropna          Drop null data entries from a DataFrame.
-  filter          Filter message by a classification threshold.
   from-file       Load messages from a file.
   from-kafka      Load messages from a Kafka cluster.
-  inf-identity    Perform inference for testing that performs a no-op.
-  inf-pytorch     Perform inference with PyTorch.
-  inf-triton      Perform inference with Triton Inference Server.
   mlflow-drift    Report model drift statistics to ML Flow.
   monitor         Display throughput numbers at a specific point in the pipeline.
-  preprocess      Prepare FIL input DataFrames for inference.
   serialize       Includes & excludes columns from messages.
   to-file         Write all messages to a file.
   to-kafka        Write all messages to a Kafka cluster.
@@ -383,5 +307,5 @@ Commands:
 
 ## Next Steps
 * [Morpheus Examples](./examples.md) - Example pipelines using both the Python API and command line interface
-* [Morpheus Pretrained Models](./models_and_datasets.md) - Pre-trained models with corresponding training, validation scripts, and datasets
+* [Models](./models_and_datasets.md) - The models the fork's stages score with, and how each score is pinned to its model
 * [Morpheus Developer Guide](./developer_guide/guides.md) - Documentation on using the Morpheus Python & C++ APIs

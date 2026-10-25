@@ -23,15 +23,7 @@ import numpy as np
 import pytest
 
 from _utils import TEST_DIRS
-from morpheus.messages.memory.inference_memory import InferenceMemory
-from morpheus.messages.memory.inference_memory import InferenceMemoryAE
-from morpheus.messages.memory.inference_memory import InferenceMemoryFIL
-from morpheus.messages.memory.inference_memory import InferenceMemoryNLP
-from morpheus.messages.memory.response_memory import ResponseMemory
-from morpheus.messages.memory.response_memory import ResponseMemoryAE
-from morpheus.messages.memory.response_memory import ResponseMemoryProbs
 from morpheus.messages.memory.tensor_memory import TensorMemory
-from morpheus.utils.type_aliases import DataFrameType
 from morpheus.utils.type_aliases import NDArrayType
 
 INPUT_FILE = os.path.join(TEST_DIRS.tests_data_dir, 'filter_probs.csv')
@@ -73,21 +65,6 @@ def check_tensor_memory(cls: type, count: int, tensors: typing.Dict[str, NDArray
         cls(count, tensors)
 
 
-def check_response_memory_probs(cls: type, array_pkg: types.ModuleType):
-    test_data = array_pkg.array(np.loadtxt(INPUT_FILE, delimiter=",", skiprows=1))
-    count = test_data.shape[0]
-
-    mem = cls(count=count, probs=test_data)
-    assert mem.count == count
-    compare_tensors(mem.get_tensors(), {'probs': test_data})
-    assert (mem.get_output('probs') == test_data).all()
-
-    with pytest.raises(TypeError):
-        cls(count, test_data)
-
-    return mem
-
-
 @pytest.mark.gpu_and_cpu_mode
 def test_tensor_memory(array_pkg: types.ModuleType):
     test_data = array_pkg.array(np.loadtxt(INPUT_FILE, delimiter=",", skiprows=1))
@@ -99,87 +76,12 @@ def test_tensor_memory(array_pkg: types.ModuleType):
     for col in range(test_data.shape[1]):
         tensors[string.ascii_lowercase[col]] = array_pkg.array(test_data[:, col])
 
-    for cls in (TensorMemory, InferenceMemory, ResponseMemory):
+    for cls in (TensorMemory, ):
         check_tensor_memory(cls=cls, count=count, tensors=tensors, array_pkg=array_pkg)
 
 
 @pytest.mark.gpu_and_cpu_mode
-def test_inference_memory_ae(array_pkg: types.ModuleType):
-    test_data = array_pkg.array(np.loadtxt(INPUT_FILE, delimiter=",", skiprows=1))
-    count = test_data.shape[0]
-
-    input_tensor = array_pkg.array(test_data[:, 0])
-    seq_ids = array_pkg.array(test_data[:, 1])
-    mem = InferenceMemoryAE(count=count, inputs=input_tensor, seq_ids=seq_ids)
-
-    assert mem.count == count
-    compare_tensors(mem.get_tensors(), {'input': input_tensor, 'seq_ids': seq_ids})
-    assert (mem.input == input_tensor).all()
-    assert (mem.seq_ids == seq_ids).all()
-
-    with pytest.raises(TypeError):
-        InferenceMemoryAE(count, input_tensor, seq_ids)  # pylint: disable=too-many-function-args,missing-kwoa
-
-
-@pytest.mark.gpu_and_cpu_mode
-def test_inference_memory_fil(array_pkg: types.ModuleType):
-    test_data = array_pkg.array(np.loadtxt(INPUT_FILE, delimiter=",", skiprows=1))
-    count = test_data.shape[0]
-
-    input_0 = array_pkg.array(test_data[:, 0])
-    seq_ids = array_pkg.array(test_data[:, 1])
-    mem = InferenceMemoryFIL(count=count, input__0=input_0, seq_ids=seq_ids)
-
-    assert mem.count == count
-    compare_tensors(mem.get_tensors(), {'input__0': input_0, 'seq_ids': seq_ids})
-    assert (mem.input__0 == input_0).all()
-    assert (mem.seq_ids == seq_ids).all()
-
-    with pytest.raises(TypeError):
-        InferenceMemoryFIL(count, input_0, seq_ids)  # pylint: disable=too-many-function-args,missing-kwoa
-
-
-@pytest.mark.gpu_and_cpu_mode
-def test_inference_memory_nlp(array_pkg: types.ModuleType):
-    test_data = array_pkg.array(np.loadtxt(INPUT_FILE, delimiter=",", skiprows=1))
-    count = test_data.shape[0]
-
-    input_ids = array_pkg.array(test_data[:, 0])
-    input_mask = array_pkg.array(test_data[:, 1])
-    seq_ids = array_pkg.array(test_data[:, 2])
-    mem = InferenceMemoryNLP(count=count, input_ids=input_ids, input_mask=input_mask, seq_ids=seq_ids)
-
-    assert mem.count == count
-    compare_tensors(mem.get_tensors(), {'input_ids': input_ids, 'input_mask': input_mask, 'seq_ids': seq_ids})
-    assert (mem.input_ids == input_ids).all()
-    assert (mem.input_mask == input_mask).all()
-    assert (mem.seq_ids == seq_ids).all()
-
-    with pytest.raises(TypeError):
-        InferenceMemoryNLP(count, input_ids, input_mask, seq_ids)  # pylint: disable=too-many-function-args,missing-kwoa
-
-
-@pytest.mark.gpu_and_cpu_mode
-def test_response_memory_ae(array_pkg: types.ModuleType, filter_probs_df: DataFrameType):
-    mem = check_response_memory_probs(ResponseMemoryAE, array_pkg)
-
-    assert mem.user_id == ""
-    assert mem.explain_df is None
-
-    mem.user_id = "testy"
-    mem.explain_df = filter_probs_df
-
-    assert mem.user_id == "testy"
-    assert (mem.explain_df.values == filter_probs_df.values).all()
-
-
-@pytest.mark.gpu_and_cpu_mode
-def test_response_memory_probs(array_pkg: types.ModuleType):
-    check_response_memory_probs(ResponseMemoryProbs, array_pkg)
-
-
-@pytest.mark.gpu_and_cpu_mode
-@pytest.mark.parametrize("tensor_cls", [TensorMemory, InferenceMemory, ResponseMemory])
+@pytest.mark.parametrize("tensor_cls", [TensorMemory])
 def test_constructor_length_error(array_pkg: types.ModuleType, tensor_cls: type):
     count = 10
     tensors = {"a": array_pkg.zeros(count), "b": array_pkg.ones(count)}
@@ -189,7 +91,7 @@ def test_constructor_length_error(array_pkg: types.ModuleType, tensor_cls: type)
 
 
 @pytest.mark.gpu_and_cpu_mode
-@pytest.mark.parametrize("tensor_cls", [TensorMemory, InferenceMemory, ResponseMemory])
+@pytest.mark.parametrize("tensor_cls", [TensorMemory])
 def test_set_tensor_length_error(array_pkg: types.ModuleType, tensor_cls: type):
     count = 10
     mem = tensor_cls(count=count)
@@ -199,7 +101,7 @@ def test_set_tensor_length_error(array_pkg: types.ModuleType, tensor_cls: type):
 
 
 @pytest.mark.gpu_and_cpu_mode
-@pytest.mark.parametrize("tensor_cls", [TensorMemory, InferenceMemory, ResponseMemory])
+@pytest.mark.parametrize("tensor_cls", [TensorMemory])
 def test_set_tensors_length_error(array_pkg: types.ModuleType, tensor_cls: type):
     count = 10
     tensors = {"a": array_pkg.zeros(count), "b": array_pkg.ones(count)}
@@ -210,7 +112,7 @@ def test_set_tensors_length_error(array_pkg: types.ModuleType, tensor_cls: type)
 
 
 @pytest.mark.gpu_and_cpu_mode
-@pytest.mark.parametrize("tensor_cls", [TensorMemory, InferenceMemory, ResponseMemory])
+@pytest.mark.parametrize("tensor_cls", [TensorMemory])
 @pytest.mark.parametrize(
     "shape",
     [

@@ -21,7 +21,6 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 
 ## Table of Contents
 - [General](#general)
-- [Inference](#inference)
 - [Input](#input)
 - [Lineage](#lineage)
 - [Output](#output)
@@ -32,15 +31,10 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 
 ## General
 
-- Linear Modules Stage {py:class}`~morpheus.stages.general.linear_modules_stage.LinearModulesStage` Loads an existing, registered, module and wraps it as a Morpheus stage. Refer to [Morpheus Modules](../developer_guide/guides.md#morpheus-modules) for details on modules.
+- Linear Modules Stage {py:class}`~morpheus.stages.general.linear_modules_stage.LinearModulesStage` Loads an existing, registered, module and wraps it as a Morpheus stage.
 - Monitor Stage {py:class}`~morpheus.stages.general.monitor_stage.MonitorStage` Display throughput numbers at a specific point in the pipeline.
-- Multi Port Module Stage {py:class}`~morpheus.stages.general.multi_port_modules_stage.MultiPortModulesStage` Loads an existing, registered, multi-port module and wraps it as a multi-port Morpheus stage. Refer to [Morpheus Modules](../developer_guide/guides.md#morpheus-modules) for details on modules.
+- Multi Port Module Stage {py:class}`~morpheus.stages.general.multi_port_modules_stage.MultiPortModulesStage` Loads an existing, registered, multi-port module and wraps it as a multi-port Morpheus stage.
 - Trigger Stage {py:class}`~morpheus.stages.general.trigger_stage.TriggerStage` Buffer data until the previous stage has completed, useful for testing performance of one stage at a time.
-
-## Inference
-
-- PyTorch Inference Stage {py:class}`~morpheus.stages.inference.pytorch_inference_stage.PyTorchInferenceStage` PyTorch inference stage used for most pipeline modes with the exception of Auto Encoder.
-- Triton Inference Stage {py:class}`~morpheus.stages.inference.triton_inference_stage.TritonInferenceStage`  Inference stage which utilizes a [Triton Inference Server](https://developer.nvidia.com/nvidia-triton-inference-server).
 
 ## Input
 
@@ -82,9 +76,6 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 
 ## Post-process
 
-- Add Classifications Stage {py:class}`~morpheus.stages.postprocess.add_classifications_stage.AddClassificationsStage` Add detected classifications to each message.
-- Add Scores Stage {py:class}`~morpheus.stages.postprocess.add_scores_stage.AddScoresStage` Add probability scores to each message.
-- Filter Detections Stage {py:class}`~morpheus.stages.postprocess.filter_detections_stage.FilterDetectionsStage` Filter message by a classification threshold.
 - Generate Viz Frames Stage {py:class}`~morpheus.stages.postprocess.generate_viz_frames_stage.GenerateVizFramesStage` Write out visualization DataFrames.
 - MLflow Drift Stage {py:class}`~morpheus.stages.postprocess.ml_flow_drift_stage.MLFlowDriftStage` Report model drift statistics to MLflow.
 - Serialize Stage {py:class}`~morpheus.stages.postprocess.serialize_stage.SerializeStage` Include & exclude columns from messages.
@@ -94,8 +85,6 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 
 - Deserialize Stage {py:class}`~morpheus.stages.preprocess.deserialize_stage.DeserializeStage` Partition messages based on the `pipeline_batch_size` parameter of the pipeline's `morpheus.config.Config` object.
 - Drop Null Stage {py:class}`~morpheus.stages.preprocess.drop_null_stage.DropNullStage` Drop null data entries from a DataFrame.
-- Preprocess FIL Stage {py:class}`~morpheus.stages.preprocess.preprocess_fil_stage.PreprocessFILStage` Prepare FIL input DataFrames for inference.
-- Preprocess NLP Stage {py:class}`~morpheus.stages.preprocess.preprocess_nlp_stage.PreprocessNLPStage` Prepare NLP input DataFrames for inference.
 
 ## Telemetry
 
@@ -123,6 +112,7 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - TC-3 Cardinality Stage {py:class}`~morpheus.stages.telemetry.tc3_cardinality_stage.TC3CardinalityStage` Count distinct layer 3 counterpart addresses and ports per entity over a trailing window: fan-out, fan-in and distinct destination ports.
 - TC-3 Reach Stage {py:class}`~morpheus.stages.telemetry.tc3_reach_stage.TC3ReachStage` Classify each flow's destination through the shared IP parser and describe the mix of destinations a source has been reaching.
 - TC-3 TTL Stage {py:class}`~morpheus.stages.telemetry.tc3_ttl_stage.TC3TtlStage` Compare each flow's IP time-to-live against its source's established value, where one hop is what an interposed device costs.
+- TC-4 ABP Score Stage {py:class}`~morpheus.stages.telemetry.tc4_abp_score_stage.TC4AbpScoreStage` Score each flow's thirteen features with the shipped `abp-pcap-xgb` booster from the model inventory, on the CPU, and write the probability, the verdict above the upstream threshold of 0.5, and the version of the model that scored it.
 - TC-4 Envelope Stage {py:class}`~morpheus.stages.telemetry.tc4_envelope_stage.TC4EnvelopeStage` Compare each record's transfer magnitudes against the envelope its `(src_ip, dst_ip, dst_port)` triple has kept, a 99th percentile only where enough prior transfers support one.
 - TC-4 Flow Stage {py:class}`~morpheus.stages.telemetry.tc4_flow_stage.TC4FlowStage` Roll each record into its flow's time bin and write the running transport features the shipped `abp-pcap-xgb` model was trained on, and the stack fingerprint each SYN carries with whether its source has presented it before.
 - TC-5 Cadence Stage {py:class}`~morpheus.stages.telemetry.tc5_cadence_stage.TC5CadenceStage` Score an authentication's hour of day and day of week against the histogram of that principal's own history, smoothing an hour never used before into a finite surprise that grows with how much history it contradicts. The local time is a fixed offset rather than a named zone, so the feature cannot move when a timezone database is updated.
@@ -140,4 +130,5 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - TC-7 Endpoint Stage {py:class}`~morpheus.stages.telemetry.tc7_endpoint_stage.TC7EndpointStage` Write whether each process's parent-image pairing is new to its host and to its host's peer group as the inventory stood when the process ran.
 - TC-7 HTTP Stage {py:class}`~morpheus.stages.telemetry.tc7_http_stage.TC7HttpStage` Write each client's windowed 4xx and 2xx counts, their ratio, and its distinct path count over a trailing ten minutes against its own busiest day, and the user-agent family it sent and whether it is new to the client.
 - TC-7 SaaS Stage {py:class}`~morpheus.stages.telemetry.tc7_saas_stage.TC7SaasStage` Write each operation's record count against the principal's own 30-day 99th percentile for it, and the week's breadth of object types so far.
+- TC-7 SID Score Stage {py:class}`~morpheus.stages.telemetry.tc7_sid_score_stage.TC7SidScoreStage` Score a text column with the shipped SID model from the model inventory, on the CPU, reading a long body in overlapping windows, and write each label's probability, the labels found, and the version of the model that scored it.
 - TC-7 Service Stage {py:class}`~morpheus.stages.telemetry.tc7_service_stage.TC7ServiceStage` Key each connection on the service it reached, its name where there is one and its address where not, and write the service's window counts, the client software new to it and its distinct clients against its busiest day.

@@ -263,13 +263,6 @@ When ready, commit both the changes to the `dependencies.yaml` file and the upda
    ```
    At this point, Morpheus can be fully used. Any changes to Python code will not require a rebuild. Changes to C++ code will require calling `./scripts/compile.sh`. Installing Morpheus is only required once per virtual environment.
 
-### Build the Morpheus Models Container
-
-From the root of the Morpheus repository run the following command:
-```bash
-models/docker/build_container.sh
-```
-
 ### Quick Launch Kafka Cluster
 
 Launching a full production Kafka cluster is outside the scope of this project; however, if a quick cluster is needed for testing or development, one can be quickly launched via Docker Compose. The following commands outline that process. Refer to [this](https://medium.com/big-data-engineering/hello-kafka-world-the-complete-guide-to-kafka-with-docker-and-python-f788e2588cfc) guide for more in-depth information:
@@ -378,30 +371,6 @@ Launching a full production Kafka cluster is outside the scope of this project; 
       ```
 
       **Note:** This will consume messages.
-
-### Pipeline Validation
-
-To verify that all pipelines are working correctly, validation scripts have been added at `${MORPHEUS_ROOT}/scripts/validation`. There are scripts for each of the main workflows: Anomalous Behavior Profiling (ABP), Phishing Detection (Phishing), and Sensitive Information Detection (SID).
-
-To run all of the validation workflow scripts, use the following commands:
-
-```bash
-# Run validation scripts
-./scripts/validation/val-run-all.sh
-```
-
-At the end of each workflow, a section will print the different inference workloads that were run and the validation error percentage for each. For example:
-
-```bash
-===ERRORS===
-PyTorch     :3/314 (0.96 %)
-Triton(ONNX):Skipped
-Triton(TRT) :Skipped
-TensorRT    :Skipped
-Complete!
-```
-
-This indicates that only 3 out of 314 rows did not match the validation dataset. Errors similar to `:/ ( %)` or very high percentages display, then the workflow did not complete successfully.
 
 ### Troubleshooting the Build
 

@@ -17,8 +17,6 @@ limitations under the License.
 
 # Examples
 Ensure the environment is set up by following [Getting Started with Morpheus](./getting_started.md) before running the examples below.
-* [ABP Detection Example Using Morpheus](../../examples/abp_pcap_detection/README.md)
-* [Sensitive Information Detection with Natural Language Processing (NLP) Example](../../examples/nlp_si_detection/README.md)
 * [Splunk Lineage App for Morpheus Behavioral Analytics](../../examples/splunk_lineage_app/README.md)
 
 

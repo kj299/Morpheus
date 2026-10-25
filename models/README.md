@@ -15,143 +15,35 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# Morpheus Models
+# Models
 
-Pretrained models for Morpheus with corresponding training, validation scripts, and datasets.
+What this directory holds for the fork, and where each model a stage scores with is recorded.
 
-## Repo Structure
-Every Morpheus use case has a directory, **`<use-case>-models`**, that contains the model files for the use case. Training and validation datasets and scripts are also provided in [`datasets`](./datasets/), [`training-tuning-scripts`](./training-tuning-scripts/), and [`validation-inference-scripts`](./validation-inference-scripts/). Jupyter notebook (`.ipynb`) version of the training and fine-tuning scripts are also provided.
+## The model inventory
 
-The `triton_model_repo` contains the necessary directory structure and configuration files in order to run the Morpheus Models in Triton Inference Server. This includes symlinks to the above-mentioned model files along with corresponding Triton configuration files (`.pbtxt`). More information on how to deploy this repository to Triton can be found in the [README](./triton-model-repo/README.md).
+[`inventory`](./inventory/README.md) holds the two shipped models the design rules read: the `abp-pcap-xgb` flow
+classifier behind R-B-L4-001 and the `sid-minibert-20230424` sensitive-information model behind R-B-L7-003. Each
+file is recorded with its sha256, the settings the model was trained under and its upstream provenance, and both
+score on the CPU inside the pipeline (`TC4AbpScoreStage`, `TC7SidScoreStage`). Upstream served them from a Triton
+model repository; ruling D2 of the [repository audit](../docs/source/developer_guide/guides/13_repository_audit.md)
+removed that path and moved these two models here.
 
-Models can also be published to an [MLflow](https://mlflow.org/) server and deployed to Triton using the [MLflow Triton plugin](https://github.com/triton-inference-server/server/tree/main/deploy/mlflow-triton-plugin). The [MLflow](./mlflow/README.md) directory contains information on how to set up a Docker container to run an MLflow server for publishing Morpheus models and deploying them to Triton.
+The fork's own learned models are not in this directory. The layer 5 per-principal and per-peer-group models are
+committed under [`examples/layer5_model/models`](../examples/layer5_model/README.md) with the manifests that pin them.
 
-In the root directory, the file `model-information.csv` contains the following information for each model:
+## Data the fork reads
 
- - **Model name** - Name of the model
- - **Use case** - Specific Morpheus use case the model targets
- - **Owner** - Name of the individual who owns the model
- - **Version** - Version of the model (major.minor.patch)
- - **Model overview** - General description
- - **Model architecture** - General model architecture
- - **Training** - Training dataset and paradigm
- - **How to use this model** - Circumstances where this model is useful
- - **Input data** - Typical data that is used as input to the model
- - **Output** - Type and format of model output
- - **Out-of-scope use cases** - Use cases not envisioned during development
- - **Ethical considerations** - Ethical analysis of risks and harms
- - **References** - Resources used in model development
- - **Training epochs** - Number of epochs used during training
- - **Batch size** - Batch size used during training
- - **GPU model** - Family of GPU used during training
- - **Model accuracy** - Accuracy of the model when tested
- - **Model F1** - F1 score of the model when tested
- - **Small test set accuracy** - Accuracy of model on validation data in datasets directory
- - **Memory footprint** - Memory required by the model
- - **Thresholds** - Values of thresholds used for validation
- - **NLP hash file** - Hash file for tokenizer vocabulary
- - **NLP max length** - Max length value for tokenizer
- - **NLP stride** - stride value for tokenizer
- - **NLP do lower** - `do_lower` value for tokenizer
- - **NLP do truncate** - `do_truncate` value for tokenizer
- - **Version CUDA** - CUDA version used during training
- - **Version Python** - Python version used during training
- - **Version Ubuntu** - Ubuntu version used during training
- - **Version Transformers** - Transformers version used during training
+| Path | Reader |
+| --- | --- |
+| `data/public_suffix_list.dat` | `morpheus.utils.query_entropy`, which splits a DNS name into its registered domain and subdomain for the layer 7 DNS features. The file is the [Public Suffix List](https://publicsuffix.org/list/) as upstream committed it on 2023-07-25, sha256 `3d1e812e00ca5c140b66ab5351f5cf990f167fad6558a8549eb5cd5922a79e2d`. |
+| `datasets/validation-data/dfp_training_feature_samples.csv`, `datasets/validation-data/dfp-cloudtrail-role-g-validation-data-input.csv`, `datasets/validation-data/dfp_dataloader_test/` | The `dfencoder` tests under `tests/morpheus/dfencoder`; `dfencoder` is the autoencoder the fork's layer 5 scorer trains. |
+| `datasets/training-data/azure/azure-ad-logs-sample-training-data.json`, `datasets/training-data/cloudtrail/hammah-role-g-training-part1.json`, `datasets/training-data/cloudtrail/hammah-user123-training-part2.json` | `examples/upstream_reuse`, the recorded measurement behind the decision not to reuse the upstream digital fingerprinting stages (ruling D4). |
 
-## Generating TensorRT Models from ONNX
-The Morpheus ONNX to TensorRT (TRT) conversion utility requires additional packages, which can be installed using the following command:
-```bash
-conda env update --solver=libmamba -n morpheus --file conda/environments/model-utils_cuda-128_arch-$(arch).yaml
-```
+## Everything else
 
-For users wishing to use TRT models generated using this tool with Triton will then need to refer to the [Triton Model Repository](./triton-model-repo/README.md) documentation on how to deploy the models to Triton, and how to build the Morpheus Triton Server Models Container.
-
-# Model Card Info
-## Sensitive Information Detection (SID)
-### Model Overview
-SID is a classifier, designed to detect sensitive information (for example, AWS credentials, GitHub credentials) in unencrypted data. This example model classifies text containing these 10 categories of sensitive information- address, bank account, credit card number, email address, government id number, full name, password, phone number, secret keys, and usernames.
-### Model Architecture
-Compact BERT-mini transformer model
-### Training
-Training consisted of fine-tuning the original pretrained [model from Google](https://huggingface.co/google/bert_uncased_L-4_H-256_A-4). The labeled training dataset is 2 million synthetic PCAP payloads generated using the [faker package](https://github.com/joke2k/faker) to mimic sensitive and benign data found in nested JSON objects from web APIs and environmental variables.
-### How To Use This Model
-This model is an example of customized transformer-based sensitive information detection. It can be further fine-tuned for specific detection needs or retrained for alternative categorizations using the fine-tuning scripts in the repo.
-#### Input
-English text from PCAP payloads
-#### Output
-Multi-label sequence classification for 10 sensitive information categories
-### Generating TRT Models from ONNX
-
-For the best performance you need to compile a TensorRT engine file on each machine that it will be run on. To facilitate this, Morpheus contains a utility to input an ONNX file and export the TensorRT engine file. Sample command to generate the TensorRT engine file -
-```bash
-morpheus --log_level=info tools onnx-to-trt --input_model ${MORPHEUS_ROOT}/models/sid-models/sid-minibert-20230424.onnx --output_model ${MORPHEUS_ROOT}/models/sid-models/model.plan --batches 1 8 --batches 1 16 --batches 1 32 --seq_length 256 --max_workspace_size 16000
-```
-
-Note: If you get an out-of-memory error, reduce the `--max_workspace_size` argument until it will successfully run.
-### References
-Well-Read Students Learn Better: On the Importance of Pre-training Compact Models, 2019,  https://arxiv.org/abs/1908.08962
-
-## Phishing Email Detection
-### Model Overview
-Phishing email detection is a binary classifier differentiating between phishing/spam and non-phishing/spam emails and SMS messages.
-### Model Architecture
-BERT-base uncased transformer model
-### Training
-Training consisted of fine-tuning the original pretrained [model from google](https://huggingface.co/bert-base-uncased). The labeled training dataset is around 5000 SMS messages from a public dataset- [SMS Spam Collection](https://archive.ics.uci.edu/ml/datasets/SMS+Spam+Collection)
-### How To Use This Model
-This model is an example of customized transformer-based phishing email detection. It can be retrained for specific detection needs and customized the emails of your enterprise using the training scripts in the repo.
-#### Input
-Entire email as a string
-#### Output
-Binary sequence classification as phishing/spam or non-phishing/spam
-### Generating TRT Models from ONNX
-For the best performance you need to compile a TensorRT engine file on each machine that it will be run on. To facilitate this, Morpheus contains a utility to input an ONNX file and export the TensorRT engine file. Sample command to generate the TensorRT engine file -
-```bash
-morpheus --log_level=info tools onnx-to-trt --input_model ${MORPHEUS_ROOT}/models/phishing-models/phishing-bert-20230517.onnx --output_model ${MORPHEUS_ROOT}/models/phishing-models/model.plan --batches 1 8 --batches 1 16 --batches 1 32 --seq_length 128 --max_workspace_size 16000
-```
-### References
-- https://archive.ics.uci.edu/ml/datasets/SMS+Spam+Collection
-- Devlin J. et al. (2018), BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding
-https://arxiv.org/abs/1810.04805
-
-
-## Anomalous Behavior Profiling (ABP)
-### Model Overview
-This model is an example of a binary classifier to differentiate between anomalous GPU behavior such as cryptocurrency mining / GPU malware, and non-anomalous GPU-based workflows (for example, ML/DL training). The model is an XGBoost model.
-### Model Architecture
-XGBoost
-### Training
-Training consisted of ~1000 labeled nv-smi logs generated from processes running either GPU malware or benign GPU-based workflows.
-### How To Use This Model
-This model can be used to flag anomalous GPU activity.
-#### Input
-nv-smi data
-#### Output
-Binary classification as anomalous or benign.
-### References
-<!-- Vale attempts to spell check the author names -->
-<!-- vale off -->
-Chen, Guestrin (2016) XGBoost. A scalable tree boosting system. https://arxiv.org/abs/1603.02754
-<!-- vale on -->
-
-## Digital Fingerprinting (DFP)
-### Model Overview
-This use case is currently implemented to detect changes in users' behavior that indicate a change from a human to a machine or a machine to a human. The model is an ensemble of an Autoencoder and fast Fourier transform reconstruction.
-### Model Architecture
-The model is an ensemble of an Autoencoder and a fast Fourier transform reconstruction. The reconstruction loss of new log data through the trained Autoencoder is used as an anomaly score. Concurrently, the timestamps of user/entity activity are used for a time series analysis to flag activity with poor reconstruction after a fast Fourier transform.
-### Training
-The Autoencoder is trained on a baseline benign period of user activity.
-### How To Use This Model
-This model is one example of an Autoencoder trained from a baseline for benign activity from synthetic `user-123` and `role-g`. This model combined with validation data from Morpheus examples can be used to test the DFP Morpheus pipeline. It has little utility outside of testing.
-### Input
-aws-cloudtrail logs
-### Output
-Anomalous score of Autoencoder, Binary classification of time series anomaly detection
-### References
-<!-- Vale attempts to spell check the author names -->
-<!-- vale off -->
-- https://github.com/AlliedToasters/dfencoder/blob/master/dfencoder/autoencoder.py
-- https://github.com/rapidsai/clx/blob/branch-22.12/notebooks/anomaly_detection/FFT_Outlier_Detection.ipynb
-- Rasheed Peng Alhajj Rokne Jon: Fourier Transform Based Spatial Outlier Mining 2009 - https://link.springer.com/chapter/10.1007/978-3-642-04394-9_39
-<!-- vale on -->
+The other directories here (`abp-models`, `dfp-models`, `phishing-models`, `training-tuning-scripts`,
+`validation-inference-scripts`, the rest of `datasets` and `data`) and `model-information.csv` are upstream model
+material for use cases the audit removes. Each file's verdict and the ruling behind it are in
+[`ci/artifacts/repository_audit_manifest.csv`](../ci/artifacts/repository_audit_manifest.csv); until they go, the
+upstream description of each is at the fork point,
+[`models/README.md` at `c6a3b56d`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56db1c77c2f375ae0833a65a7b6d2272269/models/README.md).

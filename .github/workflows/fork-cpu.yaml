@@ -50,6 +50,21 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
+      # The SID model and its validation set are the only Git LFS files the tiers read, and they live under
+      # models/inventory. Everything else stays a pointer: the fork's other tests build their corpora in code. The
+      # objects are cached by the pointers' content, so the 45 MB model is downloaded when it changes rather than
+      # on every run, which keeps the job inside the repository's LFS bandwidth.
+      - name: Restore the model inventory's LFS objects
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs/objects
+          key: model-inventory-lfs-${{ hashFiles('models/inventory/**') }}
+
+      - name: Fetch the model inventory's LFS files
+        run: |
+          git lfs install --local
+          git lfs pull --include="models/inventory/**"
+
       - name: Create the environment
         uses: mamba-org/setup-micromamba@v2
         with:

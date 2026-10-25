@@ -63,8 +63,8 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 #99, for a cause the repository does not show -- and in GPU mode on one card, where the twelve that existed then
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
-That is fifty-seven stages and forty-six supporting
-modules, covered by 2,566 distinct tests, itemized in
+That is fifty-nine stages and fifty supporting
+modules, covered by 2,598 distinct tests, itemized in
 [Part 6](#provided). Fifty-eight of the sixty rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -85,8 +85,8 @@ over the events the daily drift over the TLS and DNS columns added returned what
 now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
 scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
-What remains design rather than a running system: two of the sixty rules (R-B-L4-001 and
-R-B-L7-003, which need a Triton endpoint), the
+What remains design rather than a running system: two of the sixty rules as detections (R-B-L4-001 and
+R-B-L7-003, whose models score on the CPU but which no saved search reads yet), the
 hysteresis half of control 9 (its suppression half ships on every detection), controls 10 and 11 as code, the sharding router's wiring, and clock
 correction, since `clock_source` and `clock_offset_ms` are schema that nothing produces or checks. Layer 5
 is the case to state precisely: **each principal has a learned model of their own, hosts share one per peer group, and nothing else is scored.**
@@ -385,7 +385,8 @@ raises `dataclasses.FrozenInstanceError` after freezing. The fields that matter 
 - `feature_length`: second-axis dimension of the tensor handed to the model. Sequence length for NLP,
   feature count for forest inference.
 - `num_threads`, `edge_buffer_size` (default 128, must be a power of two greater than one).
-- `class_labels`: index-to-label mapping used by `AddClassificationsStage`.
+- `class_labels`: index-to-label mapping. The upstream `AddClassificationsStage` read it, and went with the Triton
+  path under the [repository audit](./13_repository_audit.md)'s ruling D2; `MLFlowDriftStage` still reads it.
 - `ae: ConfigAutoEncoder`, which carries `userid_column_name`, `timestamp_column_name`,
   `feature_columns`, `feature_scaler`, `fallback_username` (default `generic_user`), and `use_generic_model`.
 - `Config.save(filename)` and `Config.to_string()` serialize the whole object to JSON. Part 5 uses this
@@ -459,15 +460,22 @@ Sources (`stages/input/`): `KafkaSourceStage`, `HttpServerSourceStage`, `HttpCli
 [`AppShieldSourceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/appshield_source_stage.py) went with the ransomware
 use case.
 
-Preprocess (`stages/preprocess/`): `DeserializeStage`, `PreprocessNLPStage` (subword tokenization),
-`PreprocessFILStage`, `DropNullStage`, `GroupByColumnStage`.
+Preprocess (`stages/preprocess/`): `DeserializeStage`,
+[`PreprocessNLPStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/preprocess/preprocess_nlp_stage.py) (subword tokenization),
+[`PreprocessFILStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/preprocess/preprocess_fil_stage.py), `DropNullStage`, `GroupByColumnStage`.
 
-Inference (`stages/inference/`): `TritonInferenceStage`, `PyTorchInferenceStage`,
-`IdentityInferenceStage`, over the shared `InferenceStage` base.
+Inference (`stages/inference/`): [`TritonInferenceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/inference/triton_inference_stage.py),
+[`PyTorchInferenceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/inference/pytorch_inference_stage.py),
+[`IdentityInferenceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/inference/identity_inference_stage.py), over the shared
+[`InferenceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/inference/inference_stage.py) base.
 
-Postprocess (`stages/postprocess/`): `AddClassificationsStage`, `AddScoresStage`,
-`FilterDetectionsStage`, `SerializeStage`, `ValidationStage`, `MLFlowDriftStage`, `TimeSeriesStage`,
+Postprocess (`stages/postprocess/`): [`AddClassificationsStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/postprocess/add_classifications_stage.py),
+[`AddScoresStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/postprocess/add_scores_stage.py),
+[`FilterDetectionsStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/postprocess/filter_detections_stage.py), `SerializeStage`, `ValidationStage`, `MLFlowDriftStage`, `TimeSeriesStage`,
 `GenerateVizFramesStage`.
+
+The two preprocessing stages, the inference directory and the three postprocessing stages linked above went with
+the Triton path under ruling D2; each fork model now scores inside a stage of its own, from a committed file.
 
 Output (`stages/output/`): `WriteToKafkaStage`, `WriteToElasticsearchStage`, `WriteToFileStage`,
 `WriteToDatabricksDeltaLakeStage`, `HttpClientSinkStage`, `HttpServerSinkStage`,
@@ -686,13 +694,13 @@ window is satisfied, which is a deliberate choice between latency and stability.
 | Layer | What exists | Where |
 | --- | --- | --- |
 | 1-2 | GPU packet capture off a ConnectX NIC into device memory (removed) | [`stages/doca/doca_source_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/doca/doca_source_stage.py), [`_lib/doca/`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/_lib/doca) |
-| 3-4 | Flow assembly and TCP flag features | `examples/abp_pcap_detection/abp_pcap_preprocessing.py` |
+| 3-4 | Flow assembly and TCP flag features (removed; `TC4FlowStage` computes them now) | [`examples/abp_pcap_detection/abp_pcap_preprocessing.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py) |
 | 3 | IP arithmetic and classification | `parsers/ip.py` |
 | 3-7 | Zeek log ingestion with typed headers | `parsers/zeek.py` |
 | 5-7 | Authentication behavior modeling | `morpheus_dfp` with Duo and Azure schemas |
-| 7 | Subword tokenization to transformer inference | `stages/preprocess/preprocess_nlp_stage.py` |
+| 7 | Subword tokenization to transformer inference (removed; `morpheus.utils.wordpiece` produces the token ids on the CPU) | [`stages/preprocess/preprocess_nlp_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/preprocess/preprocess_nlp_stage.py) |
 | 7 | Named entity recognition over logs (removed) | [`examples/log_parsing/`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/log_parsing) |
-| 7 | Sensitive information detection, phishing | `models/sid-models`, `models/phishing-models` |
+| 7 | Sensitive information detection, phishing | [`models/inventory`](../../../../models/inventory/README.md) (the SID model, moved), `models/phishing-models` |
 | Host | Process, DLL, VAD, and handle snapshots (removed) | [`stages/input/appshield_source_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/appshield_source_stage.py) |
 | SIEM | Splunk notable event regex parsing | `parsers/splunk_notable_parser.py` |
 
@@ -758,7 +766,7 @@ return output_message
 Reassembly into a single output message preserves order within a message. But batch **boundaries** depend
 on how many rows arrived together, which depends on upstream timing. If the model is not batch-invariant,
 identical rows can score differently depending on who they were batched with. Triton's dynamic batching
-amplifies this.
+amplified this, and is one of the reasons the audit's ruling D2 removed that path.
 
 **Wall-clock reads.** `DFPPostprocessingStage._process_events` writes
 `df['event_time'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')`. This field varies between runs by
@@ -781,7 +789,7 @@ filesystem order, which is not guaranteed stable across object stores or listing
 `elasticsearch.helpers.parallel_bulk`; `WriteToKafkaStage` produces asynchronously with a delivery
 callback. Neither guarantees output ordering at the destination.
 
-**Floating point.** GPU reductions in float32 are not associative. `AddScoresStage` and the autoencoder
+**Floating point.** GPU reductions in float32 are not associative. The upstream `AddScoresStage` and the autoencoder
 loss aggregation can differ in the last bits between runs with different block scheduling. This is
 irrelevant until a score sits within a few ULPs of a threshold, at which point it flips the decision.
 
@@ -795,9 +803,10 @@ irrelevant until a score sits within a few ULPs of a threshold, at which point i
 - `ControlMessage.set_timestamp`/`filter_timestamp` gives per-message stage timing without touching the payload.
 - `Config.freeze()` guarantees configuration immutability once the pipeline is built; `Config.save()`
   serializes it for hashing.
-- `FilterDetectionsController.filter_copy` uses `meta.copy_ranges(true_pairs)`, preserving relative order
-  of surviving rows. `filter_slice` splits into multiple messages instead, which changes downstream
-  batching; prefer `copy`.
+- [`FilterDetectionsController.filter_copy`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/controllers/filter_detections_controller.py)
+  used `meta.copy_ranges(true_pairs)`, preserving relative order of surviving rows, where `filter_slice` split
+  into multiple messages and changed downstream batching. It went with filter-detections under rulings D2 and
+  D10.
 - `compute_schema` fixes output types at build time, so column presence and dtype are static.
 - `CompareDataFrameStage` and `ValidationStage` exist specifically for golden-file regression, and are
   the foundation of the replay harness in Part 5.
@@ -894,12 +903,14 @@ Every layer segment follows the same seven-step shape, which is the DFP pattern 
    hold it.
 5. **Feature derivation** - a second `DataFrameInputSchema` using `IncrementColumn` and
    `DistinctIncrementColumn` for novelty, plus `CustomColumn` for layer-specific ratios.
-6. **Score** - `DFPInferenceStage` against a per-entity autoencoder, `TritonInferenceStage` for a shared
-   model, or `TimeSeriesStage` for periodicity. Layers with high entity cardinality and low per-entity
+6. **Score** - `DFPInferenceStage` against a per-entity autoencoder, a shared model scored from a committed
+   file, or `TimeSeriesStage` for periodicity. Layers with high entity cardinality and low per-entity
    volume should use a shared model with the entity as a categorical feature rather than one model per entity.
    Status: `TC5ScoreStage` with a pinned manifest scores in place of `DFPInferenceStage`, and `TimeSeriesStage`
-   is not used, each for the reasons Pass 4 measured.
-7. **Emit** - `FilterDetectionsStage` (copy mode), `SerializeStage`, then `WriteToKafkaStage`.
+   is not used, each for the reasons Pass 4 measured. The two shared models score from the model inventory in
+   `TC4AbpScoreStage` and `TC7SidScoreStage`; `TritonInferenceStage`, the way upstream served one, went under the
+   audit's ruling D2.
+7. **Emit** - `SiemWireStage`, which renders each row as the SIEM event, then `WriteToKafkaStage` or a file sink.
 
 ### Where "predictive" actually comes from
 
@@ -1400,7 +1411,7 @@ explicitly in the rule documentation.
 ### TC-4: Transport
 
 **Entity key:** `flow_id` = `src_ip:src_port=dst_ip:dst_port` (the format already used in
-`abp_pcap_preprocessing.py`), plus `community_id` for cross-tool joins.
+[`abp_pcap_preprocessing.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py)), plus `community_id` for cross-tool joins.
 
 **Sources:** the same as TC-3 with per-packet detail, plus Zeek `conn.log`, plus a per-packet
 capture source. Status: no per-packet source feeds this class. The upstream DOCA path never could: its
@@ -1415,7 +1426,7 @@ collector that emits those header fields is new work. Tracked in #66.
 `handshake_duration_ms`, `connection_state`, `close_reason`, and the flag counters
 `ack`, `psh`, `rst`, `syn`, `fin`.
 
-**Behavioral features:** the thirteen features in `abp_pcap_preprocessing.py` are a validated starting
+**Behavioral features:** the thirteen features in [`abp_pcap_preprocessing.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py) are a validated starting
 set and should be adopted as-is: the five flag sums, `ppm`, `data_len`, `bpp`, `all`, and the four ratios
 `ackpush/all`, `rst/all`, `syn/all`, `fin/all`. Add: `syn` without matching `ack` per source (scanning),
 `rst` ratio per destination (closed-port probing), handshake-duration distribution shift, and TCP options
@@ -1533,11 +1544,11 @@ endpoint: `process_guid`, `parent_process_guid`, `image_path`, `command_line_has
 generation algorithms. `DistinctIncrementColumn` over `target_object_type` per principal for data access
 novelty. Record-count-per-operation deviation from the principal's baseline for bulk extraction. Ratio of
 `4xx` to `2xx` per client for enumeration (`5xx` is about the server and is excluded; see R-D-L7-005). User agent novelty per principal. Process ancestry
-novelty using the parent-child pair as a categorical. The `models/` directory ships pretrained models
-usable here: `sid-models` for sensitive information detection and `phishing-models`. The log parsing and
+novelty using the parent-child pair as a categorical. Upstream shipped two pretrained models usable
+here: the sensitive-information model, now in the fork's [model inventory](../../../../models/inventory/README.md), and `phishing-models`. The log parsing and
 ransomware models, and `AppShieldSourceStage`, which Part 0 named as the host-telemetry analogue, were removed
 with their use cases under the [repository audit](./13_repository_audit.md)'s ruling D1. This fork composes none
-of the rest, R-B-L7-003 waits on a Triton path (see Part 6), and the endpoint class reads EDR process records
+of the rest, R-B-L7-003's model scores but no saved search reads it yet (see Part 6), and the endpoint class reads EDR process records
 (gap G69, closed by the removal).
 
 What is built beyond the tunnelling and enumeration measurements: every DNS and HTTP client is measured against its
@@ -2019,7 +2030,7 @@ hop is what a single interposed device costs and the stricter reading would miss
 ### Layer 4
 
 **R-B-L4-001 - Anomalous flow profile.** Direct application of the shipped `abp-pcap-xgb` model over
-the thirteen features in `abp_pcap_preprocessing.py`, with `FilterDetectionsStage` at a tuned threshold.
+the thirteen features in [`abp_pcap_preprocessing.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py), flagged above a tuned threshold.
 
 **R-D-L4-002 - SYN without completion.** `syn/all` above 0.9 with `ack` near zero across more than 50
 distinct destination ports from one source in a 60-second bin. Deterministic port scan.
@@ -2042,10 +2053,13 @@ Four of these five ship as saved searches, reading
 {py:class}`~morpheus.stages.telemetry.tc4_envelope_stage.TC4EnvelopeStage`, and each is asserted over the
 seeded corpus in `tests/morpheus/determinism/test_transport_harness.py` together with the case beside it
 that must stay quiet. The one that does not ship is recorded here rather than left to be discovered.
-R-B-L4-001 is the shipped `abp-pcap-xgb` model behind a Triton endpoint, so what this fork owes it is the
-thirteen features under the names it was trained on; those are emitted, and `MODEL_FEATURES` maps each one
-to the column carrying it so a deployment builds the model's input frame from the mapping rather than from
-a second copy of the list.
+R-B-L4-001 is the shipped `abp-pcap-xgb` model, which upstream served from a Triton endpoint. The
+[model inventory](../../../../models/inventory/README.md) holds it converted to XGBoost's JSON format beside the digest of the upstream file, and
+{py:class}`~morpheus.stages.telemetry.tc4_abp_score_stage.TC4AbpScoreStage` scores it on the CPU over the
+thirteen features under the names it was trained on: `MODEL_FEATURES` maps each one to the column carrying it,
+so the stage builds the model's input frame from the mapping rather than from a second copy of the list. Each
+row carries `abp_score`, `abp_anomalous` above the threshold of 0.5 that the upstream configuration set, and
+`abp_model_version`. No saved search reads the score yet, so the rule is a score rather than a detection.
 
 Four departures from the text above are deliberate, and each is recorded where it is made. **R-B-L4-004 joins on
 the machine, not the flow.** The stack is read off the SYN at layer 4 and the claim off the request at layer 7,
@@ -2064,7 +2078,7 @@ R-B-L4-005 fires on either `bpp` or `data_len` rather than on both, because a bu
 thousand ordinary-sized packets leaves `bpp` exactly where it has always been -- which is the common shape
 and the one that requiring both would miss.
 
-Three departures from `abp_pcap_preprocessing.py` are corrections rather than preferences, and they are
+Three departures from [`abp_pcap_preprocessing.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py) are corrections rather than preferences, and they are
 the reason this layer took a stage of its own rather than a call into the example. The rollup is a running
 total per flow per bin instead of a group within whatever message the stream happened to be chunked into,
 which is the defect determinism control 5 exists to catch and the same one the layer 5 scoring adapter was
@@ -2286,8 +2300,7 @@ principal's own 30-day 99th percentile by more than 5x, weighted by the target o
 classification from TC-0.
 
 **R-B-L7-003 - Sensitive data in transit.** The shipped SID model over request and response bodies at
-an egress point, using `TritonInferenceStage` with `AddClassificationsStage` mapped to
-`config.class_labels`.
+an egress point, each of its ten labels present above its threshold.
 
 **R-B-L7-004 - Process ancestry novelty.** A `(parent_image_path, image_path)` pair not seen on the
 host or in its peer group in 30 days, weighted by `integrity_level` and by the host's criticality in the asset
@@ -2361,8 +2374,12 @@ every day, an editor installed under another user's profile, a pair the host ran
 four days old. Its severity is the integrity weight scaled by the inventory's criticality -- half again for a host
 called high, half for one called low -- and the host's owner rides on the notable. A host is keyed with
 {py:func}`~morpheus.utils.entity_key.normalize_hostname`, so an EDR that starts spelling `fin-01` as `FIN-01`
-partway through the corpus, as an agent upgrade does, leaves one host with one history, which the harness asserts. One is not built. R-B-L7-003 needs a running Triton server, and nothing in this fork's CI can fire
-it.
+partway through the corpus, as an agent upgrade does, leaves one host with one history, which the harness asserts. One has a score but no search:
+{py:class}`~morpheus.stages.telemetry.tc7_sid_score_stage.TC7SidScoreStage` scores R-B-L7-003's model on the CPU
+from the [model inventory](../../../../models/inventory/README.md), reading a body longer than the model's 256 tokens in windows every 64 tokens as
+upstream recorded, and writes each label's probability, `sid_labels` and `sid_model_version`. Over the 2,000
+payloads of the validation set the model shipped with, it decides 19,982 of the 20,000 labels correctly. No saved
+search reads it yet.
 
 Three decisions the text above leaves open are made here. **Entropy is measured below the registered domain.**
 Ordinary names score 3.0 to 3.7 bits per character as whole names but 0 to 2.3 once the registered domain is
@@ -3596,8 +3613,9 @@ Batch composition varies with upstream timing. Three mitigations, in order of pr
 1. **Verify batch invariance.** Score a fixed corpus at `model_max_batch_size` of 1, 8, and 64 and assert
    the outputs match within tolerance. If they do not, the model has a batch-dependent operation, most
    commonly batch normalization in training mode. Fix the model.
-2. **Disable Triton dynamic batching** for scoring models. Set `max_queue_delay_microseconds` to 0 or
-   remove the `dynamic_batching` block from the model configuration entirely.
+2. **Disable dynamic batching** where a model server scores. In Triton, set `max_queue_delay_microseconds` to
+   0 or remove the `dynamic_batching` block from the model configuration entirely. The fork's two shipped
+   models score inside the pipeline instead, on one thread.
 3. **Fix the batch boundary deterministically.** Batch by window and entity rather than by arrival, so
    batch membership is a function of the data rather than of timing.
 
@@ -4214,7 +4232,7 @@ Pass 4 measures each of these and records which the fork reuses.
   {py:class}`~morpheus.stages.telemetry.tc4_envelope_stage.TC4EnvelopeStage`, composed in
   `tests/morpheus/determinism/transport_pipeline.py`). `morpheus:score:l4` has a producer, which takes the
   unproduced stanza count from five to four. This is the first layer whose features were fixed by a model
-  somebody else trained, so the thirteen in `abp_pcap_preprocessing.py` are adopted unchanged and
+  somebody else trained, so the thirteen in [`abp_pcap_preprocessing.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py) are adopted unchanged and
   `MODEL_FEATURES` maps each to the column carrying it. Three things about how the reference computes them are
   changed, and each is a correctness point rather than a preference: the rollup is a running total rather than
   a group within whatever message the stream was chunked into, the bin is floored and half-open like every
@@ -4530,7 +4548,7 @@ reconciliation, the read contracts and fork CI, the provenance columns, the laye
 | Envelope validation, clock quarantine, collector and pipeline health, late-arrival delivery, platform baselines | Medium | Built, in step 11. Every corpus record carries `observed_time`, `ingest_time`, `clock_source`, `clock_offset_ms`, `sampling_policy` and `tenant_id`, and every layer 3 flow `exporter_id`. `EnvelopeValidateStage` stamps `ingest_time`, marks a missing field that has no stated reason, and quarantines a record whose clock is unsynchronized or more than a second out: the telemetry corpus's DMZ poller, three polls at 4500 ms, reaches `morpheus:quarantine` and nothing else. `CollectorSequenceStage` finds the ARP sensor's three undelivered records; `PipelineHealthStage` writes 851 `morpheus:health` records over the sample events, and its per-feed baseline steps on the SaaS corpus's doubling tenant alone. Nine more stateful stages refuse a far-future time; a late flow reaches `morpheus:late` and no detection, and every detection reads `window_complete=true`. Four reports ship with expectations, and Part 2 gains TC-P. The layer 3 to 7 window stages' clocks are guarded too: the fifteen stateful TC-3 to TC-7 stages and `WindowSealStage` take `max_clock_skew_seconds`, a row further ahead of the stream than it allows enters no window, moves no watermark and sets `clock_refused`, and the sealer emits such a row in its own `sealed_by=refused` message rather than letting one far-future row seal every open window. What is not built: correcting an event time by the offset a collector reports |
 | Device telemetry class and R-C-003 | Large | Built, in step 15. A `tc1_device` sub-class keyed `site_id:device_id` carries the device's own poll, and `TC1DeviceStage` reads a restart from `sysUpTime` as the counter normalization does, measures restarts per period against the device's own thirty days and counts the periods running that each held more, which R-P-L1-009 reads, places a configuration change against the estate's change window, which R-D-L1-008 reads, and differences the routing table. The `Device restart` report reads the device's restart first and gathers its ports' flags beside it. `TC2CardinalityStage` keeps OUI novelty per port as `oui_first_seen_on_port`, the closed binding carries `oui`, and `TC3ReachStage` writes `dst_is_management` from the estate's prefixes, with a `vlan_designations` lookup on the search head. R-C-003 ships, over a rogue-host actor in the campaign corpus, which now holds layers 1, 2 and 3 at headquarters, with three controls each one condition short. What remains: the gauges -- `cpu_util`, `mem_util`, `syslog_rate`, `bgp_peer_count` -- are carried and read by no rule; a change window is one window for the estate rather than one per device or per day; and the management prefixes are given to the stage and to the lookup separately, so the two can disagree. Tracked in #65 |
 | Service and application entity | Large | Built, in step 13. `TC7ServiceStage` keys a service on `sni:dst_port`, or `dst_ip:dst_port` without a name, and measures its connections, bytes and distinct clients per window, new client fingerprints, and its clients against its own busiest day; R-B-L7-007 reads it. DNS and HTTP clients are measured against their own busiest day, and R-B-L7-001 and R-D-L7-005 threshold the ratio with the literal as a floor; `TC7DnsStage` reads `response_code` into an NXDOMAIN ratio and counts distinct registered domains per client, and R-B-L7-008 reads both; `TC7HttpStage` reads the user agent into a family, an operating system and per-client novelty. `TC6CertificateStage` keys a destination on `dst_ip:sni`, and R-D-L6-002 groups on it. TC-0 gains an `application` kind keyed `address:port` and carrying `service_account` and `owning_team`, produced by `TC0ApplicationStage` on `context:application` and attached as `ctx_application_*` at layers 4, 6 and 7; the context corpus reassigns a server and records it late. `TC4FlowStage` carries the options, segment size and window of each SYN packet into a per-host `stack_fingerprint`, and R-B-L4-004 ships as a join on `host_key` rather than on a flow. What remains: `client_app` is still read by nothing; a SaaS application is not yet an entity of its own, only the servers that answer for one; the 5xx ratio is not measured per service; and user agent novelty is per client, not per principal. Gaps G10, G29, G49, G50, G51 and G77 are closed by #64 |
-| Triton-backed rules R-B-L4-001 and R-B-L7-003 | Medium | Specified over the `abp` features and over request bodies; no fork pipeline composes `TritonInferenceStage` and no `Scorer`-protocol adapter exists for layers 4 or 7 the way `ReferenceScorer` and `DfencoderScorer` do for layer 5. Both need a Triton endpoint and a GPU path CPU CI cannot exercise; revisit once the per-user model's CPU inference path exists as the pattern to copy. Not scheduled; recorded as gap G48 in the retrospective |
+| Model rules R-B-L4-001 and R-B-L7-003 | Medium | Scored, under the repository audit's ruling D2. Both models moved into `models/inventory`, which records each file's digest and upstream provenance; `TC4AbpScoreStage` scores the ABP booster through XGBoost and `TC7SidScoreStage` the SID model through ONNX Runtime, both on the CPU and both in the CI tiers, and every score carries the version of the file that produced it. The Triton path is removed. What remains: no saved search reads either score, so neither rule is a detection yet. Gap G48 in the retrospective |
 | Entity sharding router configuration | Small | `RouterStage` wiring. The stable hash it needs already ships as {py:mod}`~morpheus.utils.sharding`; what remains is the pipeline configuration around it, asserted equal to the unsharded golden under control 13. Tracked in #66 |
 | Runnable segment compositions and SIEM transport | Large | The runners are built, in step 16: `examples/behavioral_analytics/run_<segment>.py` for all ten segments, the host segment among them, reads one JSON lines file per class with `FileSourceStage`, runs the segment's composition, and ends in `MinimizationStage`, `SiemWireStage` and a new `SiemWireSinkStage`, which writes a file or a Kafka topic per sourcetype with null fields left out, as neither generic writer does. Beside the scored stream every runner writes `morpheus:health` through `PipelineHealthStage` as `envelope.health` runs it for the harnesses, and `morpheus:edge` through `EdgeEmitStage` for a segment whose corpus module names its hops in `EDGE_HOPS`, so the two forwarder monitors that had nothing to read are fed. `--state` restores every stage's memory on start and checkpoints on stop, and `test_segment_runners.py` holds each runner's output to its composition line for line, restarts three segments halfway with equal output, and finds no principal in any segment's output under the example policy. One health count is still normalized in that restart check: `fallback`, because `envelope.health` drops a column that is null on every row of the frame it is given before `PipelineHealthStage` reads it, and `model_fallback_used` is null on the whole fortnight before the scored week, so a run stopped inside the fortnight answers nothing where the whole replay answers zero. The repair is upstream of the health stage, a score stage writing false rather than null where no manifest covers the row, and is not made yet. Building them found two more NaN-identity defects: `TC6ContentStage` counted a missing content type as present, and `MinimizationStage`'s copy check matched a gap in a digested column to a gap in a kept one. The compositions still live beside their corpora, and the runners import them. The transport is configured: `examples/splunk_lineage_app/transport/` holds a Splunk Connect for Kafka sink over one topic per sourcetype, posting to the raw endpoint so the `props.conf` stanzas set `_time`, and an `inputs.conf` with the HEC token and a forwarder monitor per runner file, all rendered from the sourcetype inventory and held to it, to the app and to the runners' own naming by `test_splunk_transport.py`. Every one of the fifty-eight stages is a `morpheus run pipeline-other` command, and `test_lineage_stage_cli.py` builds each one and holds the nine compositions in the example README to the CLI; widening it found three constructors the CLI could not build and that an absent list option reached a stage as an empty tuple rather than its None default, which is repaired in `register_stage`. The sharding variant is built: `session_pipeline.run_pipeline(shards=N)` runs the layer 5 composition as control 4 describes, over `ShardSplitStage` and `RouterStage` keyed on `stable_shard`, and the harness holds it to the unsharded golden on every column about an entity, with the three stream-accounting columns (`sealed_by`, `day_sealed_by`, `session_abandoned`) named as the ones a branch decides for itself, and a negative control that splits a principal across branches and changes the features. The real-feed normalizations are in the row below. Tracked in #66 |
 | Per-class collector input contracts, samples and layer 3-7 normalization schemas | Medium | The contracts and samples are built, in step 16: `examples/behavioral_analytics/input_contracts.json` names the type, unit, collector-side source and whether it is required for every column of all twenty input classes, `collector_contract.md` is rendered from it, each segment's corpus is exported to `samples/<segment>/<class>.jsonlines`, and `test_input_contracts.py` holds all eleven corpus builders to the contract and the committed files to what the builders build. The normalization is built too: `FlowRecordNormalizeStage` takes IPFIX, decoded from a packet capture by `morpheus.utils.ipfix` (RFC 7011 templates scoped per exporter and observation domain, RFC 5103 reverse counters), into the TC-3 record, `exporter_id` included, and `morpheus.utils.collector_schemas` holds one `DataFrameInputSchema` per layer 5, 6 and 7 sub-class -- Microsoft Entra ID sign-in records, Zeek `ssl.log` joined to `x509.log`, `http.log`, `dns.log`, the Microsoft 365 unified audit log and Windows System Monitor event 1 joined to the event 7 of its own image -- with Zeek read through `parsers/zeek.py`, whose pandas path could not read a standard Zeek header and now does. The sign-in mapping is the one `examples/upstream_reuse/evaluate.py` measures as its `azure` source, and a test holds the two to each other. `examples/behavioral_analytics/fixtures/` renders seven committed samples in those formats, and `test_collector_schemas.py` holds each normalized fixture to its sample column for column and the network, session, application, SaaS and endpoint segments run over them to the files they write from the samples, byte for byte. Zeek cannot carry what an inspecting proxy saw inside a TLS session, so `content_type_declared` and `content_type_detected` are null from it, and a cloud identity provider has no on-premises `target_host`, so that is null from the Entra ID schema; the test asserts both rather than excusing them. What remains is a per-packet source for `TC4FlowStage`. The upstream DOCA path could not be that source, since its `DocaConvertStage` emitted only `src_ip` and the payload, and the repository audit's ruling D1 removed it; a per-packet collector is new work. The collectors themselves remain out of scope. Tracked in #66 |
@@ -4840,7 +4858,7 @@ this order:
    `lineage_id` construction, the Splunk edge index, and the chain query on a two-layer chain before
    scaling it to seven. R-C-004 is the target.
 3. **Layers 3 and 4 third.** Highest volume, so it benefits most from the operational lessons of steps 1
-   and 2. `community_id` from day one. The `abp_pcap_detection` example is the template.
+   and 2. `community_id` from day one. The upstream [`abp_pcap_detection`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection) example was the template.
 4. **Layer 6 fourth.** Small, high-signal, and cheap once layers 3 and 4 exist, since it rides the same
    collection points. R-B-L6-001 is one of the best rules in the set relative to its cost.
 5. **Layers 1 and 2 last.** Highest collection effort, lowest standalone detection value, but they

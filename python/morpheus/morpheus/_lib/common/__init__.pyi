@@ -12,7 +12,6 @@ import os
 __all__ = [
     "FiberQueue",
     "FileTypes",
-    "FilterSource",
     "HttpEndpoint",
     "HttpServer",
     "IndicatorsFontStyle",
@@ -76,43 +75,6 @@ class FileTypes():
     JSON: morpheus._lib.common.FileTypes # value = <FileTypes.JSON: 1>
     PARQUET: morpheus._lib.common.FileTypes # value = <FileTypes.PARQUET: 3>
     __members__: dict # value = {'Auto': <FileTypes.Auto: 0>, 'JSON': <FileTypes.JSON: 1>, 'CSV': <FileTypes.CSV: 2>, 'PARQUET': <FileTypes.PARQUET: 3>}
-    pass
-class FilterSource():
-    """
-    Enum to indicate which source the FilterDetectionsStage should operate on.
-
-    Members:
-
-      Auto
-
-      TENSOR
-
-      DATAFRAME
-    """
-    def __eq__(self, other: object) -> bool: ...
-    def __getstate__(self) -> int: ...
-    def __hash__(self) -> int: ...
-    def __index__(self) -> int: ...
-    def __init__(self, value: int) -> None: ...
-    def __int__(self) -> int: ...
-    def __ne__(self, other: object) -> bool: ...
-    def __repr__(self) -> str: ...
-    def __setstate__(self, state: int) -> None: ...
-    def __str__(self) -> str: ...
-    @property
-    def name(self) -> str:
-        """
-        :type: str
-        """
-    @property
-    def value(self) -> int:
-        """
-        :type: int
-        """
-    Auto: morpheus._lib.common.FilterSource # value = <FilterSource.Auto: 0>
-    DATAFRAME: morpheus._lib.common.FilterSource # value = <FilterSource.DATAFRAME: 2>
-    TENSOR: morpheus._lib.common.FilterSource # value = <FilterSource.TENSOR: 1>
-    __members__: dict # value = {'Auto': <FilterSource.Auto: 0>, 'TENSOR': <FilterSource.TENSOR: 1>, 'DATAFRAME': <FilterSource.DATAFRAME: 2>}
     pass
 class HttpEndpoint():
     def __init__(self, py_parse_fn: typing.Callable, url: str, method: str, include_headers: bool = False) -> None: ...

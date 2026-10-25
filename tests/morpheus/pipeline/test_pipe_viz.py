@@ -29,9 +29,9 @@ from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.pipeline.pipeline import Pipeline
 from morpheus.pipeline.pipeline import PipelineState
+from morpheus.stages.general.monitor_stage import MonitorStage
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
-from morpheus.stages.postprocess.add_classifications_stage import AddClassificationsStage
 from morpheus.stages.postprocess.serialize_stage import SerializeStage
 from morpheus.stages.preprocess.deserialize_stage import DeserializeStage
 
@@ -41,15 +41,14 @@ def viz_pipeline_fixture(config: Config, dataset_cudf: DatasetManager):
     """
     Creates a quick pipeline.
     """
-    config.class_labels = ['frogs', 'lizards', 'toads', 'turtles']
     config.num_threads = 1
 
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, [dataset_cudf["filter_probs.csv"]]))
     pipe.add_stage(DeserializeStage(config))
     pipe.add_stage(ConvMsg(config, dataset_cudf["filter_probs.csv"]))
-    pipe.add_stage(AddClassificationsStage(config))
-    pipe.add_stage(SerializeStage(config, include=[f"^{c}$" for c in config.class_labels]))
+    pipe.add_stage(MonitorStage(config))
+    pipe.add_stage(SerializeStage(config))
     pipe.add_stage(InMemorySinkStage(config))
 
     return pipe

@@ -81,24 +81,26 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,544 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,229 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
-corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples), less the 875 files removed since: three under ruling D5, and 224 in the language-model part
-of D1, 48 in its DOCA part and 384 in its security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its
-digital fingerprinting part and 120 under ruling D7.
+corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
+and the sixteen ruling D2 added (four model inventory files, six modules and their six tests), less the 1,206 files
+removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
+security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
+ruling D7 and 331 under ruling D2.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 601 |
-| `keep-dependency` | 413 |
-| `keep` | 382 |
-| `update` | 148 |
+| `remove` | 273 |
+| `keep-dependency` | 412 |
+| `keep` | 399 |
+| `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
 organization workflows the fork modified, and three were its own: `TC1FeatureStage`, its utility module and
 its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1, the 48 of its DOCA part, the
-384 of its security-examples part and the 96 of its digital fingerprinting part, and the 120 of D7, so 601 remain
-marked.
+384 of its security-examples part and the 96 of its digital fingerprinting part, the 120 of D7 and the 327 of D2.
+D2 kept one file the audit had marked, the SID validation set, which moved with the model. That leaves 273 marked.
 
 Between the passes, the second readers moved files in both directions:
 
@@ -228,7 +230,28 @@ The removals land as one change per ruling, in this order, each with the `update
    page's MLflow section and guide 1's Loki example. Guides 5 and 10, which describe that example, went with D7;
    `tests/morpheus_dfp` (D4) and `tests/benchmarks` (D1 and D2), which still name its paths, go with their rulings; and
    `fetch_example_data.py` waits for the dataset README that links it. The remaining examples follow.
-3. **D2**, after the fork model inventory exists to receive the two models.
+3. **D2**, after the fork model inventory exists to receive the two models. Done on 2026-10-25. `models/inventory`
+   holds both with each file's sha256, the settings the model was trained under and its upstream path and digest:
+   the ABP booster converted from XGBoost's legacy binary format, which XGBoost 3 cannot read, to JSON with a
+   220-row check that the conversion changed no margin, and the SID model as ONNX with its vocabulary, GPU hash
+   table and labels. `TC4AbpScoreStage` and `TC7SidScoreStage` score them on the CPU, through XGBoost and through
+   ONNX Runtime behind a WordPiece tokenizer that gives Hugging Face's ids, and both run in the CPU tiers; the lock
+   file gains `xgboost` and `onnxruntime`, and the CPU workflow fetches the inventory's LFS objects. Then 327 files
+   marked for removal went: the inference, preprocessing, add-scores, add-classifications and filter-detections
+   stages with their messages, memories, C++ sources, bindings and tests, the mock Triton server and its payloads,
+   the Triton model repository, the model containers and MLflow plugin, the benchmarks, the ABP packet-capture and
+   NLP SI examples, the validation harness under `scripts/validation`, the kitchen-sink figure and the test data only
+   the removed C++ tests read. Four rows not marked for removal went with them, each replaced or orphaned by the
+   change: the ABP booster's original `.bst` and its Triton configuration, both superseded by the converted model,
+   whose inventory record carries their digests; the SID model's PyTorch file, the same model the ONNX file is;
+   and `FilterDetectionsController`, whose only users were the filter-detections stage and module (D10). The SID
+   validation set, marked for removal, moved with the model instead, as its second reader proposed, because it is
+   what the SID scorer's test holds the model to. The command line, the stages page, the CLI and getting-started
+   pages, the models pages, the workspace file, `dependencies.yaml` and the generated environments, the release
+   script, guide 11's model rules and guide 12's G48 were edited with it. `morpheus_dfp`'s inference pipe module, marked
+   for removal under D4, loaded the filter-detections module and no longer imports; nothing kept imports it. The model-utils environment, the
+   phishing and ABP `nvsmi` models, and their training and validation scripts were held back for D2's tests and are
+   no longer: they go with D1's remainder.
 4. **D7**, then **D6**. D7 went on 2026-10-25, ahead of D2 and D6 because nothing either of them needs is in it: guides
    2 to 8 and 10 with their images, the module and loader reference pages, and the developer-guide examples the guides
    include, which D1 had held back for them (phishing, RabbitMQ in Python and C++, the simple C++ stage and the Python

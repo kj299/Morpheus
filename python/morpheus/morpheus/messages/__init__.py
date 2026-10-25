@@ -20,13 +20,6 @@ Message classes, which contain data being transfered between pipeline stages
 
 from morpheus._lib.messages import DataLoaderRegistry
 from morpheus.messages.memory.tensor_memory import TensorMemory
-from morpheus.messages.memory.inference_memory import InferenceMemory
-from morpheus.messages.memory.inference_memory import InferenceMemoryAE
-from morpheus.messages.memory.inference_memory import InferenceMemoryFIL
-from morpheus.messages.memory.inference_memory import InferenceMemoryNLP
-from morpheus.messages.memory.response_memory import ResponseMemory
-from morpheus.messages.memory.response_memory import ResponseMemoryAE
-from morpheus.messages.memory.response_memory import ResponseMemoryProbs
 from morpheus.messages.message_base import MessageBase
 from morpheus.messages.message_meta import MessageMeta
 from morpheus.messages.message_meta import UserMessageMeta
@@ -37,15 +30,8 @@ __all__ = [
     "ControlMessage",
     "ControlMessageType",
     "DataLoaderRegistry",
-    "InferenceMemory",
-    "InferenceMemoryAE",
-    "InferenceMemoryFIL",
-    "InferenceMemoryNLP",
     "MessageBase",
     "MessageMeta",
-    "ResponseMemory",
-    "ResponseMemoryAE",
-    "ResponseMemoryProbs",
     "TensorMemory",
     "UserMessageMeta",
 ]
