@@ -23,15 +23,7 @@ Developer Guides
    :maxdepth: 20
 
    ./1_simple_python_stage.md
-   ./2_real_world_phishing.md
-   ./3_simple_cpp_stage.md
-   ./4_source_cpp_stage.md
-   ./5_digital_fingerprinting.md
-   ./6_digital_fingerprinting_reference.md
-   ./7_python_modules.md
-   ./8_cpp_modules.md
    ./9_control_messages.md
-   ./10_modular_pipeline_digital_fingerprinting.md
    ./11_predictive_behavioral_analytics_osi.md
    ./12_behavioral_analytics_retrospective.md
    ./13_repository_audit.md

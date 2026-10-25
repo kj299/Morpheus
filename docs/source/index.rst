@@ -130,20 +130,6 @@ Modifying Morpheus
    stages/morpheus_stages
 
 .. toctree::
-   :caption: Morpheus Modules
-   :maxdepth: 20
-   :hidden:
-
-   modules/index
-
-.. toctree::
-   :caption: Morpheus Loaders
-   :maxdepth: 20
-   :hidden:
-
-   loaders/index
-
-.. toctree::
    :maxdepth: 20
    :caption: Extra Information
    :hidden:

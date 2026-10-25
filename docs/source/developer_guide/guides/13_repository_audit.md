@@ -81,15 +81,15 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,664 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,544 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
-corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples), less the 755 files removed since: three under ruling D5, and 224 in the language-model part
-of D1, 48 in its DOCA part and 384 in its security-examples part, all on 2026-10-24, and 96 in its digital
-fingerprinting part on 2026-10-25.
+corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples), less the 875 files removed since: three under ruling D5, and 224 in the language-model part
+of D1, 48 in its DOCA part and 384 in its security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its
+digital fingerprinting part and 120 under ruling D7.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 721 |
+| `remove` | 601 |
 | `keep-dependency` | 413 |
 | `keep` | 382 |
 | `update` | 148 |
@@ -97,7 +97,8 @@ fingerprinting part on 2026-10-25.
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
 organization workflows the fork modified, and three were its own: `TC1FeatureStage`, its utility module and
 its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1, the 48 of its DOCA part, the
-384 of its security-examples part and the 96 of its digital fingerprinting part, so 721 remain marked.
+384 of its security-examples part and the 96 of its digital fingerprinting part, and the 120 of D7, so 601 remain
+marked.
 
 Between the passes, the second readers moved files in both directions:
 
@@ -224,11 +225,18 @@ The removals land as one change per ruling, in this order, each with the `update
    production, demo and visualization examples and the `external/morpheus-visualizations` submodule, with their
    `.gitattributes`, `.gitignore` and `.gitmodules` entries, the `dfp_example` environment and its container dependency
    group, the `conf.py` path, the workspace analysis path, the release script's steps for them, the troubleshooting
-   page's MLflow section and guide 1's Loki example. Guides 5 and 10, which describe that example, go with D7;
+   page's MLflow section and guide 1's Loki example. Guides 5 and 10, which describe that example, went with D7;
    `tests/morpheus_dfp` (D4) and `tests/benchmarks` (D1 and D2), which still name its paths, go with their rulings; and
    `fetch_example_data.py` waits for the dataset README that links it. The remaining examples follow.
 3. **D2**, after the fork model inventory exists to receive the two models.
-4. **D6**, then **D7**.
+4. **D7**, then **D6**. D7 went on 2026-10-25, ahead of D2 and D6 because nothing either of them needs is in it: guides
+   2 to 8 and 10 with their images, the module and loader reference pages, and the developer-guide examples the guides
+   include, which D1 had held back for them (phishing, RabbitMQ in Python and C++, the simple C++ stage and the Python
+   modules), with their tests and `examples/CMakeLists.txt`. Guide 2's constructor and needed-columns section moved into
+   guide 1 and guide 6's schema reference into guide 11 first. The documentation indexes, the `MORPHEUS_BUILD_EXAMPLES`
+   option, the release and CMake CI scripts, the CPU-only page's example list, the pass-through test of the C++ example
+   and the C++ test that quoted guide 3 were edited with it. The phishing tests and Triton mocks that are not the
+   example's own still go with D2.
 5. **D4**'s remainder, after the evidence is cited by permalink.
 
 For each, the paths come from the removal list, selected by the ruling's directories, and the edits from the

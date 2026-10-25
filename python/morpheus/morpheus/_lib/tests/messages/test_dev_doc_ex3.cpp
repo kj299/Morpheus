@@ -32,14 +32,13 @@
 using namespace morpheus;
 using namespace morpheus::test;
 
-class TestDevDocEx3 : public morpheus::test::TestWithPythonInterpreter
+class TestMutableInfoCheckout : public morpheus::test::TestWithPythonInterpreter
 {};
 
-TEST_F(TestDevDocEx3, TestPyObjFromMultiMesg)
+TEST_F(TestMutableInfoCheckout, TestPyObjFromMultiMesg)
 {
-    // Test to verify that the lambda in docs/source/developer_guide/guides/3_simple_cpp_stage.md
-    // compiles and runs correctly.
-    // If you have to make a change here to ensure the test passes, please update the documentation
+    // Checks out the mutable info of a message's payload, deep-copies the DataFrame, returns the original and
+    // wraps the copy in a new MessageMeta.
     using namespace pybind11::literals;
     pybind11::gil_scoped_release no_gil;
 

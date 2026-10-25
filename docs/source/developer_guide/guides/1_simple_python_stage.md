@@ -116,7 +116,7 @@ from morpheus.pipeline.single_port_stage import SinglePortStage
 class PassThruStage(PassThruTypeMixin, GpuAndCpuMixin, SinglePortStage):
 ```
 
-There are four methods that need to be defined in our new subclass to implement the stage interface: `name`, `accepted_types`, `compute_schema`, `supports_cpp_node`, and `_build_single`. In practice, it is often necessary to define at least one more method which will perform the actual work of the stage; by convention, this method is typically named `on_data`, which we will define in our examples.
+There are five methods that need to be defined in our new subclass to implement the stage interface: `name`, `accepted_types`, `compute_schema`, `supports_cpp_node`, and `_build_single`. In practice, it is often necessary to define at least one more method which will perform the actual work of the stage; by convention, this method is typically named `on_data`, which we will define in our examples.
 
 `name` is a property method; it should return a user-friendly name for the stage. Currently, this property is only used for debugging purposes, and there are no requirements on the content or format of the name. However by convention the string returned by this method should be the same as the string passed to the `register_stage` decorator.
 ```python
@@ -179,6 +179,110 @@ Finally, we will return our node.
 ```python
 return node
 ```
+
+### Stage Constructors
+
+Our pass through stage needs no constructor, but most stages do. Every stage constructor receives a {py:class}`~morpheus.config.Config` instance as its first argument and is then free to define stage-specific arguments after it. The `Config` holds parameters shared by several stages in the pipeline, which any constructor may inspect; a parameter specific to one stage is a constructor argument. Validate the arguments in the constructor and raise an exception when they are wrong, so the pipeline fails before it starts rather than after.
+
+A stage that adds columns to the DataFrame can also ask Morpheus to pre-allocate them, with null values, when the DataFrame is first constructed. It does so by populating the `_needed_columns` attribute in its constructor with each column's name and type.
+
+The following stage counts the recipients of an email and joins the counts to the message body with a separator token received as a constructor argument. The argument is documented in the [`numpydoc`](https://numpydoc.readthedocs.io/en/latest/format.html#parameters) style, which documents it for both API and command line users:
+
+```python
+import mrc
+from mrc.core import operators as ops
+
+from morpheus.cli.register_stage import register_stage
+from morpheus.common import TypeId
+from morpheus.config import Config
+from morpheus.messages import MessageMeta
+from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
+from morpheus.pipeline.single_port_stage import SinglePortStage
+
+
+@register_stage("recipient-features")
+class RecipientFeaturesStage(PassThruTypeMixin, SinglePortStage):
+    """
+    Pre-processing stage which counts the number of recipients in an email's metadata.
+
+    Parameters
+    ----------
+    config : morpheus.config.Config
+        Pipeline configuration instance.
+    sep_token : str
+        Separator token placed between the counts and the message body.
+    """
+
+    def __init__(self, config: Config, sep_token: str = '[SEP]'):
+        super().__init__(config)
+
+        if len(sep_token) > 0:
+            self._sep_token = sep_token
+        else:
+            raise ValueError("sep_token cannot be an empty string")
+
+        # The columns this stage adds, pre-allocated by Morpheus with null values.
+        self._needed_columns.update({
+            'to_count': TypeId.INT32,
+            'bcc_count': TypeId.INT32,
+            'cc_count': TypeId.INT32,
+            'total_recipients': TypeId.INT32,
+            'data': TypeId.STRING
+        })
+
+    @property
+    def name(self) -> str:
+        return "recipient-features"
+
+    def accepted_types(self) -> tuple:
+        return (MessageMeta, )
+
+    def supports_cpp_node(self) -> bool:
+        return False
+
+    def on_data(self, message: MessageMeta) -> MessageMeta:
+        # Open the DataFrame from the incoming message for in-place modification
+        with message.mutable_dataframe() as df:
+            df['to_count'] = df['To'].str.count('@')
+            df['bcc_count'] = df['BCC'].str.count('@')
+            df['cc_count'] = df['CC'].str.count('@')
+            df['total_recipients'] = df['to_count'] + df['bcc_count'] + df['cc_count']
+
+            # Attach features to string data
+            df['data'] = (df['to_count'].astype(str) + self._sep_token + df['bcc_count'].astype(str) +
+                          self._sep_token + df['cc_count'].astype(str) + self._sep_token +
+                          df['total_recipients'].astype(str) + self._sep_token + df['Message'])
+
+        return message
+
+    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
+        node = builder.make_node(self.unique_name, ops.map(self.on_data))
+        builder.make_edge(input_node, node)
+
+        return node
+```
+
+The `stage` decorator takes the same columns as its `needed_columns` argument, and exposes a keyword-only argument such as `sep_token` as a constructor argument:
+
+```python
+from morpheus.common import TypeId
+from morpheus.messages import MessageMeta
+from morpheus.pipeline.stage_decorator import stage
+
+
+@stage(
+    needed_columns={
+        'to_count': TypeId.INT32,
+        'bcc_count': TypeId.INT32,
+        'cc_count': TypeId.INT32,
+        'total_recipients': TypeId.INT32,
+        'data': TypeId.STRING
+    })
+def recipient_features_stage(message: MessageMeta, *, sep_token: str = '[SEP]') -> MessageMeta:
+    ...
+```
+
+> **Note**: A decorated function cannot work out its `needed_columns` at runtime from its arguments; a class can, in its constructor.
 
 ## Putting the Stage Together
 ```python

@@ -535,6 +535,67 @@ DistinctIncrementColumn(name="appincrement", dtype=int, input_name="appDisplayNa
 Note the ordering dependency: both are cumulative and therefore only well-defined given a total order on
 rows. Part 5 treats this as a first-class determinism requirement.
 
+#### Schema reference
+
+A {py:class}`~morpheus.utils.column_info.DataFrameInputSchema` names every column the output `DataFrame` will
+have. A column in the input that is in neither `column_info` nor `preserve_columns` does not appear in the output;
+the exception is a JSON field listed in `json_columns`, which is flattened first, so `column_info` can read the keys
+nested inside it. Flattening is its own step: `prep_dataframe` flattens the JSON columns and keeps only the columns the
+schema reads, and `process_dataframe` then applies `column_info`. For a JSON field `event` holding an ISO 8601
+`timestamp` key:
+
+```python
+from datetime import datetime
+
+from morpheus.utils.column_info import DataFrameInputSchema
+from morpheus.utils.column_info import DateTimeColumn
+from morpheus.utils.column_info import process_dataframe
+```
+```python
+schema = DataFrameInputSchema(json_columns=['event'],
+                              column_info=[DateTimeColumn(name='timestamp', dtype=datetime, input_name='event.timestamp')])
+
+df = process_dataframe(schema.prep_dataframe(df).df, schema)
+```
+
+The `event` field is flattened into `event.`-prefixed columns, and `event.timestamp` is parsed into a `datetime`
+column named `timestamp`. When `name` and `input_name` are the same the column is overwritten; when they differ a new
+one is created.
+
+| Argument | Type | Description |
+| -------- | ---- | ----------- |
+| `json_columns` | `List[str]` | JSON columns to flatten with [`pandas.json_normalize`](https://pandas.pydata.org/docs/reference/api/pandas.json_normalize.html); a key `id` in a field `user` becomes the column `user.id`. Defaults to an empty `list`. |
+| `column_info` | `List[ColumnInfo]` | One `ColumnInfo` per output column: renames, type conversions and computed columns. Defaults to an empty `list`. |
+| `preserve_columns` | `List[str]` or `str` | Regular expressions naming input columns to carry through unchanged. Defaults to an empty `list`. |
+| `row_filter` | `function` or `None` | Called last with the `DataFrame` as its only argument; returns a `DataFrame`. |
+
+Every `ColumnInfo` takes `name` (the output column) and `dtype` (any type string or Python class
+[pandas recognizes](https://pandas.pydata.org/docs/user_guide/basics.html#dtypes)). The subclasses add:
+
+| Class | Subclass of | Further arguments |
+| ----- | ----------- | ----------------- |
+| `CustomColumn` | `ColumnInfo` | `process_column_fn`, called with the whole `DataFrame` and returning the new [`pandas.Series`](https://pandas.pydata.org/docs/reference/api/pandas.Series.html); `input_column_types`, the input columns and `dtype` strings it needs (naming them improves performance). |
+| `RenameColumn` | `ColumnInfo` | `input_name`, the original column. |
+| `BoolColumn` | `RenameColumn` | `true_values` and `false_values`, the strings read as true and false; `true_value` and `false_value`, what to store instead of `True` and `False` (for example `1` and `0`). |
+| `DateTimeColumn` | `RenameColumn` | None. A value with a time-zone offset is converted to UTC; one without is taken as UTC. |
+| `StringJoinColumn` | `RenameColumn` | `sep`, the separator a `list` value is joined with. |
+| `StringCatColumn` | `ColumnInfo` | `input_columns`, the columns to concatenate; `sep`, the separator. |
+| `IncrementColumn` | `DateTimeColumn` | `input_name` holds the timestamps; `groupby_column`, the column to count within; `period`, a [pandas offset string](https://pandas.pydata.org/docs/user_guide/timeseries.html#timeseries-offset-aliases) for the window, `D` by default. |
+| `DistinctIncrementColumn` | `RenameColumn` | `groupby_column` (`username` by default), `period` (`D`) and `timestamp_column` (`timestamp`); the count rises only when the value in `input_name` changes. |
+
+For example, five status strings mapped onto one boolean column:
+
+```python
+from morpheus.utils.column_info import BoolColumn
+```
+```python
+field = BoolColumn(name="result",
+                   dtype=bool,
+                   input_name="result",
+                   true_values=["OK", "SUCCESS"],
+                   false_values=["DENIED", "CANCELED", "EXPIRED"])
+```
+
 #### Digital fingerprinting: The per-entity model pattern
 
 DFP is the architectural template to generalize. The flow is:

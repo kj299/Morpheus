@@ -85,16 +85,8 @@ sed_runner "s/mrc=${CURRENT_SHORT_TAG}/mrc=${NEXT_SHORT_TAG}/g" dependencies.yam
 # Generate the environment files based upon the updated dependencies.yaml
 conda run -n base --live-stream rapids-dependency-file-generator
 
-# examples/developer_guide
-sed_runner 's/'"VERSION ${CURRENT_FULL_VERSION}.*"'/'"VERSION ${NEXT_FULL_VERSION}"'/g' \
-   examples/developer_guide/3_simple_cpp_stage/CMakeLists.txt \
-   examples/developer_guide/4_rabbitmq_cpp_stage/CMakeLists.txt
-
 # docs/source/basics/overview.rst
 sed_runner "s|blob/branch-${CURRENT_SHORT_TAG}|blob/branch-${NEXT_SHORT_TAG}|g" docs/source/basics/overview.rst
-
-# docs/source/developer_guide/guides/5_digital_fingerprinting.md
-sed_runner "s|blob/branch-${CURRENT_SHORT_TAG}|blob/branch-${NEXT_SHORT_TAG}|g" docs/source/developer_guide/guides/5_digital_fingerprinting.md
 
 # docs/source/examples.md
 sed_runner "s|blob/branch-${CURRENT_SHORT_TAG}|blob/branch-${NEXT_SHORT_TAG}|g" docs/source/examples.md
