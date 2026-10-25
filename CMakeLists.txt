@@ -21,7 +21,6 @@ list(APPEND CMAKE_MESSAGE_CONTEXT "morpheus")
 option(BUILD_SHARED_LIBS "Default value for whether or not to build shared or static libraries" ON)
 option(MORPHEUS_BUILD_BENCHMARKS "Whether or not to build benchmarks" OFF)
 option(MORPHEUS_BUILD_DOCS "Enable building of API documentation" OFF)
-option(MORPHEUS_BUILD_EXAMPLES "Whether or not to build examples" OFF)
 option(MORPHEUS_BUILD_MORPHEUS_CORE "Whether or not to build morpheus_core" ON)
 option(MORPHEUS_BUILD_MORPHEUS_DFP "Whether or not to build morpheus_dfp" ON)
 option(MORPHEUS_BUILD_TESTS "Whether or not to build tests" OFF)
@@ -148,10 +147,6 @@ morpheus_utils_compiler_set_defaults(MORPHEUS_USE_CLANG_TIDY)
 include(environment/init_iwyu)
 
 add_subdirectory(python)
-
-if(MORPHEUS_BUILD_EXAMPLES)
-  add_subdirectory(examples)
-endif()
 
 if(MORPHEUS_BUILD_DOCS)
   add_subdirectory(docs)

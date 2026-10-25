@@ -37,7 +37,7 @@ config.execution_mode = ExecutionMode.CPU
 > **Note**: The `execution_mode` and all other attributes of the `morpheus.config.Config` object must be set prior to constructing either the pipeline or any stage objects. The first time a `Config` object is used to construct a pipeline or stage, the `Config` object will freeze the configuration and prevent any further changes.
 
 #### Examples
-The `examples/cpu_only`, `examples/developer_guide/1_simple_python_stage` and `examples/developer_guide/2_2_rabbitmq` examples demonstrate pipelines that are able to operate in both GPU and CPU execution modes.
+The `examples/developer_guide/1_simple_python_stage` example and the segment runners in `examples/behavioral_analytics` demonstrate pipelines that are able to operate in both GPU and CPU execution modes.
 
 ### Command Line
 The `--use_cpu_only` flag is available as an option to the `morpheus run` sub-command.
