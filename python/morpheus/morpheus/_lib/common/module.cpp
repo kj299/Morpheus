@@ -15,12 +15,7 @@
  * limitations under the License.
  */
 
-#include "morpheus/io/data_loader_registry.hpp"
 #include "morpheus/io/deserializers.hpp"  // for read_file_to_df
-#include "morpheus/io/loaders/file.hpp"
-#include "morpheus/io/loaders/grpc.hpp"
-#include "morpheus/io/loaders/payload.hpp"
-#include "morpheus/io/loaders/rest.hpp"
 #include "morpheus/io/serializers.hpp"
 #include "morpheus/objects/dtype.hpp"  // for TypeId
 #include "morpheus/objects/fiber_queue.hpp"
@@ -32,7 +27,6 @@
 #include "morpheus/version.hpp"
 
 #include <mrc/utils/string_utils.hpp>
-#include <nlohmann/json.hpp>
 #include <pybind11/attr.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>  // for return_value_policy::reference
@@ -58,31 +52,6 @@ PYBIND11_MODULE(common, _module)
         .. autosummary::
            :toctree: _generate
         )pbdoc";
-
-    LoaderRegistry::register_factory_fn(
-        "file",
-        [](nlohmann::json config) {
-            return std::make_unique<FileDataLoader>(config);
-        },
-        false);
-    LoaderRegistry::register_factory_fn(
-        "grpc",
-        [](nlohmann::json config) {
-            return std::make_unique<GRPCDataLoader>(config);
-        },
-        false);
-    LoaderRegistry::register_factory_fn(
-        "payload",
-        [](nlohmann::json config) {
-            return std::make_unique<PayloadDataLoader>(config);
-        },
-        false);
-    LoaderRegistry::register_factory_fn(
-        "rest",
-        [](nlohmann::json config) {
-            return std::make_unique<RESTDataLoader>(config);
-        },
-        false);
 
     py::class_<TensorObject>(_module, "Tensor")
         .def_property_readonly("__cuda_array_interface__", &TensorObjectInterfaceProxy::cuda_array_interface)

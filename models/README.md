@@ -41,9 +41,9 @@ committed under [`examples/layer5_model/models`](../examples/layer5_model/README
 
 ## Everything else
 
-The other directories here (`abp-models`, `dfp-models`, `phishing-models`, `training-tuning-scripts`,
-`validation-inference-scripts`, the rest of `datasets` and `data`) and `model-information.csv` are upstream model
-material for use cases the audit removes. Each file's verdict and the ruling behind it are in
+The other directories here (`abp-models`, `phishing-models`, `training-tuning-scripts`,
+`validation-inference-scripts`, the rest of `datasets` and `data`) are upstream model material for use cases the
+audit removes. Each file's verdict and the ruling behind it are in
 [`ci/artifacts/repository_audit_manifest.csv`](../ci/artifacts/repository_audit_manifest.csv); until they go, the
 upstream description of each is at the fork point,
 [`models/README.md` at `c6a3b56d`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56db1c77c2f375ae0833a65a7b6d2272269/models/README.md).

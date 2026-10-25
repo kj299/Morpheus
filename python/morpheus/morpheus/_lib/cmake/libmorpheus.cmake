@@ -17,19 +17,11 @@ include(GenerateExportHeader)
 add_library(morpheus
 
   # Keep these sorted!
-  src/io/data_loader_registry.cpp
-  src/io/data_loader.cpp
   src/io/deserializers.cpp
-  src/io/loaders/file.cpp
-  src/io/loaders/grpc.cpp
-  src/io/loaders/lambda.cpp
-  src/io/loaders/payload.cpp
-  src/io/loaders/rest.cpp
   src/io/serializers.cpp
   src/messages/control.cpp
   src/messages/memory/tensor_memory.cpp
   src/messages/meta.cpp
-  src/modules/data_loader_module.cpp
   src/objects/data_table.cpp
   src/objects/dev_mem_info.cpp
   src/objects/dtype.cpp

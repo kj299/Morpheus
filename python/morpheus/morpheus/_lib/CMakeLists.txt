@@ -84,10 +84,6 @@ set_property(GLOBAL APPEND PROPERTY py_morpheus_target_property morpheus._lib.st
 morpheus_add_pybind11_module(messages SOURCE_FILES messages/module.cpp)
 set_property(GLOBAL APPEND PROPERTY py_morpheus_target_property morpheus._lib.messages)
 
-#----------morpheus._lib.modules---------
-morpheus_add_pybind11_module(modules SOURCE_FILES modules/module.cpp)
-set_property(GLOBAL APPEND PROPERTY py_morpheus_target_property morpheus._lib.modules)
-
 if (MORPHEUS_BUILD_TESTS)
   add_subdirectory(tests)
 endif()

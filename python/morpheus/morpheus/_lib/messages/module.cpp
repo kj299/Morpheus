@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-#include "morpheus/io/data_loader_registry.hpp"
 #include "morpheus/messages/control.hpp"
 #include "morpheus/messages/memory/tensor_memory.hpp"
 #include "morpheus/messages/meta.hpp"
@@ -240,19 +239,6 @@ PYBIND11_MODULE(messages, _module)
         .def("task_type", pybind11::overload_cast<>(&ControlMessage::task_type))
         .def(
             "task_type", pybind11::overload_cast<ControlMessageType>(&ControlMessage::task_type), py::arg("task_type"));
-
-    py::class_<LoaderRegistry, std::shared_ptr<LoaderRegistry>>(_module, "DataLoaderRegistry")
-        .def_static("contains", &LoaderRegistry::contains, py::arg("name"))
-        .def_static("list", &LoaderRegistry::list)
-        .def_static("register_loader",
-                    &LoaderRegistryProxy::register_proxy_factory_fn,
-                    py::arg("name"),
-                    py::arg("loader"),
-                    py::arg("throw_if_exists") = true)
-        .def_static("unregister_loader",
-                    &LoaderRegistry::unregister_factory_fn,
-                    py::arg("name"),
-                    py::arg("throw_if_not_exists") = true);
 
     _module.attr("__version__") =
         MORPHEUS_CONCAT_STR(morpheus_VERSION_MAJOR << "." << morpheus_VERSION_MINOR << "." << morpheus_VERSION_PATCH);
