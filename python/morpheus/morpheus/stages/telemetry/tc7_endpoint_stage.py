@@ -61,12 +61,17 @@ from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.pair_history import DAY_NS
 from morpheus.utils.pair_history import DEFAULT_MAX_ENTITIES
 from morpheus.utils.pair_history import DEFAULT_MAX_PAIRS
@@ -192,9 +197,15 @@ class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
         Pairs recalled per host and per peer group.
     max_entities : int, default = 200000
         Hosts and peer groups recalled before the least recently seen is forgotten.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The histories
+        expire pairs on event time, so one process from an agent whose clock is wrong by years would age every pair
+        its host and peer group had ever seen out of the window at once, and the next process on any of them would
+        read as novel. A refused row is judged by nothing, sets `clock_refused`, and moves no horizon. See
+        `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_hosts", "_groups")
+    _checkpoint_attributes = ("_hosts", "_groups", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -208,7 +219,8 @@ class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                  window_days: int = DEFAULT_WINDOW_DAYS,
                  warmup_days: int = DEFAULT_WARMUP_DAYS,
                  max_pairs: int = DEFAULT_MAX_PAIRS,
-                 max_entities: int = DEFAULT_MAX_ENTITIES):
+                 max_entities: int = DEFAULT_MAX_ENTITIES,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
         if (window_days <= 0):
@@ -245,6 +257,9 @@ class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
         self._needed_columns[MATURE] = TypeId.BOOL8
         self._needed_columns[NOVEL] = TypeId.BOOL8
         self._needed_columns[INTEGRITY] = TypeId.STRING
+
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -302,11 +317,13 @@ class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             hosts = to_host_list(df, self._host_column)
             parents = to_host_list(df, self._parent_image_column)
             images = to_host_list(df, self._image_column)
-            raw_times = to_host_list(df, self._time_column)
             levels = (to_host_list(df, self._integrity_column) if self._integrity_column in df.columns else [None] *
                       len(hosts))
             groups = (to_host_list(df, self._peer_group_column) if self._peer_group_column in df.columns else [None] *
                       len(hosts))
+            # Guarded once, before either history is shown a time: a refused time becomes `None`, which the rows
+            # below already treat as a process with nothing to judge.
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             keys: list = []
             pairs: list = []
@@ -326,11 +343,7 @@ class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                 image = normalize_image_path(images[position])
                 group = normalize_text(groups[position])
                 pair = None if (parent is None or image is None) else f"{parent}{PAIR_SEPARATOR}{image}"
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 keys.append(host)
                 pairs.append(pair)
@@ -339,7 +352,7 @@ class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                 host_only.append(host is not None and group is None)
 
                 if (host is None or pair is None or event_time_ns is None):
-                    unusable += 1
+                    unusable += int(not refused[position])
                     host_seen.append(None)
                     peer_seen.append(None)
                     mature.append(False)
@@ -372,6 +385,13 @@ class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             assign_nullable_bool_column(df, MATURE, mature)
             assign_nullable_bool_column(df, NOVEL, novel)
             assign_str_column(df, INTEGRITY, integrity)
+
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC7EndpointStage",
+                        what="processes",
+                        outcome="they were judged by nothing, set clock_refused and aged nothing out.")
 
             if (unusable > 0):
                 logger.warning(

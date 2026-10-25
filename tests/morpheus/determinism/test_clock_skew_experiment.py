@@ -236,8 +236,8 @@ def test_the_ladders_lower_rung_moves_where_its_upper_rung_does_not(experiment):
     # The finding the span alone would have hidden. A principal reaches a port through an 802.1X session that
     # lasts most of the hour, so a minute of skew never takes it outside; an ARP observation reaches a port
     # through a MAC binding that lasts one poll cadence, and a minute is a large fraction of that. Five of the
-    # thousand and forty observations rooted on a port lose theirs net -- ten fall back to their own address, five
-    # acquire a port they did not have -- while every chain keeps its span and every sign-in keeps its desk.
+    # thousand and forty-five observations rooted on a port lose theirs net -- ten fall back to their own address,
+    # five acquire a port they did not have -- while every chain keeps its span and every sign-in keeps its desk.
     # Attribution and reach are not the same property and do not fail together. The DMZ poller is a sixth clock
     # in the spread, so a minute's spread places the other five a little differently than it did.
     config = ep.build_pipeline_config()
@@ -248,8 +248,8 @@ def test_the_ladders_lower_rung_moves_where_its_upper_rung_does_not(experiment):
     baseline = ep.run_pipeline(config, corpus)
     skewed = ep.run_pipeline(config, experiment.skew_corpus(corpus, offsets, experiment.COLLECTOR_CLOCKS))
 
-    assert experiment.chain_reach(baseline)["arp_observations_rooted_on_a_port"] == 1040
-    assert experiment.chain_reach(skewed)["arp_observations_rooted_on_a_port"] == 1035
+    assert experiment.chain_reach(baseline)["arp_observations_rooted_on_a_port"] == 1045
+    assert experiment.chain_reach(skewed)["arp_observations_rooted_on_a_port"] == 1040
 
     left = baseline.set_index(["telemetry_class", "row_key"]).sort_index()
     right = skewed.set_index(["telemetry_class", "row_key"]).sort_index()

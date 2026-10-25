@@ -57,7 +57,6 @@ from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.binding_table import NS_PER_SECOND
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.bucket_peak import BucketPeakTracker
 from morpheus.utils.bucket_peak import measure_rows
 from morpheus.utils.bucket_peak import ratios_to_reference
@@ -69,6 +68,12 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
 logger = logging.getLogger(__name__)
@@ -200,9 +205,15 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         How far back those periods reach.
     baseline_min_days : int, default = 7
         Periods of history a service needs before `service_clients_baseline` is published.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. Every window and
+        every day here expires on event time, so one connection from a sensor whose clock is wrong by years would
+        empty each service's connections, clients and days at once and refuse every real connection after it as out
+        of order. A refused row carries no measurement from this stage, sets `clock_refused`, and moves no horizon;
+        its service key is still composed, since that needs no history. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_clients", "_fingerprints", "_baseline", "_sums")
+    _checkpoint_attributes = ("_clients", "_fingerprints", "_baseline", "_sums", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -219,7 +230,8 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                  max_entities: int = 100_000,
                  baseline_bucket_seconds: int = DEFAULT_BASELINE_BUCKET_SECONDS,
                  baseline_window_seconds: int = DEFAULT_BASELINE_WINDOW_SECONDS,
-                 baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS):
+                 baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
         if (window_seconds <= 0):
@@ -267,6 +279,9 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         self._needed_columns[CLIENTS_BASELINE_DAYS] = TypeId.INT64
         self._needed_columns[CLIENTS_BASELINE_MATURE] = TypeId.BOOL8
         self._needed_columns[CLIENTS_RATIO] = TypeId.FLOAT64
+
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -351,15 +366,16 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
             clients = to_host_list(df, self._client_column)
             addresses = to_host_list(df, self._address_column)
             ports = to_host_list(df, self._port_column)
-            raw_times = to_host_list(df, self._time_column)
             names = to_host_list(df, self._name_column) if self._name_column in df.columns else [None] * rows
             sizes = to_host_list(df, self._bytes_column) if self._bytes_column in df.columns else [None] * rows
             fingerprints = (to_host_list(df, self._fingerprint_column)
                             if self._fingerprint_column in df.columns else [None] * rows)
+            # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
+            # below already treat as a connection with nothing to count.
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             keys: list = []
             sources: list = []
-            times: list = []
             connections: list = []
             volumes: list = []
             reached_by: list = []
@@ -371,20 +387,15 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
 
             for position in range(rows):
                 (key, source) = self.service_key(addresses[position], ports[position], names[position])
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 keys.append(key)
                 sources.append(source)
-                times.append(event_time_ns)
 
                 client = normalize_text(clients[position])
 
                 if (key is None or event_time_ns is None):
-                    unusable += 1
+                    unusable += int(not refused[position])
 
                     for column in (connections, volumes, reached_by, first_seen, known):
                         column.append(None)
@@ -429,6 +440,13 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
             assign_nullable_int_column(df, CLIENTS_BASELINE_DAYS, measured.buckets)
             assign_nullable_bool_column(df, CLIENTS_BASELINE_MATURE, measured.mature)
             assign_nullable_float_column(df, CLIENTS_RATIO, ratios_to_reference(measured, reached_by))
+
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC7ServiceStage",
+                        what="connections",
+                        outcome="they entered no window, set clock_refused and expired nothing.")
 
             if (unusable > 0):
                 logger.warning(

@@ -65,6 +65,12 @@ from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
 from morpheus.utils.determinism import quantize_value
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.lineage import window_id_from_timestamp
 from morpheus.utils.transfer_envelope import DEFAULT_MIN_SAMPLES
 from morpheus.utils.transfer_envelope import DEFAULT_QUANTILE
@@ -135,9 +141,15 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         Baselines and weekly tallies retained before the least recently seen is forgotten.
     decimals : int, default = 4
         Decimal places the baseline and ratio are rounded to, under determinism control 9.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The baseline
+        expires operations on event time and the week's tally restarts on a later week, so one record from a tenant
+        whose clock is wrong by years would empty every principal's thirty days and start every week over at once.
+        A refused row carries no baseline, week or breadth from this stage, sets `clock_refused`, and moves no
+        horizon. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_baselines", "_weeks")
+    _checkpoint_attributes = ("_baselines", "_weeks", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -154,7 +166,8 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                  week_epoch: str = DEFAULT_WEEK_EPOCH,
                  max_samples: int = 4096,
                  max_entities: int = 500_000,
-                 decimals: int = DEFAULT_FLOAT_DECIMALS):
+                 decimals: int = DEFAULT_FLOAT_DECIMALS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
         if (baseline_days <= 0):
@@ -200,6 +213,9 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         self._needed_columns[OPERATION_FAILED] = TypeId.BOOL8
         self._needed_columns[WEEK_ID] = TypeId.INT64
         self._needed_columns[OBJECT_TYPES_IN_WEEK] = TypeId.INT64
+
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -287,9 +303,11 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             operations = to_host_list(df, self._operation_column)
             object_types = to_host_list(df, self._object_type_column)
             counts = to_host_list(df, self._record_count_column)
-            raw_times = to_host_list(df, self._time_column)
             outcomes = (to_host_list(df, self._result_column) if self._result_column in df.columns else [None] *
                         len(principals))
+            # Guarded once, before the baseline or any week is shown a time: a refused time becomes `None`, which
+            # the rows below already treat as an operation with nothing to measure.
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             keys: list = []
             baselines: list = []
@@ -308,11 +326,7 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                 key = compose_key([principal, operations[position]])
                 outcome = normalize_text(outcomes[position])
                 did_fail = outcome is not None and outcome.lower() in FAILED_RESULTS
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 keys.append(key)
                 failed.append(did_fail)
@@ -321,7 +335,7 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                 weeks.append(week_id)
 
                 if (principal is None or event_time_ns is None):
-                    unusable += 1
+                    unusable += int(not refused[position])
                     baselines.append(None)
                     ratios.append(None)
                     samples.append(None)
@@ -361,6 +375,13 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             assign_nullable_bool_column(df, OPERATION_FAILED, failed)
             assign_nullable_int_column(df, WEEK_ID, weeks)
             assign_nullable_int_column(df, OBJECT_TYPES_IN_WEEK, breadth)
+
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC7SaasStage",
+                        what="operations",
+                        outcome="they joined no baseline or week, set clock_refused and expired nothing.")
 
             if (unusable > 0):
                 logger.warning(

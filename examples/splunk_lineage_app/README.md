@@ -221,27 +221,73 @@ side alone breaks the joins silently.
 
 ## Features without a rule
 
-The host-centric stages emit columns no search here reads, and each is listed with the reason, so a reader can tell a
-feature kept for the analyst or for a model from one nobody uses. The design guide's Part 6 carries the same table,
-and `tests/morpheus/determinism/test_feature_coverage.py` keeps both honest against the stages and these searches.
+The feature stages of every composed corpus, layers 1 to 7, emit columns no search here reads and no committed model
+under `examples/layer5_model/models/` takes as an input, and each is listed with the reason, so a reader can tell a
+feature kept for the analyst or for a model from one nobody uses. A read is a column named in a `search =` body; a
+comment that names a column to say why no search reads it is not one. The design guide's Part 6 carries the same
+table, and `tests/morpheus/determinism/test_feature_coverage.py` keeps both honest against the stages, the models and
+these searches.
 
 | Feature | Stage | Why no rule reads it |
 | --- | --- | --- |
+| `counter_wrapped`, `sample_out_of_order` | `TC1NormalizeStage` | How a delta was arrived at: a wrapped counter still yields one, an out-of-order sample yields none. `PipelineHealthStage` counts the second per collector; the `Device restart` report reads `counter_reset`. |
+| `crc_errors_delta`, `symbol_errors_delta`, `input_discards_delta`, `output_discards_delta`, `if_hc_in_octets_delta`, `if_hc_out_octets_delta` | `TC1NormalizeStage` | The counter changes `TC1RateStage` divides by the interval. R-B-L1-005 reads `error_rate` and `discard_rate`; R-B-L1-007 reads `bits_per_second` and `utilization`. |
+| `bits_in_per_second`, `bits_out_per_second` | `TC1RateStage` | The two directions behind `bits_per_second` and `utilization`, which R-B-L1-007 reads. |
+| `error_rate_baseline_buckets`, `bits_per_second_baseline_buckets` | `TC1RateStage` | How deep each history is. R-B-L1-005 and R-B-L1-007 read `_baseline_mature`, which is this against the stage's floor. |
+| `bits_per_second_step` | `TC1RateStage` | The departure above the port's record. R-B-L1-007 fires in both directions, so it reads `bits_per_second` against `_baseline_max` and `_baseline_min` rather than the one-sided step. |
+| `optical_tx_dbm_baseline`, `optical_tx_dbm_baseline_samples` | `TC1OpticalStage` | The transmit history behind `optical_tx_dbm_deviation`, which R-D-L1-002 carries as context. The rule fires on the receive side and reads that side's baseline. |
+| `optical_rx_dbm_trend_residual_db`, `optical_rx_dbm_trend_significance` | `TC1ForecastStage` | How well the line fits and how far the slope is from flat: the figures for tuning the stage's two refusals. R-P-L1-004 reads `optical_rx_dbm_days_to_floor`. |
+| `link_flap_unpolled`, `link_flap_last_change_inconsistent` | `TC1FlapStage` | How a count was arrived at: transitions the device recorded between two polls that saw the same status, and a status change the device's own record did not show. R-D-L1-003 reads the count and `link_flap_device_reset`. |
+| `lldp_neighbor_chassis_id_distinct_count` | `TC1ChangeStage` | How many neighbours the port has ever reported: context for `_changed` and `_first_seen`, which R-D-L1-006 reads. |
+| `bind_end_observed`, `bind_provisional` | `TC1BindingStage`, `TC2BindingStage` | Whether the source reported the end itself, and whether the record is an open binding emitted before its close. The lookup refreshes load every binding; R-D-L2-004 reads `bind_end_reason` and `bind_gap_ns`. |
+| `ports_per_mac`, `ports_per_mac_first_in_window`, `ports_per_mac_saturated` | `TC2CardinalityStage` | How many ports one address was seen on inside the window, with its event flag and sample cap. R-D-L2-004 reads the same condition from the closed bindings on `binding:l2`, where `bind_gap_ns` says how close the two sightings were, and no shipped search reads the count. |
+| `ouis_per_vlan_saturated` | `TC2CardinalityStage` | The sample cap on one VLAN's vendors. R-B-L2-006 carries `ouis_per_vlan_first_in_window` and fires on the step. |
+| `macs_per_port_baseline_buckets`, `ouis_per_vlan_baseline_buckets` | `TC2BaselineStage` | How deep the history is. R-B-L2-002 and R-B-L2-006 read the step, which is null until the baseline is mature. |
+| `macs_per_port_baseline_mature` | `TC2BaselineStage` | Folded into `macs_per_port_step`, which R-B-L2-002 fires on and which is null until the baseline is mature. |
+| `arp_is_gratuitous`, `gratuitous_arp_count`, `arp_count_in_window`, `gratuitous_arp_ratio`, `gratuitous_arp_ratio_saturated` | `TC2ArpStage` | The share of one sender's ARP that was unprompted, with its per-row flag, its two counts and its sample cap. The telemetry corpus's flood raises it and the harness holds it to its counts; no shipped search reads it. R-D-L2-003 reads `macs_claiming_sender_ip`, the other shape poisoning takes. |
+| `macs_claiming_sender_ip_saturated` | `TC2ArpStage` | The sample cap on one address's claimants, which makes the count a lower bound. R-D-L2-003 fires on more than one either way. |
+| `auth_abandoned` | `TC2AuthStage` | The pending exchanges this row's arrival timed out. `PipelineHealthStage` sums it per collector into `morpheus:health`; R-D-L2-005 reads `auth_unpaired`. |
 | `dsts_per_src_first_in_window`, `srcs_per_dst_first_in_window`, `dst_ports_per_src_first_in_window` | `TC3CardinalityStage` | Says which flow raised the count. The rules read the count; this is for the analyst reading the row. |
 | `internal_dsts_in_window` | `TC3ReachStage` | The numerator of `internal_dst_ratio`, which R-B-L3-001 reads instead. |
 | `internal_dst_ratio_saturated` | `TC3ReachStage` | The ratio's sample cap. R-B-L3-001 carries `dsts_per_src_saturated`, the cap on the count it fires on. |
 | `dsts_per_src_baseline_buckets`, `srcs_per_dst_baseline_buckets`, `byte_asymmetry_baseline_buckets` | `TC3BaselineStage` | How deep the history is. The rules read `_baseline_mature`, which is this against the stage's floor. |
 | `flow_regularity_saturated` | `TC3BeaconStage` | The interval cap on one pair. A beacon is regular long before it binds. |
 | `ip_ttl_saturated` | `TC3TtlStage` | The sample cap on one source's TTL samples, which a stable path never reaches. |
+| `flow_bpp`, `flow_ppm`, `flow_psh`, `flow_fin`, `flow_ackpush_ratio`, `flow_fin_ratio`, `flow_rst_ratio`, `flow_syn_ratio` | `TC4FlowStage` | Per-flow model inputs. The searches recover the counts from their maxima rather than aggregate a running ratio -- an ordinary handshake opens with a bare SYN, so `max(flow_syn_ratio)` over it is 1.0, the scan's figure -- and no layer 4 model is pinned yet (#59). |
+| `flow_bpp_envelope` | `TC4EnvelopeStage` | The envelope R-B-L4-005 measures against; it fires on `flow_bpp_envelope_breached`. |
+| `flow_bpp_envelope_mature`, `flow_data_len_envelope_mature` | `TC4EnvelopeStage` | Folded into the `_breached` flags, which are null until the envelope is mature. |
+| `logcount_saturated`, `asns_in_window_saturated` | `TC5NoveltyStage` | The sample caps on the two windowed features, which make them lower bounds. `PipelineHealthStage` counts saturated rows per collector. |
+| `app_first_seen` | `TC5NoveltyStage` | Whether the principal has used this application before. R-D-L5-008 reads `location_first_seen` and `device_first_seen`; the application enters the score as `appincrement`. |
+| `local_weekday`, `hour_share`, `weekday_share`, `weekday_unseen` | `TC5CadenceStage` | The weekday side of the histogram, and the smoothed shares behind both surprises. R-D-L5-007 reads `hour_unseen`; the weekday enters the score as `weekday_surprise_bits`. |
+| `mfa_challenge` | `TC5RiskStage` | Whether this row was a multi-factor challenge. R-D-L5-004 reads the window counts, `mfa_attempts_in_window` and `mfa_denials_in_window`; the proportion enters the score as `mfa_ratio`. |
+| `logcount_z_loss`, `appincrement_z_loss`, `deviceincrement_z_loss`, `asns_in_window_z_loss`, `hour_surprise_bits_z_loss`, `weekday_surprise_bits_z_loss`, `mfa_ratio_z_loss`, `auth_attempts_in_window_z_loss`, `auth_failures_in_window_z_loss` | `TC5ScoreStage` | The per-feature losses behind `mean_abs_z` and `max_abs_z`, which R-B-L5-001 reads. R-B-L5-002 reads `locincrement_z_loss` alone, the feature its rule names; the rest say which feature drove a score. |
+| `drift_run_restarted` | `TC5DriftStage` | Whether a gap in the entity's windows restarted the run. The trajectory rules read `drift_rising_windows`, which the restart has already reset. |
+| `session_duration_ns` | `TC5SessionStage` | The duration in nanoseconds. R-B-L5-005 reads `session_duration_s`, the TC-5 field. |
+| `session_starts`, `session_unpaired`, `session_out_of_order`, `session_abandoned`, `session_unclassified` | `TC5SessionStage` | How the pairing went: a repeated start, a stop with no start, a stop before its start, the sessions this row's arrival timed out, an action that was neither. `PipelineHealthStage` counts them per collector into `morpheus:health`. |
 | `ja4_client_changed` | `TC6FingerprintStage` | Measured, not reasoned about: in the layer 6 corpus every change on a settled host is either a first sighting, which R-B-L6-001 reads, or the host alternating between two stacks it has always had, which is that rule's control. A rule on the change alone fires only on the control. |
 | `tls_client_key` | `TC6FingerprintStage` | The key the stage keeps a host's stacks on. Searches group by `src_ip`. |
-| `cert_destination_is_global` | `TC6CertificateStage` | One half of `cert_self_signed_external`, which R-D-L6-003 reads. |
+| `cert_self_signed`, `cert_destination_is_global` | `TC6CertificateStage` | The two halves of `cert_self_signed_external`, which R-D-L6-003 reads. The first alone returns every self-signed management interface in the estate. |
 | `cert_issuer_saturated` | `TC6CertificateStage` | The issuer cap on one destination, which a destination presenting more is already past. |
 | `cipher_rank`, `cipher_floor` | `TC6CipherStage` | The numbers behind `cipher_tier` and `cipher_floor_tier`, which R-B-L6-004 reports, and `cipher_downgraded`, which it fires on. |
 | `cipher_saturated` | `TC6CipherStage` | The suite cap on one pair. |
-| `flow_bpp`, `flow_ppm`, `flow_psh`, `flow_fin`, `flow_ackpush_ratio`, `flow_fin_ratio`, `flow_rst_ratio` | `TC4FlowStage` | Per-flow model inputs. The searches recover the counts from their maxima rather than aggregate a running ratio, and no layer 4 model is pinned yet (#59). |
-| `flow_bpp_envelope` | `TC4EnvelopeStage` | The envelope R-B-L4-005 measures against; it fires on `flow_bpp_envelope_breached`. |
-| `flow_bpp_envelope_mature`, `flow_data_len_envelope_mature` | `TC4EnvelopeStage` | Folded into the `_breached` flags, which are null until the envelope is mature. |
+| `dns_client_key` | `TC7DnsStage` | The key the stage keeps a client's windows on. Searches group by `src_ip`. |
+| `dns_subdomains_saturated`, `dns_domains_saturated` | `TC7DnsStage` | The sample caps on one domain's subdomains and one client's domains, which make the counts lower bounds. R-B-L7-001 and R-B-L7-008 fire on the counts either way. |
+| `dns_answered_in_window` | `TC7DnsStage` | The denominator of `dns_nxdomain_ratio`, which R-B-L7-008 reads with `dns_nxdomain_in_window`. |
+| `dns_subdomains_per_domain_baseline`, `dns_subdomains_per_domain_baseline_days`, `dns_domains_per_client_baseline`, `dns_domains_per_client_baseline_days` | `TC7DnsStage` | The client's busiest day and how many days it is over. R-B-L7-001 and R-B-L7-008 read the ratio against it and `_baseline_mature`. |
+| `http_client_key` | `TC7HttpStage` | The key the stage keeps a client's windows on. Searches group by `src_ip`. |
+| `http_status_class` | `TC7HttpStage` | The status reduced to its class. R-D-L7-005 reads the two counts the classes are summed into. |
+| `http_4xx_to_2xx_ratio` | `TC7HttpStage` | Null for a client with no 2xx at all, the purest enumerator there is, so R-D-L7-005 tests `http_4xx_in_window > 0.7 * http_2xx_in_window`, the same inequality with the division removed. |
+| `http_window_saturated` | `TC7HttpStage` | The sample cap on one client's requests, which makes the counts lower bounds. |
+| `http_distinct_paths_baseline`, `http_distinct_paths_baseline_days` | `TC7HttpStage` | The client's busiest day and how many days it is over. R-D-L7-005 reads the ratio against it and `_baseline_mature`. |
+| `http_ua_family_first_seen` | `TC7HttpStage` | Whether this client has sent this user agent family before. R-B-L4-004 reads `http_ua_os`; the novelty is per client rather than per principal, and no rule reads it until it is. |
+| `service_connections_in_window` | `TC7ServiceStage` | The service's connections, beside its bytes and clients. R-B-L7-007 fires on the clients and carries the bytes. |
+| `service_clients_saturated` | `TC7ServiceStage` | The sample cap on one service's connections, which makes the client count a lower bound. |
+| `service_client_fingerprints` | `TC7ServiceStage` | How many client fingerprints the service has ever seen: context for `service_client_fingerprint_first_seen`, which R-B-L7-007 reads. |
+| `service_clients_baseline_days` | `TC7ServiceStage` | How many days the busiest day is over. R-B-L7-007 reads `service_clients_baseline_mature`. |
+| `saas_baseline_key` | `TC7SaasStage` | The principal and operation the baseline is kept on. R-B-L7-002 groups by `user_principal` and `operation`. |
+| `saas_baseline_samples`, `saas_baseline_saturated` | `TC7SaasStage` | How many priors the quantile is over, and whether the cap bound. R-B-L7-002 reads `saas_baseline_mature`. |
+| `saas_operation_failed` | `TC7SaasStage` | Whether the operation reached nothing and so entered neither measurement; its ratio and breadth are null. Refusals are worth a rule of their own, which is not written. |
+| `saas_week_id` | `TC7SaasStage` | The week the breadth count is in, from the stage's own epoch. R-P-L7-006 reads the weekly seal's window beside it. |
 | `endpoint_host_seen`, `endpoint_peer_seen`, `endpoint_mature` | `TC7EndpointStage` | The halves of `endpoint_pair_novel`, which R-B-L7-004 reads. Carried so an analyst can see which half decided. |
 
 ## Packaging
@@ -292,7 +338,8 @@ the stanzas parse on a search head. Run `btool savedsearches list` after install
 The run that would settle that is packaged: `validate/run_search_head.sh` starts the validation container, indexes
 the sample events, dispatches all eighty-two searches in the order `validate/VALIDATION.md` prescribes, and writes
 `validate/search_head_results.json`, which `tests/morpheus/determinism/test_search_head_run.py` compares with
-`expected_results.json`. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:
+`expected_results.json` while it is committed; when a change supersedes a run, the run moves to
+`validate/search_head_runs/` with a test of exactly how it differs from what is now written. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:
 every one of the forty-eight searches ran without error over the pipeline's own events, and forty-six returned
 what was written. The two that did not were nulls on the wire -- a field sent as `null` is not absent to Splunk, and
 `macs_per_port_step>0` and `resolution_method=*` both let null values through. The serializer
@@ -337,8 +384,9 @@ the host watchlist's expiry the same three, and the summary 8801 rows with the h
 regenerated when the daily drift reached the TLS and DNS columns: it indexed all 24,736 events, returned what is written
 for all eighty-two -- R-P-L6-006 the creeping host's last three days, R-P-L7-009 the slow tunnel's last four, R-B-L6-001
 seven rows where it returned five, and the host watchlist holding all ten entries until its expiry kept R-P-L3-009's
-three -- held the 233 risk records the detections returned, and is `validate/search_head_results.json`; the earlier
-twelve are kept beside it.
+three -- and held the 233 risk records the detections returned. It is kept in `validate/search_head_runs/` with
+the twelve before it, because on 2026-10-24 the estate corpus gained the desk spoof, the actor Chain assembly exists
+for, and the chain search's expectation went from no rows to one; no run has returned it yet.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

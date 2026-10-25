@@ -46,12 +46,17 @@ from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.ttl_profile import DEFAULT_MIN_SAMPLES
 from morpheus.utils.ttl_profile import DEFAULT_MIN_SHIFT
 from morpheus.utils.ttl_profile import MAX_TTL
@@ -101,9 +106,15 @@ class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
         Hops of difference that count as a shift. One, because one is what an interposed device adds.
     max_samples : int, default = 512
         Flows retained per entity regardless of the window.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The reference is
+        taken over a window that expires flows on event time, so one flow from an exporter whose clock is wrong by
+        years would empty every source's reference at once and make its next hop count the established one. A
+        refused row carries no profile from this stage, sets `clock_refused`, and moves no horizon. See
+        `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_tracker", )
+    _checkpoint_attributes = ("_tracker", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -114,7 +125,8 @@ class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  min_samples: int = DEFAULT_MIN_SAMPLES,
                  min_shift: int = DEFAULT_MIN_SHIFT,
-                 max_samples: int = 512):
+                 max_samples: int = 512,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
         if (window_seconds <= 0):
@@ -141,6 +153,9 @@ class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
         self._needed_columns[TTL_SHIFTED] = TypeId.BOOL8
         self._needed_columns[TTL_MATURE] = TypeId.BOOL8
         self._needed_columns[TTL_SATURATED] = TypeId.BOOL8
+
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -220,7 +235,9 @@ class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
 
             key_parts = {name: to_host_list(df, name) for name in self._key_columns}
             raw_ttls = to_host_list(df, self._ttl_column)
-            raw_times = to_host_list(df, self._time_column)
+            # Guarded once, before the tracker is shown any time: a refused time becomes `None`, which the rows
+            # below already treat as a flow with nothing to profile.
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
 
             established: list = []
             shifts: list = []
@@ -234,14 +251,10 @@ class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
             for (position, raw_ttl) in enumerate(raw_ttls):
                 key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
                 ttl = self._ttl_of(raw_ttl)
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 if (key is None or ttl is None or event_time_ns is None):
-                    unusable += 1
+                    unusable += int(not refused[position])
                     established.append(None)
                     shifts.append(None)
                     distinct.append(None)
@@ -266,6 +279,13 @@ class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
             assign_nullable_bool_column(df, TTL_SHIFTED, shifted)
             df[TTL_MATURE] = mature
             df[TTL_SATURATED] = saturated
+
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC3TtlStage",
+                        what="flows",
+                        outcome="they joined no reference, set clock_refused and expired nothing.")
 
             if (unusable > 0):
                 logger.info(

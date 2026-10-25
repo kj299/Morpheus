@@ -73,8 +73,8 @@
     },
     "R-D-L2-003 - ARP anomaly": {
       "expected_rows": 1,
-      "why": "The search aggregates BY arp_sender_ip, so the 24 contested observations collapse to one notable for the one address that is contested by two MACs.",
-      "contributing_rows": 24,
+      "why": "The search aggregates BY arp_sender_ip, so the 34 contested observations collapse to one notable for the one address that is contested by two MACs.",
+      "contributing_rows": 34,
       "key_values": {
         "arp_sender_ip": "10.0.0.1"
       }
@@ -126,18 +126,44 @@
       "expected_rows": 6,
       "expected_empty": false,
       "contributing_rows": 76,
-      "why": "One notable, for the pair 10.0.0.70:93.184.216.34, which exchanges a 512-byte message every five minutes for four hours. The negative control is 10.0.0.80, which makes plenty of flows to one file server at the ragged intervals a person produces and whose coefficient of variation is above 1.0 -- an order of magnitude above the 0.15 threshold. Grouped by flow_pair_key rather than by src_ip, because a host that beacons to one address and browses to five hundred others would have the beacon averaged away by a search keyed on the host. Five more pairs come from the campaign corpus, R-C-002's five hosts each sending a 512-byte message every sixty seconds; the rule reports all five on their regularity alone, and 40 more mature rows contribute."
+      "why": "One notable, for the pair 10.0.0.70:93.184.216.34, which exchanges a 512-byte message every five minutes for four hours. The negative control is 10.0.0.80, which makes plenty of flows to one file server at the ragged intervals a person produces and whose coefficient of variation is above 1.0 -- an order of magnitude above the 0.15 threshold. Grouped by flow_pair_key rather than by src_ip, because a host that beacons to one address and browses to five hundred others would have the beacon averaged away by a search keyed on the host. Five more pairs come from the campaign corpus, R-C-002's five hosts each sending a 512-byte message every sixty seconds; the rule reports all five on their regularity alone, and 40 more mature rows contribute.",
+      "key_values": [
+        "10.0.0.70:93.184.216.34",
+        "10.20.2.5:203.0.113.100",
+        "10.20.2.6:203.0.113.101",
+        "10.20.2.7:203.0.113.112",
+        "10.20.2.8:203.0.113.103",
+        "10.20.2.9:203.0.113.104"
+      ]
     },
     "R-D-L3-003 - Reserved-range egress": {
       "expected_rows": 1,
       "expected_empty": false,
-      "why": "One flow, to 240.0.0.1. Low volume and high signal by nature, which is only true if the classification is right about everything else -- so what this number really asserts is that the other 410 flows are correctly classified as ordinary. The classification is parsers/ip.py's, through TC3ReachStage, so the search holds no copy of the reserved ranges."
+      "why": "One flow, to 240.0.0.1. Low volume and high signal by nature, which is only true if the classification is right about everything else -- so what this number really asserts is that the other 1536 flows are correctly classified as ordinary. The classification is parsers/ip.py's, through TC3ReachStage, so the search holds no copy of the reserved ranges.",
+      "key_values": [
+        {
+          "src_ip": "10.0.0.90",
+          "dst_ip": "240.0.0.1",
+          "destination_class": "reserved"
+        }
+      ]
     },
     "R-B-L3-004 - TTL fingerprint shift": {
       "expected_rows": 1,
       "expected_empty": false,
       "contributing_rows": 12,
-      "why": "One notable, for 10.0.0.100, whose traffic starts arriving one hop short from the third hour onward: twelve flows, every one of them shifted by exactly -1, which is what a single interposed device costs. The control is 10.0.0.110, whose TTL never moves. The aggregate threshold of three shifted flows is what makes this a statement about a distribution rather than about a packet, which is what the guide's rule asks for; a single shifted flow is noise."
+      "why": "One notable, for 10.0.0.100, whose traffic starts arriving one hop short from the third hour onward: twelve flows, every one of them shifted by exactly -1, which is what a single interposed device costs. The control is 10.0.0.110, whose TTL never moves. The aggregate threshold of three shifted flows is what makes this a statement about a distribution rather than about a packet, which is what the guide's rule asks for; a single shifted flow is noise.",
+      "key_values": [
+        {
+          "src_ip": "10.0.0.100",
+          "shifted_flows": 12,
+          "shifts": [
+            -1
+          ],
+          "established_ttl": 64,
+          "distinct_ttls": 2
+        }
+      ]
     },
     "R-P-L3-005 - Fan-out trajectory": {
       "expected_rows": 43,
@@ -409,10 +435,10 @@
     "TLS table coverage - unrecognized values": {
       "expected_rows": 1,
       "expected_empty": false,
-      "contributing_rows": 105,
+      "contributing_rows": 649,
       "why": "One summary row, and the value is in the numbers rather than in whether it fired. Both zero here, which is what makes the five counts above mean what they claim: a corpus that had drifted outside the cipher ordering or the media type map would make those rules fire less and say nothing about why. In a real estate this is the search that reveals an inspection point emitting OpenSSL short names rather than IANA ones, which lands the entire cipher feed in unrecognized_ciphers.",
       "key_values": {
-        "handshakes": 105,
+        "handshakes": 649,
         "unrecognized_ciphers": 0,
         "unclassified_content_types": 0
       }
@@ -621,12 +647,12 @@
     "Behavior summary - per-layer scores": {
       "expected_rows": 8969,
       "expected_empty": false,
-      "contributing_rows": 17796,
-      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 17796 scored events on `morpheus:score:l1` through `l7` and `morpheus:score:host`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week and the host segment's, because only TC5ScoreStage produces `max_abs_z`, and it leaves each corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1333 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline. The figures grew again when step 9 gave layer 3 a fortnight of ordinary history before its scored hours: the network corpus now contributes 1184 flows where it contributed 411, and the presentation corpus 130 handshakes with a personal device among them; the campaign gained a principal who reaches a workstation and the flows of its exfiltrators' breach connections. And again when step 10 gave the port, the link, the VLAN and the 802.1X exchange behaviour of their own: the layer 1 stream grew from 305 polls of five ports to 793 of thirteen, the MAC table by 45 rows with a camera VLAN, a printer and a guest, and the 802.1X stream by 122 events from two lab benches reauthenticating every two minutes, 655 events in all. And when step 11 gave the SaaS corpus a second tenant whose sync service exports twice a day, 212 operations, and gave the layer 3 corpus one late flow, which goes to morpheus:late, where neither a detection nor the summary reads it. And when step 13 gave the application corpus a week of per-client history before its event day, so each client's DNS and HTTP rows are measured against its own busiest day: DNS queries grew from 440 to 1984 and HTTP requests from 740 to 2515, and the service class adds 303 connections keyed on the services they reached. Layer 4 gained 24 packets from the hosts whose stacks R-B-L4-004 compares with their browsers' claims, and layer 6 17 handshakes from the address that fronts two names. And when step 15 gave the estate's switches and router a poll of their own and put the campaign's headquarters desk ports in front of the rules: the device class adds 305 polls keyed on the devices, the campaign 292 port polls and 1125 MAC table walks on layers 1 and 2, which it had not sent before, and 12 flows from its four intruders. And when step 8's host segment arrived with a sourcetype of its own: 1568 rows, one per workstation per hour over three weeks, each its own group because the frame's event time is the hour's start and the entity is the machine, 536 of them scored and carrying a `peak_z`, which no row of any other layer but 5 does. And when the daily drift reached the TLS and DNS columns: the presentation corpus gained a week of 336 handshakes from the two hosts R-P-L6-006 is asserted on, and the application corpus 248 queries from the client paced under R-B-L7-001's floor, each keyed on the host or client that made it."
+      "contributing_rows": 17801,
+      "why": "One summary row per (five-minute bin, osi_layer, entity_key, lineage_id) over the 17801 scored events on `morpheus:score:l1` through `l7` and `morpheus:score:host`. It was 320 before the estate pipeline rendered these events: the same layers 1 and 2, plus the desk authentications made in that hour, which add their own groups. `peak_z` is null on every row but layer 5's scored week and the host segment's, because only TC5ScoreStage produces `max_abs_z`, and it leaves each corpus's training fortnight unscored; a null aggregate does not drop a row, so the count is a statement about the grouping, not about scoring coverage. The figures grew twice more as layers landed: layer 3 contributes 411 scored flows keyed on source addresses, layer 4 contributes 432 scored packets keyed on flows, layer 6 contributes 105 scored handshakes keyed on hosts, and layer 7 contributes 1180 DNS queries and HTTP requests keyed on the clients that made them, 1333 SaaS operations keyed on the principals who performed them and 1138 process starts keyed on the hosts that ran them, none of which shares an entity with the estate's ports and principals or with each other. The campaign corpus the chained rules are asserted on adds 308 flows, 82 host logins, 108 session records, 555 packets, 165 handshakes, 241 process starts and 555 SaaS operations on the layer 3 to 7 sourcetypes, sharing entities with one another and with no other corpus. The layer 1 figure grew by 61 rows and 13 groups when a sixth port joined the estate: the one whose optic is swapped with the link dropping, which is R-D-L1-001's control. The layer 5 figure grew by 280 events when the session corpus gained the fortnight its models are trained on, with two more principals -- the one whose account is taken over and the joiner -- so its rows reach the search head with null scores and no model version, as they leave the pipeline. The figures grew again when step 9 gave layer 3 a fortnight of ordinary history before its scored hours: the network corpus now contributes 1184 flows where it contributed 411, and the presentation corpus 130 handshakes with a personal device among them; the campaign gained a principal who reaches a workstation and the flows of its exfiltrators' breach connections. And again when step 10 gave the port, the link, the VLAN and the 802.1X exchange behaviour of their own: the layer 1 stream grew from 305 polls of five ports to 793 of thirteen, the MAC table by 45 rows with a camera VLAN, a printer and a guest, and the 802.1X stream by 122 events from two lab benches reauthenticating every two minutes, 655 events in all. And when step 11 gave the SaaS corpus a second tenant whose sync service exports twice a day, 212 operations, and gave the layer 3 corpus one late flow, which goes to morpheus:late, where neither a detection nor the summary reads it. And when step 13 gave the application corpus a week of per-client history before its event day, so each client's DNS and HTTP rows are measured against its own busiest day: DNS queries grew from 440 to 1984 and HTTP requests from 740 to 2515, and the service class adds 303 connections keyed on the services they reached. Layer 4 gained 24 packets from the hosts whose stacks R-B-L4-004 compares with their browsers' claims, and layer 6 17 handshakes from the address that fronts two names. And when step 15 gave the estate's switches and router a poll of their own and put the campaign's headquarters desk ports in front of the rules: the device class adds 305 polls keyed on the devices, the campaign 292 port polls and 1125 MAC table walks on layers 1 and 2, which it had not sent before, and 12 flows from its four intruders. And when step 8's host segment arrived with a sourcetype of its own: 1568 rows, one per workstation per hour over three weeks, each its own group because the frame's event time is the hour's start and the entity is the machine, 536 of them scored and carrying a `peak_z`, which no row of any other layer but 5 does. And when the daily drift reached the TLS and DNS columns: the presentation corpus gained a week of 336 handshakes from the two hosts R-P-L6-006 is asserted on, and the application corpus 248 queries from the client paced under R-B-L7-001's floor, each keyed on the host or client that made it."
     },
     "Chain assembly - cross-layer risk": {
-      "expected_rows": 0,
-      "expected_empty": true,
+      "expected_rows": 1,
+      "expected_empty": false,
       "distinct_lineage_ids": 3764,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
@@ -637,12 +663,28 @@
         "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "Empty, and now for the plainest reason it has had: the risk is written and is not enough. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the 3764 distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and two detections accuse any of them, each a different one: R-D-L2-003, the address claimed by two MACs, at 55, and R-D-L1-002, the tap on the port Carol sits at, at 50, on the one window her desk sign-in shares with the tap. The threshold is `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)`, so 55 falls five short, 50 ten, and no span reaches four. The other 13 carry no risk at all; the search-head run records both totals. Every other risk record lands on a lineage of one or two layers, the 70 the layer 5 model rules now write included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them where the single `resolution_method` named only the last, and 1455 chains in all carry one: the layer 3, 4 and 6 records now carry the two hops from address to machine, and each of those layers roots its chains on the machine where the hops reached one; the campaign's packets, handshakes and exports carry a third, to the session that held their address. That is also why there are fewer chains than the 4268 there were: a workstation's flows in an hour are one chain where each flow identifier, or each address a lease reassigned, used to be its own. A machine's chains are still one per layer, because each layer's corpus seals alone; the host evidence report joins them on `host_key`, and the host identity harness seals four layers together to show the chain they make.",
+      "why": "One row, and it took four empty reasons and one planted actor to reach it. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and three detections' records land on them. R-D-L1-002, the tap on the port Carol sits at, adds 50 to her chain in the window her desk sign-in shares with the tap. R-D-L2-003, the gateway claimed by two MACs, is one notable whose `lineage_id` names every chain its contested observations were on: the flooding host's, in the flood's window, and, since the workstation on the tapped port claims the gateway five times in the window after the tap, Carol's too, 55 each. Carol's chain sums to 105 against `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)` and is the row: `rules` names both detections, `layer_span` is 3, and `methods` the three hops the ladder took. The flooding host's chain stays at 55, the quiet case beside it, and the other 13 carry no risk at all; the search-head run records all three totals. Before the desk spoof the two accusations fell on different chains and the search was validated only as a correct empty: 55 five short, 50 ten. Every other risk record lands on a lineage of one or two layers, the layer 5 model rules' included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. No search head has returned the row yet: the thirteenth run was made over the events before the plant.",
       "three_layer_chain_risk": {
         "0": 13,
-        "50": 1,
-        "55": 1
-      }
+        "55": 1,
+        "105": 1
+      },
+      "key_values": [
+        {
+          "lineage_id": "d1c7d5889a57b62ff76e7207f324c93b",
+          "layer_span": 3,
+          "total_risk": 105,
+          "rules": [
+            "R-D-L1-002",
+            "R-D-L2-003"
+          ],
+          "methods": [
+            "soft:directory",
+            "soft:dot1x",
+            "soft:mac_table"
+          ]
+        }
+      ]
     },
     "Binding lookup - L2/L3 refresh": {
       "expected_rows": 1685,
@@ -677,12 +719,44 @@
     "Principal watchlist - expiry": {
       "expected_rows": 2,
       "expected_empty": false,
-      "why": "A maintenance search that keeps only the watchlist entries whose expires has not passed. Its answer depends on how far the events sit behind the clock, and run_search_head.py places them: every timestamp moves by whole weeks so the newest event lands three to ten days before the run. R-P-L7-006 stamps each principal's entry with that principal's latest event, and both of its principals' latest events are three days behind the newest in the corpus, which is the host segment's last hour, so their thirty-day expiries are still ahead and the two entries survive. R-P-L5-006 stamps each principal-day it fired, and the latest of those days is more than thirty-five days behind the newest, so its six entries have passed and are dropped. Against the unshifted 1970 events every entry would expire, which is what this note said before the first search-head run showed otherwise. Run it last: run before R-B-L7-002, it empties the list that search reads."
+      "why": "A maintenance search that keeps only the watchlist entries whose expires has not passed. Its answer depends on how far the events sit behind the clock, and run_search_head.py places them: every timestamp moves by whole weeks so the newest event lands three to ten days before the run. R-P-L7-006 stamps each principal's entry with that principal's latest event, and both of its principals' latest events are three days behind the newest in the corpus, which is the host segment's last hour, so their thirty-day expiries are still ahead and the two entries survive. R-P-L5-006 stamps each principal-day it fired, and the latest of those days is more than thirty-five days behind the newest, so its six entries have passed and are dropped. Against the unshifted 1970 events every entry would expire, which is what this note said before the first search-head run showed otherwise. Run it last: run before R-B-L7-002, it empties the list that search reads.",
+      "key_values": [
+        {
+          "user_principal": "ivy@example.com",
+          "rule_id": "R-P-L7-006",
+          "reason": "access-breadth"
+        },
+        {
+          "user_principal": "kate@example.com",
+          "rule_id": "R-P-L7-006",
+          "reason": "access-breadth"
+        }
+      ]
     },
     "Host watchlist - expiry": {
       "expected_rows": 3,
       "expected_empty": false,
-      "why": "The hosts' list, trimmed as the principals' is. R-P-L3-009 stamps each host-day it fired with the day's latest row, and the drifting host's last three days are the newest events in the corpus, so once run_search_head.py has dated them they are three to ten days behind the run and all three entries are inside their thirty days. R-P-L6-006's three entries and R-P-L7-009's four are stamped with their hosts' latest rows in the presentation and application corpora's first week, more than fifty days behind the newest event, so all seven have passed and are dropped, as R-P-L5-006's are from the principals' list. Run it last: run before R-B-L7-004, it empties the list that search reads."
+      "why": "The hosts' list, trimmed as the principals' is. R-P-L3-009 stamps each host-day it fired with the day's latest row, and the drifting host's last three days are the newest events in the corpus, so once run_search_head.py has dated them they are three to ten days behind the run and all three entries are inside their thirty days. R-P-L6-006's three entries and R-P-L7-009's four are stamped with their hosts' latest rows in the presentation and application corpora's first week, more than fifty days behind the newest event, so all seven have passed and are dropped, as R-P-L5-006's are from the principals' list. Run it last: run before R-B-L7-004, it empties the list that search reads.",
+      "key_values": [
+        {
+          "host_key": "ws-2-24",
+          "rule_id": "R-P-L3-009",
+          "reason": "host-drift-trajectory",
+          "day_window_id": 57
+        },
+        {
+          "host_key": "ws-2-24",
+          "rule_id": "R-P-L3-009",
+          "reason": "host-drift-trajectory",
+          "day_window_id": 58
+        },
+        {
+          "host_key": "ws-2-24",
+          "rule_id": "R-P-L3-009",
+          "reason": "host-drift-trajectory",
+          "day_window_id": 59
+        }
+      ]
     },
     "Binding lookup - L2/L3 expiry": {
       "expected_rows": 1685,
@@ -697,15 +771,67 @@
     "Binding lookup - L5/L2 expiry": {
       "expected_rows": 59,
       "expected_empty": false,
-      "why": "The 802.1X identity rung's maintenance search. It keeps every bucket inside the retention window and rewrites the lookup with them, so it returns what it kept, and every bucket here is inside it: the runner moves the events to the weeks before the run, and the refresh keys each row on the bucket its own time falls in. It was expected empty for as long as the refreshes keyed on the stored ordinal, a bucket counted from 1970 that an expiry measured against now() dropped; that zero was the epoch, not the job."
+      "why": "The 802.1X identity rung's maintenance search. It keeps every bucket inside the retention window and rewrites the lookup with them, so it returns what it kept, and every bucket here is inside it: the runner moves the events to the weeks before the run, and the refresh keys each row on the bucket its own time falls in. It was expected empty for as long as the refreshes keyed on the stored ordinal, a bucket counted from 1970 that an expiry measured against now() dropped; that zero was the epoch, not the job.",
+      "key_values": [
+        {
+          "dot1x_identity": "aa:bb:cc:00:00:07",
+          "port_key": "hq:sw1:Gi1/0/5",
+          "kept_buckets": 1
+        },
+        {
+          "dot1x_identity": "alice-ws",
+          "port_key": "hq:sw1:Gi1/0/1",
+          "kept_buckets": 10
+        },
+        {
+          "dot1x_identity": "bench-01",
+          "port_key": "hq:sw1:Gi1/0/19",
+          "kept_buckets": 12
+        },
+        {
+          "dot1x_identity": "bench-02",
+          "port_key": "hq:sw1:Gi1/0/20",
+          "kept_buckets": 12
+        },
+        {
+          "dot1x_identity": "bob-ws",
+          "port_key": "hq:sw1:Gi1/0/2",
+          "kept_buckets": 10
+        },
+        {
+          "dot1x_identity": "carol-ws",
+          "port_key": "hq:sw1:Gi1/0/3",
+          "kept_buckets": 10
+        },
+        {
+          "dot1x_identity": "desk-4021",
+          "port_key": "hq:sw1:Gi1/0/4",
+          "kept_buckets": 1
+        },
+        {
+          "dot1x_identity": "phone-4021",
+          "port_key": "hq:sw1:Gi1/0/4",
+          "kept_buckets": 1
+        },
+        {
+          "dot1x_identity": "unknown-supplicant",
+          "port_key": "hq:sw1:Gi1/0/2",
+          "kept_buckets": 1
+        },
+        {
+          "dot1x_identity": "unknown-supplicant",
+          "port_key": "hq:sw1:Gi1/0/5",
+          "kept_buckets": 1
+        }
+      ]
     },
     "Binding health - unresolved rate": {
       "expected_rows": 1,
-      "why": "One row: the ARP stream, the one class whose records carry a resolution outcome. Its 180 unresolved of 1,220 is the corpus's planted rate (0.148), under the 0.2 that marks a class degraded. Four more classes -- the layer 1 port stream, the MAC table, 802.1X and the layer 5 host logins -- carry the resolution_method column with no value on any row; while the wire sent those as null, resolution_method=* matched them and the search reported four classes as resolving bindings with nothing unresolved, which is how this expectation read five until the first search-head run. An absent field does not match, so they are no longer counted as healthy when nothing about them was measured. The search used to read morpheus:score:l3 alone, a sourcetype whose producer never writes resolution_method; the retrospective's gap G24. An operational metric: the value is in the numbers rather than in whether rows came back.",
+      "why": "One row: the ARP stream, the one class whose records carry a resolution outcome. Its 180 unresolved of 1,225 is the corpus's planted rate (0.147), under the 0.2 that marks a class degraded. Four more classes -- the layer 1 port stream, the MAC table, 802.1X and the layer 5 host logins -- carry the resolution_method column with no value on any row; while the wire sent those as null, resolution_method=* matched them and the search reported four classes as resolving bindings with nothing unresolved, which is how this expectation read five until the first search-head run. An absent field does not match, so they are no longer counted as healthy when nothing about them was measured. The search used to read morpheus:score:l3 alone, a sourcetype whose producer never writes resolution_method; the retrospective's gap G24. An operational metric: the value is in the numbers rather than in whether rows came back.",
       "expected_empty": false,
       "groups": {
         "morpheus:score:l2/tc2_arp": {
-          "total": 1220,
+          "total": 1225,
           "unresolved": 180
         }
       }

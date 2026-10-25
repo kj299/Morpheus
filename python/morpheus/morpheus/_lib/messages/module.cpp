@@ -24,7 +24,6 @@
 #include "morpheus/messages/memory/response_memory_probs.hpp"
 #include "morpheus/messages/memory/tensor_memory.hpp"
 #include "morpheus/messages/meta.hpp"
-#include "morpheus/messages/raw_packet.hpp"
 #include "morpheus/objects/data_table.hpp"
 #include "morpheus/objects/mutable_table_ctx_mgr.hpp"
 #include "morpheus/pybind11/json.hpp"         // IWYU pragma: keep
@@ -309,11 +308,6 @@ PYBIND11_MODULE(messages, _module)
                     &LoaderRegistry::unregister_factory_fn,
                     py::arg("name"),
                     py::arg("throw_if_not_exists") = true);
-
-    py::class_<RawPacketMessage, std::shared_ptr<RawPacketMessage>>(_module, "RawPacketMessage")
-        .def_property_readonly("num", &RawPacketMessage::count)
-        .def_property_readonly("max_size", &RawPacketMessage::get_max_size)
-        .def_property_readonly("gpu_mem", &RawPacketMessage::is_gpu_mem);
 
     _module.attr("__version__") =
         MORPHEUS_CONCAT_STR(morpheus_VERSION_MAJOR << "." << morpheus_VERSION_MINOR << "." << morpheus_VERSION_PATCH);

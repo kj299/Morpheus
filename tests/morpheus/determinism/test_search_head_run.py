@@ -302,6 +302,18 @@ other; each older step's summary figure overrides this one's. The two searches s
 the subdomain trajectories, are absent from the earlier runs and are not compared.
 """
 
+BEFORE_THE_DESK_SPOOF = {
+    "Chain assembly - cross-layer risk": 0,
+}
+"""What every run before the desk spoof found where it changed the answer.
+
+The telemetry corpus gained a workstation on the tapped port that claims the gateway in the window after the tap, so
+one three-layer chain carries R-D-L1-002's 50 and R-D-L2-003's 55 together and the chain search returns it. Every
+earlier run found the two accusations on different chains and the search empty. The ARP anomaly's own row count did
+not move, because it groups by the contested address, and neither did the summary's, because the spoof's rows join a
+group the window already had.
+"""
+
 
 def _present(changes: dict, run: dict) -> dict:
     """The changes a later step made, restricted to the searches this run dispatched."""
@@ -345,7 +357,7 @@ def test_the_first_run_differed_from_what_was_written_in_exactly_the_two_ways_it
     }
 
     assert differing == {
-        **_present(BEFORE_THE_TRAJECTORIES, run),
+        **_present(BEFORE_THE_DESK_SPOOF, run), **_present(BEFORE_THE_TRAJECTORIES, run),
         **devices,
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
@@ -384,6 +396,7 @@ def test_the_second_run_differed_from_what_is_written_only_where_the_trajectory_
     }
 
     assert differing == {
+        **_present(BEFORE_THE_DESK_SPOOF, run),
         **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
@@ -446,6 +459,7 @@ def test_the_fourth_run_differs_from_what_is_written_only_where_the_learned_mode
     }
 
     assert differing == {
+        **_present(BEFORE_THE_DESK_SPOOF, run),
         **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
@@ -476,6 +490,7 @@ def test_the_fifth_run_differs_from_what_is_written_only_where_the_host_baseline
     }
 
     assert differing == {
+        **_present(BEFORE_THE_DESK_SPOOF, run),
         **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
@@ -506,6 +521,7 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
     }
 
     assert differing == {
+        **_present(BEFORE_THE_DESK_SPOOF, run),
         **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
@@ -545,6 +561,7 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
     }
 
     assert differing == {
+        **_present(BEFORE_THE_DESK_SPOOF, run),
         **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
@@ -576,6 +593,7 @@ def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arriv
     }
 
     assert differing == {
+        **_present(BEFORE_THE_DESK_SPOOF, run),
         **_present(BEFORE_THE_TRAJECTORIES, run),
         **_present(BEFORE_THE_DEVICES, run),
         **_present(BEFORE_THE_SERVICES, run),
@@ -606,7 +624,10 @@ def test_the_ninth_run_differs_from_what_is_written_only_where_the_services_arri
     }
 
     assert differing == {
-        **_present(BEFORE_THE_TRAJECTORIES, run), **_present(BEFORE_THE_DEVICES, run), **BEFORE_THE_SERVICES
+        **_present(BEFORE_THE_DESK_SPOOF, run),
+        **_present(BEFORE_THE_TRAJECTORIES, run),
+        **_present(BEFORE_THE_DEVICES, run),
+        **BEFORE_THE_SERVICES
     }
     assert len(run["searches"]) == 72 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
@@ -632,7 +653,9 @@ def test_the_tenth_run_differs_from_what_is_written_only_where_the_devices_arriv
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**_present(BEFORE_THE_TRAJECTORIES, run), **BEFORE_THE_DEVICES}
+    assert differing == {
+        **_present(BEFORE_THE_DESK_SPOOF, run), **_present(BEFORE_THE_TRAJECTORIES, run), **BEFORE_THE_DEVICES
+    }
     assert len(run["searches"]) == 75 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 213
 
@@ -671,7 +694,7 @@ def test_the_eleventh_run_differs_from_what_is_written_only_where_the_host_segme
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_HOSTS
+    assert differing == {**BEFORE_THE_DESK_SPOOF, **BEFORE_THE_HOSTS}
     assert len(run["searches"]) == 78 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 221
 
@@ -697,7 +720,39 @@ def test_the_twelfth_run_differs_from_what_is_written_only_where_the_trajectory_
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_TRAJECTORIES
+    assert differing == {**BEFORE_THE_DESK_SPOOF, **BEFORE_THE_TRAJECTORIES}
     assert len(run["searches"]) == 80 and len(expected) == 82
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 224
     assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009"}
+
+
+THIRTEENTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-23T1125Z.json")
+"""The run over the events the daily drift over the TLS and DNS columns added; it matched everything then written."""
+
+
+def test_the_thirteenth_run_differs_from_what_is_written_only_where_the_desk_spoof_arrived():
+    # Made on 2026-10-23 when the daily drift reached the TLS and DNS columns: all eighty-two then matched, with 233
+    # risk records, and the host watchlist held R-P-L3-009's three, R-P-L6-006's three and R-P-L7-009's four. Against
+    # the events the desk spoof regenerated it differs in the chain search alone, which it found empty for the
+    # last of its four reasons: the two detections that accused a three-layer chain accused different chains.
+    with open(THIRTEENTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_DESK_SPOOF
+    assert len(run["searches"]) == 82 and len(expected) == 82
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 233
+    assert {
+        row["total_risk"]: int(row["count"])
+        for row in run["checks"]["three_layer_chain_risk"]
+    } == {
+        "0": 13, "50": 1, "55": 1
+    }
+    assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009", "R-P-L6-006", "R-P-L7-009"}

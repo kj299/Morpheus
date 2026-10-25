@@ -19,8 +19,11 @@ Each segment's runner, from its sample files to the bytes a SIEM receives, repro
 Two hops, each asserted where it can be: the composition over the in-memory corpus reaches its golden file (every
 harness asserts that), and here the runner -- `FileSourceStage` over the committed samples, the same composition,
 `SiemWireStage` and `SiemWireSinkStage` -- writes exactly the lines that in-memory result renders to through the
-same wire. Then a restart: a runner stopped after the first half of the data and started again on the second,
-with only its checkpoint directory between them, writes what one uninterrupted run writes.
+same wire. The two branches beside the scored stream are held the same way: the runner's `morpheus:health` file is
+`envelope.health` over the composition's result, and its `morpheus:edge` file, for a segment whose module names
+`EDGE_HOPS`, is `edge_stream.emit` with them, each rendered through the wire. Then a restart: a runner stopped after
+the first half of the data and started again on the second, with only its checkpoint directory between them, writes
+what one uninterrupted run writes.
 """
 
 import json
@@ -37,10 +40,14 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(EXAMPLE))
 
 # pylint: disable=wrong-import-position
+import edge_stream  # noqa: E402
+import envelope  # noqa: E402
+import host_identity  # noqa: E402
 import segment_runner  # noqa: E402
 
 from morpheus.messages import MessageMeta  # noqa: E402
 from morpheus.stages.output.siem_wire_stage import SiemWireStage  # noqa: E402
+from morpheus.utils.bucket_peak import DEFAULT_MIN_BUCKETS  # noqa: E402
 from morpheus.utils.determinism_envelope import COLD_START  # noqa: E402
 from morpheus.utils.siem_wire import to_wire_lines  # noqa: E402
 from morpheus.utils.stage_checkpoint import snapshot_digest  # noqa: E402
@@ -49,19 +56,50 @@ from morpheus.utils.tracker_state import from_bytes  # noqa: E402
 SEGMENTS = sorted(segment_runner.SEGMENTS)
 
 
+def _wire(sourcetype: str, rows) -> list[str]:
+    config = segment_runner._config()  # pylint: disable=protected-access
+    stage = SiemWireStage(config, sourcetype=sourcetype, require_columns=False)
+
+    return to_wire_lines(stage.on_data(MessageMeta(rows.reset_index(drop=True))).copy_dataframe())
+
+
+def _branches(module, config, result) -> dict[str, list[str]]:
+    """What the harnesses produce beside the scored rows: `envelope.health`, and the edges where hops are named."""
+    lines: dict[str, list[str]] = {}
+
+    if (hasattr(module, "PERIOD_SECONDS")):
+        records = envelope.health(config,
+                                  result,
+                                  module.PERIOD_SECONDS,
+                                  getattr(module, "HEALTH_MIN_BUCKETS", DEFAULT_MIN_BUCKETS))
+
+        if (len(records) > 0):
+            lines[segment_runner.HEALTH_SOURCETYPE] = _wire(segment_runner.HEALTH_SOURCETYPE, records)
+    else:
+        assert "window_id" not in result.columns or result["window_id"].isna().all(), "sealed rows and no period"
+
+    if (hasattr(module, "EDGE_HOPS")):
+        records = edge_stream.emit(config, result, **module.EDGE_HOPS)
+
+        if (len(records) > 0):
+            lines[segment_runner.EDGE_SOURCETYPE] = _wire(segment_runner.EDGE_SOURCETYPE, records)
+
+    return lines
+
+
 def _expected(segment: str) -> dict[str, list[str]]:
-    """The in-memory composition's rows, rendered through the same wire, per sourcetype."""
+    """The in-memory composition's rows and its two branches, rendered through the same wire, per sourcetype."""
     import importlib  # pylint: disable=import-outside-toplevel
 
     module = importlib.import_module(segment_runner.SEGMENTS[segment]["module"])
-    result = module.run_pipeline(module.build_pipeline_config(), module.build_corpus())
+    config = module.build_pipeline_config()
+    result = module.run_pipeline(config, module.build_corpus())
     lines: dict[str, list[str]] = {}
 
     for (_, sourcetype, rows) in segment_runner.route(segment, result):
-        config = segment_runner._config()  # pylint: disable=protected-access
-        stage = SiemWireStage(config, sourcetype=sourcetype, require_columns=False)
-        rendered = stage.on_data(MessageMeta(rows.reset_index(drop=True))).copy_dataframe()
-        lines.setdefault(sourcetype, []).extend(to_wire_lines(rendered))
+        lines.setdefault(sourcetype, []).extend(_wire(sourcetype, rows))
+
+    lines.update(_branches(module, config, result))
 
     return lines
 
@@ -81,6 +119,36 @@ def test_the_runner_writes_what_the_composition_renders(segment: str, tmp_path):
 
     assert sum(written.values()) > 0
     assert on_disk == _by_file(_expected(segment))
+
+    # Every segment that seals writes its health; the context segment seals nothing. No segment's module names hops
+    # yet, so none writes an edge file: the test below turns the branch on for one and holds it to the harness.
+    assert ("morpheus_health" in on_disk) == (segment != "context"), sorted(on_disk)
+    assert "morpheus_edge" not in on_disk, sorted(on_disk)
+
+
+NETWORK_HOPS = {
+    "hop_method_columns": [host_identity.LEASE_METHOD_COLUMN, host_identity.INVENTORY_METHOD_COLUMN],
+    "hop_uid_columns": [host_identity.LEASE_UID_COLUMN, host_identity.INVENTORY_UID_COLUMN],
+    "hop_layers": [3, 7],
+}
+"""The network segment's resolution hops, were its module to name them: a flow's source address through the DHCP
+lease at layer 3 and through the EDR inventory at layer 7."""
+
+
+@pytest.mark.cpu_mode
+def test_a_segment_naming_its_hops_writes_the_edges_the_harness_emits(tmp_path, monkeypatch):
+    import network_pipeline  # pylint: disable=import-outside-toplevel
+
+    monkeypatch.setattr(network_pipeline, "EDGE_HOPS", NETWORK_HOPS, raising=False)
+    written = segment_runner.run("network", EXAMPLE / "samples" / "network", output_dir=tmp_path / "out")
+    on_disk = sorted((tmp_path / "out" / "morpheus_edge.jsonlines").read_text(encoding="utf-8").splitlines())
+
+    config = network_pipeline.build_pipeline_config()
+    result = network_pipeline.run_pipeline(config, network_pipeline.build_corpus())
+    edges = edge_stream.emit(config, result, **NETWORK_HOPS)
+
+    assert written[segment_runner.EDGE_SOURCETYPE] == len(edges) > 0
+    assert on_disk == sorted(_wire(segment_runner.EDGE_SOURCETYPE, edges))
 
 
 def _split_inputs(segment: str, target: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
@@ -115,6 +183,17 @@ switch's MAC table -- and a binding still open when the first run stops is close
 second. A deployment holds those bindings in the SIEM's lookups, refreshed from `binding:*`; the compositions build
 them per run, so for them this equality is not the property to ask for. Their stages restore all the same."""
 
+UNANSWERED_FALLBACK = "fallback"
+"""The one health count still read as unanswered or zero by where the run was cut. `envelope.health` drops a column
+that is null on every row of the class before `PipelineHealthStage` sees it, so a class whose `model_fallback_used`
+is null until the scored week answers null from a run stopped before that week and zero from a run over the whole
+replay. The other counts, `clock_refused` among them, are compared as written: their stages declare the column, so
+it is on every row with a value."""
+
+
+def _files(directory: pathlib.Path) -> dict[str, list[str]]:
+    return {path.stem: path.read_text(encoding="utf-8").splitlines() for path in directory.glob("*.jsonlines")}
+
 
 def _without_resume_marker(lines: dict[str, list[str]]) -> dict[str, list[str]]:
     stripped = {}
@@ -124,6 +203,9 @@ def _without_resume_marker(lines: dict[str, list[str]]) -> dict[str, list[str]]:
 
         for record in records:
             record.pop("resumed_from_state", None)
+
+            if (name == "morpheus_health"):
+                record.setdefault(UNANSWERED_FALLBACK, 0)
 
         stripped[name] = sorted(json.dumps(record, sort_keys=True) for record in records)
 
@@ -145,11 +227,8 @@ def test_a_restarted_runner_writes_what_one_run_writes(segment: str, tmp_path):
     segment_runner.run(segment, second, output_dir=tmp_path / "restarted", state_dir=state, final=True)
     segment_runner.run(segment, EXAMPLE / "samples" / segment, output_dir=tmp_path / "once")
 
-    restarted = {
-        path.stem: path.read_text(encoding="utf-8").splitlines()
-        for path in (tmp_path / "restarted").glob("*.jsonlines")
-    }
-    once = {path.stem: path.read_text(encoding="utf-8").splitlines() for path in (tmp_path / "once").glob("*.jsonlines")}
+    restarted = _files(tmp_path / "restarted")
+    once = _files(tmp_path / "once")
 
     assert _without_resume_marker(restarted) == _without_resume_marker(once)
 

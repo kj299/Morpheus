@@ -50,7 +50,7 @@ echo -e "${g}Launching ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}...${x}"
 
 # Enable command logging to show what is being executed
 set -x
-docker run ${DOCA_EXTRA_ARGS} --rm -ti ${DOCKER_ARGS} ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} "${@:-bash}"
+docker run --rm -ti ${DOCKER_ARGS} ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} "${@:-bash}"
 
 { EXIT_CODE=$?; set +x; } 2>/dev/null
 

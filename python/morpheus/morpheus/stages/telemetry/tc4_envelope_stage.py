@@ -44,13 +44,18 @@ from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
 from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.event_clock import clock_for_skew_seconds
+from morpheus.utils.event_clock import event_times_ns
+from morpheus.utils.event_clock import guard_times
+from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.transfer_envelope import DEFAULT_MIN_SAMPLES
 from morpheus.utils.transfer_envelope import DEFAULT_MULTIPLIER
 from morpheus.utils.transfer_envelope import DEFAULT_QUANTILE
@@ -103,9 +108,15 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
         by nearest rank is simply the maximum, so the figure would not be what its name says.
     max_samples : int, default = 4096
         Transfers retained per entity regardless of the window.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a row's event time may be before it is refused. The envelope is
+        taken over a window that expires transfers on event time, so one record from an exporter whose clock is
+        wrong by years would empty every triple's thirty days at once and let an exfiltration begin against no
+        reference. A refused row carries no envelope from this stage, sets `clock_refused`, and moves no horizon.
+        See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_trackers", )
+    _checkpoint_attributes = ("_trackers", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -117,7 +128,8 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                  quantile: float = DEFAULT_QUANTILE,
                  multiplier: float = DEFAULT_MULTIPLIER,
                  min_samples: int = DEFAULT_MIN_SAMPLES,
-                 max_samples: int = 4096):
+                 max_samples: int = 4096,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
         if (window_seconds <= 0):
@@ -155,6 +167,9 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             self._needed_columns[f"{column}_envelope_ratio"] = TypeId.FLOAT64
             self._needed_columns[f"{column}_envelope_breached"] = TypeId.BOOL8
             self._needed_columns[f"{column}_envelope_mature"] = TypeId.BOOL8
+
+        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
+        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
 
         self._should_log_timestamps = True
 
@@ -226,8 +241,10 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                                f"DataFrame. Available columns: {sorted(df.columns)}")
 
             key_parts = {name: to_host_list(df, name) for name in self._key_columns}
-            raw_times = to_host_list(df, self._time_column)
-            rows = len(raw_times)
+            # Guarded once, before any envelope is shown a time: a refused time becomes `None`, which the rows
+            # below already treat as a record with nothing to measure.
+            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            rows = len(times)
 
             magnitudes = {
                 column: (to_host_list(df, column) if column in df.columns else [None] * rows)
@@ -244,16 +261,12 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
 
             for position in range(rows):
                 key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+                event_time_ns = times[position]
 
                 keys.append(key)
 
                 if (key is None or event_time_ns is None):
-                    unusable += 1
+                    unusable += int(not refused[position])
 
                 for column in self._magnitude_columns:
                     value = self._magnitude(magnitudes[column][position])
@@ -280,6 +293,13 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                 assign_nullable_float_column(df, f"{column}_envelope_ratio", ratios[column])
                 assign_nullable_bool_column(df, f"{column}_envelope_breached", breached[column])
                 df[f"{column}_envelope_mature"] = mature[column]
+
+            refuse_rows(df,
+                        refused,
+                        logger=logger,
+                        stage="TC4EnvelopeStage",
+                        what="records",
+                        outcome="they joined no envelope, set clock_refused and expired nothing.")
 
             if (unusable > 0):
                 logger.info(

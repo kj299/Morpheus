@@ -35,7 +35,6 @@ add_library(morpheus
   src/messages/memory/response_memory.cpp
   src/messages/memory/tensor_memory.cpp
   src/messages/meta.cpp
-  src/messages/raw_packet.cpp
   src/modules/data_loader_module.cpp
   src/objects/data_table.cpp
   src/objects/dev_mem_info.cpp

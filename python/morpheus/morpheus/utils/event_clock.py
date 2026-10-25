@@ -40,6 +40,7 @@ A clock running *behind* needs no bound here. The stages already refuse an obser
 end backwards, and a stale row simply fails to advance the clock.
 """
 
+import logging
 import typing
 
 from morpheus.utils.tracker_state import StateMixin
@@ -120,6 +121,58 @@ class EventClock(StateMixin):
         return True
 
 
+def clock_for_skew_seconds(max_clock_skew_seconds: int) -> EventClock:
+    """
+    Build a stage's clock from its `max_clock_skew_seconds` parameter.
+
+    The one place the parameter is validated, so the error names the parameter the operator set rather than the
+    nanosecond bound the clock holds inside.
+
+    Raises
+    ------
+    ValueError
+        If `max_clock_skew_seconds` is not positive.
+    """
+    if (max_clock_skew_seconds <= 0):
+        raise ValueError(f"max_clock_skew_seconds must be positive, received {max_clock_skew_seconds}")
+
+    return EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+
+
+def event_times_ns(df, column: str, time_unit: str = "ns") -> list[typing.Optional[int]]:
+    """
+    Read a frame's event-time column as nanoseconds since the epoch, one entry per row.
+
+    Parameters
+    ----------
+    df : `pandas.DataFrame` or `cudf.DataFrame`
+        The frame the stage is reading.
+    column : str
+        The event-time column.
+    time_unit : str, default = "ns"
+        Unit for numeric values, as `morpheus.utils.binding_table.to_epoch_ns` takes it.
+
+    Returns
+    -------
+    list of int or None
+        The row's time, or `None` where the value was null or could not be interpreted as a timestamp. A tracker
+        treats `None` as a row with nothing to measure, which is also what `guard_times` turns a refused time into.
+    """
+    # Imported here so that this module stays free of a frame library for the stages that only need the clock.
+    from morpheus.utils.binding_table import to_epoch_ns
+    from morpheus.utils.column_assign import to_host_list
+
+    times = []
+
+    for raw in to_host_list(df, column):
+        try:
+            times.append(to_epoch_ns(raw, time_unit=time_unit))
+        except ValueError:
+            times.append(None)
+
+    return times
+
+
 def _truthy(value: typing.Any) -> bool:
     try:
         # A nullable boolean, compared by value rather than identity.
@@ -148,6 +201,51 @@ def mark_refused(df, refused: typing.Sequence[bool]) -> None:
     assign_nullable_bool_column(df,
                                 CLOCK_REFUSED_COLUMN,
                                 [_truthy(prior) or bool(now) for (prior, now) in zip(earlier, refused)])
+
+
+def refuse_rows(df, refused: typing.Sequence[bool], *, logger: logging.Logger, stage: str, what: str,
+                outcome: str) -> int:
+    """
+    Record one stage's refusals on the frame, and say so when there were any.
+
+    The mark is written on every frame, refused or not, so that whether a frame carries `CLOCK_REFUSED_COLUMN` is a
+    property of the stage and not of which rows happened to share a batch: a `False` on a believed row answers the
+    health record's count as 0 however the stream was split, where a missing column would answer it null.
+
+    Parameters
+    ----------
+    df : `pandas.DataFrame` or `cudf.DataFrame`
+        The frame the stage is writing, in place.
+    refused : sequence of bool
+        One entry per row: whether this stage refused it, as `guard_times` reports.
+    logger : `logging.Logger`
+        The stage's logger, so the warning is filed under the stage's module.
+    stage : str
+        The stage's name, as the warning's subject.
+    what : str
+        What a row of this stage's input is, in the plural: "flows", "handshakes", "queries".
+    outcome : str
+        What became of the refused rows, completing the sentence after "max_clock_skew_seconds allows;".
+
+    Returns
+    -------
+    int
+        How many rows were refused.
+    """
+    mark_refused(df, refused)
+    count = sum(1 for flag in refused if flag)
+
+    if (count > 0):
+        logger.warning(
+            "%s refused %d of %d %s whose event time was further ahead of the stream than max_clock_skew_seconds "
+            "allows; %s",
+            stage,
+            count,
+            len(refused),
+            what,
+            outcome)
+
+    return count
 
 
 def guard_times(clock: EventClock, times: typing.Sequence[typing.Optional[int]]) -> tuple[list, list]:

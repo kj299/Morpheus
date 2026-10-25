@@ -683,9 +683,10 @@ def test_nothing_else_fired(result: pd.DataFrame):
     assert set(stepped["port_key"]) == {f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}", f"{tp.SITE}:{tp.SWITCH}:Gi1/0/2"}
     assert len(stepped) == len(tp.HUB_MACS) + 1
 
-    # The gateway is contested from the flood until the flood leaves the window, whoever is sending: the router's
-    # own announcements in that span read two claimants too, which is the right input for R-D-L2-003. Nothing else
-    # is ever contested.
+    # The gateway is contested from the flood until the flood leaves the window, and again from the desk spoof until
+    # its window ends, whoever is sending: the router's own announcements in those spans read two claimants too,
+    # which is the right input for R-D-L2-003. Nothing else is ever contested, and the two spans are separate
+    # windows, so the chain search sees two accused ports rather than one twice.
     arp = _rows(result, "tc2_arp")
     contested = arp[arp["macs_claiming_sender_ip"].fillna(0) > 1]
     excluded = contested[contested["arp_sender_ip_excluded"] == True]  # noqa: E712  pylint: disable=singleton-comparison
@@ -693,7 +694,17 @@ def test_nothing_else_fired(result: pd.DataFrame):
 
     assert set(live["arp_sender_ip"]) == {tp.GATEWAY_IP}
     assert live["event_time"].min() == tp.FLOOD_AT_SECONDS * NS
-    assert live["event_time"].max() < (tp.FLOOD_AT_SECONDS + tp.PERIOD_SECONDS) * NS
+    assert live["event_time"].max() < (tp.DESK_SPOOF_AT_SECONDS + tp.DESK_SPOOF_PACKETS + tp.PERIOD_SECONDS) * NS
+
+    # The claimant window trails each claim by one period, so the gateway is uncontested again between the flood's
+    # window and the spoof's: the router's announcement in between reads one claimant.
+    between = live[(live["event_time"] >= (tp.FLOOD_AT_SECONDS + tp.PERIOD_SECONDS) * NS)
+                   & (live["event_time"] < tp.DESK_SPOOF_AT_SECONDS * NS)]
+    assert len(between) == 0
+
+    spoof = live[live["arp_sender_mac"] == tp.MAC_C]
+    assert len(spoof) == tp.DESK_SPOOF_PACKETS
+    assert set(spoof["resolved_port_key"]) == {f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}"}
     # The redundancy pair is contested for the whole corpus and excluded for the whole corpus: visible, marked, and
     # not a detection.
     assert set(excluded["arp_sender_ip"]) == {tp.VRRP_IP}

@@ -290,3 +290,86 @@ def test_null_hosts_and_values_are_not_pooled(config: Config):
     assert _as_list(meta, "dsts_per_src_step")[3] is None
     # The real host's history is three hours deep at the last row, not five.
     assert _as_list(meta, "dsts_per_src_baseline_buckets")[5] == 3
+
+
+# --- The clock guard ------------------------------------------------------------------------------------------
+
+YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
+"""A collector clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
+
+
+def _without_row(payload: dict, position: int) -> dict:
+    """The same frame with one row left out, which is what a refused row must be indistinguishable from."""
+    return {
+        name: [value for (index, value) in enumerate(values) if index != position]
+        for (name, values) in payload.items()
+    }
+
+
+def _pandas(meta: MessageMeta) -> pd.DataFrame:
+    df = meta.copy_dataframe()
+
+    return df.to_pandas() if hasattr(df, "to_pandas") else df
+
+
+def _drive(config: Config, stage, payload: dict) -> pd.DataFrame:
+    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
+    stage.on_data(meta)
+
+    return _pandas(meta)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
+    # Row 2 is stamped a decade ahead. Admitted, it would drive every horizon in the stage past the rows before it
+    # and refuse the real row after it as out of order; refused, the stream reads exactly as if it had never arrived.
+    payload = frame([3, 3, 3, 3])
+    payload["event_time"] = [0, HOUR_NS, YEARS_AHEAD_NS, 2 * HOUR_NS]
+
+    with_bad = _drive(config, TC3BaselineStage(config, min_buckets=4), payload)
+    control = _drive(config, TC3BaselineStage(config, min_buckets=4), _without_row(payload, 2))
+
+    assert [bool(value) for value in with_bad["clock_refused"]] == [False, False, True, False]
+    assert pd.isna(with_bad["dsts_per_src_baseline_buckets"][2])
+
+    kept = with_bad.drop(index=2).reset_index(drop=True)
+    pd.testing.assert_frame_equal(kept, control, check_dtype=False)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_frame_with_nothing_refused_carries_the_column_as_false(config: Config):
+    # The mark is written on every frame, so whether a frame carries the column is a property of the stage and not of
+    # which rows shared a batch; a believed row reads False, which the health record counts as 0 rather than null.
+    payload = frame([3, 3, 3, 3])
+
+    measured = _drive(config, TC3BaselineStage(config, min_buckets=4), payload)
+
+    assert [bool(value) for value in measured["clock_refused"]] == [False] * len(measured)
+
+
+def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
+    with pytest.raises(ValueError, match="max_clock_skew_seconds"):
+        TC3BaselineStage(config, max_clock_skew_seconds=0)
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_stop_and_restore_round_trip_keeps_the_clock(config: Config):
+    # A fresh instance believes the first time it is shown, so a decade-ahead row that opens a resumed process would
+    # set its clock. The clock is part of the snapshot, and the restored instance refuses it as the stopped one would.
+    payload = frame([3, 3, 3, 3])
+    payload["event_time"] = [0, HOUR_NS, YEARS_AHEAD_NS, 2 * HOUR_NS]
+    (before, after) = ({
+        name: values[:2]
+        for (name, values) in payload.items()
+    }, {
+        name: values[2:]
+        for (name, values) in payload.items()
+    })
+
+    stopped = TC3BaselineStage(config, min_buckets=4)
+    _drive(config, stopped, before)
+
+    resumed = TC3BaselineStage(config, min_buckets=4)
+    resumed.restore_state(stopped.checkpoint_state())
+
+    assert [bool(value) for value in _drive(config, resumed, after)["clock_refused"]] == [True, False]

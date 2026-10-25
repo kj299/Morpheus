@@ -7,10 +7,6 @@
 abp-models/* filter=lfs diff=lfs merge=lfs -text
 datasets/training-data/** filter=lfs diff=lfs merge=lfs -text
 datasets/validation-data/** filter=lfs diff=lfs merge=lfs -text
-dlp_models/gliner_bi_encoder/*.json filter=lfs diff=lfs merge=lfs -text
 dfp-models/* filter=lfs diff=lfs merge=lfs -text
-fraud-detection-models/ filter=lfs diff=lfs merge=lfs -text
-log-parsing-models/* filter=lfs diff=lfs merge=lfs -text
 phishing-models/* filter=lfs diff=lfs merge=lfs -text
-root-cause-models/* filter=lfs diff=lfs merge=lfs -text
 sid-models/* filter=lfs diff=lfs merge=lfs -text

@@ -12,13 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-The normalize step of the per-layer pattern for five real feeds: one `DataFrameInputSchema` per layer 6 and 7
+The normalize step of the per-layer pattern for six real feeds: one `DataFrameInputSchema` per layer 5, 6 and 7
 sub-class, from the format a deployment already writes to the columns the stages read.
 
 Each schema is built from `column_info` primitives and applied with `process_dataframe`, as the guide's per-layer
 pattern says, and produces exactly the class's columns from `examples/behavioral_analytics/input_contracts.json`
 and the universal envelope:
 
+- `tc5_auth`: Microsoft Entra ID sign-in logs, as Azure Monitor exports them (one record with its `properties`), the
+  feed `examples/upstream_reuse/evaluate.py` measures as the `azure` source.
 - `tc6`: Zeek `ssl.log` joined to `x509.log` on the leaf certificate's fingerprint, with the JA4 package's `ja4`.
 - `tc7_http`: Zeek `http.log`.
 - `tc7_dns`: Zeek `dns.log`.
@@ -30,18 +32,22 @@ Zeek logs are read with {py:func}`morpheus.parsers.zeek.parse`.
 
 **What a format cannot say, the schema does not invent.** Zeek sees a TLS handshake, not what an inspecting proxy
 saw inside it, so `content_type_declared` and `content_type_detected` are null from the Zeek schema and the layer 6
-content rule cannot fire on a Zeek-only feed; a feed with an inspecting proxy supplies them. No format here
+content rule cannot fire on a Zeek-only feed; a feed with an inspecting proxy supplies them. A cloud identity
+provider has no on-premises target computer, so `target_host` is null from the Entra ID schema. No format here
 records when the collector read a line, so `observed_time` is the record's own time and the collection lag reads
 zero; a collector that keeps its read time passes it as `observed_column`. The collector's own facts --
 identity, contract version, tenant, clock discipline, sampling -- are a `CollectorProfile`, because no record
 carries them, and `collector_seq` numbers the records in file order from the profile's `first_seq`.
 
 **Vocabulary is mapped where the format's differs and passed through where it does not.** Zeek writes `TLSv13`
-and OpenSSL's `self signed certificate`; the stages read `TLSv1.3` and `self-signed`. A value the map does not know
-is passed through as it is, so a new one reaches the SIEM visibly rather than as a null.
+and OpenSSL's `self signed certificate`; the stages read `TLSv1.3` and `self-signed`. Entra ID writes an error code,
+`multiFactorAuthentication` and `primaryRefreshToken`; the stages read `success` or `failure`, a boolean and
+`refresh`. A value the map does not know is passed through as it is, so a new one reaches the SIEM visibly rather
+than as a null.
 
 `origin_hash` is built the way the corpus builders build it for each class, so a normalized record is, to the
-lineage stamp, the same record the corpus has.
+lineage stamp, the same record the corpus has; where the record carries its own identifier, as a sign-in's `id`,
+that is the origin.
 """
 
 import dataclasses
@@ -82,6 +88,36 @@ VALIDATION_RESULTS = {
 M365_RESULTS = {"succeeded": "success", "success": "success", "true": "success", "false": "failed"}
 """`ResultStatus` values, lower-cased, that mean something other than themselves; the rest pass through lower-cased."""
 
+ENTRA_FIELDS = {
+    "event_time": "createdDateTime",
+    "user_principal": "userPrincipalName",
+    "source_country": "location.countryOrRegion",
+    "source_region": "location.state",
+    "source_city": "location.city",
+    "source_latitude": "location.geoCoordinates.latitude",
+    "source_longitude": "location.geoCoordinates.longitude",
+    "source_asn": "autonomousSystemNumber",
+    "source_ip": "ipAddress",
+    "app": "appDisplayName",
+    "device_id": "deviceDetail.deviceId",
+    "auth_result": "status.errorCode",
+    "mfa_used": "authenticationRequirement",
+    "mfa_result": "authenticationDetails",
+    "token_type": "incomingTokenType",
+}
+"""Each `tc5_auth` column to the sign-in property it is read from, as `pandas.json_normalize` names it. This is the
+mapping `examples/upstream_reuse/evaluate.py` measures as `SOURCE_MAPPINGS["azure"]`, with the separators the
+upstream stage strips kept; `tests/morpheus/utils/test_collector_schemas.py` holds the two to each other."""
+
+ENTRA_MFA_REQUIREMENTS = {"multiFactorAuthentication": True, "singleFactorAuthentication": False}
+"""`authenticationRequirement` to whether a second factor was asked for."""
+
+ENTRA_TOKEN_TYPES = {"none": "bearer", "primaryRefreshToken": "refresh", "refreshToken": "refresh"}
+"""`incomingTokenType` values that mean something other than themselves; the rest pass through."""
+
+ENTRA_PASSWORD_METHOD = "Password"
+"""The `authenticationDetails` step that is the first factor; every other step is a second one."""
+
 SYSMON_NAMESPACE = "{http://schemas.microsoft.com/win/2004/08/events/event}"
 
 
@@ -121,6 +157,23 @@ def _text(name: str, source: str, mapping: dict = None) -> CustomColumn:
         return values
 
     return CustomColumn(name=name, dtype="object", process_column_fn=column, input_column_types={source: "object"})
+
+
+def _through(name: str,
+             source: str,
+             function: typing.Callable[[str], typing.Any],
+             dtype: str = "object") -> CustomColumn:
+    """A column read from `source` as text and passed value by value through `function`, nulls staying null."""
+
+    def column(df: pd.DataFrame) -> pd.Series:
+        if (source not in df.columns):
+            return pd.Series([None] * len(df), index=df.index, dtype=dtype)
+
+        return pd.Series([None if value is None else function(value) for value in _text_values(df[source])],
+                         index=df.index,
+                         dtype=dtype)
+
+    return CustomColumn(name=name, dtype=dtype, process_column_fn=column, input_column_types={source: "object"})
 
 
 def _count(name: str, source: str) -> CustomColumn:
@@ -363,6 +416,97 @@ def m365_audit_schema(profile: CollectorProfile,
     ] + tail)
 
 
+def _place(value: str) -> str:
+    """A place name as the layer 5 searches group it: lower case, one hyphen for each run of white space."""
+    return "-".join(value.lower().split())
+
+
+def _mfa_result(steps: typing.Any) -> typing.Optional[str]:
+    """
+    `approved` or `denied` from a sign-in's second-factor steps; null where none was asked for.
+
+    The first step of `authenticationDetails` is the first factor, whatever method it used: a password, a FIDO2 key or
+    Windows Hello sign a passwordless user in with one step, and that step is not a second factor. Every step after
+    the first is one, and the result is `approved` only if all of them succeeded.
+    """
+    if (_missing(steps) or isinstance(steps, str)):
+        return None
+
+    second = list(steps)[1:]
+
+    if (len(second) == 0):
+        return None
+
+    return "approved" if all(bool(step.get("succeeded")) for step in second) else "denied"
+
+
+def entra_signin_schema(profile: CollectorProfile) -> DataFrameInputSchema:
+    """
+    `tc5_auth` from Microsoft Entra ID sign-in records, their `properties` flattened as `read_entra` reads them.
+
+    `auth_result` is `success` for `status.errorCode` 0 and `failure` for any other; `mfa_used` is whether
+    `authenticationRequirement` asked for a second factor; `mfa_result` is whether every step of
+    `authenticationDetails` after the password succeeded, and null where there was none; `source_asn` is
+    `autonomousSystemNumber` in the `as5089` form the contract gives; places are lower-cased and hyphenated, and
+    the principal lower-cased, as the contract asks.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    fields = ENTRA_FIELDS
+
+    def created(df: pd.DataFrame) -> pd.Series:
+        return pd.to_datetime(df[fields["event_time"]], utc=True).astype("int64").astype("Int64")
+
+    def coordinate(name: str) -> CustomColumn:
+        source = fields[name]
+
+        def column(df: pd.DataFrame) -> pd.Series:
+            if (source not in df.columns):
+                return pd.Series([None] * len(df), index=df.index, dtype="Float64")
+
+            return pd.to_numeric(df[source]).astype("Float64")
+
+        return CustomColumn(name=name,
+                            dtype="Float64",
+                            process_column_fn=column,
+                            input_column_types={source: "Float64"})
+
+    def mfa_result(df: pd.DataFrame) -> pd.Series:
+        source = fields["mfa_result"]
+        values = df[source] if source in df.columns else [None] * len(df)
+
+        return pd.Series([_mfa_result(value) for value in values], index=df.index, dtype=object)
+
+    (head, tail) = _envelope(profile, created, lambda df: _text_values(df["id"]))
+
+    return DataFrameInputSchema(column_info=head + [
+        _through("user_principal", fields["user_principal"], str.lower),
+        _text("source_ip", fields["source_ip"]),
+        _text("app", fields["app"]),
+        _through("auth_result", fields["auth_result"], lambda code: "success" if int(float(code)) == 0 else "failure"),
+        # A domain controller's target computer; a cloud identity provider has none.
+        _text("target_host", "target_host"),
+        _through("source_country", fields["source_country"], str.lower),
+        _through("source_region", fields["source_region"], _place),
+        _through("source_city", fields["source_city"], _place),
+        coordinate("source_latitude"),
+        coordinate("source_longitude"),
+        _through("source_asn", fields["source_asn"], lambda number: f"as{int(float(number))}"),
+        _text("device_id", fields["device_id"]),
+        _through("mfa_used", fields["mfa_used"], lambda value: ENTRA_MFA_REQUIREMENTS.get(value), dtype="boolean"),
+        _derived("mfa_result", "object", mfa_result),
+        _text("token_type", fields["token_type"], ENTRA_TOKEN_TYPES),
+    ] + tail)
+
+
 def sysmon_process_schema(profile: CollectorProfile) -> DataFrameInputSchema:
     """
     `tc7_endpoint` from Sysmon event 1 records joined by `join_image_signatures`.
@@ -488,6 +632,23 @@ def read_m365(path: str) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def read_entra(path: str) -> pd.DataFrame:
+    """
+    Sign-in records as Azure Monitor exports them, one JSON object per line or one JSON array, each record's
+    `properties` flattened to dotted columns as `AzureSourceStage` flattens them. A file of bare sign-in objects,
+    as the Graph API's `signIns` returns them, is flattened the same way.
+    """
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read().strip()
+
+    records = json.loads(text) if text.startswith("[") else [json.loads(line) for line in text.splitlines() if line]
+
+    if (len(records) > 0 and all("properties" in record for record in records)):
+        records = [record["properties"] for record in records]
+
+    return pd.json_normalize(records)
+
+
 def read_sysmon(path: str) -> pd.DataFrame:
     """
     Sysmon events as `wevtutil qe Microsoft-Windows-Sysmon/Operational /f:xml` writes them: `<Event>` elements one
@@ -541,6 +702,11 @@ def zeek_dns(path: str, profile: CollectorProfile) -> pd.DataFrame:
 def m365_audit(path: str, profile: CollectorProfile, organizations: typing.Optional[dict] = None) -> pd.DataFrame:
     """`tc7_saas` records from unified audit log records."""
     return normalize(read_m365(path), m365_audit_schema(profile, organizations))
+
+
+def entra_signin(path: str, profile: CollectorProfile) -> pd.DataFrame:
+    """`tc5_auth` records from Entra ID sign-in records."""
+    return normalize(read_entra(path), entra_signin_schema(profile))
 
 
 def sysmon_process(path: str, profile: CollectorProfile) -> pd.DataFrame:

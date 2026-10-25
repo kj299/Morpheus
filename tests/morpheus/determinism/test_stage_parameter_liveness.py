@@ -1791,6 +1791,7 @@ REGISTRY: dict = {
                      Knob("mss_column", INPUT_COLUMN, benign="tcp_mss"),
                      Knob("window_column", INPUT_COLUMN, benign="tcp_window_initial"),
                      Knob("max_hosts", DIFFERS, benign=100000, extreme=1, frame=_two_stacks),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC4EnvelopeStage":
         Scenario(stage=TC4EnvelopeStage,
@@ -1808,6 +1809,7 @@ REGISTRY: dict = {
                      Knob("multiplier", DIFFERS, benign=3.0, extreme=1.2),
                      Knob("min_samples", DIFFERS, benign=4, extreme=100),
                      Knob("max_samples", DIFFERS, benign=4096, extreme=5),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC6FingerprintStage":
         Scenario(stage=TC6FingerprintStage,
@@ -1820,6 +1822,7 @@ REGISTRY: dict = {
                      Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
                      Knob("max_values", DIFFERS, benign=64, extreme=1),
                      Knob("max_entities", DIFFERS, benign=100000, extreme=1),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC6CertificateStage":
         Scenario(
@@ -1842,6 +1845,7 @@ REGISTRY: dict = {
                 Knob("min_samples", DIFFERS, benign=3, extreme=100),
                 Knob("max_samples", DIFFERS, benign=512, extreme=3),
                 Knob("estate_warmup_seconds", DIFFERS, benign=604800, extreme=0),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
             )),
     "TC6CipherStage":
         Scenario(stage=TC6CipherStage,
@@ -1855,6 +1859,7 @@ REGISTRY: dict = {
                      Knob("window_seconds", DIFFERS, benign=2592000, extreme=120),
                      Knob("min_samples", DIFFERS, benign=3, extreme=100),
                      Knob("max_samples", DIFFERS, benign=512, extreme=2),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC6ContentStage":
         Scenario(stage=TC6ContentStage,
@@ -1964,6 +1969,7 @@ REGISTRY: dict = {
                           frame=_dns_days,
                           also={"baseline_min_days": 1}),
                      Knob("baseline_min_days", DIFFERS, benign=7, extreme=1, frame=_dns_days),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC7HttpStage":
         Scenario(stage=TC7HttpStage,
@@ -1987,6 +1993,7 @@ REGISTRY: dict = {
                           frame=_http_days,
                           also={"baseline_min_days": 1}),
                      Knob("baseline_min_days", DIFFERS, benign=7, extreme=1, frame=_http_days),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC7ServiceStage":
         Scenario(stage=TC7ServiceStage,
@@ -2012,6 +2019,7 @@ REGISTRY: dict = {
                           frame=_service_days,
                           also={"baseline_min_days": 1}),
                      Knob("baseline_min_days", DIFFERS, benign=7, extreme=1, frame=_service_days),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC7SaasStage":
         Scenario(
@@ -2033,6 +2041,7 @@ REGISTRY: dict = {
                 Knob("max_samples", DIFFERS, benign=4096, extreme=1),
                 Knob("max_entities", DIFFERS, benign=500000, extreme=1),
                 Knob("decimals", DIFFERS, benign=4, extreme=1),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
             ),
         ),
     "TC7EndpointStage":
@@ -2052,6 +2061,7 @@ REGISTRY: dict = {
                 Knob("warmup_days", DIFFERS, benign=1, extreme=0),
                 Knob("max_pairs", DIFFERS, benign=16384, extreme=1),
                 Knob("max_entities", DIFFERS, benign=200000, extreme=1),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
             ),
         ),
     "TC5CadenceStage":
@@ -2183,6 +2193,7 @@ REGISTRY: dict = {
                      "frame that does not is the subject of the window seal stage's own tests; the flag changes "
                      "nothing about a well-formed batch by design."),
                 Knob("column_prefix", DIFFERS, benign="", extreme="day_"),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
             ),
         ),
     "EnvelopeValidateStage":
@@ -2345,6 +2356,7 @@ REGISTRY: dict = {
                      Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
                      Knob("window_seconds", DIFFERS, benign=3600, extreme=60),
                      Knob("max_samples", DIFFERS, benign=4096, extreme=2),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC3BaselineStage":
         Scenario(stage=TC3BaselineStage,
@@ -2363,6 +2375,7 @@ REGISTRY: dict = {
                      Knob("window_seconds", DIFFERS, benign=14 * 24 * 3600, extreme=4 * 3600),
                      Knob("min_buckets", DIFFERS, benign=4, extreme=40),
                      Knob("max_buckets", DIFFERS, benign=1024, extreme=4),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC3ReachStage":
         Scenario(
@@ -2384,6 +2397,7 @@ REGISTRY: dict = {
                 Knob("max_samples", DIFFERS, benign=4096, extreme=2),
                 # Four of the flows reach the management network; with no list, none is classified.
                 Knob("management_prefixes", DIFFERS, benign=None, extreme=["10.0.0.8/30"]),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
             )),
     "TC3BeaconStage":
         Scenario(stage=TC3BeaconStage,
@@ -2399,6 +2413,7 @@ REGISTRY: dict = {
                      Knob("min_intervals", DIFFERS, benign=12, extreme=3),
                      Knob("max_samples", DIFFERS, benign=4096, extreme=3),
                      Knob("max_entities", DIFFERS, benign=500000, extreme=1),
+                     Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                  )),
     "TC3TtlStage":
         Scenario(
@@ -2419,6 +2434,7 @@ REGISTRY: dict = {
                 Knob("min_samples", DIFFERS, benign=2, extreme=100),
                 Knob("min_shift", DIFFERS, benign=1, extreme=200),
                 Knob("max_samples", DIFFERS, benign=512, extreme=2),
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
             )),
     "MinimizationStage":
         Scenario(
