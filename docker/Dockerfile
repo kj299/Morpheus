@@ -16,11 +16,11 @@
 # limitations under the License.
 
 # ============== LEGEND =================================================== #
-#       [conda_bld_morpheus_core] [conda_bld_morpheus]
-#               /                  /
+#       [conda_bld_morpheus_core]
+#               /
 # [base] -> [conda_env] -> [base_extended] -> [runtime_conda_create] -> [runtime]
 #                               \
-#                         [conda_env_dev] -> [development] -> [development_pydbg]
+#                         [conda_env_dev] -> [development]
 #                               \
 #                         [build_docs]
 #                               \
@@ -31,14 +31,13 @@
 #  base_extended: Optional environmental elements, libraries, packages, etc.
 #  conda_env_dev: Full development environment with all necessary conda
 #    packages.
-#  conda_bld_morpheus: Utility stage used to build and cache the Morpheus
-#    conda package for runtime environments. (should not be extended)
+#  conda_bld_morpheus_core: Utility stage used to build and cache the
+#    morpheus-core conda package for runtime environments. (should not be
+#    extended)
 #  runtime: Full runtime environment with Morpheus installed as a conda
 #    package
 #  development: Full development environment able to build against a Morpheus
 #    source directory.
-#  development_pydbg: Development + debug build of cpython and various GDB
-#    debugging macros.
 #  build_docs: Build the Morpheus documentation
 #  git_clone: Clone the Morpheus repository to ensure we do not unintentionally
 #    copy local build artifacts
@@ -226,47 +225,6 @@ RUN --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
     # Remove channel_alias to use the normal channel in the container
     conda config --env --remove-key channel_alias
 
-# ============ Stage: conda_bld_morpheus ============
-# Now build the morpheus conda package
-FROM --platform=$TARGETPLATFORM base_extended AS conda_bld_morpheus
-
-ARG MORPHEUS_ROOT_HOST
-ARG CUDA_MAJOR_VER
-ARG CUDA_MINOR_VER
-
-ENV GIT_CLONE_PROTECTION_ACTIVE=false
-
-RUN --mount=type=cache,id=apt,target=/var/cache/apt \
-    apt update && \
-    DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC \
-    apt install --no-install-recommends -y \
-        cuda-compiler-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER} \
-        cuda-cudart-dev-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER} \
-        cuda-cupti-dev-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER} \
-        cuda-nvml-dev-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER} \
-        cuda-nvtx-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER} \
-        libcublas-dev-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER} \
-        libcufft-dev-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER} \
-        libcurand-dev-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER} \
-        libcusolver-dev-${CUDA_MAJOR_VER}-${CUDA_MINOR_VER} && \
-    rm -rf /var/lib/apt/lists/*
-
-# Copy the source
-COPY . ./
-
-RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locked \
-    --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
-    --mount=type=cache,id=pip_cache,target=/root/.cache/pip,sharing=locked \
-    # Install git-lfs before running the build to avoid errors during conda build
-    /opt/conda/bin/mamba install -y -n base -c conda-forge "git-lfs" &&\
-    source activate base &&\
-    git lfs install &&\
-    # Need to get around recent versions of git locking paths until they are deemed safe
-    git config --global --add safe.directory "*" &&\
-    # Change to the morpheus directory and build the conda package
-    cd ${MORPHEUS_ROOT_HOST} &&\
-    MORPHEUS_PYTHON_BUILD_STUBS=OFF CONDA_BLD_PATH=/opt/conda/conda-bld ./ci/conda/recipes/run_conda_build.sh morpheus
-
 # ============ Stage: build_docs ============
 # Now build the morpheus docs
 FROM --platform=$TARGETPLATFORM conda_env_dev AS build_docs
@@ -277,7 +235,7 @@ ARG MORPHEUS_ROOT_HOST
 COPY . ./
 
 RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locked \
-    --mount=type=bind,from=conda_bld_morpheus,source=/opt/conda/conda-bld,target=/opt/conda/conda-bld \
+    --mount=type=bind,from=conda_bld_morpheus_core,source=/opt/conda/conda-bld,target=/opt/conda/conda-bld \
     --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
     --mount=type=cache,id=pip_cache,target=/root/.cache/pip,sharing=locked \
     source activate morpheus &&\
@@ -290,7 +248,7 @@ RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locke
         -c nvidia \
         -c nvidia/label/dev \
         -c pytorch \
-        morpheus && \
+        morpheus-core && \
     # Change to the morpheus directory and build the docs
     cd ${MORPHEUS_ROOT_HOST} &&\
     CMAKE_CONFIGURE_EXTRA_ARGS="-DMORPHEUS_BUILD_DOCS=ON -DMORPHEUS_PYTHON_BUILD_STUBS=OFF -DMORPHEUS_CUDA_ARCHITECTURES=RAPIDS"\
@@ -306,8 +264,8 @@ ARG REAL_ARCH
 
 COPY "${MORPHEUS_ROOT_HOST}/conda/environments/runtime_cuda-${CUDA_MAJOR_VER}${CUDA_MINOR_VER}_arch-${REAL_ARCH}.yaml" "./conda/environments/"
 
-# Mount Morpheus conda package build in `conda_bld_morpheus`
-RUN --mount=type=bind,from=conda_bld_morpheus,source=/opt/conda/conda-bld,target=/opt/conda/conda-bld \
+# Mount the morpheus-core conda package built in `conda_bld_morpheus_core`
+RUN --mount=type=bind,from=conda_bld_morpheus_core,source=/opt/conda/conda-bld,target=/opt/conda/conda-bld \
     --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
     --mount=type=cache,id=pip_cache,target=/root/.cache/pip,sharing=locked \
     # CVE-2018-20225 for the base pip, not the env one
@@ -324,7 +282,7 @@ RUN --mount=type=bind,from=conda_bld_morpheus,source=/opt/conda/conda-bld,target
         -c nvidia \
         -c nvidia/label/dev \
         -c pytorch \
-        morpheus && \
+        morpheus-core && \
     /opt/conda/bin/conda env update --solver=libmamba -n morpheus --file \
         conda/environments/runtime_cuda-${CUDA_MAJOR_VER}${CUDA_MINOR_VER}_arch-${REAL_ARCH}.yaml
 
@@ -390,39 +348,7 @@ RUN --mount=type=cache,id=apt,target=/var/cache/apt \
         openjdk-11-jre-headless && \
     rm -rf /var/lib/apt/lists/*
 
-# Install camouflage needed for unittests to mock a triton server
-RUN source activate morpheus && \
-    npm install -g camouflage-server@0.15 && \
-    npm cache clean --force && \
-    conda clean -afy
-
 # Setup git to allow other users to access /workspace. Requires git 2.35.3 or
 # greater. See https://marc.info/?l=git&m=164989570902912&w=2. Only enable for
 # development
 RUN git config --global --add safe.directory "*"
-
-# ============ Stage: python_debug_bld ===========
-# Configure and build cpython with debugging symbols
-FROM --platform=$TARGETPLATFORM development AS development_pydbg
-ARG PYTHON_VER
-
-# Temporary until #68 goes in
-ARG MORPHEUS_USER="root"
-
-
-COPY ${MORPHEUS_ROOT_HOST}/ci/conda/recipes/python-dbg/ ./ci/conda/recipes/python-dbg
-COPY ${MORPHEUS_ROOT_HOST}/ci/conda/recipes/run_conda_build.sh ./ci/conda/recipes/run_conda_build.sh
-COPY ${MORPHEUS_ROOT_HOST}/ci/conda/recipes/python_dbg_install.sh ./ci/conda/recipes/python_dbg_install.sh
-
-
-
-# Build and install debug cpython
-RUN source activate morpheus \
-    && MORPHEUS_ROOT=/workspace \
-       CONDA_BLD_PATH=/opt/conda/conda-bld \
-       ./ci/conda/recipes/run_conda_build.sh pydebug \
-    && ./ci/conda/recipes/python_dbg_install.sh \
-       -s $( ls /opt/conda/conda-bld/src_cache/Python-${PYTHON_VER}*.tar.xz ) \
-       -c $( ls /opt/conda/conda-bld/linux-64/morpheus-python-dbg-${PYTHON_VER}*.tar.bz2 ) \
-       -i ./ci/conda/recipes/python-dbg/source \
-       -g $(eval echo "~${MORPHEUS_USER}")/.gdbinit

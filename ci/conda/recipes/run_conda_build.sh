@@ -116,46 +116,24 @@ fi
 
 # And default channels (should match dependencies.yaml) with optional channel alias
 CONDA_ARGS_ARRAY+=("-c" "${CONDA_CHANNEL_ALIAS:+"${CONDA_CHANNEL_ALIAS%/}/"}conda-forge")
-CONDA_ARGS_ARRAY+=("-c" "${CONDA_CHANNEL_ALIAS:+"${CONDA_CHANNEL_ALIAS%/}/"}huggingface")
 CONDA_ARGS_ARRAY+=("-c" "${CONDA_CHANNEL_ALIAS:+"${CONDA_CHANNEL_ALIAS%/}/"}rapidsai")
 CONDA_ARGS_ARRAY+=("-c" "${CONDA_CHANNEL_ALIAS:+"${CONDA_CHANNEL_ALIAS%/}/"}nvidia")
 CONDA_ARGS_ARRAY+=("-c" "${CONDA_CHANNEL_ALIAS:+"${CONDA_CHANNEL_ALIAS%/}/"}nvidia/label/dev")
 
 if [[ ${NUMARGS} == 0 ]]; then
    echo -e "${r}ERROR: No arguments were provided. Please provide at least one package to build. Available packages:${x}"
-   echo -e "${r}   morpheus${x}"
-   echo -e "${r}   morpheus-libs${x}"
-   echo -e "${r}   pydebug${x}"
+   echo -e "${r}   morpheus-core${x}"
+   echo -e "${r}   morpheus-libs (the same package, under its older name)${x}"
    echo -e "${r}Exiting...${x}"
    exit 12
 fi
 
-if hasArg morpheus; then
+if hasArg morpheus-core || hasArg morpheus-libs; then
    # Set GIT_VERSION to set the project version inside of meta.yaml
    export GIT_VERSION="$(get_version)"
 
-   echo "Running conda-build for morpheus v${GIT_VERSION}..."
-   set -x
-   conda ${CONDA_COMMAND} "${CONDA_ARGS_ARRAY[@]}" ${CONDA_ARGS} ci/conda/recipes/morpheus
-   set +x
-fi
-
-if hasArg morpheus-libs; then
-   # Set GIT_VERSION to set the project version inside of meta.yaml
-   export GIT_VERSION="$(get_version)"
-
-   echo "Running conda-build for morpheus libraries v${GIT_VERSION}..."
+   echo "Running conda-build for morpheus-core v${GIT_VERSION}..."
    set -x
    conda ${CONDA_COMMAND} "${CONDA_ARGS_ARRAY[@]}" ${CONDA_ARGS} ci/conda/recipes/morpheus-core
-   conda ${CONDA_COMMAND} "${CONDA_ARGS_ARRAY[@]}" ${CONDA_ARGS} ci/conda/recipes/morpheus-dfp
-   set +x
-fi
-
-if hasArg pydebug; then
-   export MORPHEUS_PYTHON_VER=$(python --version | cut -d ' ' -f 2)
-
-   echo "Running conda-build for python-dbg..."
-   set -x
-   conda ${CONDA_COMMAND} "${CONDA_ARGS_ARRAY[@]}" ${CONDA_ARGS} ./ci/conda/recipes/python-dbg
    set +x
 fi

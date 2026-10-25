@@ -101,26 +101,6 @@ This workflow utilizes a Docker container to set up most dependencies ensuring a
       DOCKER_IMAGE_TAG=my_tag ./docker/build_container_dev.sh
       ```
       Would build the container `morpheus:my_tag`.
-   1. To build the container with a debugging version of CPython installed, update the Docker target as follows:
-   ```shell
-   DOCKER_TARGET=development_pydbg ./docker/build_container_dev.sh
-   ```
-   1. Note: When debugging Python code, you just need to add `ci/conda/recipes/python-dbg/source` to the source path your debugger.
-   1. Once created, you will be able to introspect Python objects from within GDB. For example, if we were to break within a generator setup call and examine its `PyFrame_Object` `f`, it might be similar to:
-   ```shell
-    #4  0x000056498ce685f4 in gen_send_ex (gen=0x7f3ecc07ad40, arg=<optimized out>, exc=<optimized out>, closing=<optimized out>) at Objects/genobject.c:222
-    (gdb) pyo f
-    object address  : 0x7f3eb3888750
-    object refcount : 1
-    object type     : 0x56498cf99c00
-    object type name: frame
-    object repr     : <frame at 0x7f3eb3888750, file '/workspace/morpheus/pipeline/pipeline.py', line 902, code join
-   ```
-   1. Note: Now when running the container, Conda should list your Python version as `pyxxx_dbg_morpheus`.
-   ```shell
-    (morpheus) user@host:/workspace# conda list | grep python
-    python                    3.8.13          py3.8.13_dbg_morpheus    local
-   ```
    1. Note: This does not build any Morpheus or MRC code and defers building the code until the entire repo can be mounted into a running container. This allows for faster incremental builds during development.
 2. Run the development container
    ```bash
@@ -128,14 +108,6 @@ This workflow utilizes a Docker container to set up most dependencies ensuring a
    ```
    1. The container tag follows the same rules as `build_container_dev.sh` and will default to the current `YYMMDD`. Specify the desired tag with `DOCKER_IMAGE_TAG`. For example, `DOCKER_IMAGE_TAG=my_tag ./docker/run_container_dev.sh`
    2. This will automatically mount the current working directory to `/workspace`.
-   3. Some of the validation tests require launching the Morpheus models Docker container within the Morpheus container. To enable this you will need to grant the Morpheus container access to your host OS's Docker socket file with:
-      ```bash
-      DOCKER_EXTRA_ARGS="-v /var/run/docker.sock:/var/run/docker.sock" ./docker/run_container_dev.sh
-      ```
-      Then once the container is started you will need to install some extra packages to enable launching Docker containers:
-      ```bash
-      ./external/utilities/docker/install_docker.sh
-      ```
 
 3. Compile Morpheus
    ```bash
@@ -232,11 +204,6 @@ When ready, commit both the changes to the `dependencies.yaml` file and the upda
    pytest
    ```
 1. Optional: Run full end-to-end tests
-   - Our end-to-end tests require the [camouflage](https://testinggospels.github.io/camouflage/) testing framework. Install camouflage with:
-      ```bash
-      npm install -g camouflage-server@0.15
-      ```
-
    - Run end-to-end (aka slow) tests:
       ```bash
       pytest --run_slow
@@ -393,23 +360,6 @@ Due to the large number of dependencies, it's common to run into build issues. T
        ```bash
        rm -rf build/docs/ docs/source/_modules docs/source/_lib
        ```
- - CI Issues
-   - To run CI locally, the `ci/scripts/run_ci_local.sh` script can be used. For example to run a local CI build:
-      ```bash
-      ci/scripts/run_ci_local.sh build
-      ```
-      - Build artifacts resulting from a local CI run can be found in the `.tmp/local_ci_tmp/` directory.
-   - To troubleshoot a particular CI stage it can be helpful to run:
-      ```bash
-      ci/scripts/run_ci_local.sh bash
-      ```
-
-      This will open a bash shell inside the CI container with all of the environment variables typically set during a CI run. From here you can run the commands that would typically be run by one of the CI scripts in `ci/scripts/github`.
-
-      To run a CI stage requiring a GPU (ex: `test`), set the `USE_GPU` environment variable to `1`:
-      ```bash
-      USE_GPU=1 ci/scripts/run_ci_local.sh bash
-      ```
 
 Refer to the [troubleshooting guide](../extra_info/troubleshooting.md) for more information on common issues and how to resolve them.
 

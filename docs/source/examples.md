@@ -26,10 +26,6 @@ Morpheus supports multiple environments, each environment is intended to support
 ./scripts/fetch_data.py fetch examples datasets
 ```
 
-In addition to this many of the examples utilize the Morpheus Triton Models container which can be obtained by running the following command:
-```bash
-docker pull nvcr.io/nvidia/morpheus/morpheus-tritonserver-models:25.10
-```
 
 The following are the supported environments:
 | Environment | Description |
@@ -37,4 +33,3 @@ The following are the supported environments:
 | [Conda](./developer_guide/contributing.md#build-in-a-conda-environment) | Morpheus is built from source by the end user, and dependencies are installed via the Conda package manager. |
 | [Morpheus Docker Container](./developer_guide/contributing.md#build-in-docker-container) | A Docker container that is built from source by the end user, Morpheus is then built from source from within the container. |
 | [Morpheus Release Container](./getting_started.md#building-the-morpheus-container) | Pre-built Docker container that is built from source by the Morpheus team, and is available for download from the [NGC container registry](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/morpheus/containers/morpheus/tags), or can be built locally from source. |
-| [Dev Container](./devcontainer.md) | A [Dev Container](https://containers.dev/) that is built from source by the end user, Morpheus is then built from source from within the container. |
