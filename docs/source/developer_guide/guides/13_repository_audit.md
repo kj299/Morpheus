@@ -81,22 +81,23 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,760 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,664 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
-corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples), less the 659 files removed since: three under ruling D5, and 224 in the language-model part
-of D1, 48 in its DOCA part and 384 in its security-examples part, all on 2026-10-24.
+corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples), less the 755 files removed since: three under ruling D5, and 224 in the language-model part
+of D1, 48 in its DOCA part and 384 in its security-examples part, all on 2026-10-24, and 96 in its digital
+fingerprinting part on 2026-10-25.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 817 |
+| `remove` | 721 |
 | `keep-dependency` | 413 |
 | `keep` | 382 |
 | `update` | 148 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
 organization workflows the fork modified, and three were its own: `TC1FeatureStage`, its utility module and
-its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1, the 48 of its DOCA part and the
-384 of its security-examples part, so 817 remain marked.
+its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1, the 48 of its DOCA part, the
+384 of its security-examples part and the 96 of its digital fingerprinting part, so 721 remain marked.
 
 Between the passes, the second readers moved files in both directions:
 
@@ -206,21 +207,26 @@ The removals land as one change per ruling, in this order, each with the `update
 1. **D5**, the smallest and entirely the fork's own. Done on 2026-10-24: three files removed, and the command line,
    CPU tier list, liveness registry, `TC1ChangeStage` and its test, the stages page, guides 11 and 12 and the stage
    counts edited with them.
-2. **D1**, use case by use case. The language-model and retrieval part went first, on 2026-10-24: `morpheus_llm`,
-   its examples, tests, fixtures, Conda recipe and CMake module, the RSS and `ArxivSource` stages that served it, the
-   namespace migration script, and the LLM-only dependencies (regenerated with the pinned dependency file
-   generator). The build options, documentation build, command line, test configuration, stages page and guide
-   11's citations were edited with it. DOCA went second, the same day: the GPUNetIO source and convert stages,
-   their C++ and CUDA sources, `RawPacketMessage`, the DOCA and DPDK CMake modules, the example and its page, the
-   optional-dependency installer, the `MORPHEUS_SUPPORT_DOCA` build option through the Docker, Conda and compile
-   scripts, and the three dependencies only DOCA needed. Guide 11 cites the removed sources by permalink and states
-   the layer 4 per-packet source as new work. The security examples went third, the same day: ransomware with
-   `AppShieldSourceStage` and the AppShield data, graph fraud detection, data loss prevention with its GLiNER model
-   and licence, log parsing, root cause, SID visualization and the ABP `nvsmi` example, with their models, training
-   and validation scripts, datasets, Triton entries, tests and documentation stubs. Two pieces of that list wait for
-   the ruling that owns their dependents: phishing, whose example guide 2 includes (D7) and whose tests and Triton
-   mocks go with D2; and the ABP `nvsmi` model and its Triton entry, which the D2 Triton tests load. The remaining
-   examples follow.
+2. **D1**, use case by use case. The language-model and retrieval part went first, on 2026-10-24: `morpheus_llm`, its
+   examples, tests, fixtures, Conda recipe and CMake module, the RSS and `ArxivSource` stages that served it, the
+   namespace migration script, and the LLM-only dependencies (regenerated with the pinned dependency file generator).
+   The build options, documentation build, command line, test configuration, stages page and guide 11's citations were
+   edited with it. DOCA went second, the same day: the GPUNetIO source and convert stages, their C++ and CUDA sources,
+   `RawPacketMessage`, the DOCA and DPDK CMake modules, the example and its page, the optional-dependency installer, the
+   `MORPHEUS_SUPPORT_DOCA` build option through the Docker, Conda and compile scripts, and the three dependencies only
+   DOCA needed. Guide 11 cites the removed sources by permalink and states the layer 4 per-packet source as new work.
+   The security examples went third, the same day: ransomware with `AppShieldSourceStage` and the AppShield data, graph
+   fraud detection, data loss prevention with its GLiNER model and licence, log parsing, root cause, SID visualization
+   and the ABP `nvsmi` example, with their models, training and validation scripts, datasets, Triton entries, tests and
+   documentation stubs. Two pieces of that list wait for the ruling that owns their dependents: phishing, whose example
+   guide 2 includes (D7) and whose tests and Triton mocks go with D2; and the ABP `nvsmi` model and its Triton entry,
+   which the D2 Triton tests load. The upstream digital fingerprinting examples went fourth, on 2026-10-25: the
+   production, demo and visualization examples and the `external/morpheus-visualizations` submodule, with their
+   `.gitattributes`, `.gitignore` and `.gitmodules` entries, the `dfp_example` environment and its container dependency
+   group, the `conf.py` path, the workspace analysis path, the release script's steps for them, the troubleshooting
+   page's MLflow section and guide 1's Loki example. Guides 5 and 10, which describe that example, go with D7;
+   `tests/morpheus_dfp` (D4) and `tests/benchmarks` (D1 and D2), which still name its paths, go with their rulings; and
+   `fetch_example_data.py` waits for the dataset README that links it. The remaining examples follow.
 3. **D2**, after the fork model inventory exists to receive the two models.
 4. **D6**, then **D7**.
 5. **D4**'s remainder, after the evidence is cited by permalink.

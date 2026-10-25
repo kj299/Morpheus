@@ -193,7 +193,6 @@ data/*
 docs/source/_lib
 docs/source/_modules
 examples/data/dfp
-examples/digital_fingerprinting/**/dfp_detections_*.csv
 mlruns/*
 notebooks/output
 triton_models/**/*.engine
@@ -207,12 +206,8 @@ viz_frames*
 # Ignore user-defined clangd settings
 .clangd
 
-# Ignore DFP Visualization output dirs
-examples/digital_fingerprinting/visualization/*-dfp-output/
-
 # Ignore saved benchmark data
 tests/benchmarks/.benchmarks/
-examples/digital_fingerprinting/production/benchmarks/.benchmarks/
 
 # Ignore the third-party Vale style packages that `vale sync` downloads. Only the project's own
 # vocabularies under ci/vale/styles/config/ are tracked.

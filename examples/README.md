@@ -17,7 +17,6 @@ limitations under the License.
 
 # Examples
 * [ABP Detection Example Using Morpheus](./abp_pcap_detection/README.md)
-* [Digital Fingerprinting (DFP)](./digital_fingerprinting/README.md)
 * [Sensitive Information Detection with Natural Language Processing (NLP) Example](./nlp_si_detection/README.md)
 * [Splunk Lineage App for Morpheus Behavioral Analytics](./splunk_lineage_app/README.md)
 
