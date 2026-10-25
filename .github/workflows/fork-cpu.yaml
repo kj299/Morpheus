@@ -15,8 +15,8 @@
 
 # The fork's own CI: every test the GPU conformance runner names, in CPU execution mode, on an ordinary runner.
 #
-# pr.yaml delegates to NVIDIA's shared workflows and their runners, which this fork has no access to, so until this
-# file existed no GitHub Actions run had ever executed the suite here. This job installs the pinned CPU environment
+# Upstream's pr.yaml, removed under audit ruling D6, delegated to NVIDIA's shared workflows and their runners, which
+# this fork has no access to, so until this file existed no GitHub Actions run had ever executed the suite here. This job installs the pinned CPU environment
 # (ci/scripts/cpu_env/linux-64-cpu.lock, released morpheus-core for its compiled library), overlays the repository's
 # Python sources onto it, and runs the two tiers
 # ci/scripts/gpu_conformance.sh keeps total, selecting the CPU variant of every mode-parametrized test. The GPU

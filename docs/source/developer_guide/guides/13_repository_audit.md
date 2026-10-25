@@ -81,17 +81,17 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,229 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,170 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
-and the sixteen ruling D2 added (four model inventory files, six modules and their six tests), less the 1,206 files
+and the sixteen ruling D2 added (four model inventory files, six modules and their six tests), less the 1,265 files
 removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
-ruling D7 and 331 under ruling D2.
+ruling D7, 331 under ruling D2 and 59 under ruling D6.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 273 |
+| `remove` | 214 |
 | `keep-dependency` | 412 |
 | `keep` | 399 |
 | `update` | 145 |
@@ -99,8 +99,8 @@ ruling D7 and 331 under ruling D2.
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
 organization workflows the fork modified, and three were its own: `TC1FeatureStage`, its utility module and
 its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1, the 48 of its DOCA part, the
-384 of its security-examples part and the 96 of its digital fingerprinting part, the 120 of D7 and the 327 of D2.
-D2 kept one file the audit had marked, the SID validation set, which moved with the model. That leaves 273 marked.
+384 of its security-examples part and the 96 of its digital fingerprinting part, the 120 of D7, the 327 of D2 and the 59 of
+D6. D2 kept one file the audit had marked, the SID validation set, which moved with the model. That leaves 214 marked.
 
 Between the passes, the second readers moved files in both directions:
 
@@ -260,6 +260,24 @@ The removals land as one change per ruling, in this order, each with the `update
    option, the release and CMake CI scripts, the CPU-only page's example list, the pass-through test of the C++ example
    and the C++ test that quoted guide 3 were edited with it. The phishing tests and Triton mocks that are not the
    example's own still go with D2.
+
+   D6 went on 2026-10-25, after D2: 59 files. They were CODEOWNERS for GitHub and GitLab, the
+   ops and copy-PR bots, the project automation workflows, `ci_pipe.yml`, `pr.yaml` and the label workflow, and the
+   CI scripts under `ci/scripts/github` with the local CI runner, its bootstrap, the style and version checks,
+   `ci/runner` and `ci/docker`. Also `ci/release` with `update-version.sh`, the Conda recipes other than
+   `morpheus-core` (`morpheus`, `morpheus-dfp`, `python-dbg`) with the debug-Python installer and the local channel,
+   `docker/build_conda_packages.sh`, and the upstream development container (`.devcontainer`) with its documentation
+   page. The fork's CI (`fork-cpu.yaml`, `gpu_conformance.sh`, `ci/scripts/cpu_env`), the `morpheus-core` recipe and
+   the C++ lint scripts stay. Edited with it:
+   - **`docker/Dockerfile`:** loses the debug-Python stage and the stage that built the removed `morpheus` package.
+     Its documentation and runtime stages install `morpheus-core` from the stage that builds it.
+   - **`run_conda_build.sh`:** gains the `morpheus-core` target that stage had always asked for and never had.
+   - **`dependencies.yaml`:** its comments name the `morpheus-core` recipe.
+   - **`contributing.md`:** loses the debug-Python and local CI sections.
+   - **Devcontainer pages:** the example environment tables and the devcontainer known issue go with it.
+
+   Three pieces D2 should have taken went too: the install of the Triton mock server in `docker/Dockerfile`, the Triton models
+   container pull in the examples page, and the step in `contributing.md` that started the models container.
 5. **D4**'s remainder, after the evidence is cited by permalink.
 
 For each, the paths come from the removal list, selected by the ruling's directories, and the edits from the

@@ -21,7 +21,6 @@ limitations under the License.
 - Arm64 users need to install CUDA enabled PyTorch by hand ([#2095](https://github.com/nv-morpheus/Morpheus/issues/2095))
 - DFP visualization fails to install on AArch64 ([#2125](https://github.com/nv-morpheus/Morpheus/issues/2125))
 - Build errors after a CMake reconfigure, work-around is to delete the `build` directory and re-run CMake ([#2279](https://github.com/nv-morpheus/Morpheus/issues/2279)).
-- Python `stubgen` failing for C++ examples inside devcontainer ([#2287](https://github.com/nv-morpheus/Morpheus/issues/2287)), the actual build succeeds, and code is functional, but the Python stub files are not generated.
 
 
 Refer to [open issues in the Morpheus project](https://github.com/nv-morpheus/Morpheus/issues)

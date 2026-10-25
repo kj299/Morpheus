@@ -248,7 +248,7 @@ dependencies:
 
 
   # Build dependencies for Morpheus on the target arch. Mirrors the `build` section in
-  # ci/conda/recipes/morpheus/meta.yaml
+  # ci/conda/recipes/morpheus-core/meta.yaml
   build_cpp_build:
     common:
       - output_types: [conda]
@@ -270,7 +270,7 @@ dependencies:
           - sysroot_linux-64>=2.28
 
   # Build dependencies for Morpheus on the host arch. Mirrors the `host` section in
-  # ci/conda/recipes/morpheus/meta.yaml
+  # ci/conda/recipes/morpheus-core/meta.yaml
   build_cpp_host:
     common:
       - output_types: [conda]
@@ -364,7 +364,7 @@ dependencies:
 
   # Runtime dependencies for Morpheus. Included in nearly all output files so dependencies should
   # be added only if it is needed to run the core Morpheus library.
-  # This should be synced with `run` in ci/conda/recipes/morpheus/meta.yaml
+  # This should be synced with `run` in ci/conda/recipes/morpheus-core/meta.yaml
   runtime:
     common:
       - output_types: [conda]
