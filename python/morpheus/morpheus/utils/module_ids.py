@@ -13,17 +13,3 @@
 # limitations under the License.
 
 MORPHEUS_MODULE_NAMESPACE = "morpheus"
-
-DATA_LOADER = "DataLoader"
-FILE_BATCHER = "FileBatcher"
-FILE_TO_DF = "FileToDF"
-FILTER_CONTROL_MESSAGE = "FilterControlMessage"
-FROM_CONTROL_MESSAGE = "FromControlMessage"
-MLFLOW_MODEL_WRITER = "MLFlowModelWriter"
-SERIALIZE = "Serialize"
-TO_CONTROL_MESSAGE = "ToControlMessage"
-WRITE_TO_FILE = "WriteToFile"
-FILTER_CM_FAILED = "FilterCmFailed"
-PAYLOAD_BATCHER = "PayloadBatcher"
-WRITE_TO_ELASTICSEARCH = "WriteToElasticsearch"
-WRITE_TO_VECTOR_DB = "WriteToVectorDB"

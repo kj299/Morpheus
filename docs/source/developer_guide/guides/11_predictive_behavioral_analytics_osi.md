@@ -482,7 +482,9 @@ Output (`stages/output/`): `WriteToKafkaStage`, `WriteToElasticsearchStage`, `Wr
 `CompareDataFrameStage`, `InMemorySinkStage`.
 
 General (`stages/general/`): `MonitorStage`, `TriggerStage`, `BufferStage`, `DelayStage`,
-`RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, `MultiPortModulesStage`.
+`RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, and
+[`MultiPortModulesStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/general/multi_port_modules_stage.py), which went with
+the DFP module pipelines under the [repository audit](./13_repository_audit.md)'s ruling D4.
 
 Lineage (`stages/lineage/`): `LineageStampStage`, `CommunityIdStage`, `EnvelopeStampStage`, `EnvelopeValidateStage`,
 `CollectorSequenceStage`, `ChainAnchorStage`, `BindingResolverStage`, `EdgeEmitStage`, `WindowSealStage`,
@@ -497,10 +499,13 @@ There is no Splunk sink. Delivery to Splunk goes through Kafka, HTTP Event Colle
 
 Modules are the composable sub-stage unit introduced in 23.03. They are registered with
 `@register_module(NAME, NAMESPACE)` from `python/morpheus/morpheus/utils/module_utils.py` and loaded with
-`builder.load_module(...)`. The DFP deployment in `python/morpheus_dfp/morpheus_dfp/modules/` is the
-reference example of nesting: `dfp_deployment` contains `dfp_training_pipe` and `dfp_inference_pipe`, each
-of which contains `dfp_preproc`, `dfp_rolling_window`, `dfp_data_prep`, among others. Module identifiers live
-in `python/morpheus_dfp/morpheus_dfp/utils/module_ids.py`.
+`builder.load_module(...)`. The DFP deployment in
+[`python/morpheus_dfp/morpheus_dfp/modules/`](https://github.com/nv-morpheus/Morpheus/tree/c6a3b56d/python/morpheus_dfp/morpheus_dfp/modules) was the reference
+example of nesting: `dfp_deployment` contains `dfp_training_pipe` and `dfp_inference_pipe`, each of which contains
+`dfp_preproc`, `dfp_rolling_window`, `dfp_data_prep`, among others. Module identifiers lived in
+[`python/morpheus_dfp/morpheus_dfp/utils/module_ids.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_dfp/morpheus_dfp/utils/module_ids.py).
+Ruling D4 removed those modules with the rest of `morpheus_dfp` that the reuse evidence does not import; the only
+module left in the tree is the one `DeserializeStage` loads.
 
 ---
 
@@ -529,8 +534,9 @@ applies the schema.
 
 `IncrementColumn` and `DistinctIncrementColumn` are the behavioral primitives. `DistinctIncrementColumn`
 in particular encodes "how many distinct values of this attribute has this entity used so far," which is
-the novelty signal that most behavioral detections reduce to. `python/morpheus_dfp/morpheus_dfp/utils/schema_utils.py`
-uses exactly this pattern for Azure and Duo:
+the novelty signal that most behavioral detections reduce to.
+[`python/morpheus_dfp/morpheus_dfp/utils/schema_utils.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_dfp/morpheus_dfp/utils/schema_utils.py)
+used exactly this pattern for Azure and Duo:
 
 ```python
 IncrementColumn(name="logcount", dtype=int,
@@ -633,11 +639,12 @@ filtered_df["_batch_id"] = self.batch_count
 
 `_row_hash` is used to locate the boundary between already-seen and new rows, and `_batch_id` to select
 rows newer than the last training batch. Both are excluded from the serialized output by
-`dfp_inference_pipe.py` (`"exclude": ['batch_count', 'origin_hash', '_row_hash', '_batch_id']`). For a
+[`dfp_inference_pipe.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_dfp/morpheus_dfp/modules/dfp_inference_pipe.py) (`"exclude": ['batch_count', 'origin_hash', '_row_hash', '_batch_id']`). For a
 lineage-bearing pipeline, that exclusion list should be revisited: `origin_hash` and `_row_hash` are
 exactly what a SIEM needs to tie a score back to a source record.
 
-`origin_hash` itself is set in `python/morpheus/morpheus/controllers/file_to_df_controller.py` and is a
+`origin_hash` itself was set in
+[`python/morpheus/morpheus/controllers/file_to_df_controller.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/controllers/file_to_df_controller.py) and is a
 hash of the source object set, which makes it a usable batch-level provenance token.
 
 `DFPInferenceStage` resolves a per-entity model from MLflow through `ModelManager`/`ModelCache`
@@ -782,7 +789,7 @@ different models. The 600-second cache means even a single long run can switch m
 training path sets `dataset.shuffle_batch_indices = True`. `GaussRankScaler` fitting depends on the
 sample it sees. Torch and cuDNN kernel selection is nondeterministic unless constrained.
 
-**Input enumeration order.** `fsspec.open_files(files)` in `modules/file_batcher.py` returns objects in
+**Input enumeration order.** `fsspec.open_files(files)` in [`modules/file_batcher.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/modules/file_batcher.py) returns objects in
 filesystem order, which is not guaranteed stable across object stores or listings.
 
 **Sink concurrency.** `ElasticsearchController.parallel_bulk_write` uses
@@ -958,7 +965,7 @@ pipeline is how lineage silently breaks.
 | `clock_source` | enum | `ptp`, `ntp_disciplined`, `ntp_undisciplined`, `unsynchronized`. |
 | `clock_offset_ms` | int | Last measured offset. Records above a configured bound are quarantined, not dropped. |
 | `sampling_policy` | string | `full`, `1:N`, `adaptive:<params>`. Required for any rate-based feature to be interpretable. |
-| `origin_hash` | hex string | Hash of the source object or batch. Already produced by `file_to_df_controller.py`. |
+| `origin_hash` | hex string | Hash of the source object or batch. The upstream [`file_to_df_controller.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/controllers/file_to_df_controller.py) produced it. |
 | `event_uid` | hex string | Deterministic per-event identity. Construction in Part 4. |
 | `entity_key` | string | The primary behavioral subject for this telemetry class. |
 | `site_id` / `tenant_id` | string | Physical and logical scoping. |
@@ -1470,7 +1477,7 @@ either as one record carrying `session_start` and `session_end`, where the durat
 separate start and stop records `TC5SessionStage` pairs; both yield `session_duration_s`.
 
 **Behavioral features:** this is where `morpheus_dfp` applies directly, and the Duo and Azure schemas in
-`schema_utils.py` are the template. The proven set is `logcount` (`IncrementColumn` over timestamp grouped
+[`schema_utils.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_dfp/morpheus_dfp/utils/schema_utils.py) are the template. The proven set is `logcount` (`IncrementColumn` over timestamp grouped
 by user), `locincrement` (`DistinctIncrementColumn` over a concatenated location), and `appincrement`.
 Extend with: distinct source ASN per user per window, distinct device per user, hour-of-day and
 day-of-week deviation from the user's own histogram, MFA-to-total-auth ratio, failure-then-success

@@ -17,17 +17,11 @@
 
 #include "./common.hpp"
 
-#include "morpheus/io/data_loader_registry.hpp"
-#include "morpheus/io/loaders/file.hpp"
-#include "morpheus/io/loaders/grpc.hpp"
-#include "morpheus/io/loaders/payload.hpp"
-#include "morpheus/io/loaders/rest.hpp"
 #include "morpheus/messages/meta.hpp"
 #include "morpheus/utilities/cudf_util.hpp"
 #include "morpheus/utilities/string_util.hpp"
 
 #include <cpython/initconfig.h>  // for PyStatus_Exception, PyConfig_Clear, PyConfig_InitPythonConfig
-#include <nlohmann/json.hpp>
 #include <pybind11/gil.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
@@ -54,31 +48,6 @@ bool TestWithPythonInterpreter::m_initialized = false;
 void TestWithPythonInterpreter::SetUp()
 {
     this->initialize_interpreter();
-
-    LoaderRegistry::register_factory_fn(
-        "file",
-        [](nlohmann::json config) {
-            return std::make_unique<FileDataLoader>(config);
-        },
-        false);
-    LoaderRegistry::register_factory_fn(
-        "grpc",
-        [](nlohmann::json config) {
-            return std::make_unique<GRPCDataLoader>(config);
-        },
-        false);
-    LoaderRegistry::register_factory_fn(
-        "payload",
-        [](nlohmann::json config) {
-            return std::make_unique<PayloadDataLoader>(config);
-        },
-        false);
-    LoaderRegistry::register_factory_fn(
-        "rest",
-        [](nlohmann::json config) {
-            return std::make_unique<RESTDataLoader>(config);
-        },
-        false);
 
     pybind11::gil_scoped_acquire gil;
     CudfHelper::load();

@@ -1,7 +1,0 @@
-accessdevicebrowser
-accessdeviceos
-authdevicename
-reason
-result
-locincrement
-logcount

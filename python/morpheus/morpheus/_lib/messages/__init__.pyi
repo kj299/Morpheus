@@ -15,7 +15,6 @@ import mrc.core.node
 __all__ = [
     "ControlMessage",
     "ControlMessageType",
-    "DataLoaderRegistry",
     "DataTable",
     "MessageMeta",
     "MutableTableCtxMgr",
@@ -107,16 +106,6 @@ class ControlMessageType():
     NONE: morpheus._lib.messages.ControlMessageType # value = <ControlMessageType.INFERENCE: 1>
     TRAINING: morpheus._lib.messages.ControlMessageType # value = <ControlMessageType.TRAINING: 2>
     __members__: dict # value = {'INFERENCE': <ControlMessageType.INFERENCE: 1>, 'NONE': <ControlMessageType.INFERENCE: 1>, 'TRAINING': <ControlMessageType.TRAINING: 2>}
-    pass
-class DataLoaderRegistry():
-    @staticmethod
-    def contains(name: str) -> bool: ...
-    @staticmethod
-    def list() -> list[str]: ...
-    @staticmethod
-    def register_loader(name: str, loader: typing.Callable[[ControlMessage, dict], ControlMessage], throw_if_exists: bool = True) -> None: ...
-    @staticmethod
-    def unregister_loader(name: str, throw_if_not_exists: bool = True) -> None: ...
     pass
 class DataTable():
     pass

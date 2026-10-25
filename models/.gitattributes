@@ -6,6 +6,5 @@
 *.sav filter=lfs diff=lfs merge=lfs -text
 datasets/training-data/** filter=lfs diff=lfs merge=lfs -text
 datasets/validation-data/** filter=lfs diff=lfs merge=lfs -text
-dfp-models/* filter=lfs diff=lfs merge=lfs -text
 phishing-models/* filter=lfs diff=lfs merge=lfs -text
 inventory/**/*.csv filter=lfs diff=lfs merge=lfs -text

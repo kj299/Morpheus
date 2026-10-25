@@ -92,26 +92,12 @@ function(add_morpheus_test)
 endfunction()
 
 add_morpheus_test(
-  NAME io
-  FILES
-    io/test_data_loader.cpp
-    io/test_data_loader_registry.cpp
-    io/test_loaders.cpp
-)
-
-add_morpheus_test(
   NAME messages
   FILES
     messages/test_control_message.cpp
     messages/test_dev_doc_ex3.cpp
     messages/test_sliced_message_meta.cpp
     messages/test_message_meta.cpp
-)
-
-add_morpheus_test(
-  NAME modules
-  FILES
-    modules/test_data_loader_module.cpp
 )
 
 add_morpheus_test(

@@ -81,26 +81,27 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,170 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,038 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
-and the sixteen ruling D2 added (four model inventory files, six modules and their six tests), less the 1,265 files
+and the sixteen ruling D2 added (four model inventory files, six modules and their six tests), less the 1,397 files
 removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
-ruling D7, 331 under ruling D2 and 59 under ruling D6.
+ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 214 |
-| `keep-dependency` | 412 |
+| `remove` | 84 |
+| `keep-dependency` | 410 |
 | `keep` | 399 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
 organization workflows the fork modified, and three were its own: `TC1FeatureStage`, its utility module and
 its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1, the 48 of its DOCA part, the
-384 of its security-examples part and the 96 of its digital fingerprinting part, the 120 of D7, the 327 of D2 and the 59 of
-D6. D2 kept one file the audit had marked, the SID validation set, which moved with the model. That leaves 214 marked.
+384 of its security-examples part and the 96 of its digital fingerprinting part, the 120 of D7, the 327 of D2, the 59 of
+D6 and the 130 of D4. D2 kept one file the audit had marked, the SID validation set, which moved with the model. That
+leaves 84 marked.
 
 Between the passes, the second readers moved files in both directions:
 
@@ -278,7 +279,25 @@ The removals land as one change per ruling, in this order, each with the `update
 
    Three pieces D2 should have taken went too: the install of the Triton mock server in `docker/Dockerfile`, the Triton models
    container pull in the examples page, and the step in `contributing.md` that started the models container.
-5. **D4**'s remainder, after the evidence is cited by permalink.
+5. **D4**'s remainder, after the evidence is cited by permalink. Done on 2026-10-25: 132 files. The 76 rows that name
+   D4 were not a cut that leaves the tree whole on their own, so they went with every other `remove` row that would
+   otherwise have kept a reference to them:
+   - **The rest of `morpheus_dfp` and `tests/morpheus_dfp`:** the modules, the file batcher, file-to-frame,
+     preprocessing, visualization and S3 stages, and the utilities no evidence stage imports.
+   - **The data-loader stack D10 names:** the C++ loaders, their registry, the `DataLoaderModule` and the
+     `morpheus._lib.modules` binding with their C++ tests, the Python loaders, and the `DataLoaderRegistry` binding in
+     `morpheus._lib.messages`.
+   - **The module-based utilities only module pipelines used:** the file batcher, file-to-frame, control-message,
+     monitor, serialize, write and MLflow writer modules, `MultiPortModulesStage`, and their tests.
+   - **The DFP datasets and models no evidence reads:** the training and validation splits other than the three
+     samples `examples/upstream_reuse` records, the two pickled models, and the column lists.
+
+   Two `keep-dependency` rows went with them, `utils/loader_utils.py` and `utils/loader_ids.py`, whose only users
+   were the loaders. What `examples/upstream_reuse` imports stays, and its test still passes: the six DFP stages,
+   three utilities, `MLFlowDriftStage`, `TimeSeriesStage`, the Azure, Duo and CloudTrail sources and the MLflow
+   writer controller. The core library's build list, the common and messages bindings, the C++ test helper and its
+   CMake, `morpheus.modules` (down to the deserialize module `DeserializeStage` loads), `module_ids.py`, the stages
+   page and the models README were edited with it. Guide 11 cites the removed DFP and loader files by permalink.
 
 For each, the paths come from the removal list, selected by the ruling's directories, and the edits from the
 `action` column of the rows that name the ruling. For the language-model part of D1, for example:
