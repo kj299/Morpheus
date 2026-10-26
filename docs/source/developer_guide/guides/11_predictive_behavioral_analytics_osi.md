@@ -4362,7 +4362,7 @@ Pass 4 measures each of these and records which the fork reuses.
   pipelines emit is classified by what it says about a person on its own, and a new feature column fails a test
   until somebody has decided which -- an inventory nobody checks is a snapshot of the day it was written. The
   counts are the finding: fourteen columns identify a person or an account, twenty-five address their device,
-  seventeen locate them, and two hundred and forty-two are profile, two hundred and thirty-two of them behavioural,
+  nineteen locate them, and two hundred and forty-two are profile, two hundred and thirty-two of them behavioural,
   which is to say the largest thing an estate ends up holding is the part
   this design derives rather than the part it ingested. The stage drops or pseudonymizes at the wire boundary,
   with a keyed HMAC and no default key, stably so the per-entity story survives, and it refuses to pseudonymize
@@ -4819,7 +4819,7 @@ That test is the point of it: an inventory nobody checks reads as authoritative 
 whichever day it was written.
 
 The counts are worth stating plainly, because they are not what an estate expects. Of the columns this
-fork emits, fourteen identify a person or an account, twenty-five are addresses, seventeen locate, twenty are
+fork emits, fourteen identify a person or an account, twenty-five are addresses, nineteen locate, twenty are
 pseudonyms -- and two hundred and forty-two are profile, two hundred and thirty-five of them behavioural; the other
 seven are the organisational columns the TC-0 context store and its join carry. **The largest category by far
 is the one the design manufactures rather than collects.** An estate reviewing this will think about the

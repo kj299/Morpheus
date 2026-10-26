@@ -162,7 +162,7 @@ def test_the_counts_the_documents_quote_are_the_counts_here():
     # thing in the inventory and a reader takes them at face value. Pinning them here means a reclassification
     # fails a test rather than quietly making two documents wrong.
     assert [len(columns_in(category)) for category in (IDENTIFIES, ADDRESSES, LOCATES, PSEUDONYMS, PROFILES)] == [
-        14, 25, 17, 20, 242
+        14, 25, 19, 20, 242
     ], "the category sizes have moved; README.md and the guide's Part 6 quote them and need the same edit"
 
     # The split the documents quote inside the profile count: the organisational columns are named, and the rest
