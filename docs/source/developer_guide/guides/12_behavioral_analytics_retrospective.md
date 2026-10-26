@@ -304,11 +304,14 @@ because every reader marked persistence as out of the delivery lens's remit.
 against the code, the saved searches and the contracts rather than against the plan's status paragraphs. Of
 the eighty-nine rows, sixty-eight are closed: the capability the row says is missing is in the tree with a
 test, a stanza or a contract column behind it. Both rows marked blocking are among them: G03 by host
-identity (#63) and G10 by the service entity (#64). Eleven are narrowed to a remainder the row did not
-state (G09, G12, G20, G23, G45, G49, G53, G60, G65, G79, G82), of which one is open work: G20, hysteresis,
+identity (#63) and G10 by the service entity (#64). Twelve are narrowed to a remainder the row did not
+state (G09, G12, G20, G23, G39, G45, G49, G53, G60, G65, G79, G82), of which one is open work: G20, hysteresis,
 which is deferred. G23, the host score, closed when the host half's third part put a daily trajectory over the
 TLS and DNS columns beside the host model's; G53, predictive mechanisms for the application layer, narrowed to
-HTTP and process behaviour, since DNS and TLS now carry one. Ten hold (G08, G21, G39, G48, G56, G69, G70, G72, G74, G88): eight as recorded decisions
+HTTP and process behaviour, since DNS and TLS now carry one. G39, port identity across a rename, narrowed under plan
+section 3.1 to the layer 2 join: layer 1 keys a port on its `ifIndex` and a switch on its chassis serial, so a
+renamed port keeps its key, its history and its binding, but the layer 2 collectors still report the new name, and a
+renamed port meets them only through `reported_entity_key`. Nine hold (G08, G21, G48, G56, G69, G70, G72, G74, G88): seven as recorded decisions
 or out-of-scope items, and two, G72 (`TC1FeatureStage` in no composed pipeline) and G88 (control 13's
 fourth check through `CompareDataFrameStage` for the lineage pipeline only), as plain open items that no
 step has taken. G90, the ninetieth gap the critic added, now has a row, closed by step 16's first part.
@@ -355,7 +358,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G36 | major | stands → closed | network objects | Link flap instability has no detection rule | #61 |
 | G37 | major | stands → closed | network objects | 802.1X time-to-authorize lacks a per-port distribution | #61 |
 | G38 | major | stands → closed | network objects | BindingCloser explicit stop and snapshot reconcile are wired in no stage; `bind_end_observed` always false | #61 |
-| G39 | major | stands → holds | network objects | Port identity does not survive renaming: no ifIndex/serial/alias anchor for `entity_key` | #52 |
+| G39 | major | stands → narrowed | network objects | Port identity does not survive renaming: no ifIndex/serial/alias anchor for `entity_key` | #52 |
 | G40 | major | stands → closed | nodes | Device reboot flags are emitted and read by nothing | #61 |
 | G41 | major | stands → closed | all | `clock_source`/clock_offset_ms and the other envelope fields are produced, validated and quarantined on by nothing | #62 |
 | G42 | major | stands → closed | nodes | Collectors are not entities: `collector_seq` monotonicity unchecked, no collector health signal | #62 |

@@ -418,3 +418,152 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
     with pytest.raises(ValueError, match="max_clock_skew_seconds"):
         make_stage(config, max_clock_skew_seconds=0)
+
+
+def _renamed_samples(**overrides) -> dict:
+    # One port polled four times. Between the second and third poll an operator renames it; its ifIndex does not
+    # change. The crc total keeps counting through the rename, as the hardware does.
+    samples = {
+        "site_id": ["hq"] * 4,
+        "device_id": ["sw1"] * 4,
+        "port_id": ["Gi1/0/5", "Gi1/0/5", "uplink-core-2", "uplink-core-2"],
+        "if_index": [10105] * 4,
+        "chassis_serial": ["FOC2201X0AB"] * 4,
+        "event_time": [0, MINUTE_NS, 2 * MINUTE_NS, 3 * MINUTE_NS],
+        "uptime": [3600, 3660, 3720, 3780],
+        "crc_errors": [100, 110, 125, 131],
+        "symbol_errors": [0] * 4,
+        "input_discards": [0] * 4,
+        "output_discards": [0] * 4,
+    }
+    samples.update(overrides)
+
+    return samples
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_renamed_port_keeps_its_key_and_its_history(config: Config):
+    meta = MessageMeta(get_df_class(config.execution_mode)(_renamed_samples()))
+    make_stage(config, port_anchor_column="if_index").on_data(meta)
+
+    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 4
+    # Unanchored, the third poll would be a new port's first sample, with no delta.
+    assert _as_list(meta, "crc_errors_delta") == [None, 10, 15, 6]
+    assert _as_list(meta, "reported_entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
+    assert _as_list(meta, "identity_renamed") == [False, False, True, True]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_without_an_anchor_a_rename_is_a_new_port_as_before(config: Config):
+    meta = MessageMeta(get_df_class(config.execution_mode)(_renamed_samples()))
+    stage = make_stage(config)
+    stage.on_data(meta)
+
+    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
+    assert _as_list(meta, "crc_errors_delta") == [None, 10, None, 6]
+    # The columns that describe an anchor exist only where one is configured.
+    assert "reported_entity_key" not in meta.get_column_names()
+    assert "identity_renamed" not in stage.get_needed_columns()
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_rehostnamed_switch_keeps_its_ports(config: Config):
+    samples = _renamed_samples(device_id=["sw1", "sw1", "hq-acc-01", "hq-acc-01"], port_id=["Gi1/0/5"] * 4)
+    meta = MessageMeta(get_df_class(config.execution_mode)(samples))
+    make_stage(config, device_anchor_column="chassis_serial").on_data(meta)
+
+    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 4
+    assert _as_list(meta, "crc_errors_delta") == [None, 10, 15, 6]
+    assert _as_list(meta, "identity_renamed") == [False, False, True, True]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_port_anchor_is_scoped_to_its_device(config: Config):
+    # Two switches number their ports alike: the same ifIndex on another device is another port.
+    samples = {
+        "site_id": ["hq", "hq"],
+        "device_id": ["sw1", "sw2"],
+        "port_id": ["Gi1/0/5", "Gi1/0/9"],
+        "if_index": [10105, 10105],
+        "event_time": [0, 0],
+        "crc_errors": [0, 0],
+        "symbol_errors": [0, 0],
+        "input_discards": [0, 0],
+        "output_discards": [0, 0],
+    }
+    meta = MessageMeta(get_df_class(config.execution_mode)(samples))
+    make_stage(config, port_anchor_column="if_index").on_data(meta)
+
+    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5", "hq:sw2:Gi1/0/9"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_row_without_an_anchor_keeps_its_reported_name(config: Config):
+    meta = MessageMeta(get_df_class(config.execution_mode)(_renamed_samples(if_index=[10105, 10105, None, None])))
+    make_stage(config, port_anchor_column="if_index").on_data(meta)
+
+    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
+    assert _as_list(meta, "identity_renamed") == [False] * 4
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_anchor_column_the_collector_did_not_send_is_no_anchor(config: Config):
+    samples = _renamed_samples()
+    del samples["if_index"]
+    meta = MessageMeta(get_df_class(config.execution_mode)(samples))
+    make_stage(config, port_anchor_column="if_index").on_data(meta)
+
+    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_refused_sample_teaches_the_anchor_nothing(config: Config):
+    # Another port sets the stream's progress; then ifIndex 10105's first sample arrives a decade ahead and is refused.
+    # Its name must not become the port's, so the honest samples after it name the port as they report it.
+    samples = {
+        "site_id": ["hq"] * 4,
+        "device_id": ["sw1"] * 4,
+        "port_id": ["Gi1/0/1", "uplink-core-2", "Gi1/0/5", "Gi1/0/5"],
+        "if_index": [10101, 10105, 10105, 10105],
+        "event_time": [0, YEARS_AHEAD_NS, MINUTE_NS, 2 * MINUTE_NS],
+        "uptime": [3600, 3660, 3660, 3720],
+        "crc_errors": [0, 900, 100, 110],
+        "symbol_errors": [0] * 4,
+        "input_discards": [0] * 4,
+        "output_discards": [0] * 4,
+    }
+    meta = MessageMeta(get_df_class(config.execution_mode)(samples))
+    make_stage(config, port_anchor_column="if_index").on_data(meta)
+
+    assert _as_list(meta, "clock_refused") == [False, True, False, False]
+    assert _as_list(meta,
+                    "entity_key") == ["hq:sw1:Gi1/0/1", "hq:sw1:uplink-core-2", "hq:sw1:Gi1/0/5", "hq:sw1:Gi1/0/5"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_link_is_named_from_the_anchored_port(config: Config):
+    samples = _renamed_samples(lldp_neighbor_chassis_id=["core2"] * 4, lldp_neighbor_port_id=["Te1/1/1"] * 4)
+    meta = MessageMeta(get_df_class(config.execution_mode)(samples))
+    make_stage(config, port_anchor_column="if_index").on_data(meta)
+
+    # A rename on the near end is not a re-patch, so the link the adjacency lookup is keyed on does not change.
+    assert set(_as_list(meta, "link_key")) == {"core2:Te1/1/1|hq:sw1:Gi1/0/5"}
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_the_anchors_survive_a_checkpoint(config: Config):
+    df_class = get_df_class(config.execution_mode)
+    samples = _renamed_samples()
+    first_half = {name: values[:2] for (name, values) in samples.items()}
+    second_half = {name: values[2:] for (name, values) in samples.items()}
+
+    stage = make_stage(config, port_anchor_column="if_index")
+    stage.on_data(MessageMeta(df_class(first_half)))
+
+    resumed = make_stage(config, port_anchor_column="if_index")
+    resumed.restore_state(stage.checkpoint_state())
+    meta = MessageMeta(df_class(second_half))
+    resumed.on_data(meta)
+
+    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2
+    assert _as_list(meta, "crc_errors_delta") == [15, 6]

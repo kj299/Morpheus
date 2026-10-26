@@ -258,6 +258,37 @@ def test_missing_column_raises(config: Config):
         run(config, payload)
 
 
+RENAMED = ("hq", "sw1", "uplink-core-2")
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_renamed_port_with_an_anchor_extends_its_binding(config: Config):
+    # Gap G39: the port's name is configuration and its ifIndex is not. Keyed on the anchor, the rename is the same
+    # port with the same optic, so the one binding runs on under the name it was first seen with.
+    payload = samples([(PORT, 0, "SN-AAA", "chassis-a"), (RENAMED, HOUR, "SN-AAA", "chassis-a")])
+    payload["if_index"] = [10101, 10101]
+    result = run(config, payload, port_anchor_column="if_index")
+
+    assert len(result) == 1
+    assert result["entity_key"].iloc[0] == "hq:sw1:Gi1/0/1"
+    assert result["bind_observations"].iloc[0] == 2
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_renamed_port_without_an_anchor_is_a_new_port(config: Config):
+    payload = samples([(PORT, 0, "SN-AAA", "chassis-a"), (RENAMED, HOUR, "SN-AAA", "chassis-a")])
+    payload["if_index"] = [10101, 10101]
+    result = run(config, payload)
+
+    assert sorted(result["entity_key"]) == ["hq:sw1:Gi1/0/1", "hq:sw1:uplink-core-2"]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_an_anchor_needs_the_three_key_parts(config: Config):
+    with pytest.raises(ValueError, match="three key parts"):
+        TC1BindingStage(config, key_columns=["site_id", "port_id"], port_anchor_column="if_index")
+
+
 @pytest.mark.gpu_and_cpu_mode
 def test_tc1_binding_stage_pipe(config: Config):
     frame = get_df_class(config.execution_mode)(samples([(PORT, 0, "SN-AAA", "chassis-a"),

@@ -460,6 +460,14 @@
           "notes": "The interface name, not the `ifIndex`."
         },
         {
+          "name": "if_index",
+          "type": "integer",
+          "unit": "",
+          "required": false,
+          "source": "`ifIndex` (`1.3.6.1.2.1.2.2.1.1`)",
+          "notes": "What a renamed port is recognised by. Send it only from a device that persists it across reboots; a reassigned index merges two ports' histories."
+        },
+        {
           "name": "uptime",
           "type": "integer",
           "unit": "centiseconds",

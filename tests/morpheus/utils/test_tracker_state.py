@@ -49,6 +49,8 @@ from morpheus.utils.drift_trajectory import DriftTrajectoryTracker
 from morpheus.utils.established_value import ValueHistoryTracker
 from morpheus.utils.event_clock import EventClock
 from morpheus.utils.geo_velocity import GeoVelocityTracker
+from morpheus.utils.identity_anchor import AnchoredNames
+from morpheus.utils.identity_anchor import PortIdentity
 from morpheus.utils.link_flap import LinkFlapTracker
 from morpheus.utils.optical_baseline import OpticalBaselineTracker
 from morpheus.utils.optical_forecast import OpticalForecastTracker
@@ -229,11 +231,26 @@ def _ttl(tracker, key, now, draw):
     return tracker.observe(key, now, [64, 63, 128, 255][int(draw * 4)])
 
 
+def _anchored(tracker, key, now, draw):
+    # A refused row (learn=False) is in the history too, so its leaving the map untouched survives the round trip.
+    return tracker.resolve(("hq", ), f"if-{int(draw * 5)}", f"{key}-{now % 3}", learn=draw > 0.1)
+
+
+def _port_identity(tracker, key, now, draw):
+    return tracker.names("hq",
+                         f"sw-{now % 2}",
+                         f"Gi{int(draw * 4)}",
+                         f"FOC-{key}",
+                         10000 + int(draw * 5),
+                         learn=draw > 0.1)
+
+
 def _identifiers(tracker, key, now, draw):
     return tracker.observe(key, now, {"serial": f"SN{int(draw * 6)}", "chassis": f"ch-{int(draw * 2)}"})
 
 
 CASES = {
+    "anchored_names": (lambda: AnchoredNames(max_anchors=3), _keyed_by(_anchored)),
     "arrival_regularity": (lambda: ArrivalRegularityTracker(min_intervals=3, max_entities=3), _keyed_by(_arrival)),
     "binding_closer": (lambda: BindingCloser(["mac"], idle_timeout_ns=3 * HOUR_NS, max_open=3), _binding_closer_ops),
     "bucket_peak": (lambda: BucketPeakTracker(bucket_ns=HOUR_NS, window_ns=24 * HOUR_NS, min_buckets=3, max_entities=3),
@@ -251,6 +268,7 @@ CASES = {
                          _keyed_by(_optics)),
     "optical_forecast": (lambda: OpticalForecastTracker(min_samples=3, max_entities=3), _keyed_by(_forecast)),
     "outcome_run": (lambda: OutcomeRunTracker(max_entities=3), _keyed_by(_outcome)),
+    "port_identity": (lambda: PortIdentity(max_anchors=3), _keyed_by(_port_identity)),
     "pair_history": (lambda: PairHistoryTracker(max_entities=3), _keyed_by(_pair)),
     "ratio_window": (lambda: RatioWindowTracker(min_denominator=2, max_entities=3), _keyed_by(_ratio)),
     "reboot_counter": (lambda: RebootCounter(bucket_ns=6 * HOUR_NS, max_devices=3), _keyed_by(_reboots)),

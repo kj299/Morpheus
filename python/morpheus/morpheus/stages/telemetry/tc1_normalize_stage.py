@@ -43,6 +43,7 @@ from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import EventClock
 from morpheus.utils.event_clock import mark_refused
+from morpheus.utils.identity_anchor import PortIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,12 @@ Optional rather than required, unlike the error counters: a copper access port b
 error table still has a key, an optic and a flap count worth scoring, and refusing the whole row because it carries no
 traffic counter would cost all of that. Absent, their deltas are null. Always 64-bit: the 32-bit `ifInOctets` wraps in
 under four seconds at ten gigabits, faster than any poller, so a delta over it would be a guess."""
+
+REPORTED_KEY_COLUMN = "reported_entity_key"
+"""The key composed from the names as the collector reported them, written when an anchor is configured."""
+
+RENAMED_COLUMN = "identity_renamed"
+"""Whether the reported names differ from the anchored ones, written when an anchor is configured."""
 
 LINK_KEY_COLUMN = "link_key"
 """The port and the LLDP neighbour on the far end of it, as `entity_key.compose_link_key` names a link."""
@@ -84,7 +91,10 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
 
     Each row also gains `entity_key`, the `site_id:device_id:port_id` identity that the per-port models key on and
     that anchors the bottom of the lineage ladder, and `link_key`, the port and the LLDP neighbour on the far end of
-    it, which is what the adjacency lookup is keyed on and what changes when somebody re-patches the port.
+    it, which is what the adjacency lookup is keyed on and what changes when somebody re-patches the port. The names in
+    the key are the collector's, so a renamed port or a re-hostnamed switch would start a new entity; given
+    `port_anchor_column` and `device_anchor_column`, the key keeps the names an `ifIndex` and a chassis serial were
+    first seen with, and the rename is reported beside it rather than splitting the history.
 
     This stage is stateful and must run single-engine, which is the Morpheus default. For parallelism, shard by
     device upstream and give each shard its own instance, which is determinism control 4. Rows are processed in the
@@ -131,6 +141,16 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
     neighbor_port_column : str, default = "lldp_neighbor_port_id"
         Column holding the LLDP neighbour's port identifier. With the chassis and the port's own key it names the
         link, written to `link_key`; a row without either neighbour column carries a null link.
+    device_anchor_column : str, optional
+        Column holding an identifier the device reports about itself, typically its chassis serial. Given, a device
+        keeps the hostname it was first seen with for as long as its serial is remembered, so a re-hostnamed switch
+        stays one entity with one history. The reported hostname is still in `device_column`.
+    port_anchor_column : str, optional
+        Column holding an identifier that survives a port rename, typically `ifIndex`. Given, a port keeps the name it
+        was first seen with on its device. Pass it only for an estate that persists `ifIndex` across reboots: an index
+        reassigned at boot hands one port's history to another. With either anchor configured each row also gains
+        `reported_entity_key`, the key as the names were reported, and `identity_renamed`, set when the two differ.
+        A row without an anchor value keeps its reported names. See `morpheus.utils.identity_anchor`.
     max_clock_skew_seconds : int, default = 604800
         How far ahead of the stream's own progress a sample's event time may be before it is refused. The counter
         state is kept per port in event-time order, so one sample from a device whose clock is wrong by years would
@@ -138,7 +158,7 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
         refused sample carries no deltas, sets `clock_refused`, and moves nothing. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_tracker", "_clock")
+    _checkpoint_attributes = ("_tracker", "_clock", "_identity")
 
     def __init__(self,
                  c: Config,
@@ -156,6 +176,8 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
                  octet_columns: list[str] = None,
                  neighbor_chassis_column: str = "lldp_neighbor_chassis_id",
                  neighbor_port_column: str = "lldp_neighbor_port_id",
+                 device_anchor_column: str = None,
+                 port_anchor_column: str = None,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
         super().__init__(c)
 
@@ -193,6 +215,10 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
         self._uptime_unit = uptime_unit
         self._delta_suffix = delta_suffix
         self._entity_key_column = entity_key_column
+        self._device_anchor_column = device_anchor_column
+        self._port_anchor_column = port_anchor_column
+        self._anchored = device_anchor_column is not None or port_anchor_column is not None
+        self._identity = PortIdentity()
 
         # SNMP reports `sysUpTime` as `TimeTicks`, which is a 32-bit counter of centiseconds and rolls over after
         # about 497 days. Telling the tracker where that ceiling is lets it separate a rollover, where the device has
@@ -208,6 +234,10 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
         self._needed_columns[entity_key_column] = TypeId.STRING
         self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
         self._needed_columns[LINK_KEY_COLUMN] = TypeId.STRING
+
+        if (self._anchored):
+            self._needed_columns[REPORTED_KEY_COLUMN] = TypeId.STRING
+            self._needed_columns[RENAMED_COLUMN] = TypeId.BOOL8
         self._needed_columns["interval_seconds"] = TypeId.FLOAT64
 
         for flag in ("counter_reset", "counter_wrapped", "sample_out_of_order"):
@@ -248,6 +278,17 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
         except ValueError:
             return None
 
+    def _anchor_values(self, df, column: typing.Optional[str], count: int) -> list:
+        # An anchor column the collector did not send is every row without an anchor, not an error: a poller that
+        # walks no serial still has ports worth keying on their names.
+        if (column is None or column not in df.columns):
+            return [None] * count
+
+        return to_host_list(df, column)
+
+    def _canonical_key(self, site, device, port, device_anchor, port_anchor, learn: bool) -> typing.Optional[str]:
+        return compose_key(self._identity.names(site, device, port, device_anchor, port_anchor, learn=learn))
+
     def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
         """
         Normalize every row of the message payload.
@@ -282,7 +323,21 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
 
             key_parts = [to_host_list(df, column) for column in self._key_columns]
             # A missing part yields a null key rather than the string "None": half an identity is not an identity.
+            # With an anchor configured these are the reported keys, replaced below row by row with the anchored ones,
+            # so a row is keyless exactly when one of its reported names is missing.
             entity_keys = [compose_key(row) for row in zip(*key_parts)]
+            reported_keys = list(entity_keys)
+            device_anchors = self._anchor_values(df, self._device_anchor_column, len(entity_keys))
+            port_anchors = self._anchor_values(df, self._port_anchor_column, len(entity_keys))
+
+            def anchored(position: int, learn: bool) -> typing.Optional[str]:
+                if (not self._anchored):
+                    return entity_keys[position]
+
+                return self._canonical_key(*(part[position] for part in key_parts),
+                                           device_anchors[position],
+                                           port_anchors[position],
+                                           learn=learn)
 
             raw_times = to_host_list(df, self._time_column)
             # The octet counters are read where the collector sent them and are absent otherwise, which the tracker
@@ -290,15 +345,6 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
             measured = self._counter_columns + [name for name in self._octet_columns if name in df.columns]
             counters = {name: to_host_list(df, name) for name in measured}
             differenced = self._counter_columns + self._octet_columns
-
-            if (all(name in df.columns for name in self._neighbor_columns)):
-                neighbours = zip(*[to_host_list(df, name) for name in self._neighbor_columns])
-                link_keys = [
-                    compose_link_key(entity_key, chassis, port)
-                    for (entity_key, (chassis, port)) in zip(entity_keys, neighbours)
-                ]
-            else:
-                link_keys = [None] * len(entity_keys)
 
             if (self._uptime_column is not None and self._uptime_column in df.columns):
                 uptimes = [self._uptime_ns(value) for value in to_host_list(df, self._uptime_column)]
@@ -332,6 +378,8 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
                     event_time_ns = None
 
                 if (event_time_ns is None):
+                    entity_keys[position] = anchored(position, learn=False)
+
                     for name in differenced:
                         deltas[name].append(None)
 
@@ -345,6 +393,8 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
                 # A time the stream cannot believe must not become the port's previous sample: every honest sample
                 # after it would then read as out of order and lose its delta.
                 if (not self._clock.accept(event_time_ns)):
+                    entity_keys[position] = anchored(position, learn=False)
+
                     for name in differenced:
                         deltas[name].append(None)
 
@@ -355,6 +405,8 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
                     refused[position] = True
                     continue
 
+                entity_key = anchored(position, learn=True)
+                entity_keys[position] = entity_key
                 result = self._tracker.observe(entity_key,
                                                event_time_ns, {name: counters[name][position]
                                                                for name in measured},
@@ -369,8 +421,25 @@ class TC1NormalizeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Sing
                 flags["sample_out_of_order"].append(result.out_of_order)
                 unordered += int(result.out_of_order)
 
+            # The link is named from the anchored key, so a rename on the near end does not read as a re-patch.
+            if (all(name in df.columns for name in self._neighbor_columns)):
+                neighbours = zip(*[to_host_list(df, name) for name in self._neighbor_columns])
+                link_keys = [
+                    compose_link_key(entity_key, chassis, port)
+                    for (entity_key, (chassis, port)) in zip(entity_keys, neighbours)
+                ]
+            else:
+                link_keys = [None] * len(entity_keys)
+
             assign_str_column(df, self._entity_key_column, entity_keys)
             assign_str_column(df, LINK_KEY_COLUMN, link_keys)
+
+            if (self._anchored):
+                assign_str_column(df, REPORTED_KEY_COLUMN, reported_keys)
+                df[RENAMED_COLUMN] = [
+                    reported is not None and reported != canonical
+                    for (reported, canonical) in zip(reported_keys, entity_keys)
+                ]
 
             for name in differenced:
                 assign_nullable_int_column(df, f"{name}{self._delta_suffix}", deltas[name])

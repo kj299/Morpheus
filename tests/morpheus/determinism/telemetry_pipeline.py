@@ -88,6 +88,7 @@ permutation check fails, correctly: a counter delta is the difference from the p
 stages flag out-of-order arrival rather than repairing it.
 """
 
+import hashlib
 import random
 import typing
 
@@ -278,6 +279,20 @@ ERRORS_FROM_MINUTE = 45
 ERRORS_PER_MINUTE_STEP = 30
 """A cable going bad: from minute forty-five the port's CRC errors climb by thirty more each minute than the last.
 Every port runs a few errors a minute, which is what the climb is measured against."""
+
+RENAMED_PORT = ERROR_PORT
+RENAMED_TO = "uplink-core-2"
+RENAME_AT_MINUTE = 35
+"""The failing cable's port is renamed at minute thirty-five, ten minutes before the cable starts to fail. An
+error-rate history is mature after `BASELINE_MIN_BUCKETS` five-minute periods, half an hour, so keyed on its reported
+name the renamed port would start again and still be immature when the hour ends, and R-B-L1-005 would never fire on
+it. Keyed on its `ifIndex`, which the rename does not change, it is the same port with the same history (gap G39)."""
+
+
+def if_index(device: str, port: str) -> int:
+    """The `ifIndex` a port reports: fixed per device and port as first named, the way a persisted index is."""
+    return 10000 + int(hashlib.sha256(f"{device}|{port}".encode()).hexdigest()[:6], 16) % 90000
+
 
 VOLUME_PORT = "Gi1/0/9"
 SILENT_PORT = "Gi1/0/10"
@@ -631,12 +646,16 @@ def _build_layer_1(rng: random.Random, extra: random.Random) -> pd.DataFrame:
                 (chassis, neighbour_port) = (None, None)
 
             tx_dbm = round(-2.0 + draw.uniform(-0.05, 0.05), 3)
+            # The rename changes what the port is called and nothing the hardware reports about itself.
+            reported_port = RENAMED_TO if (device == SWITCH and port == RENAMED_PORT
+                                           and minute >= RENAME_AT_MINUTE) else port
             seq += 1
             rows.append({
                 "event_time": time_s * NS_PER_SECOND,
                 "site_id": SITE,
                 "device_id": device,
-                "port_id": port,
+                "port_id": reported_port,
+                "if_index": if_index(device, port),
                 "uptime": uptime_cs,
                 "if_last_change": last_change_cs,
                 "oper_status": "up",
@@ -659,6 +678,7 @@ def _build_layer_1(rng: random.Random, extra: random.Random) -> pd.DataFrame:
             "site_id": SITE,
             "device_id": QUARANTINED_SWITCH,
             "port_id": QUARANTINED_PORT,
+            "if_index": if_index(QUARANTINED_SWITCH, QUARANTINED_PORT),
             "uptime": boot_uptime_cs + minute * 60 * CS_PER_SECOND,
             "if_last_change": 10 * CS_PER_SECOND,
             "oper_status": "up",
@@ -1155,6 +1175,11 @@ def build_port_binding_table(port_bindings: pd.DataFrame) -> BindingTable:
                                        end_column="bind_end")
 
 
+PORT_ANCHOR_COLUMN = "if_index"
+"""What layer 1 keys a port on beside its name. The corpus's devices persist `ifIndex`, so a renamed port keeps its
+history; an estate that does not persist it must not pass this (see `morpheus.utils.identity_anchor`)."""
+
+
 def layer_1_stages(config: Config) -> list:
     """
     The layer 1 composition: counters, the rates they become and the port's history of them, optics, flaps,
@@ -1164,7 +1189,7 @@ def layer_1_stages(config: Config) -> list:
     history is kept per hour of the day, which an hour-long corpus exercises without contradicting.
     """
     return [
-        TC1NormalizeStage(config, uptime_column="uptime", uptime_unit="cs"),
+        TC1NormalizeStage(config, uptime_column="uptime", uptime_unit="cs", port_anchor_column=PORT_ANCHOR_COLUMN),
         TC1RateStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
         TC1OpticalStage(config),
         TC1ForecastStage(config, floors=OPTIC_FLOORS),
@@ -1247,7 +1272,7 @@ def run_classes(config: Config,
     # `binding_uid`, built exactly as `binding_table` builds one, so it serves as the row key directly rather than
     # having a second identifier composed beside it the way the layer 2 bindings do.
     port_bindings = _run_class(config,
-                               batches["tc1"], [TC1BindingStage(config)],
+                               batches["tc1"], [TC1BindingStage(config, port_anchor_column=PORT_ANCHOR_COLUMN)],
                                impose_order,
                                seal=False,
                                envelope=CLASS_ENVELOPE["tc1_binding"],

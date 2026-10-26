@@ -231,6 +231,7 @@ these searches.
 | Feature | Stage | Why no rule reads it |
 | --- | --- | --- |
 | `counter_wrapped`, `sample_out_of_order` | `TC1NormalizeStage` | How a delta was arrived at: a wrapped counter still yields one, an out-of-order sample yields none. `PipelineHealthStage` counts the second per collector; the `Device restart` report reads `counter_reset`. |
+| `identity_renamed`, `reported_entity_key` | `TC1NormalizeStage` | With an anchor configured, whether the port's reported names differ from the anchored ones, and the key as reported. Not a detection: a rename is configuration. `reported_entity_key` is what a renamed port's layer 2 `port_key` matches (gap G39). |
 | `crc_errors_delta`, `symbol_errors_delta`, `input_discards_delta`, `output_discards_delta`, `if_hc_in_octets_delta`, `if_hc_out_octets_delta` | `TC1NormalizeStage` | The counter changes `TC1RateStage` divides by the interval. R-B-L1-005 reads `error_rate` and `discard_rate`; R-B-L1-007 reads `bits_per_second` and `utilization`. |
 | `bits_in_per_second`, `bits_out_per_second` | `TC1RateStage` | The two directions behind `bits_per_second` and `utilization`, which R-B-L1-007 reads. |
 | `error_rate_baseline_buckets`, `bits_per_second_baseline_buckets` | `TC1RateStage` | How deep each history is. R-B-L1-005 and R-B-L1-007 read `_baseline_mature`, which is this against the stage's floor. |

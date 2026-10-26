@@ -377,6 +377,19 @@ def port_inventory() -> dict:
     }
 
 
+def renamed_switch_polls() -> dict:
+    """One port polled twice, its switch re-hostnamed between the polls, its chassis serial and ifIndex unchanged."""
+    return {
+        **{
+            name: values[:2]
+            for (name, values) in port_inventory().items()
+        },
+        "device_id": ["sw1", "sw1-rack4"],
+        "chassis_serial": ["FOC2201X0AB"] * 2,
+        "if_index": [10101] * 2,
+    }
+
+
 MINIMIZATION_KEY = b"a-key-long-enough-to-be-accepted"
 
 WIRE_SINK_FILE = os.path.join(tempfile.gettempdir(), "liveness-siem-wire-sink.jsonlines")
@@ -1474,6 +1487,9 @@ REGISTRY: dict = {
                      extreme=["if_hc_in_octets"]),
                 Knob("neighbor_chassis_column", INPUT_COLUMN, benign="lldp_neighbor_chassis_id"),
                 Knob("neighbor_port_column", INPUT_COLUMN, benign="lldp_neighbor_port_id"),
+                # Any anchor adds the reported key and the rename flag, whether or not a row was renamed.
+                Knob("device_anchor_column", DIFFERS, benign=None, extreme="device_id"),
+                Knob("port_anchor_column", DIFFERS, benign=None, extreme="port_id"),
             ),
         ),
     "TC1RateStage":
@@ -1716,6 +1732,10 @@ REGISTRY: dict = {
                 Knob("idle_timeout_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("emit_open_on_complete", DIFFERS, benign=False, extreme=True),
                 Knob("emit_open_bindings", DIFFERS, benign=False, extreme=True),
+                # Both ports of the device share the anchor, so the second takes the first's name and its bindings.
+                Knob("port_anchor_column", DIFFERS, benign=None, extreme="device_id"),
+                Knob("device_anchor_column", DIFFERS, benign=None, extreme="chassis_serial",
+                     frame=renamed_switch_polls),
             ),
         ),
     "TC2BindingStage":

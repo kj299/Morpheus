@@ -283,6 +283,7 @@ NUMBER_WORDS = {
     "twenty": 20,
     "twenty-one": 21,
     "twenty-two": 22,
+    "twenty-three": 23,
     "thirty-seven": 37,
     "thirty-eight": 38,
     "thirty-nine": 39,

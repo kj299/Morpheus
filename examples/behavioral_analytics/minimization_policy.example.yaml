@@ -14,7 +14,8 @@
 #                           port, and digesting it means digesting the port keys beside it, below.
 #   origin_hash             a flow's origin carries its addresses and ports.
 #   model_version           each principal has a model of their own, and its version names them.
-#   *_port_key, link_key    copies of a layer 1 or 2 entity key.
+#   *_port_key, link_key,   copies of a layer 1 or 2 entity key; reported_entity_key is the layer 1 key as
+#   reported_entity_key     the collector named the port before an anchor kept its first name.
 #
 # What it costs: a digested key joins only to lookups digested under the same key. The binding lookups the app
 # refreshes from these records stay consistent, because they are built from the same digests; a lookup the estate
@@ -35,5 +36,6 @@ pseudonymize:
   - port_key
   - auth_port_key
   - link_key
+  - reported_entity_key
 
 drop: []

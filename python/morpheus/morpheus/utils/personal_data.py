@@ -220,6 +220,9 @@ _LOCATES = (
     "user_location",
     # The port and the neighbour port it is cabled to, at layer 1.
     "link_key",
+    # The same port by its interface index, and by the names it was reported under before an anchor kept its key.
+    "if_index",
+    "reported_entity_key",
 )
 
 _PROFILES = (
@@ -573,6 +576,8 @@ _OPERATIONAL = (
     "ctx_criticality",
     "ctx_data_classification",
     "ctx_found",
+    # A port reported under a name other than the one its anchor keeps, as its other change flags are.
+    "identity_renamed",
     "ctx_knowledge",
     "ctx_object_criticality",
     "ctx_object_data_classification",
