@@ -771,6 +771,31 @@ def test_the_failing_cable_runs_errors_its_port_never_has(result: pd.DataFrame):
 
 
 @pytest.mark.cpu_mode
+def test_a_renamed_port_keeps_its_key_its_history_and_its_binding(result: pd.DataFrame):
+    # Gap G39. The failing cable's port is renamed at minute thirty-five. The test above is the rule still firing on
+    # it from minute forty-five; on a new key its history would not be mature again before the hour ends.
+    cable = _port(result, tp.RENAMED_PORT)
+    renamed = cable["event_time"] >= tp.RENAME_AT_MINUTE * 60 * NS
+    new_key = f"{tp.SITE}:{tp.SWITCH}:{tp.RENAMED_TO}"
+
+    assert renamed.any() and (~renamed).any()
+    assert set(cable.loc[renamed, "port_id"]) == {tp.RENAMED_TO}
+    assert set(cable.loc[renamed, "reported_entity_key"]) == {new_key}
+    assert _is(cable, "identity_renamed").tolist() == renamed.tolist()
+    # The counter delta runs straight through the rename rather than starting again with no previous sample.
+    assert cable.loc[renamed, "crc_errors_delta"].notna().all()
+
+    layer_1 = _rows(result, "tc1")
+    assert (layer_1["entity_key"] != new_key).all()
+    assert not _is(layer_1[layer_1["entity_key"] != cable["entity_key"].iloc[0]], "identity_renamed").any()
+
+    # The port's binding runs on under the name it was first seen with, as one interval.
+    bindings = _rows(result, "tc1_binding")
+    assert (bindings["entity_key"] != new_key).all()
+    assert (bindings["entity_key"] == cable["entity_key"].iloc[0]).sum() == 1
+
+
+@pytest.mark.cpu_mode
 def test_the_repatch_and_the_insertion_are_neighbours_the_port_never_had(result: pd.DataFrame):
     layer_1 = _rows(result, "tc1")
     new = layer_1[_is(layer_1, "lldp_neighbor_chassis_id_changed") & _is(layer_1, "lldp_neighbor_chassis_id_first_seen")

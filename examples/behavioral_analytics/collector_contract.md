@@ -112,6 +112,7 @@ One record per port per poll, with the raw counters as the device reports them. 
 | `site_id` | string | -- | yes | The collector's inventory | The first component of every entity key; it must not vary between polls. |
 | `device_id` | string | -- | yes | `sysName` (`1.3.6.1.2.1.1.5`) | The same value layer 2 sends as `switch_id`. |
 | `port_id` | string | -- | yes | `ifName` (`1.3.6.1.2.1.31.1.1.1.1`) | The interface name, not the `ifIndex`. |
+| `if_index` | integer | -- | no | `ifIndex` (`1.3.6.1.2.1.2.2.1.1`) | What a renamed port is recognised by. Send it only from a device that persists it across reboots; a reassigned index merges two ports' histories. |
 | `uptime` | integer | `centiseconds` | yes | `sysUpTime` (`1.3.6.1.2.1.1.3`) | `TimeTicks`; a fall is a restart, which tells a counter wrap from a reboot. |
 | `if_last_change` | integer | `centiseconds` | yes | `ifLastChange` (`1.3.6.1.2.1.2.2.1.9`) | Measured on the same clock as uptime; a flap between polls moves it. |
 | `oper_status` | string | -- | yes | `ifOperStatus` (`1.3.6.1.2.1.2.2.1.8`) | `up` or `down`. |

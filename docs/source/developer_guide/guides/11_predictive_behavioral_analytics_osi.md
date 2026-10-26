@@ -64,7 +64,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
 That is fifty-nine stages and fifty-one supporting
-modules, covered by 2,619 distinct tests, itemized in
+modules, covered by 2,620 distinct tests, itemized in
 [Part 6](#provided). Fifty-eight of the sixty rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -1056,10 +1056,17 @@ wrap from a device reboot. A collector that subtracted first would be subtracted
 the previous sample, which makes it stateful, and state at the collector is state to be replicated, aged,
 and lost on restart; keeping it in the pipeline leaves the collector a stateless poller.
 
-**Identity is the collector's strings.** The port key is `site_id:device_id:port_id` composed from the names
-the poller reports; nothing anchors it to an `ifIndex`, a chassis serial or an alias interval, so a renamed
-port or a replaced switch with a new `hostname` starts a new entity and a new history. That is a recorded
-limitation rather than planned work (gap G39).
+**Identity is anchored to what the hardware reports about itself.** The port key is `site_id:device_id:port_id`,
+composed from the names the poller reports, and a name is configuration: an operator renames `Gi1/0/5` to
+`uplink-core-2`, a switch is re-hostnamed when it moves rack. Given `port_anchor_column` (the `ifIndex`) and
+`device_anchor_column` (the chassis serial), `TC1NormalizeStage` and `TC1BindingStage` key the port on the names
+its anchors were first seen with, so a rename keeps the port's key, its counter history and its binding, and
+`reported_entity_key` and `identity_renamed` carry the rename beside it. The telemetry corpus renames the failing
+cable's port at minute thirty-five; with the anchor R-B-L1-005 fires on it from minute forty-five, and without it
+the renamed port's error-rate history is not mature again before the hour ends and the rule never fires. Two limits
+remain (gap G39, narrowed). An `ifIndex` that a device reassigns at boot merges two ports' histories, so the anchor
+is for an estate that persists it and is not passed otherwise. And the layer 2 collectors report the name the
+switch reports now, so after a rename their `port_key` meets layer 1's `reported_entity_key`, not its `entity_key`.
 Placed here it also inherits the pipeline's determinism controls: the stage is single-engine and shards
 by device (control 4), and it processes rows in the order given, flagging a sample that arrives out of
 order rather than reporting the negative delta a naive subtraction would produce. A wrap and a reboot are
@@ -4475,6 +4482,7 @@ connection's and the machine's, and the rules that read them name them.
 | Feature | Stage | Why no rule reads it |
 | --- | --- | --- |
 | `counter_wrapped`, `sample_out_of_order` | `TC1NormalizeStage` | How a delta was arrived at: a wrapped counter still yields one, an out-of-order sample yields none. `PipelineHealthStage` counts the second per collector; the `Device restart` report reads `counter_reset`. |
+| `identity_renamed`, `reported_entity_key` | `TC1NormalizeStage` | With an anchor configured, whether the port's reported names differ from the anchored ones, and the key as reported. Not a detection: a rename is configuration. `reported_entity_key` is what a renamed port's layer 2 `port_key` matches (gap G39). |
 | `crc_errors_delta`, `symbol_errors_delta`, `input_discards_delta`, `output_discards_delta`, `if_hc_in_octets_delta`, `if_hc_out_octets_delta` | `TC1NormalizeStage` | The counter changes `TC1RateStage` divides by the interval. R-B-L1-005 reads `error_rate` and `discard_rate`; R-B-L1-007 reads `bits_per_second` and `utilization`. |
 | `bits_in_per_second`, `bits_out_per_second` | `TC1RateStage` | The two directions behind `bits_per_second` and `utilization`, which R-B-L1-007 reads. |
 | `error_rate_baseline_buckets`, `bits_per_second_baseline_buckets` | `TC1RateStage` | How deep each history is. R-B-L1-005 and R-B-L1-007 read `_baseline_mature`, which is this against the stage's floor. |
