@@ -131,6 +131,56 @@ a lag is measured from, and a consumer comparing them should not have to convert
 MODEL_COLUMNS = (MODEL_VERSION_COLUMN, MODEL_FALLBACK_COLUMN)
 """Control 1 on the row: the model a scored event was scored against, and whether that was a fallback."""
 
+L1_PORT_COLUMNS = ("port_id",
+                   "transceiver_serial",
+                   "transceiver_serial_changed",
+                   "link_flaps",
+                   "oper_status",
+                   "optical_rx_dbm_forecast_status",
+                   "optical_rx_dbm_days_to_floor",
+                   "optical_rx_dbm_floor_dbm",
+                   "optical_rx_dbm_trend_db_per_day",
+                   "optical_rx_dbm_trend_samples",
+                   "optical_rx_dbm",
+                   "optical_rx_dbm_baseline",
+                   "optical_rx_dbm_baseline_samples",
+                   "optical_rx_dbm_deviation",
+                   "optical_tx_dbm_deviation",
+                   "link_flaps_in_window",
+                   "link_flap_device_reset",
+                   "counter_reset",
+                   "interval_seconds",
+                   "crc_errors_delta",
+                   "symbol_errors_delta",
+                   "input_discards_delta",
+                   "output_discards_delta",
+                   "if_hc_in_octets_delta",
+                   "if_hc_out_octets_delta",
+                   "error_rate",
+                   "error_rate_baseline_max",
+                   "error_rate_baseline_mature",
+                   "error_rate_step",
+                   "discard_rate",
+                   "bits_per_second",
+                   "bits_per_second_baseline_max",
+                   "bits_per_second_baseline_min",
+                   "bits_per_second_baseline_mature",
+                   "utilization",
+                   "lldp_neighbor_chassis_id",
+                   "lldp_neighbor_chassis_id_changed",
+                   "lldp_neighbor_chassis_id_first_seen",
+                   "lldp_neighbor_port_id",
+                   "link_key",
+                   "resolution_method")
+"""What every port poll on `morpheus:score:l1` carries; see the variants of that stanza."""
+
+L1_PORT_CONTEXT_COLUMNS = ("ctx_port_found",
+                           "ctx_port_commissioning_rx_dbm",
+                           "ctx_port_designation",
+                           "ctx_port_owner",
+                           "ctx_port_version_uids")
+"""What a port poll carries when the network inventory was joined onto it, which R-D-L1-010 reads."""
+
 PRODUCED: dict = {
     "morpheus:score:l1":
         Sourcetype(
@@ -164,47 +214,11 @@ PRODUCED: dict = {
                 # R-B-L1-007 the traffic against its peak and its trough. R-C-003 reads the serial change and the
                 # flap count as its first step. The deltas and the interval they cover are here because every rate is
                 # one divided by the other, and the link key because the adjacency lookup is keyed on it.
-                ("port_id",
-                 "transceiver_serial",
-                 "transceiver_serial_changed",
-                 "link_flaps",
-                 "oper_status",
-                 "optical_rx_dbm_forecast_status",
-                 "optical_rx_dbm_days_to_floor",
-                 "optical_rx_dbm_floor_dbm",
-                 "optical_rx_dbm_trend_db_per_day",
-                 "optical_rx_dbm_trend_samples",
-                 "optical_rx_dbm",
-                 "optical_rx_dbm_baseline",
-                 "optical_rx_dbm_baseline_samples",
-                 "optical_rx_dbm_deviation",
-                 "optical_tx_dbm_deviation",
-                 "link_flaps_in_window",
-                 "link_flap_device_reset",
-                 "counter_reset",
-                 "interval_seconds",
-                 "crc_errors_delta",
-                 "symbol_errors_delta",
-                 "input_discards_delta",
-                 "output_discards_delta",
-                 "if_hc_in_octets_delta",
-                 "if_hc_out_octets_delta",
-                 "error_rate",
-                 "error_rate_baseline_max",
-                 "error_rate_baseline_mature",
-                 "error_rate_step",
-                 "discard_rate",
-                 "bits_per_second",
-                 "bits_per_second_baseline_max",
-                 "bits_per_second_baseline_min",
-                 "bits_per_second_baseline_mature",
-                 "utilization",
-                 "lldp_neighbor_chassis_id",
-                 "lldp_neighbor_chassis_id_changed",
-                 "lldp_neighbor_chassis_id_first_seen",
-                 "lldp_neighbor_port_id",
-                 "link_key",
-                 "resolution_method"),
+                L1_PORT_COLUMNS,
+                # A port read against the network inventory (TC0NetworkStage through TC0EnrichStage): R-D-L1-010 reads
+                # the level the port was commissioned at, and carries its designation, owner and the context version.
+                # A variant rather than required, because a deployment without an inventory still sends port polls.
+                (*L1_PORT_COLUMNS, *L1_PORT_CONTEXT_COLUMNS),
                 # A device. The Device restart report reads the restart and the uptime it came back with, R-D-L1-008
                 # the configuration change and where it fell against the change window, and R-P-L1-009 the restarts
                 # per period against the device's own history and how many periods in a row have each held more. The
