@@ -74,6 +74,7 @@ from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import compose_link_key
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.event_clock import EventClock
+from morpheus.utils.identity_anchor import PortIdentity
 from morpheus.utils.lineage import event_uid
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,12 @@ class TC1BindingStage(CheckpointMixin, GpuAndCpuMixin, SinglePortStage):
         Columns composing the port. Defaults to `["site_id", "device_id", "port_id"]`, composed into `entity_key`
         exactly as the other TC-1 stages compose it. A row missing any part carries no key and is skipped rather
         than binding to a fabricated one.
+    device_anchor_column : str, optional
+        Column holding the device's chassis serial. Given, with `port_anchor_column` or alone, the port is keyed on
+        the names its anchors were first seen with, exactly as `TC1NormalizeStage` keys it given the same columns,
+        so a renamed port extends its binding rather than opening another. Requires the three default key parts.
+    port_anchor_column : str, optional
+        Column holding the port's `ifIndex`, on the same terms. See `morpheus.utils.identity_anchor`.
     time_column : str, default = "event_time"
         Column holding the observation's event time. Event time, never ingest time.
     time_unit : str, default = "ns"
@@ -160,11 +167,13 @@ class TC1BindingStage(CheckpointMixin, GpuAndCpuMixin, SinglePortStage):
         `bind_provisional = true`, so a port brought into service now is resolvable before its binding closes.
     """
 
-    _checkpoint_attributes = ("_closer", "_clock")
+    _checkpoint_attributes = ("_closer", "_clock", "_identity")
 
     def __init__(self,
                  c: Config,
                  key_columns: list[str] = None,
+                 device_anchor_column: str = None,
+                 port_anchor_column: str = None,
                  time_column: str = "event_time",
                  time_unit: str = "ns",
                  attribute_columns: list[str] = None,
@@ -183,6 +192,14 @@ class TC1BindingStage(CheckpointMixin, GpuAndCpuMixin, SinglePortStage):
         if (len(attribute_columns) == 0):
             raise ValueError("attribute_columns must name at least one column; a binding to nothing has no content")
 
+        self._anchor_columns = (device_anchor_column, port_anchor_column)
+        self._anchored = any(column is not None for column in self._anchor_columns)
+
+        # An anchor names a device within a site and a port within a device, so it needs to know which part is which.
+        if (self._anchored and len(key_columns) != len(KEY_ATTRIBUTES)):
+            raise ValueError(f"an anchor column needs the three key parts site, device and port; received "
+                             f"key_columns {key_columns}")
+
         if (idle_timeout_seconds <= 0):
             raise ValueError(f"idle_timeout_seconds must be positive, received {idle_timeout_seconds}")
 
@@ -197,6 +214,7 @@ class TC1BindingStage(CheckpointMixin, GpuAndCpuMixin, SinglePortStage):
         self._emit_open_bindings = emit_open_bindings
 
         self._clock = EventClock(max_skew_ns=max_clock_skew_seconds * NS_PER_SECOND)
+        self._identity = PortIdentity()
         self._closer = BindingCloser(attribute_names=attribute_columns,
                                      idle_timeout_ns=idle_timeout_seconds * NS_PER_SECOND)
 
@@ -360,6 +378,19 @@ class TC1BindingStage(CheckpointMixin, GpuAndCpuMixin, SinglePortStage):
         raw_times = to_host_list(source, self._time_column)
         attributes = {name: to_host_list(source, name) for name in self._attribute_columns}
         row_count = len(raw_times)
+        # An anchor column the collector did not send is every row without an anchor, as in `TC1NormalizeStage`.
+        anchors = [
+            to_host_list(source, column) if column is not None and column in source.columns else [None] * row_count
+            for column in self._anchor_columns
+        ]
+
+        def key_of(position: int, learn: bool) -> typing.Optional[str]:
+            parts = [key_parts[name][position] for name in self._key_columns]
+
+            if (self._anchored):
+                parts = self._identity.names(*parts, *(values[position] for values in anchors), learn=learn)
+
+            return compose_key(parts)
 
         closed = []
         opened_keys: list[str] = []
@@ -367,20 +398,21 @@ class TC1BindingStage(CheckpointMixin, GpuAndCpuMixin, SinglePortStage):
         implausible = 0
 
         for position in range(row_count):
-            key = compose_key([key_parts[name][position] for name in self._key_columns])
-
             try:
                 event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
             except ValueError:
                 event_time_ns = None
 
-            if (event_time_ns is None or key is None):
+            # A row the stream refuses teaches the anchors nothing, as in `TC1NormalizeStage`.
+            if (event_time_ns is None or key_of(position, learn=False) is None):
                 unordered += 1
                 continue
 
             if (not self._clock.accept(event_time_ns)):
                 implausible += 1
                 continue
+
+            key = key_of(position, learn=True)
 
             # A port that has not been polled for longer than the idle timeout is presumed out of service, and its
             # binding ends where the silence began. Expiry runs on this row's own event time, which keeps the
