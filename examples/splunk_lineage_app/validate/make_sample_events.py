@@ -274,6 +274,11 @@ def main() -> int:
         rows = context[context["telemetry_class"] == name]
         by_sourcetype[sourcetype] = _render(rows.dropna(axis=1, how="all"), sourcetype)
 
+    # The network inventory is context too, but it is the estate's: its records came in with the polls they are
+    # joined onto, and they are rendered from the same run.
+    network = telemetry[telemetry["telemetry_class"] == tp.NETWORK_CONTEXT_CLASS]
+    by_sourcetype["context:network"] = _render(network.dropna(axis=1, how="all"), "context:network")
+
     bindings = telemetry[telemetry["telemetry_class"] == "tc2_binding"]
     bucketed = tp.build_binding_table(bindings).to_bucketed_frame()
 

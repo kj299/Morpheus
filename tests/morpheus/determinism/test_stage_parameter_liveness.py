@@ -72,6 +72,7 @@ from morpheus.stages.telemetry.tc0_application_stage import TC0ApplicationStage
 from morpheus.stages.telemetry.tc0_asset_stage import TC0AssetStage
 from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
 from morpheus.stages.telemetry.tc0_identity_stage import TC0IdentityStage
+from morpheus.stages.telemetry.tc0_network_stage import TC0NetworkStage
 from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_device_stage import TC1DeviceStage
@@ -704,6 +705,28 @@ def asset_records() -> dict:
         "valid_to": [None, None, None],
         "recorded_at": [0, 7 * DAY, 0],
         "change": ["assert", "assert", "retract"],
+    }
+
+
+def network_records() -> dict:
+    """A port, its switch and a VLAN, then the port recommissioned with a new optic, as the inventory records them."""
+    return {
+        "object_kind": ["port", "device", "vlan", "port"],
+        "site_id": ["hq", "hq", "hq", "hq"],
+        "device_id": ["sw1", "sw1", None, "sw1"],
+        "port_id": ["Gi1/0/6", None, None, "Gi1/0/6"],
+        "vlan_id": [None, None, 10, None],
+        "commissioning_rx_dbm": [-7.0, None, None, -6.5],
+        "designation": ["access", None, "desks", "access"],
+        "device_role": [None, "access-switch", None, None],
+        "owner": ["netops", "netops", "facilities", "netops"],
+        "owning_team": [None, "network-engineering", None, None],
+        "criticality": ["medium", "high", "medium", "medium"],
+        "valid_from": [0, 0, 0, 45 * MINUTE],
+        "valid_to": [None, None, None, None],
+        "recorded_at": [0, 0, 0, 46 * MINUTE],
+        # The VLAN's record is a retraction, so a stage that ignored the change column would assert it.
+        "change": ["assert", "assert", "retract", "assert"],
     }
 
 
@@ -1979,6 +2002,33 @@ REGISTRY: dict = {
             knobs=(
                 Knob("asset_column", INPUT_COLUMN, benign="hostname"),
                 Knob("asset_columns", DIFFERS, benign=None, extreme=["data_classification"]),
+                Knob("valid_from_column", DIFFERS, benign="valid_from", extreme="recorded_at"),
+                Knob("valid_to_column", DIFFERS, benign="valid_to", extreme="valid_from"),
+                Knob("recorded_column", DIFFERS, benign="recorded_at", extreme="valid_from"),
+                Knob("change_column", DIFFERS, benign="change", extreme="no_such_column"),
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+            ),
+        ),
+    "TC0NetworkStage":
+        Scenario(
+            stage=TC0NetworkStage,
+            frame=network_records,
+            base={},
+            knobs=(
+                Knob("kind_column", INPUT_COLUMN, benign="object_kind"),
+                # A port keyed on its switch alone is the switch's record twice over.
+                Knob("key_columns",
+                     DIFFERS,
+                     benign=None,
+                     extreme={
+                         "port": ["site_id", "device_id"], "device": ["site_id", "device_id"], "vlan": ["vlan_id"]
+                     }),
+                Knob("kind_attributes",
+                     DIFFERS,
+                     benign=None,
+                     extreme={
+                         "port": ["owner"], "device": ["owner"], "vlan": ["owner"]
+                     }),
                 Knob("valid_from_column", DIFFERS, benign="valid_from", extreme="recorded_at"),
                 Knob("valid_to_column", DIFFERS, benign="valid_to", extreme="valid_from"),
                 Knob("recorded_column", DIFFERS, benign="recorded_at", extreme="valid_from"),

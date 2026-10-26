@@ -6,6 +6,7 @@
     "context:application": 3,
     "context:asset": 7,
     "context:identity": 23,
+    "context:network": 20,
     "morpheus:edge": 2768,
     "morpheus:health": 1098,
     "morpheus:late": 1,

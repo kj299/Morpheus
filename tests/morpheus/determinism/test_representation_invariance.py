@@ -50,7 +50,8 @@ import telemetry_pipeline as tp  # noqa: E402
 
 def _as(frame: pd.DataFrame, column: str, render) -> pd.DataFrame:
     frame = frame.copy()
-    frame[column] = [render(value) for value in frame[column]]
+    # A missing value is missing in every type: the network inventory's port and device records carry no VLAN.
+    frame[column] = [value if pd.isna(value) else render(value) for value in frame[column]]
 
     return frame
 

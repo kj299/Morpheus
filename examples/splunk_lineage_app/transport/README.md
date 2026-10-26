@@ -32,6 +32,7 @@ files; `tests/morpheus/utils/test_splunk_transport.py` fails when the two differ
 | `context:application` | `context.application` | `context_application.jsonlines` | `behavior_context` |
 | `context:asset` | `context.asset` | `context_asset.jsonlines` | `behavior_context` |
 | `context:identity` | `context.identity` | `context_identity.jsonlines` | `behavior_context` |
+| `context:network` | `context.network` | `context_network.jsonlines` | `behavior_context` |
 | `morpheus:edge` | `morpheus.edge` | `morpheus_edge.jsonlines` | `behavior_lineage` |
 | `morpheus:health` | `morpheus.health` | `morpheus_health.jsonlines` | `behavior_health` |
 | `morpheus:late` | `morpheus.late` | `morpheus_late.jsonlines` | `behavior_late` |

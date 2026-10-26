@@ -101,6 +101,32 @@ One record per change to a principal: department, manager, employment status, ac
 | `change` | string | -- | yes | The directory's change type | `assert` or `retract`. |
 | `tenant_id` | string | -- | yes | The directory's own configuration | -- |
 
+## Network inventory (TC-0)
+
+`tc0_network`, layer 0; sample in [`samples/telemetry/tc0_network.jsonlines`](./samples/telemetry/tc0_network.jsonlines). Carries no collector envelope.
+
+One record per change to what a port, a device or a VLAN is: a port's commissioning receive level, each object's designation, owner and criticality, a device's role. Read by `TC0NetworkStage` into the bitemporal context store, keyed as the telemetry keys each object; layer 1, the device class and layer 2 are joined against it at each row's event time, and R-D-L1-010 reads the commissioning level.
+
+| Column | Type | Unit | Required | Source | Notes |
+|---|---|---|---|---|---|
+| `source_seq` | integer | `count` | yes | The inventory's own change sequence | -- |
+| `object_kind` | string | -- | yes | The network inventory | `port`, `device` or `vlan`. Any other kind is refused. |
+| `site_id` | string | -- | yes | The network inventory | The first part of every key, as the polling collectors send it. |
+| `device_id` | string | -- | yes | The network inventory | A port's or a device's switch, as `sysName` reports it. Null on a VLAN. |
+| `port_id` | string | -- | yes | The network inventory | A port's name as it was commissioned; a renamed port is found by the name its `ifIndex` was first seen with. Null on a device or a VLAN. |
+| `vlan_id` | integer | -- | yes | The network inventory | Null on a port or a device. |
+| `commissioning_rx_dbm` | float | `dBm` | yes | The acceptance test the link passed when it was commissioned | A port's receive level then, which R-D-L1-010 compares the polled level with. A new optic is recommissioned, as a new version from the moment it went in. |
+| `designation` | string | -- | yes | The network inventory | What a port or a VLAN is for: `access`, `uplink`, `desks`, `cameras`. |
+| `device_role` | string | -- | yes | The network inventory | A device's role: `access-switch`, `router`. |
+| `owner` | string | -- | yes | The network inventory | Who answers for the object. |
+| `owning_team` | string | -- | yes | The network inventory | A device's owning team. |
+| `criticality` | string | -- | yes | The network inventory | -- |
+| `valid_from` | integer | `ns since the Unix epoch` | yes | When the fact became true | -- |
+| `valid_to` | integer | `ns since the Unix epoch` | yes | When the fact stopped being true | Null while it still holds. |
+| `recorded_at` | integer | `ns since the Unix epoch` | yes | When the inventory recorded the change | -- |
+| `change` | string | -- | yes | The inventory's change type | `assert` or `retract`. |
+| `tenant_id` | string | -- | yes | The inventory's own configuration | -- |
+
 ## Interface poll (TC-1)
 
 `tc1`, layer 1; sample in [`samples/telemetry/tc1.jsonlines`](./samples/telemetry/tc1.jsonlines). Carries the envelope.

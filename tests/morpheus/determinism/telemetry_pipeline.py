@@ -111,6 +111,11 @@ from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
+from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
+from morpheus.stages.telemetry.tc0_network_stage import DEVICE as DEVICE_KIND
+from morpheus.stages.telemetry.tc0_network_stage import PORT as PORT_KIND
+from morpheus.stages.telemetry.tc0_network_stage import VLAN as VLAN_KIND
+from morpheus.stages.telemetry.tc0_network_stage import TC0NetworkStage
 from morpheus.stages.telemetry.tc1_binding_stage import TC1BindingStage
 from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
 from morpheus.stages.telemetry.tc1_device_stage import TC1DeviceStage
@@ -124,8 +129,10 @@ from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
 from morpheus.stages.telemetry.tc2_baseline_stage import TC2BaselineStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
+from morpheus.utils import bitemporal
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
+from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.lineage import event_uid
@@ -448,7 +455,44 @@ BGP_PEERS_BEFORE = 4
 BGP_PEERS_AFTER = 2
 """The router loses two of its four BGP peers, and the routes they carried, at minute fifty."""
 
-TELEMETRY_CLASSES = ("tc1", "tc1_binding", DEVICE_CLASS, "tc2_mac", "tc2_binding", "tc2_arp", "tc2_auth")
+NETWORK_CONTEXT_CLASS = "tc0_network"
+"""The network inventory's records: what each port, device and VLAN was commissioned as, is for, and belongs to."""
+
+COMMISSIONING_RX_DBM = -7.0
+"""The receive level every port's link was commissioned at, which is where an optic in this corpus sits when it is
+healthy."""
+COMMISSIONING_MARGIN_DB = 1.5
+"""How far below its commissioning level a port's receive light may fall before R-D-L1-010 reads it as lost light.
+
+The failing optic on `MAINTENANCE_PORT` crosses it at minute thirty-nine, six minutes before it is replaced; the
+tap on `HUB_PORT` crosses it at once, at minute forty. Every other port sits within a tenth of a decibel of its
+commissioning level. The degradation's 1.76 dB is what `TC1OpticalStage`'s median cannot see, because the median
+slides down with it: R-D-L1-002 stays quiet on that port."""
+UNRECORDED_PORT = SILENT_PORT
+"""A port the inventory never recorded, so its rows carry `ctx_port_found` false and no commissioning level, and
+R-D-L1-010 cannot read it, rather than reading it against a guess."""
+DEVICE_ROLES = {
+    SWITCH: "access-switch",
+    REBOOTING_SWITCH: "access-switch",
+    PEER_SWITCH: "access-switch",
+    STORM_SWITCH: "access-switch",
+    ROUTER: "router"
+}
+"""What each device is, as the inventory records it."""
+VLAN_DESIGNATIONS = {VLAN: "desks", IOT_VLAN: "cameras"}
+"""What each VLAN carries, as the inventory records it."""
+INVENTORY_RECORDED_NS = 0
+"""When the inventory recorded the estate as commissioned: the corpus's first instant, which is as early as any of its
+records may be dated, since the search-head run moves every event forward from the epoch."""
+
+TELEMETRY_CLASSES = ("tc1",
+                     "tc1_binding",
+                     DEVICE_CLASS,
+                     "tc2_mac",
+                     "tc2_binding",
+                     "tc2_arp",
+                     "tc2_auth",
+                     NETWORK_CONTEXT_CLASS)
 
 CLASS_ENVELOPE = {
     "tc1": (1, ["site_id", "device_id", "port_id"]),
@@ -486,6 +530,7 @@ RULES = ("R-D-L1-001",
          "R-B-L1-007",
          "R-D-L1-008",
          "R-P-L1-009",
+         "R-D-L1-010",
          "R-B-L2-002",
          "R-D-L2-001",
          "R-D-L2-003",
@@ -527,7 +572,107 @@ def build_corpus() -> dict[str, pd.DataFrame]:
 
     # The rest of the envelope each collector owes: when its sensor saw the record, its clock, its sampling, the
     # tenant. Added after the records are drawn, so it moves none of them.
-    return {name: universal_envelope.attach(frame) for (name, frame) in corpus.items()}
+    corpus = {name: universal_envelope.attach(frame) for (name, frame) in corpus.items()}
+
+    # A context record is bitemporal: its valid time and its recording time are its clock, and it has no sensor or
+    # sampling for the collector envelope to describe, as `context_pipeline` says of the other TC-0 kinds. What it
+    # shares with every other record is the tenant it belongs to.
+    network = _build_network_context()
+    network["tenant_id"] = universal_envelope.TENANT
+    corpus[NETWORK_CONTEXT_CLASS] = network
+
+    return corpus
+
+
+def _network_record(kind: str, valid_from_ns: int, recorded_ns: int, **values) -> dict:
+    row = {
+        "object_kind": kind,
+        "site_id": SITE,
+        "device_id": None,
+        "port_id": None,
+        "vlan_id": None,
+        "commissioning_rx_dbm": None,
+        "designation": None,
+        "device_role": None,
+        "owner": None,
+        "owning_team": None,
+        "criticality": None,
+        bitemporal.VALID_FROM: valid_from_ns,
+        bitemporal.VALID_TO: None,
+        bitemporal.RECORDED_AT: recorded_ns,
+        bitemporal.CHANGE: bitemporal.ASSERT,
+    }
+    row.update(values)
+
+    return row
+
+
+def _build_network_context() -> pd.DataFrame:
+    """The network inventory: every recorded port at its commissioning level, every device and both VLANs.
+
+    The replaced optic on `MAINTENANCE_PORT` was recommissioned when it went in, at the level it was measured at,
+    which is a second version of the port's record from the minute of the swap. The substituted optic on
+    `XCVR_SWAP_PORT` was not, because nobody knew it had been changed; the port keeps its first record.
+    """
+    commissioned = INVENTORY_RECORDED_NS
+    rows = []
+    ports = [(SWITCH, port) for port in PORTS + [MAINTENANCE_PORT]]
+    ports += [(SWITCH, port) for port in (FLAPPER_PORT, ERROR_PORT, VOLUME_PORT, REPATCH_PORT, INLINE_PORT)]
+    ports += [(REBOOTING_SWITCH, port) for port in REBOOT_PORTS]
+
+    for (device, port) in sorted(set(ports)):
+        designation = "uplink" if port in NEIGHBOURS and device == SWITCH else "access"
+        rows.append(
+            _network_record(PORT_KIND,
+                            commissioned,
+                            commissioned,
+                            device_id=device,
+                            port_id=port,
+                            commissioning_rx_dbm=COMMISSIONING_RX_DBM,
+                            designation=designation,
+                            owner="netops",
+                            criticality="high" if designation == "uplink" else "medium"))
+
+    swap_ns = MAINTENANCE_SWAP_AT_MINUTE * 60 * NS_PER_SECOND
+    rows.append(
+        _network_record(PORT_KIND,
+                        swap_ns,
+                        swap_ns + 60 * NS_PER_SECOND,
+                        device_id=SWITCH,
+                        port_id=MAINTENANCE_PORT,
+                        commissioning_rx_dbm=COMMISSIONING_RX_DBM,
+                        designation="access",
+                        owner="netops",
+                        criticality="medium"))
+
+    for device in DEVICES:
+        rows.append(
+            _network_record(DEVICE_KIND,
+                            commissioned,
+                            commissioned,
+                            device_id=device,
+                            device_role=DEVICE_ROLES[device],
+                            owner="netops",
+                            owning_team="network-engineering",
+                            criticality="high" if device == ROUTER else "medium"))
+
+    for (vlan, designation) in sorted(VLAN_DESIGNATIONS.items()):
+        rows.append(
+            _network_record(VLAN_KIND,
+                            commissioned,
+                            commissioned,
+                            vlan_id=vlan,
+                            designation=designation,
+                            owner="facilities" if designation == "cameras" else "it-desktop",
+                            criticality="medium"))
+
+    frame = pd.DataFrame(rows)
+    frame[bitemporal.VALID_TO] = frame[bitemporal.VALID_TO].astype("Int64")
+    frame["vlan_id"] = frame["vlan_id"].astype("Int64")
+    frame = frame.sort_values([bitemporal.RECORDED_AT], kind="mergesort").reset_index(drop=True)
+    frame.insert(0, "source_seq", range(len(frame)))
+
+    return frame
 
 
 def _octets_per_minute(extra: random.Random, bits_per_second: float) -> int:
@@ -767,15 +912,14 @@ def _build_devices() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def device_stages(config: Config) -> list:
+def device_stages(config: Config, network: typing.Optional[dict] = None) -> list:
     """The device composition: restarts against the device's own periods, configuration changes placed against the
-    estate's change window, and routing churn."""
+    estate's change window, and routing churn. Given the network context stores, each device's inventory record is
+    joined on last, under `ctx_device_`."""
     return [
-        TC1DeviceStage(config,
-                       change_window=list(CHANGE_WINDOW),
-                       bucket_seconds=PERIOD_SECONDS,
-                       min_buckets=BASELINE_MIN_BUCKETS),
-    ]
+        TC1DeviceStage(
+            config, change_window=list(CHANGE_WINDOW), bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
+    ] + _context(config, network, DEVICE_KIND, "device_key", DEVICE_PREFIX)
 
 
 def _mac_row(time_s: int, mac: str, switch: str, port: str, vlan: int, envelope: dict, action: str = None) -> dict:
@@ -1009,6 +1153,20 @@ its own would give the same root key two different roots, one per class, and not
 they were the same chain."""
 
 
+def _run_context(config: Config, dataframes: list[pd.DataFrame]) -> pd.DataFrame:
+    """Source → `TC0NetworkStage` → determinism stamp → sink, as `context_pipeline` runs every TC-0 producer: context
+    is a store, not a stream, so nothing here orders, windows or seals it."""
+    pipe = ResumableLinearPipeline(config)
+    pipe.set_source(InMemorySourceStage(config, dataframes=[frame.copy() for frame in dataframes]))
+    pipe.add_stage(TC0NetworkStage(config))
+    pipe.add_stage(
+        DeterminismStampStage(config, envelope=stamping.envelope_for(NETWORK_CONTEXT_CLASS, SETTINGS, rules=RULES)))
+    sink = pipe.add_stage(InMemorySinkStage(config))
+    pipe.run()
+
+    return _collect(sink)
+
+
 def _run_class(config: Config,
                dataframes: list[pd.DataFrame],
                stages: list,
@@ -1179,14 +1337,44 @@ PORT_ANCHOR_COLUMN = "if_index"
 """What layer 1 keys a port on beside its name. The corpus's devices persist `ifIndex`, so a renamed port keeps its
 history; an estate that does not persist it must not pass this (see `morpheus.utils.identity_anchor`)."""
 
+PORT_PREFIX = "ctx_port_"
+DEVICE_PREFIX = "ctx_device_"
+VLAN_PREFIX = "ctx_vlan_"
+"""Where each kind's context lands on an event, so a port's owner and its switch's owner never share a column."""
 
-def layer_1_stages(config: Config) -> list:
+
+def network_stores(produced: pd.DataFrame) -> dict[str, BitemporalStore]:
+    """One store per network kind, rebuilt from what `TC0NetworkStage` emitted, the way a consumer of
+    `context:network` would. Separate, so a port's row is joined with port attributes only and never carries an
+    empty column for every attribute a device or a VLAN has."""
+    records = produced.to_dict("records")
+
+    return {
+        kind:
+            BitemporalStore.from_records(kind,
+                                         [record for record in records if record[bitemporal.CONTEXT_KIND] == kind])
+        for kind in (PORT_KIND, DEVICE_KIND, VLAN_KIND)
+    }
+
+
+def _context(config: Config, network: typing.Optional[dict], kind: str, entity_column: str, prefix: str) -> list:
+    """The point-in-time join of one network kind onto a class's rows, as the inventory knew it at each row's event
+    time, or nothing when the composition was given no inventory."""
+    if (network is None):
+        return []
+
+    return [TC0EnrichStage(config, store=network[kind], entity_column=entity_column, prefix=prefix, set_kinds={})]
+
+
+def layer_1_stages(config: Config, network: typing.Optional[dict] = None) -> list:
     """
     The layer 1 composition: counters, the rates they become and the port's history of them, optics, flaps,
     identifier changes. Shared with the campaign corpus, whose port polls meet the same contract.
 
     The rate history is kept over the sealing period with the corpus's floor, as the layer 2 baseline is; the volume
-    history is kept per hour of the day, which an hour-long corpus exercises without contradicting.
+    history is kept per hour of the day, which an hour-long corpus exercises without contradicting. Given the network
+    context stores from `network_stores`, each port's inventory record is joined on last, under `ctx_port_`; the
+    campaign corpus has no inventory and passes none.
     """
     return [
         TC1NormalizeStage(config, uptime_column="uptime", uptime_unit="cs", port_anchor_column=PORT_ANCHOR_COLUMN),
@@ -1195,14 +1383,15 @@ def layer_1_stages(config: Config) -> list:
         TC1ForecastStage(config, floors=OPTIC_FLOORS),
         TC1FlapStage(config, last_change_column="if_last_change", last_change_unit="cs"),
         TC1ChangeStage(config),
-    ]
+    ] + _context(config, network, PORT_KIND, "entity_key", PORT_PREFIX)
 
 
-def mac_table_stages(config: Config) -> list:
+def mac_table_stages(config: Config, network: typing.Optional[dict] = None) -> list:
     """
     The layer 2 composition over MAC table walks: the cardinality features, each port's vendor history, and each
     port's count and each VLAN's vendor count against the peaks of their own earlier periods. Shared with the
-    campaign corpus, whose two sites' tables meet the same contract.
+    campaign corpus, whose two sites' tables meet the same contract. Given the network context stores, each VLAN's
+    inventory record is joined on last, under `ctx_vlan_`.
     """
     return [
         TC2CardinalityStage(config),
@@ -1212,7 +1401,7 @@ def mac_table_stages(config: Config) -> list:
                          value_column="ouis_per_vlan",
                          bucket_seconds=PERIOD_SECONDS,
                          min_buckets=BASELINE_MIN_BUCKETS),
-    ]
+    ] + _context(config, network, VLAN_KIND, "vlan_key", VLAN_PREFIX)
 
 
 def run_classes(config: Config,
@@ -1250,8 +1439,22 @@ def run_classes(config: Config,
 
     # Every class's records are validated once, ahead of every pipeline the class feeds: `ingest_time` stamped, the
     # envelope checked, and a record whose clock cannot be trusted taken out before any stateful stage sees it.
+    # The network inventory is context, not telemetry: it has no collector envelope to validate and is not sealed
+    # into windows. Its records are written first, because every other class is joined against the stores they make.
+    network_batches = batches.get(NETWORK_CONTEXT_CLASS)
+    batches = {name: frames for (name, frames) in batches.items() if name != NETWORK_CONTEXT_CLASS}
     (batches, quarantined) = universal_envelope.validate(config, batches, ID_COLUMNS)
     outputs = {}
+    network = None
+
+    if (network_batches is not None):
+        produced = _run_context(config, network_batches)
+        network = network_stores(produced)
+        produced["row_key"] = [
+            uid if isinstance(uid, str) else f"refused-{seq}"
+            for (uid, seq) in zip(produced[bitemporal.CONTEXT_UID], produced["source_seq"])
+        ]
+        outputs[NETWORK_CONTEXT_CLASS] = produced
 
     if (len(quarantined) > 0):
         quarantined["row_key"] = quarantined["event_uid"]
@@ -1260,7 +1463,7 @@ def run_classes(config: Config,
     # Layer 1: counters, the rates they become and the port's history of them, optics, flaps, identifier changes.
     outputs["tc1"] = _run_class(config,
                                 batches["tc1"],
-                                layer_1_stages(config),
+                                layer_1_stages(config, network),
                                 impose_order,
                                 seal=False,
                                 chain=CHAIN_ROOTS["tc1"],
@@ -1285,7 +1488,7 @@ def run_classes(config: Config,
     # The devices themselves: restarts, configuration changes and routing churn, keyed on the switch or router.
     outputs[DEVICE_CLASS] = _run_class(config,
                                        batches[DEVICE_CLASS],
-                                       device_stages(config),
+                                       device_stages(config, network),
                                        impose_order,
                                        seal=False,
                                        chain=CHAIN_ROOTS[DEVICE_CLASS],
@@ -1296,7 +1499,7 @@ def run_classes(config: Config,
     # against the peaks of their own earlier periods, and the closed bindings.
     outputs["tc2_mac"] = _run_class(config,
                                     batches["tc2_mac"],
-                                    mac_table_stages(config),
+                                    mac_table_stages(config, network),
                                     impose_order,
                                     seal=False,
                                     chain=CHAIN_ROOTS["tc2_mac"],

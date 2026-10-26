@@ -52,6 +52,7 @@ R-D-L6-005,R-D-L6-005 - Content type mismatch,"src_ip,dst_ip",1h,none
 R-D-L7-005,R-D-L7-005 - Enumeration,src_ip,1h,none
 R-P-L1-004,R-P-L1-004 - Optical degradation forecast,entity_key,1h,none
 R-P-L1-009,R-P-L1-009 - Reboot-rate trajectory,entity_key,1h,none
+R-D-L1-010,R-D-L1-010 - Optical level below commissioning,entity_key,1h,none
 R-P-L3-005,R-P-L3-005 - Fan-out trajectory,entity_key,4h,none
 R-P-L5-006,R-P-L5-006 - Drift trajectory,"user_principal,day_window_id",2d,none
 R-P-L6-006,R-P-L6-006 - Client stack trajectory,"src_ip,day_window_id",2d,none

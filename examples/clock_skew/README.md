@@ -49,7 +49,7 @@ for row.
 
 ## The result
 
-All fifty-eight shipped detections are swept, each over the pipeline that feeds it, through
+All fifty-nine shipped detections are swept, each over the pipeline that feeds it, through
 [`rules.py`](./rules.py), which reduces every rule to what it accuses and reads every threshold, join tolerance
 and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hundred, one second, ten, thirty and
 sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
@@ -138,12 +138,12 @@ holds the largest: the creeping host's three days and the slow tunnel's four are
 nothing else moved. The sweeps move only the lease and inventory binding identifiers the hosts resolve through, as
 they did before.
 
-What a sweep can say depends on the clocks in the corpus, and the fifty-eight fall into three groups that must
+What a sweep can say depends on the clocks in the corpus, and the fifty-nine fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
-| Inputs on clocks that disagree | 34 | A tolerance, or the spread at which the rule changes |
+| Inputs on clocks that disagree | 35 | A tolerance, or the spread at which the rule changes |
 | Inputs on one clock, in a corpus with several | 22 | Boundary sensitivity under a uniform shift, not a tolerance |
 | Corpus with one clock | 2 | Nothing; reported as not measured |
 
@@ -156,7 +156,7 @@ flow exporter, inspection point and EDR, whose records meet in one row of the ho
 
 | Rule | Breaking spread |
 | --- | --- |
-| R-D-L1-001, 002, 003 and 006, R-B-L1-005 and 007, R-P-L1-004, R-D-L2-001, 003 and 005, R-B-L2-002, 006, 007 and 008 | unchanged to 60s on collectors and on switches |
+| R-D-L1-001, 002, 003, 006 and 010, R-B-L1-005 and 007, R-P-L1-004, R-D-L2-001, 003 and 005, R-B-L2-002, 006, 007 and 008 | unchanged to 60s on collectors and on switches |
 | R-D-L1-008, configuration change outside the window, and R-P-L1-009, reboot-rate trajectory | unchanged to 60s on collectors; the devices' polls are on no switch clock |
 | **R-D-L2-004, MAC in two places** | unchanged to 60s on collectors; **changes at 60s on switches** |
 | R-B-L7-004, process ancestry novelty | unchanged to 60s on host clocks |

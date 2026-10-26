@@ -302,7 +302,7 @@ because every reader marked persistence as out of the delivery lens's remit.
 
 **Re-verified 2026-10-22**, against the tree at the merge of pull request #99, by reading each row's claim
 against the code, the saved searches and the contracts rather than against the plan's status paragraphs. Of
-the eighty-nine rows, sixty-eight are closed: the capability the row says is missing is in the tree with a
+the eighty-nine rows, sixty-nine are closed: the capability the row says is missing is in the tree with a
 test, a stanza or a contract column behind it. Both rows marked blocking are among them: G03 by host
 identity (#63) and G10 by the service entity (#64). Twelve are narrowed to a remainder the row did not
 state (G09, G12, G20, G23, G39, G45, G49, G53, G60, G65, G79, G82), of which one is open work: G20, hysteresis,
@@ -311,7 +311,9 @@ TLS and DNS columns beside the host model's; G53, predictive mechanisms for the 
 HTTP and process behaviour, since DNS and TLS now carry one. G39, port identity across a rename, narrowed under plan
 section 3.1 to the layer 2 join: layer 1 keys a port on its `ifIndex` and a switch on its chassis serial, so a
 renamed port keeps its key, its history and its binding, but the layer 2 collectors still report the new name, and a
-renamed port meets them only through `reported_entity_key`. Nine hold (G08, G21, G48, G56, G69, G70, G72, G74, G88): seven as recorded decisions
+renamed port meets them only through `reported_entity_key`. G70, TC-0 context keyed on a port, a device or a VLAN, closed under plan section 3.2: the network inventory's records
+are joined onto layer 1, the device class and layer 2, and R-D-L1-010 reads a port's commissioning level. Eight hold
+(G08, G21, G48, G56, G69, G72, G74, G88): six as recorded decisions
 or out-of-scope items, and two, G72 (`TC1FeatureStage` in no composed pipeline) and G88 (control 13's
 fourth check through `CompareDataFrameStage` for the lineage pipeline only), as plain open items that no
 step has taken. G90, the ninetieth gap the critic added, now has a row, closed by step 16's first part.
@@ -395,7 +397,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G67 | minor | stands → closed | all | Stages reference page omits most fork stages (TC-0/3/4/6/7, scoring, drift, lineage, minimization) and guide lookup stanzas drift | #52 |
 | G68 | minor | stands → closed | users | Entity sharding router is a utility with no composed pipeline | #66 |
 | G69 | minor | stands → holds → closed | systems | AppShield host snapshots named as a TC-7 source and used by nothing; removed 2026-10-24 (audit ruling D1) | #52 |
-| G70 | minor | narrowed → holds | network objects | No TC-0 context keyed on port, device or VLAN (commissioning optical level, designation, owner) | not scheduled |
+| G70 | minor | narrowed → closed | network objects | No TC-0 context keyed on port, device or VLAN (commissioning optical level, designation, owner) | not scheduled |
 | G71 | minor | stands → closed | network objects | Stateful TC-1/TC-2 stages other than binding and auth do not guard event time | #62 |
 | G72 | minor | stands → holds → closed | network objects | TC1FeatureStage runs in no composed pipeline, golden or sourcetype; removed 2026-10-24 (audit ruling D5) | #52 |
 | G73 | minor | stands → closed | network objects | TC-1 field names and counter contract in guide/README do not match stage inputs and outputs | #52 |
@@ -444,7 +446,7 @@ tunes a plan against them.
   `tc7_service`, the application kind of TC-0 and both baselines.
 - **Platforms.** Nearly every sentence: the envelope fields are produced and validated, the determinism
   stamp runs in all thirteen pipelines, `morpheus:health` exists, Kafka Connect is configured and all
-  eighty-two searches have run on a search head.
+  eighty-three searches have run on a search head.
 
 ## The plan
 

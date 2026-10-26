@@ -936,6 +936,24 @@ PRODUCED: dict = {
                               "service_account",
                               "criticality"),
         ),
+    "context:network":
+        Sourcetype(
+            name="context:network",
+            time_column="valid_from",
+            time_columns=("valid_from", "valid_to", "recorded_at"),
+            producer="`morpheus.stages.telemetry.tc0_network_stage.TC0NetworkStage`, one record per version of a "
+            "port, a device or a VLAN; the `tc0_network` class of `tests/morpheus/determinism/telemetry_pipeline.py`.",
+            # Keyed as the telemetry keys each object, so the record behind a port's `ctx_port_version_uids` is found
+            # by its key. R-D-L1-010 reads the commissioning level off the enriched polls, and these are its source.
+            required_columns=("context_uid",
+                              "context_kind",
+                              "context_entity",
+                              "context_key",
+                              "context_attributes",
+                              "change",
+                              "object_kind",
+                              "site_id"),
+        ),
 }
 """Sourcetypes something in this fork emits, keyed by stanza name."""
 

@@ -110,7 +110,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 82
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 83
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
@@ -127,7 +127,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     # the trajectory rule reads it.
     writers = [name for name in names if runner.writes_risk(name)]
 
-    assert len(writers) == 58
+    assert len(writers) == 59
     assert max(position[name] for name in writers) < position[runner.CHAIN]
     assert position[runner.SUMMARY] < position[runner.TRAJECTORY] < position[runner.CHAIN]
     assert min(position[name] for name in expiries) > max(position[name] for name in names if name not in expiries)
@@ -528,7 +528,7 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS
     }
-    assert len(run["searches"]) == 52 and len(expected) == 82
+    assert len(run["searches"]) == 52 and len(expected) == 83
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
 
 
@@ -568,7 +568,7 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
         **BEFORE_THE_LEASES,
         **BEFORE_THE_PLATFORM
     }
-    assert len(run["searches"]) == 62 and len(expected) == 82
+    assert len(run["searches"]) == 62 and len(expected) == 83
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -599,7 +599,7 @@ def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arriv
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
     }
-    assert len(run["searches"]) == 66 and len(expected) == 82
+    assert len(run["searches"]) == 66 and len(expected) == 83
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -629,7 +629,7 @@ def test_the_ninth_run_differs_from_what_is_written_only_where_the_services_arri
         **_present(BEFORE_THE_DEVICES, run),
         **BEFORE_THE_SERVICES
     }
-    assert len(run["searches"]) == 72 and len(expected) == 82
+    assert len(run["searches"]) == 72 and len(expected) == 83
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -656,7 +656,7 @@ def test_the_tenth_run_differs_from_what_is_written_only_where_the_devices_arriv
     assert differing == {
         **_present(BEFORE_THE_DESK_SPOOF, run), **_present(BEFORE_THE_TRAJECTORIES, run), **BEFORE_THE_DEVICES
     }
-    assert len(run["searches"]) == 75 and len(expected) == 82
+    assert len(run["searches"]) == 75 and len(expected) == 83
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 213
 
 
@@ -695,7 +695,7 @@ def test_the_eleventh_run_differs_from_what_is_written_only_where_the_host_segme
     }
 
     assert differing == {**BEFORE_THE_DESK_SPOOF, **BEFORE_THE_HOSTS}
-    assert len(run["searches"]) == 78 and len(expected) == 82
+    assert len(run["searches"]) == 78 and len(expected) == 83
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 221
 
 
@@ -721,7 +721,7 @@ def test_the_twelfth_run_differs_from_what_is_written_only_where_the_trajectory_
     }
 
     assert differing == {**BEFORE_THE_DESK_SPOOF, **BEFORE_THE_TRAJECTORIES}
-    assert len(run["searches"]) == 80 and len(expected) == 82
+    assert len(run["searches"]) == 80 and len(expected) == 83
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 224
     assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009"}
 
@@ -747,7 +747,7 @@ def test_the_thirteenth_run_differs_from_what_is_written_only_where_the_desk_spo
     }
 
     assert differing == BEFORE_THE_DESK_SPOOF
-    assert len(run["searches"]) == 82 and len(expected) == 82
+    assert len(run["searches"]) == 82 and len(expected) == 83
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 233
     assert {
         row["total_risk"]: int(row["count"])
