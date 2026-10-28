@@ -80,6 +80,7 @@ SEGMENTS: dict[str, dict] = {
             "tc2_auth": L2,
             "tc1_binding": "binding:l1",
             "tc2_binding": "binding:l2",
+            "tc0_network": "context:network",
         },
     },
     "network": {

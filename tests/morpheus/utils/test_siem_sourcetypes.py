@@ -103,17 +103,18 @@ def test_the_unproduced_count_is_pinned():
     # Every stanza has a producer. Pinned rather than merely recorded, so that adding a stanza, with or without a
     # producer, is a deliberate edit here and not a silent drift in what the app appears to support.
     assert len(UNPRODUCED) == 0
-    assert len(PRODUCED) == 19
+    assert len(PRODUCED) == 20
 
 
 NUMBER_WORDS = {
     # "none" because the sentence says none of the stanzas is without a producer; the rest reach the stanza total,
-    # and a total past nineteen fails here with a KeyError naming the word to add.
+    # and a total past twenty fails here with a KeyError naming the word to add.
     "none": 0,
     **{
         word: number
         for (number, word) in enumerate(("zero one two three four five six seven eight nine ten eleven twelve "
-                                         "thirteen fourteen fifteen sixteen seventeen eighteen nineteen").split())
+                                         "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty").split(
+                                        ))
     },
 }
 

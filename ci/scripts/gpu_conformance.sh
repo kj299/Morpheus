@@ -107,6 +107,7 @@ TARGETS=(
     tests/morpheus/stages/test_tc0_asset_stage.py
     tests/morpheus/stages/test_tc0_enrich_stage.py
     tests/morpheus/stages/test_tc0_identity_stage.py
+    tests/morpheus/stages/test_tc0_network_stage.py
     tests/morpheus/stages/test_tc3_cardinality_stage.py
     tests/morpheus/stages/test_tc3_reach_stage.py
     tests/morpheus/stages/test_tc3_ttl_stage.py

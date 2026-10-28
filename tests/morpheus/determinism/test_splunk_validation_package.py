@@ -119,6 +119,7 @@ NEIGHBOR = "R-D-L1-006 - LLDP neighbor change"
 VOLUME = "R-B-L1-007 - Interface volume departure"
 CONFIGURATION = "R-D-L1-008 - Configuration change outside the change window"
 TRAJECTORY = "R-P-L1-009 - Reboot-rate trajectory"
+COMMISSIONING = "R-D-L1-010 - Optical level below commissioning"
 PHYSICAL = "R-C-003 - Physical compromise chain"
 VENDOR = "R-B-L2-006 - New vendor on a VLAN"
 SLOW = "R-B-L2-007 - Slow 802.1X authorization"
@@ -126,6 +127,7 @@ INSTANT = "R-B-L2-008 - Instant 802.1X authorization"
 TAP_DEVIATION = threshold(TAP, r"optical_rx_dbm_deviation\s*<=\s*(-?[\d.]+)")
 TAP_SAMPLES = threshold(TAP, r"optical_rx_dbm_baseline_samples\s*>=\s*([\d.]+)")
 TAP_TRANSMIT = threshold(TAP, r"abs\(optical_tx_dbm_deviation\)\s*<\s*([\d.]+)")
+COMMISSIONING_MARGIN = threshold(COMMISSIONING, r"rx_below_commissioning_db\s*>=\s*([\d.]+)")
 FLAP_TRANSITIONS = threshold(FLAP, r"link_flaps_in_window\s*>=\s*([\d.]+)")
 ERROR_STEP = threshold(ERRORS, r"error_rate_step\s*>\s*([\d.]+)")
 SURGE_FACTOR = threshold(VOLUME, r"surge_factor\s*=\s*([\d.]+)")
@@ -1554,8 +1556,9 @@ def test_the_chain_assembly_returns_the_tapped_desk_and_not_the_flooding_host(ex
     # nothing wrote, and a risk sum that was written and too small, because the two detections that accused a
     # three-layer chain accused different chains. The desk spoof puts the ARP anomaly's 55 on the tapped port's
     # chain beside R-D-L1-002's 50, so one chain reaches the 60 the search needs and the flooding host's, at 55,
-    # stays the quiet case beside it. Both are asserted from the events, as is the risk on every three-layer chain,
-    # and the search-head run records the per-chain totals.
+    # stays the quiet case beside it. R-D-L1-010's 30, the tapped port read against its commissioning level, lands
+    # on the same chain. Both are asserted from the events, as is the risk on every three-layer chain, and the
+    # search-head run records the per-chain totals.
 
     entry = expected["searches"]["Chain assembly - cross-layer risk"]
     chain = _search_text("Chain assembly - cross-layer risk")
@@ -1612,7 +1615,7 @@ def test_the_chain_assembly_returns_the_tapped_desk_and_not_the_flooding_host(ex
     assert entry["three_layer_chain_risk"] == dict(sorted(totals.items(), key=lambda item: int(item[0])))
     assert entry["expected_rows"] == len(accused) == 1 and entry["expected_empty"] is False
 
-    # The one row is Carol's port in the window the tap and the desk spoof share, accused by both rules, and the
+    # The one row is Carol's port in the window the tap and the desk spoof share, accused by all three rules, and the
     # flooding host's chain is the one at 55: the threshold, not the absence of a second accusation, keeps it out.
     (lineage, total) = next(iter(accused.items()))
     rules = sorted({
@@ -1623,7 +1626,7 @@ def test_the_chain_assembly_returns_the_tapped_desk_and_not_the_flooding_host(ex
     row = entry["key_values"][0]
 
     assert (row["lineage_id"], row["total_risk"], row["layer_span"]) == (lineage, total, spans[lineage])
-    assert row["rules"] == rules == ["R-D-L1-002", "R-D-L2-003"]
+    assert row["rules"] == rules == ["R-D-L1-002", "R-D-L1-010", "R-D-L2-003"]
     assert row["methods"] == sorted(methods[lineage])
     assert sorted(risk[lineage] for lineage in three_layer if 0 < risk.get(lineage, 0) < risk_threshold) == [55]
 
@@ -1742,6 +1745,7 @@ NUMBER_WORDS = {
     "eighty": 80,
     "eighty-one": 81,
     "eighty-two": 82,
+    "eighty-three": 83,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -2100,6 +2104,17 @@ def _departed(event: dict) -> typing.Optional[str]:
     return None
 
 
+def _below_commissioning(event: dict) -> typing.Optional[float]:
+    """R-D-L1-010's `eval`: how far a port's light sits below its commissioning level, or `None` where the inventory
+    gave the port no level. The level arrives as the text the enrichment writes, which `tonumber` reads."""
+    (level, now) = (event.get("ctx_port_commissioning_rx_dbm"), _number(event, "optical_rx_dbm"))
+
+    if (event.get("ctx_port_found") is not True or level is None or now is None):
+        return None
+
+    return round(float(level) - now, 3)
+
+
 LAYER_1_AND_2 = {
     # rule id: (sourcetype file, the base search and `where` as a predicate, the `stats BY` field or None for a
     # rule that writes one risk record per row).
@@ -2130,6 +2145,10 @@ LAYER_1_AND_2 = {
     "R-P-L1-009": ("morpheus_score_l1.jsonlines", lambda e: e.get("device_reboot_baseline_mature") is True and
                    _at_least(e, "device_reboot_rising_buckets", RISING_PERIODS),
                    None),
+    "R-D-L1-010":
+        ("morpheus_score_l1.jsonlines", lambda e:
+         (_below_commissioning(e) or 0.0) >= COMMISSIONING_MARGIN and e.get("transceiver_serial_changed") is not True,
+         "entity_key"),
     "R-B-L2-002": ("morpheus_score_l2.jsonlines",
                    lambda e: e.get("macs_per_port_first_in_window") is True and _over(e, "macs_per_port_step", 0),
                    "port_key"),
@@ -2175,7 +2194,8 @@ def _risk_score(rule_id: str) -> float:
 def test_the_new_layer_1_detections_return_exactly_what_is_written(expected: dict):
     searches = expected["searches"]
 
-    for (rule, key) in (("R-D-L1-002", TAP), ("R-D-L1-003", FLAP), ("R-B-L1-005", ERRORS), ("R-B-L1-007", VOLUME)):
+    for (rule, key) in (("R-D-L1-002", TAP), ("R-D-L1-003", FLAP), ("R-B-L1-005", ERRORS), ("R-B-L1-007", VOLUME),
+                        ("R-D-L1-010", COMMISSIONING)):
         notables = _notables(rule)
 
         assert searches[key]["expected_rows"] == len(notables), key

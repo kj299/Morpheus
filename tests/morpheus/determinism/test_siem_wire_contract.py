@@ -355,6 +355,17 @@ def test_the_context_pipeline_produces_a_parsable_timestamp(wire_config: Config,
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_the_network_inventory_produces_a_parsable_timestamp(wire_config: Config, telemetry: pd.DataFrame):
+    # The ports, devices and VLANs the layer 1, device and layer 2 rows are read against, written by the telemetry
+    # composition rather than the context one because those rows are the ones that join them.
+    rows = telemetry[telemetry["telemetry_class"] == tp.NETWORK_CONTEXT_CLASS].reset_index(drop=True)
+
+    assert len(rows) > 0, "the harness emitted no network inventory rows"
+
+    assert_parses_as_its_own_stanza(wire_config, rows.dropna(axis=1, how="all"), "context:network")
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_the_edge_stream_produces_a_parsable_timestamp(wire_config: Config, edges: pd.DataFrame):
     assert set(edges["relation_type"]) == {"resolved_through", "carried_by"}
     assert_parses_as_its_own_stanza(wire_config, edges.copy(), "morpheus:edge")
@@ -439,6 +450,7 @@ def test_every_produced_sourcetype_is_covered_here():
         "context:identity",
         "context:asset",
         "context:application",
+        "context:network",
         "morpheus:quarantine",
         "morpheus:late",
         "morpheus:health",

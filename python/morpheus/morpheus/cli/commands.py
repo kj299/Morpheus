@@ -574,6 +574,7 @@ add_command("tc0-application", "morpheus.stages.telemetry.tc0_application_stage.
 add_command("tc0-asset", "morpheus.stages.telemetry.tc0_asset_stage.TC0AssetStage", modes=ALL)
 add_command("tc0-enrich", "morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage", modes=ALL)
 add_command("tc0-identity", "morpheus.stages.telemetry.tc0_identity_stage.TC0IdentityStage", modes=ALL)
+add_command("tc0-network", "morpheus.stages.telemetry.tc0_network_stage.TC0NetworkStage", modes=ALL)
 add_command("tc1-binding", "morpheus.stages.telemetry.tc1_binding_stage.TC1BindingStage", modes=ALL)
 add_command("tc1-change", "morpheus.stages.telemetry.tc1_change_stage.TC1ChangeStage", modes=ALL)
 add_command("tc1-device", "morpheus.stages.telemetry.tc1_device_stage.TC1DeviceStage", modes=ALL)

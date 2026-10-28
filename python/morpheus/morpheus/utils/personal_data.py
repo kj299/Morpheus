@@ -168,6 +168,10 @@ _IDENTIFIES = (
     # The account an application runs as, from the CMDB, and as it rides on an event.
     "service_account",
     "ctx_application_service_account",
+    # Who answers for a port, a device or a VLAN, from the network inventory, as it rides on an event.
+    "ctx_port_owner",
+    "ctx_device_owner",
+    "ctx_vlan_owner",
 )
 
 _ADDRESSES = (
@@ -516,9 +520,34 @@ _PSEUDONYMS = (
     "session_binding_uid",
     # The CMDB versions an event's application rests on.
     "ctx_application_version_uids",
+    "ctx_port_version_uids",
+    "ctx_device_version_uids",
+    "ctx_vlan_version_uids",
 )
 
 _OPERATIONAL = (
+    # What the network inventory says a port, a device or a VLAN is, and the join's bookkeeping: the hardware's
+    # commissioning level, what the object is for and how much it matters, which describe the estate, not a person.
+    "commissioning_rx_dbm",
+    "designation",
+    "object_kind",
+    "ctx_port_commissioning_rx_dbm",
+    "ctx_port_criticality",
+    "ctx_port_designation",
+    "ctx_port_found",
+    "ctx_port_knowledge",
+    "ctx_port_recorded_at",
+    "ctx_device_criticality",
+    "ctx_device_device_role",
+    "ctx_device_found",
+    "ctx_device_knowledge",
+    "ctx_device_owning_team",
+    "ctx_device_recorded_at",
+    "ctx_vlan_criticality",
+    "ctx_vlan_designation",
+    "ctx_vlan_found",
+    "ctx_vlan_knowledge",
+    "ctx_vlan_recorded_at",
     # A service's own window, novelty and baseline, which aggregate its clients rather than describing any one; how
     # its key was chosen; and the application the CMDB maps a server's port to, which is about the application.
     "service_bytes_in_window",
@@ -851,10 +880,10 @@ AMBIGUOUS: dict[str, dict[str, str]] = {
         "tc5_session": IDENTIFIES,
     },
     "context_entity": {
-        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES, "tc0_application": ADDRESSES
+        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES, "tc0_application": ADDRESSES, "tc0_network": LOCATES
     },
     "context_key": {
-        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES, "tc0_application": ADDRESSES
+        "tc0_identity": IDENTIFIES, "tc0_asset": ADDRESSES, "tc0_application": ADDRESSES, "tc0_network": LOCATES
     },
 }
 """Column names whose meaning depends on which telemetry class the row belongs to.

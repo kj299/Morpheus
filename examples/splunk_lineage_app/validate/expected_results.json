@@ -663,19 +663,20 @@
         "soft:dot1x",
         "soft:mac_table"
       ],
-      "why": "One row, and it took four empty reasons and one planted actor to reach it. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and three detections' records land on them. R-D-L1-002, the tap on the port Carol sits at, adds 50 to her chain in the window her desk sign-in shares with the tap. R-D-L2-003, the gateway claimed by two MACs, is one notable whose `lineage_id` names every chain its contested observations were on: the flooding host's, in the flood's window, and, since the workstation on the tapped port claims the gateway five times in the window after the tap, Carol's too, 55 each. Carol's chain sums to 105 against `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)` and is the row: `rules` names both detections, `layer_span` is 3, and `methods` the three hops the ladder took. The flooding host's chain stays at 55, the quiet case beside it, and the other 13 carry no risk at all; the search-head run records all three totals. Before the desk spoof the two accusations fell on different chains and the search was validated only as a correct empty: 55 five short, 50 ten. Every other risk record lands on a lineage of one or two layers, the layer 5 model rules' included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. No search head has returned the row yet: the thirteenth run was made over the events before the plant.",
+      "why": "One row, and it took four empty reasons and one planted actor to reach it. Every detection ends by collecting its rows into `behavior_risk`, and this search sums those records per lineage, once each, over the chains the events span. 15 of the distinct `lineage_id` values span three layers -- a port's layer 1 samples, the layer 2 observations the ladder resolved onto it, and the layer 5 authentications of the person sitting at it -- and four detections' records land on them. R-D-L1-002, the tap on the port Carol sits at, adds 50 to her chain in the window her desk sign-in shares with the tap. R-D-L1-010 adds 30 for the same light lost against the port's commissioning level. R-D-L2-003, the gateway claimed by two MACs, is one notable whose `lineage_id` names every chain its contested observations were on: the flooding host's, in the flood's window, and, since the workstation on the tapped port claims the gateway five times in the window after the tap, Carol's too, 55 each. Carol's chain sums to 135 against `total_risk >= 60 OR (layer_span >= 4 AND peak_z >= 4.0)` and is the row: `rules` names all three of its detections, `layer_span` is 3, and `methods` the three hops the ladder took. The flooding host's chain stays at 55, the quiet case beside it, and the other 13 carry no risk at all; the search-head run records all three totals. Before the desk spoof the two accusations fell on different chains and the search was validated only as a correct empty: 55 five short, 50 ten. Every other risk record lands on a lineage of one or two layers, the layer 5 model rules' included: a flow, a handshake, a query and a sign-in are each their own entity, and the chained rules, which do join entities, name each step's single-layer lineage. `methods` reads `resolution_methods`, every hop a resolver ladder took, and the `join_method` of every `morpheus:edge` record in the chain, which `EdgeEmitStage` writes one per hop and per connection carried between layers; the edges add no method the scored records did not already name, so the 15 say `soft:directory`, `soft:dot1x` and `soft:mac_table` between them. No search head has returned the row yet: the thirteenth run was made over the events before the plant.",
       "three_layer_chain_risk": {
         "0": 13,
         "55": 1,
-        "105": 1
+        "135": 1
       },
       "key_values": [
         {
           "lineage_id": "d1c7d5889a57b62ff76e7207f324c93b",
           "layer_span": 3,
-          "total_risk": 105,
+          "total_risk": 135,
           "rules": [
             "R-D-L1-002",
+            "R-D-L1-010",
             "R-D-L2-003"
           ],
           "methods": [
@@ -1201,6 +1202,20 @@
       "key_values": [
         {
           "entity_key": "hq:sw5"
+        }
+      ]
+    },
+    "R-D-L1-010 - Optical level below commissioning": {
+      "expected_rows": 2,
+      "expected_empty": false,
+      "contributing_rows": 27,
+      "why": "Two ports. The network inventory records every port of the corpus but one at the -7 dBm its link was commissioned at, and TC0EnrichStage joins that level onto each poll as it was known at the poll's time. The tap on hq:sw1:Gi1/0/3 takes three decibels at minute forty and holds them: twenty-one polls 1.5 dB or more below the level, the deepest 3.048. The failing optic on hq:sw1:Gi1/0/6 slides four hundredths of a decibel a poll and crosses the margin at minute thirty-nine: six polls before the swap, the deepest 1.756. That port is the case the rule exists for: its median slides with it, so R-D-L1-002 never sees it. The poll on which its new optic appears is excluded as a new optic, and the port is recommissioned from the swap, as a second version of its record the inventory made a minute later. Every other port sits within a tenth of a decibel of its level, and hq:sw1:Gi1/0/10, which the inventory never recorded, has no level and is not read.",
+      "key_values": [
+        {
+          "entity_key": "hq:sw1:Gi1/0/3"
+        },
+        {
+          "entity_key": "hq:sw1:Gi1/0/6"
         }
       ]
     },

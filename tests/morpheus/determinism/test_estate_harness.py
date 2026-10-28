@@ -108,6 +108,11 @@ def _split(frame: pd.DataFrame, parts: int) -> list[pd.DataFrame]:
 
 
 def _windows(frame: pd.DataFrame) -> list[int]:
+    # The network inventory has no event time and is not windowed; the store it builds does not depend on the order
+    # of its records, so it is permuted as one group.
+    if ("event_time" not in frame.columns):
+        return [0] * len(frame)
+
     return [window_id_from_timestamp(int(t), ep.PERIOD_SECONDS * NS) for t in frame["event_time"]]
 
 
@@ -227,7 +232,7 @@ def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, p
         shuffled = _permuted(corpus, seed)
 
         assert any(not shuffled[name]["collector_seq"].equals(corpus[name]["collector_seq"])
-                   for name in corpus), "permutation was a no-op"
+                   for name in corpus if "collector_seq" in corpus[name].columns), "permutation was a no-op"
 
         difference = diff_frames(result, ep.run_pipeline(pipeline_config, shuffled))
         assert difference is None, f"seed {seed}: {difference}"
@@ -363,8 +368,11 @@ def test_every_class_ran_and_only_the_chained_ones_sealed(result: pd.DataFrame):
     # The binding classes ride along because the Splunk package is rendered from this one run, and they are what
     # the two binding sourcetypes are made of. They carry no chain, and saying so here keeps a future sealer that
     # swept them up from passing quietly.
+    # The network inventory rides along for the same reason, as the records `context:network` is made of; it is a
+    # store rather than a stream and is neither chained nor windowed.
     assert set(result["telemetry_class"]) == (set(ep.CHAINED_CLASSES) | set(ep.UNCHAINED_CLASSES)
-                                              | {universal_envelope.QUARANTINE_CLASS})
+                                              | {universal_envelope.QUARANTINE_CLASS, ep.tp.NETWORK_CONTEXT_CLASS})
+    assert _rows(result, ep.tp.NETWORK_CONTEXT_CLASS)["window_id"].isna().all()
 
     for name in ep.CHAINED_CLASSES:
         rows = _rows(result, name)

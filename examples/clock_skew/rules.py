@@ -132,6 +132,7 @@ NEIGHBOR = "R-D-L1-006 - LLDP neighbor change"
 VOLUME = "R-B-L1-007 - Interface volume departure"
 CONFIGURATION = "R-D-L1-008 - Configuration change outside the change window"
 TRAJECTORY = "R-P-L1-009 - Reboot-rate trajectory"
+COMMISSIONING = "R-D-L1-010 - Optical level below commissioning"
 SUBSTITUTION_LINK_FLAPS = threshold(SUBSTITUTION, r"link_flaps\s*=\s*([\d.]+)")
 FORECAST_DAYS = threshold(FORECAST, r"optical_rx_dbm_days_to_floor\s*<=\s*([\d.]+)")
 TAP_RX_DROP_DB = threshold(TAP, r"optical_rx_dbm_deviation\s*<=\s*(-[\d.]+)")
@@ -142,6 +143,7 @@ ERRORS_STEP = threshold(ERRORS, r"error_rate_step\s*>\s*([\d.]+)")
 SURGE_FACTOR = threshold(VOLUME, r"surge_factor\s*=\s*([\d.]+)")
 SILENCE_FACTOR = threshold(VOLUME, r"silence_factor\s*=\s*([\d.]+)")
 RISING_PERIODS = threshold(TRAJECTORY, r"device_reboot_rising_buckets\s*>=\s*([\d.]+)")
+COMMISSIONING_MARGIN_DB = threshold(COMMISSIONING, r"rx_below_commissioning_db\s*>=\s*([\d.]+)")
 
 
 def layer_1_decisions(result: pd.DataFrame) -> dict:
@@ -172,6 +174,9 @@ def layer_1_decisions(result: pd.DataFrame) -> dict:
     suppression's fields. Read off the device's own poll, where the other six read the port's.
 
     R-P-L1-009: `device_reboot_baseline_mature=true device_reboot_rising_buckets>=3`, one notable per device.
+
+    R-D-L1-010: receive light 1.5 dB or more below the commissioning level the network inventory joined onto the
+    poll, on a poll whose optic did not change, `stats ... BY entity_key`.
     """
     polls = rows(result, "tc1").sort_values(["entity_key", "event_time"], kind="stable")
     polls = polls.assign(previous_serial=polls.groupby("entity_key")["transceiver_serial"].shift(1))
@@ -204,6 +209,11 @@ def layer_1_decisions(result: pd.DataFrame) -> dict:
     departed = polls[true(polls, "bits_per_second_baseline_mature")
                      & ((traffic > SURGE_FACTOR * peak) | ((trough > 0) & (traffic < SILENCE_FACTOR * trough)))]
 
+    requires(COMMISSIONING, r"ctx_port_found=true ctx_port_commissioning_rx_dbm=\* NOT transceiver_serial_changed=true")
+    below = number(polls, "ctx_port_commissioning_rx_dbm") - number(polls, "optical_rx_dbm")
+    unlit = polls[true(polls, "ctx_port_found") & (below.round(3) >= COMMISSIONING_MARGIN_DB)
+                  & ~true(polls, "transceiver_serial_changed")]
+
     devices = rows(result, "tc1_device")
     requires(CONFIGURATION, r"config_changed=true config_change_in_window=false")
     unscheduled = devices[true(devices, "config_changed") & false(devices, "config_change_in_window")]
@@ -221,6 +231,7 @@ def layer_1_decisions(result: pd.DataFrame) -> dict:
         "R-B-L1-007": keys(departed, ["entity_key"]),
         "R-D-L1-008": keys(unscheduled, ["entity_key", "running_config_hash"]),
         "R-P-L1-009": keys(worsening, ["entity_key"]),
+        "R-D-L1-010": keys(unlit, ["entity_key"]),
     }
 
 

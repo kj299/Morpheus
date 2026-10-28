@@ -83,6 +83,11 @@ def _rows(result: pd.DataFrame, telemetry_class: str) -> pd.DataFrame:
 
 
 def _windows(frame: pd.DataFrame) -> list[int]:
+    # The network inventory has no event time and is not windowed; the store it builds does not depend on the order
+    # of its records, so it is permuted as one group.
+    if ("event_time" not in frame.columns):
+        return [0] * len(frame)
+
     return [window_id_from_timestamp(int(t), tp.PERIOD_SECONDS * NS) for t in frame["event_time"]]
 
 
@@ -127,7 +132,12 @@ def test_corpus_is_shaped_like_the_network(corpus: dict[str, pd.DataFrame]):
 
     # Every class carries the envelope the identifiers derive from, each collector's sequence rising. The DMZ poller
     # numbers its own polls beside the main poller's in the layer 1 class.
-    for frame in corpus.values():
+    # The network inventory is context: its clock is its valid and recorded time, and it has no collector envelope.
+    for (name, frame) in corpus.items():
+        if (name == tp.NETWORK_CONTEXT_CLASS):
+            assert frame["recorded_at"].notna().all() and "collector_id" not in frame.columns
+            continue
+
         assert set(tp.ID_COLUMNS) <= set(frame.columns)
         assert frame.groupby("collector_id")["collector_seq"].apply(lambda seq: seq.is_monotonic_increasing).all()
 
@@ -220,7 +230,7 @@ def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, p
         shuffled = _permuted(corpus, seed)
 
         assert any(not shuffled[name]["collector_seq"].equals(corpus[name]["collector_seq"])
-                   for name in corpus), "permutation was a no-op"
+                   for name in corpus if "collector_seq" in corpus[name].columns), "permutation was a no-op"
 
         difference = diff_frames(result, tp.run_pipeline(pipeline_config, shuffled))
         assert difference is None, f"seed {seed}: {difference}"
@@ -768,6 +778,63 @@ def test_the_failing_cable_runs_errors_its_port_never_has(result: pd.DataFrame):
     others = layer_1[layer_1["entity_key"] != f"{tp.SITE}:{tp.SWITCH}:{tp.ERROR_PORT}"]
     assert others["error_rate_step"].max() < 0.1
     assert layer_1[_is(layer_1, "counter_reset")]["error_rate"].isna().all()
+
+
+@pytest.mark.cpu_mode
+def test_light_lost_below_commissioning_is_read_where_the_median_cannot_see_it(result: pd.DataFrame):
+    # Gap G70. R-D-L1-010 reads each poll's receive light against the level the inventory records the port's link
+    # commissioned at. The tap and the failing optic are the two ports below it; the failing optic is the one the
+    # median-relative tap rule cannot see, because the median slides down with it.
+    layer_1 = _rows(result, "tc1")
+    level = pd.to_numeric(layer_1["ctx_port_commissioning_rx_dbm"])
+    below = (level - pd.to_numeric(layer_1["optical_rx_dbm"])).round(3)
+    lit = layer_1[(below >= tp.COMMISSIONING_MARGIN_DB) & ~_is(layer_1, "transceiver_serial_changed")]
+    failing = f"{tp.SITE}:{tp.SWITCH}:{tp.MAINTENANCE_PORT}"
+
+    assert sorted(lit["entity_key"].unique()) == [f"{tp.SITE}:{tp.SWITCH}:{tp.HUB_PORT}", failing]
+    assert lit[lit["entity_key"] == failing]["event_time"].max() < tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS
+    assert (_port(result, tp.MAINTENANCE_PORT)["optical_rx_dbm_deviation"].dropna() > -1.0).all()
+
+    # The port the inventory never recorded is found nowhere and carries no level; every other port carries one.
+    unrecorded = _port(result, tp.UNRECORDED_PORT)
+    assert not _is(unrecorded, "ctx_port_found").any() and unrecorded["ctx_port_commissioning_rx_dbm"].isna().all()
+    recorded = layer_1[layer_1["entity_key"] != unrecorded["entity_key"].iloc[0]]
+    assert _is(recorded, "ctx_port_found").all()
+
+
+@pytest.mark.cpu_mode
+def test_the_replaced_optic_is_read_against_its_recommissioned_record_once_the_inventory_knew_of_it(
+        result: pd.DataFrame):
+    # The swap is recorded a minute after it happened, and a poll is joined with the inventory as it stood at the
+    # poll's own time: the swap's own poll still names the first record, the next names the second.
+    optic = _port(result, tp.MAINTENANCE_PORT)
+    swap_ns = tp.MAINTENANCE_SWAP_AT_MINUTE * 60 * NS
+    before = set(optic[optic["event_time"] <= swap_ns]["ctx_port_version_uids"])
+    after = set(optic[optic["event_time"] > swap_ns]["ctx_port_version_uids"])
+
+    assert len(before) == len(after) == 1 and before != after
+
+    records = _rows(result, tp.NETWORK_CONTEXT_CLASS)
+    port_records = records[records["context_entity"] == optic["entity_key"].iloc[0]]
+    assert sorted(port_records["context_uid"]) == sorted(before | after)
+
+
+@pytest.mark.cpu_mode
+def test_every_device_and_vlan_row_carries_what_the_inventory_says_it_is(result: pd.DataFrame):
+    devices = _rows(result, tp.DEVICE_CLASS)
+    roles = dict(zip(devices["device_key"], devices["ctx_device_device_role"]))
+
+    assert roles == {f"{tp.SITE}:{device}": role for (device, role) in tp.DEVICE_ROLES.items()}
+
+    tables = _rows(result, "tc2_mac")
+    designations = dict(zip(tables["vlan_key"], tables["ctx_vlan_designation"]))
+
+    assert designations == {f"{tp.SITE}:{vlan}": label for (vlan, label) in tp.VLAN_DESIGNATIONS.items()}
+
+    # Every inventory record is accepted, and each kind's records are keyed as the telemetry keys the object.
+    records = _rows(result, tp.NETWORK_CONTEXT_CLASS)
+    assert records["context_refused"].isna().all()
+    assert set(records["context_kind"]) == {"port", "device", "vlan"}
 
 
 @pytest.mark.cpu_mode

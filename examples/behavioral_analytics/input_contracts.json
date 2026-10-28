@@ -428,6 +428,151 @@
         }
       ]
     },
+    "tc0_network": {
+      "layer": 0,
+      "title": "Network inventory (TC-0)",
+      "home": "telemetry",
+      "envelope": false,
+      "description": "One record per change to what a port, a device or a VLAN is: a port's commissioning receive level, each object's designation, owner and criticality, a device's role. Read by `TC0NetworkStage` into the bitemporal context store, keyed as the telemetry keys each object; layer 1, the device class and layer 2 are joined against it at each row's event time, and R-D-L1-010 reads the commissioning level.",
+      "columns": [
+        {
+          "name": "source_seq",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "source": "The inventory's own change sequence",
+          "notes": ""
+        },
+        {
+          "name": "object_kind",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": "`port`, `device` or `vlan`. Any other kind is refused."
+        },
+        {
+          "name": "site_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": "The first part of every key, as the polling collectors send it."
+        },
+        {
+          "name": "device_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": "A port's or a device's switch, as `sysName` reports it. Null on a VLAN."
+        },
+        {
+          "name": "port_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": "A port's name as it was commissioned; a renamed port is found by the name its `ifIndex` was first seen with. Null on a device or a VLAN."
+        },
+        {
+          "name": "vlan_id",
+          "type": "integer",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": "Null on a port or a device."
+        },
+        {
+          "name": "commissioning_rx_dbm",
+          "type": "float",
+          "unit": "dBm",
+          "required": true,
+          "source": "The acceptance test the link passed when it was commissioned",
+          "notes": "A port's receive level then, which R-D-L1-010 compares the polled level with. A new optic is recommissioned, as a new version from the moment it went in."
+        },
+        {
+          "name": "designation",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": "What a port or a VLAN is for: `access`, `uplink`, `desks`, `cameras`."
+        },
+        {
+          "name": "device_role",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": "A device's role: `access-switch`, `router`."
+        },
+        {
+          "name": "owner",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": "Who answers for the object."
+        },
+        {
+          "name": "owning_team",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": "A device's owning team."
+        },
+        {
+          "name": "criticality",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The network inventory",
+          "notes": ""
+        },
+        {
+          "name": "valid_from",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the fact became true",
+          "notes": ""
+        },
+        {
+          "name": "valid_to",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the fact stopped being true",
+          "notes": "Null while it still holds."
+        },
+        {
+          "name": "recorded_at",
+          "type": "integer",
+          "unit": "ns since the Unix epoch",
+          "required": true,
+          "source": "When the inventory recorded the change",
+          "notes": ""
+        },
+        {
+          "name": "change",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The inventory's change type",
+          "notes": "`assert` or `retract`."
+        },
+        {
+          "name": "tenant_id",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "The inventory's own configuration",
+          "notes": ""
+        }
+      ]
+    },
     "tc1": {
       "layer": 1,
       "title": "Interface poll (TC-1)",
