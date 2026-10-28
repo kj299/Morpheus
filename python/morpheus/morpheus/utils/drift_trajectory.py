@@ -41,6 +41,13 @@ different, and should say so rather than reinterpreting this column.
 
 Velocity and acceleration are the first and second differences the guide names as its second predictive
 mechanism, reported alongside. A large positive second difference is drift becoming a spike.
+
+**The run is also projected forward**, which is the guide's third mechanism, the forecast: a least-squares line
+through the windows of the current rising run, its slope per window and the value it gives the next window. The
+line is fitted to the run alone, not to the retained history, because the question is where this climb is going,
+and a month of flat windows before it would pull the slope towards zero. A run shorter than `FORECAST_MIN_RUN`
+carries no projection: a line through two points is the velocity, already reported. How many windows the
+projection takes to reach a stated level is the caller's arithmetic, since the level is a fact about a rule.
 """
 
 import collections
@@ -69,6 +76,9 @@ can decide: a brand new principal whose score is climbing is not obviously the l
 """
 
 DEFAULT_MAX_ENTITIES = 100_000
+
+FORECAST_MIN_RUN = 3
+"""Windows in the current rising run before it is projected. Two points make a velocity, not a line."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -105,6 +115,11 @@ class DriftResult:
         A gap in a principal's activity is absence, not drift.
     out_of_order : bool
         The window is not after the previous one. Nothing is recorded.
+    trend_per_window : float or None
+        The least-squares slope through the current rising run's windows, counting this one. `None` for a run
+        shorter than `FORECAST_MIN_RUN`.
+    forecast_next : float or None
+        The value that line gives the next window. `None` where `trend_per_window` is.
     """
 
     windows: int
@@ -117,6 +132,8 @@ class DriftResult:
     mature: bool
     run_restarted: bool
     out_of_order: bool
+    trend_per_window: typing.Optional[float] = None
+    forecast_next: typing.Optional[float] = None
 
 
 @dataclasses.dataclass
@@ -256,6 +273,8 @@ class DriftTrajectoryTracker(StateMixin):
         track.last_value = value
         track.last_velocity = velocity
 
+        (trend, forecast) = self._project(track)
+
         return DriftResult(windows=len(track.values),
                            velocity=self._round(velocity),
                            acceleration=self._round(acceleration),
@@ -265,10 +284,28 @@ class DriftTrajectoryTracker(StateMixin):
                            rise_sigmas=self._round(rise_sigmas),
                            mature=mature,
                            run_restarted=restarted,
-                           out_of_order=False)
+                           out_of_order=False,
+                           trend_per_window=self._round(trend),
+                           forecast_next=self._round(forecast))
 
     def _round(self, value: typing.Optional[float]) -> typing.Optional[float]:
         return None if value is None else quantize_value(value, decimals=self._decimals)
+
+    @staticmethod
+    def _project(track: _EntityTrack) -> tuple:
+        """The least-squares line through the current run's windows, as its slope and its next value."""
+        run = min(track.rising, len(track.values))
+
+        if (run < FORECAST_MIN_RUN):
+            return (None, None)
+
+        values = list(track.values)[-run:]
+        mean_x = (run - 1) / 2
+        mean_y = statistics.fmean(values)
+        spread = sum((x - mean_x)**2 for x in range(run))
+        slope = sum((x - mean_x) * (y - mean_y) for (x, y) in enumerate(values)) / spread
+
+        return (slope, mean_y + slope * (run - mean_x))
 
     @staticmethod
     def _sigma(track: _EntityTrack) -> typing.Optional[float]:

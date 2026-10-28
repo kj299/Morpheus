@@ -131,6 +131,20 @@ a lag is measured from, and a consumer comparing them should not have to convert
 MODEL_COLUMNS = (MODEL_VERSION_COLUMN, MODEL_FALLBACK_COLUMN)
 """Control 1 on the row: the model a scored event was scored against, and whether that was a fallback."""
 
+DAILY_DRIFT_COLUMNS = ("day_window_id",
+                       "drift_mature",
+                       "drift_rising_windows",
+                       "drift_total_rise",
+                       "drift_rise_sigmas",
+                       "drift_baseline_sigma",
+                       "drift_velocity",
+                       "drift_acceleration",
+                       "drift_trend_per_window",
+                       "drift_forecast_next",
+                       "drift_windows_to_ceiling")
+"""The daily trajectory TC5DriftStage stamps behind a daily seal, with its forecast, which the layer 7 trajectory rules
+read off a DNS, an HTTP and an endpoint row alike."""
+
 L1_PORT_COLUMNS = ("port_id",
                    "transceiver_serial",
                    "transceiver_serial_changed",
@@ -436,10 +450,11 @@ PRODUCED: dict = {
             time_columns=ENVELOPE_TIME_COLUMNS,
             producer="The TC-7 DNS, HTTP and service stages behind WindowSealStage, the `tc7_dns`, `tc7_http` and "
             "`tc7_service` classes of `tests/morpheus/determinism/application_pipeline.py`, the last two enriched by "
-            "TC0EnrichStage with the CMDB's application and the first followed by a daily TC5DriftStage; and "
+            "TC0EnrichStage with the CMDB's application and the first two followed by a daily TC5DriftStage; and "
             "TC7SaasStage, enriched by TC0EnrichStage and followed by a weekly TC5DriftStage, the `tc7_saas` class of "
             "`tests/morpheus/determinism/saas_pipeline.py`; and TC7EndpointStage, enriched by TC0EnrichStage with the "
-            "host's asset record, the `tc7_endpoint` class of `tests/morpheus/determinism/endpoint_pipeline.py`.",
+            "host's asset record and followed by a daily TC5DriftStage, the `tc7_endpoint` class of "
+            "`tests/morpheus/determinism/endpoint_pipeline.py`.",
             # R-B-L7-001 and R-D-L7-005 read the DNS and HTTP columns. The two count columns are here as well as the
             # ratio because the ratio is undefined for a client with no successes, and the search reads the counts
             # for that reason. R-B-L7-002 and R-P-L7-006 read the SaaS columns, the context the enrichment attached,
@@ -452,7 +467,9 @@ PRODUCED: dict = {
             # R-B-L7-001, R-D-L7-005 and R-B-L7-008 read each client's baseline beside its count, and R-B-L4-004 the
             # operating system a request's user agent claims. R-B-L7-007 reads the service sub-class: a service's
             # clients against its busiest day, the client software new to it, and the application that answered.
-            # R-P-L7-009 reads the daily trajectory TC5DriftStage stamps over each DNS client's busiest domain.
+            # R-P-L7-009 reads the daily trajectory TC5DriftStage stamps over each DNS client's busiest domain,
+            # R-P-L7-010 the one over each HTTP client's busiest ten minutes of paths, and R-P-L7-011 the one over the
+            # distinct process pairs each host starts in a day, each with the line through its run.
             required_columns=("event_uid",
                               "entity_key",
                               "lineage_id",
@@ -478,14 +495,7 @@ PRODUCED: dict = {
                  "dns_domains_per_client_ratio",
                  "dns_nxdomain_in_window",
                  "dns_nxdomain_ratio",
-                 "day_window_id",
-                 "drift_mature",
-                 "drift_rising_windows",
-                 "drift_total_rise",
-                 "drift_rise_sigmas",
-                 "drift_baseline_sigma",
-                 "drift_velocity",
-                 "drift_acceleration"),
+                 *DAILY_DRIFT_COLUMNS),
                 ("src_ip",
                  "host_key",
                  "mac_address",
@@ -503,7 +513,8 @@ PRODUCED: dict = {
                  "dst_ip",
                  "dst_port",
                  "ctx_application_found",
-                 "ctx_application_name"),
+                 "ctx_application_name",
+                 *DAILY_DRIFT_COLUMNS),
                 ("user_principal",
                  "operation",
                  "target_object_type",
@@ -544,7 +555,8 @@ PRODUCED: dict = {
                  "endpoint_integrity",
                  "endpoint_peer_group",
                  "endpoint_host_only",
-                 "signature_status"),
+                 "signature_status",
+                 *DAILY_DRIFT_COLUMNS),
                 ("src_ip",
                  "host_key",
                  "dst_ip",

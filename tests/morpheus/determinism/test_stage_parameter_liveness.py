@@ -2239,6 +2239,7 @@ REGISTRY: dict = {
                 Knob("max_entities", DIFFERS, benign=100_000, extreme=1),
                 Knob("decimals", DIFFERS, benign=4, extreme=1),
                 Knob("aggregate", DIFFERS, benign="none", extreme="mean", frame=repeated_days),
+                Knob("ceiling", DIFFERS, benign=None, extreme=6.0),
             ),
         ),
     "TC5TravelStage":

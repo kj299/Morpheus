@@ -97,7 +97,9 @@ PREDICTIVE = ("R-P-L5-006 - Drift trajectory",
               "R-P-L7-006 - Access breadth trajectory",
               "R-P-L3-009 - Host drift trajectory",
               "R-P-L6-006 - Client stack trajectory",
-              "R-P-L7-009 - Subdomain count trajectory")
+              "R-P-L7-009 - Subdomain count trajectory",
+              "R-P-L7-010 - Path count trajectory",
+              "R-P-L7-011 - Process breadth trajectory")
 SUMMARY = "Behavior summary - per-layer scores"
 TRAJECTORY = "R-P-L3-005 - Fan-out trajectory"
 CHAIN = "Chain assembly - cross-layer risk"

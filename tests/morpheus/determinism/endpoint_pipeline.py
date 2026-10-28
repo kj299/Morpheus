@@ -40,6 +40,14 @@ because that is what an EDR log looks like at logon. On day 40, eight processes 
 - the **kiosk starts Notepad**, which it last did on day 20, and is quiet on its own history;
 - and the **lab machine**, four days old, starts `nmap`, and is quiet because no comparison is possible yet.
 
+**One host's breadth creeps.** From day 27 the second build server takes up one more each day of the five tool pairs
+the first runs every morning, and keeps them: never a pair R-B-L7-004 can call new, since its peer runs them all, and
+a host starting more distinct pairs every day than the day before, which is R-P-L7-011's trajectory. The daily
+distinct count is measured over a second seal, by day, behind the hourly one. The creep ends nine days before the
+decisive day, so the watchlist entries it writes are a month old when a search head's expiry job reads them, as the
+other trajectories' entries in their corpora's first weeks are, while R-B-L7-004, which reads the list before the
+expiry runs, still raises the build server's curl by the watchlist's boost.
+
 **One host, two spellings.** From day 20 the EDR on the first finance workstation reports it as `FIN-01` where it had
 reported `fin-01`, as an agent upgrade does. Keyed as text that is a new host with no history and no inventory record,
 judged alone and immature for a week; keyed with the shared host rule it is the same workstation throughout, which is
@@ -70,6 +78,9 @@ from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
+from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
+from morpheus.stages.telemetry.tc7_endpoint_stage import HOST_KEY
+from morpheus.stages.telemetry.tc7_endpoint_stage import PAIR
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.bitemporal import BitemporalStore
@@ -96,17 +107,20 @@ UNKNOWN_CRITICALITY_WEIGHT = 1.0
 WINDOW_DAYS = 30
 WARMUP_DAYS = 7
 
+DAY_SECONDS = 86400
+DRIFT_PREFIX = "day_"
+
 SETTINGS = {
     "period_seconds": PERIOD_SECONDS,
     "lateness_seconds": LATENESS_SECONDS,
     "window_days": WINDOW_DAYS,
     "warmup_days": WARMUP_DAYS,
+    "day_seconds": DAY_SECONDS,
 }
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-B-L7-004", )
+RULES = ("R-B-L7-004", "R-P-L7-011")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
-DAY_SECONDS = 86400
 LAST_DAY = 40
 """The day the eight processes that decide the rule run. Every day before it is history."""
 
@@ -146,6 +160,13 @@ TEAMVIEWER = r"C:\Program Files\TeamViewer\TeamViewer.exe"
 NOTEPAD = r"C:\Windows\System32\notepad.exe"
 MSHTA = r"C:\Windows\System32\mshta.exe"
 NMAP = r"C:\Program Files (x86)\Nmap\nmap.exe"
+GRADLE = r"C:\Tools\gradle\bin\gradle.exe"
+NUGET = r"C:\Tools\nuget.exe"
+DOTNET = r"C:\Program Files\dotnet\dotnet.exe"
+PYTHON = r"C:\Program Files\Python312\python.exe"
+CMAKE = r"C:\Program Files\CMake\bin\cmake.exe"
+BUILD_TOOLS = ((JAVA, GRADLE), (MSBUILD, NUGET), (MSBUILD, DOTNET), (JAVA, PYTHON), (MSBUILD, CMAKE))
+"""The tool pairs the first build server runs every morning, which the second takes up one a day at the end."""
 KIOSK_APP = r"C:\Program Files\Kiosk\kiosk-shell.exe"
 
 
@@ -171,6 +192,10 @@ HOST_SEEN = KIOSK
 """Notepad on the kiosk, which last ran it on day 20. Quiet."""
 WARMING_UP = LAB
 """`nmap` on a machine four days old. Quiet."""
+
+CREEPING = "build-02"
+"""A build server that takes up one more of its peer's tool pairs every day for five days. R-P-L7-011's host."""
+CREEP_FIRST_DAY = 27
 
 STALE_FIRST_DAY = 2
 """Inside the warm-up, so the tool's first run is history rather than an alert of its own."""
@@ -273,6 +298,14 @@ def _logon(rows: list, host: str, day: int):
         _process(rows, host, MSBUILD, COMPILER, at(day, 9, 20), "High")
         _process(rows, host, WORD, POWERSHELL, at(day, 9, 30), "High")
 
+        for (index, (parent, image)) in enumerate(BUILD_TOOLS):
+            _process(rows, host, parent, image, at(day, 9, 40 + index), "High")
+
+    if (host == CREEPING and day >= CREEP_FIRST_DAY):
+        # One more of its peer's tools each day: one on the first, all five from the fifth on.
+        for (index, (parent, image)) in enumerate(BUILD_TOOLS[:day - CREEP_FIRST_DAY + 1]):
+            _process(rows, host, parent, image, at(day, 9, 40 + index), "High")
+
     if (host == "fin-02"):
         # The editor, installed under Bob's profile.
         _process(rows, host, EXPLORER, editor(FINANCE_HOSTS[host]), at(day, 9, 20))
@@ -362,6 +395,20 @@ def run_pipeline(config: Config,
                         lateness_seconds=LATENESS_SECONDS,
                         order_columns=list(DEFAULT_ORDER_COLUMNS),
                         entity_key_column="entity_key"))
+    # The daily trajectory R-P-L7-011 reads: a second seal over days behind the hourly one, and the drift stage over
+    # the distinct process pairs each host started in the day.
+    pipe.add_stage(
+        WindowSealStage(config,
+                        period_seconds=DAY_SECONDS,
+                        lateness_seconds=LATENESS_SECONDS,
+                        order_columns=list(DEFAULT_ORDER_COLUMNS),
+                        column_prefix=DRIFT_PREFIX))
+    pipe.add_stage(
+        TC5DriftStage(config,
+                      entity_column=HOST_KEY,
+                      score_column=PAIR,
+                      window_column=f"{DRIFT_PREFIX}window_id",
+                      aggregate="distinct"))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()

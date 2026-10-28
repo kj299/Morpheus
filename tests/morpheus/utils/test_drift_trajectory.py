@@ -233,6 +233,46 @@ def test_replaying_a_stream_reproduces_it():
     assert run() == run()
 
 
+def test_a_run_of_two_is_a_velocity_and_carries_no_projection():
+    results = feed(tracker(), FLAT + [1.4])
+
+    assert results[-1].rising_windows == 2
+    assert results[-1].trend_per_window is None
+    assert results[-1].forecast_next is None
+
+
+def test_a_rising_run_is_projected_along_its_own_line():
+    # The run starts at the last flat window, 0.95, and climbs by exactly 0.5 a window: the line through it is that
+    # climb, and the next window is half a unit above the last.
+    results = feed(tracker(), FLAT + [1.45, 1.95, 2.45])
+
+    assert results[-1].rising_windows == 4
+    assert results[-1].trend_per_window == pytest.approx(0.5)
+    assert results[-1].forecast_next == pytest.approx(2.95)
+
+
+def test_the_projection_is_fitted_to_the_run_and_not_to_the_flat_history_before_it():
+    # A fit over all nine windows would be pulled towards the flat six and give a fraction of the climb.
+    results = feed(tracker(), FLAT + [2.0, 3.0, 4.0])
+
+    assert results[-1].trend_per_window == pytest.approx(1.0, abs=0.06)
+
+
+def test_an_uneven_run_is_projected_by_least_squares():
+    results = feed(tracker(), [1.0, 2.0, 2.5, 4.5])
+
+    # x = 0..3 against 1, 2, 2.5, 4.5: slope 1.1, and the line at x = 4 is 2.5 + 1.1 * 2.5.
+    assert results[-1].trend_per_window == pytest.approx(1.1)
+    assert results[-1].forecast_next == pytest.approx(5.25)
+
+
+def test_a_broken_run_carries_no_projection():
+    results = feed(tracker(), [1.0, 2.0, 3.0, 2.5])
+
+    assert results[2].trend_per_window == pytest.approx(1.0)
+    assert results[-1].trend_per_window is None
+
+
 def test_the_constructor_refuses_values_it_cannot_use():
     with pytest.raises(ValueError, match="max_windows must be at least 2"):
         DriftTrajectoryTracker(max_windows=1)

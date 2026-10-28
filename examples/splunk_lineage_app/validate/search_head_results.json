@@ -1,10 +1,10 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-26T12:24:31.898983+00:00",
+  "at": "2026-10-28T16:45:29.821686+00:00",
   "timestamp_shift_weeks": 2955,
   "dispatch_window": {
     "earliest": 1787097600,
-    "latest": 1793020895
+    "latest": 1793209357
   },
   "indexed": {
     "binding:bucketed": 3000,
@@ -15,7 +15,7 @@
     "context:identity": 23,
     "context:network": 20,
     "morpheus:edge": 2768,
-    "morpheus:health": 1098,
+    "morpheus:health": 1099,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
     "morpheus:score:host": 1568,
@@ -25,7 +25,7 @@
     "morpheus:score:l4": 1011,
     "morpheus:score:l5": 661,
     "morpheus:score:l6": 649,
-    "morpheus:score:l7": 8354
+    "morpheus:score:l7": 9219
   },
   "expected_indexed": {
     "binding:bucketed": 3000,
@@ -36,7 +36,7 @@
     "context:identity": 23,
     "context:network": 20,
     "morpheus:edge": 2768,
-    "morpheus:health": 1098,
+    "morpheus:health": 1099,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
     "morpheus:score:host": 1568,
@@ -46,14 +46,14 @@
     "morpheus:score:l4": 1011,
     "morpheus:score:l5": 661,
     "morpheus:score:l6": 649,
-    "morpheus:score:l7": 8354
+    "morpheus:score:l7": 9219
   },
   "btool_check": "",
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-5073722.000000",
-        "min_drift": "-5833322.000000"
+        "max_drift": "-5262180.000000",
+        "min_drift": "-6021780.000000"
       }
     ],
     "binding_tables": [
@@ -101,6 +101,16 @@
         "rule_id": "R-P-L7-009",
         "reason": "subdomain-trajectory",
         "count": "4"
+      },
+      {
+        "rule_id": "R-P-L7-010",
+        "reason": "path-trajectory",
+        "count": "4"
+      },
+      {
+        "rule_id": "R-P-L7-011",
+        "reason": "process-breadth-trajectory",
+        "count": "3"
       }
     ],
     "three_layer_chain_risk": [
@@ -118,8 +128,8 @@
       }
     ],
     "risk_records": {
-      "written": 235,
-      "indexed": 235,
+      "written": 242,
+      "indexed": 242,
       "by_rule": [
         {
           "rule_id": "R-B-L1-005",
@@ -352,6 +362,14 @@
         {
           "rule_id": "R-P-L7-009",
           "count": "4"
+        },
+        {
+          "rule_id": "R-P-L7-010",
+          "count": "4"
+        },
+        {
+          "rule_id": "R-P-L7-011",
+          "count": "3"
         }
       ]
     }
@@ -367,6 +385,8 @@
     "R-P-L3-009 - Host drift trajectory",
     "R-P-L6-006 - Client stack trajectory",
     "R-P-L7-009 - Subdomain count trajectory",
+    "R-P-L7-010 - Path count trajectory",
+    "R-P-L7-011 - Process breadth trajectory",
     "Topology - LLDP adjacency",
     "R-C-002 - TLS anomaly precedes beaconing",
     "R-C-001 - Lateral movement chain",
@@ -481,6 +501,14 @@
     "R-P-L7-009 - Subdomain count trajectory": {
       "phase": "predictive",
       "rows": 4
+    },
+    "R-P-L7-010 - Path count trajectory": {
+      "phase": "predictive",
+      "rows": 4
+    },
+    "R-P-L7-011 - Process breadth trajectory": {
+      "phase": "predictive",
+      "rows": 3
     },
     "Topology - LLDP adjacency": {
       "phase": "search",
@@ -740,7 +768,7 @@
     },
     "Behavior summary - per-layer scores": {
       "phase": "summary",
-      "rows": 8969
+      "rows": 9032
     },
     "R-P-L3-005 - Fan-out trajectory": {
       "phase": "trajectory",

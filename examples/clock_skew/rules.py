@@ -661,6 +661,16 @@ SUBDOMAIN_RISING_WINDOWS = threshold(SUBDOMAIN_TRAJECTORY, r"rising_threshold\s*
 SUBDOMAIN_RISE_SIGMAS = threshold(SUBDOMAIN_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
 requires(SUBDOMAIN_TRAJECTORY, r"drift_mature=true")
 requires(SUBDOMAIN_TRAJECTORY, r"dns_registered_domain=\*")
+PATH_TRAJECTORY = "R-P-L7-010 - Path count trajectory"
+PATH_RISING_WINDOWS = threshold(PATH_TRAJECTORY, r"rising_threshold\s*=\s*([\d.]+)")
+PATH_RISE_SIGMAS = threshold(PATH_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
+requires(PATH_TRAJECTORY, r"drift_mature=true")
+requires(PATH_TRAJECTORY, r"http_distinct_paths=\*")
+PROCESS_TRAJECTORY = "R-P-L7-011 - Process breadth trajectory"
+PROCESS_RISING_WINDOWS = threshold(PROCESS_TRAJECTORY, r"rising_threshold\s*=\s*([\d.]+)")
+PROCESS_RISE_SIGMAS = threshold(PROCESS_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
+requires(PROCESS_TRAJECTORY, r"drift_mature=true")
+requires(PROCESS_TRAJECTORY, r"endpoint_pair=\*")
 
 
 def _measured(frame: pd.DataFrame, column: str, multiple: float) -> pd.Series:
@@ -670,9 +680,10 @@ def _measured(frame: pd.DataFrame, column: str, multiple: float) -> pd.Series:
 
 def application_decisions(result: pd.DataFrame) -> dict:
     """
-    R-B-L7-001, R-B-L7-008 and R-P-L7-009 over DNS, R-D-L7-005 over HTTP and R-B-L7-007 over the services.
-    R-P-L7-009 is keyed on the client and the day it fired, as the search deduplicates, and reads the daily drift
-    the hourly DNS rows carry; a row without a registered domain is not a DNS row to it.
+    R-B-L7-001, R-B-L7-008 and R-P-L7-009 over DNS, R-D-L7-005 and R-P-L7-010 over HTTP and R-B-L7-007 over the
+    services. The two trajectories are keyed on the client and the day each fired, as the searches deduplicate, and
+    read the daily drift the hourly rows carry; a row without a registered domain is not a DNS row to R-P-L7-009, and
+    one without a distinct-path count is not an HTTP row to R-P-L7-010.
     """
     dns = rows(result, "tc7_dns")
     http = rows(result, "tc7_http")
@@ -691,6 +702,9 @@ def application_decisions(result: pd.DataFrame) -> dict:
     slow = dns[dns["dns_registered_domain"].notna() & true(dns, "drift_mature")
                & (number(dns, "drift_rising_windows") >= SUBDOMAIN_RISING_WINDOWS)
                & (number(dns, "drift_rise_sigmas") > SUBDOMAIN_RISE_SIGMAS)]
+    probing = http[http["http_distinct_paths"].notna() & true(http, "drift_mature")
+                   & (number(http, "drift_rising_windows") >= PATH_RISING_WINDOWS)
+                   & (number(http, "drift_rise_sigmas") > PATH_RISE_SIGMAS)]
 
     reached = set()
     measured = services[true(services, "service_clients_baseline_mature")] if len(services) > 0 else services
@@ -712,6 +726,7 @@ def application_decisions(result: pd.DataFrame) -> dict:
         "R-B-L7-007": reached,
         "R-B-L7-008": keys(generating, ["src_ip"]),
         "R-P-L7-009": keys(slow, ["src_ip", "day_window_id"]),
+        "R-P-L7-010": keys(probing, ["src_ip", "day_window_id"]),
     }
 
 
@@ -755,10 +770,19 @@ def saas_decisions(result: pd.DataFrame) -> dict:
 
 
 def endpoint_decisions(result: pd.DataFrame) -> dict:
-    """R-B-L7-004: `endpoint_pair_novel=true`, one notable per pair per host."""
+    """
+    R-B-L7-004: `endpoint_pair_novel=true`, one notable per pair per host. R-P-L7-011: the daily breadth trajectory,
+    keyed on the host and the day it fired, as the search deduplicates.
+    """
     endpoint = rows(result, "tc7_endpoint")
+    widening = endpoint[endpoint["endpoint_pair"].notna() & true(endpoint, "drift_mature")
+                        & (number(endpoint, "drift_rising_windows") >= PROCESS_RISING_WINDOWS)
+                        & (number(endpoint, "drift_rise_sigmas") > PROCESS_RISE_SIGMAS)]
 
-    return {"R-B-L7-004": keys(endpoint[true(endpoint, "endpoint_pair_novel")], ["endpoint_host", "endpoint_pair"])}
+    return {
+        "R-B-L7-004": keys(endpoint[true(endpoint, "endpoint_pair_novel")], ["endpoint_host", "endpoint_pair"]),
+        "R-P-L7-011": keys(widening, ["endpoint_host", "day_window_id"]),
+    }
 
 
 # --- The host segment, over the host score corpus -------------------------------------------------------------

@@ -110,7 +110,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 83
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 85
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
@@ -127,7 +127,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     # the trajectory rule reads it.
     writers = [name for name in names if runner.writes_risk(name)]
 
-    assert len(writers) == 59
+    assert len(writers) == 61
     assert max(position[name] for name in writers) < position[runner.CHAIN]
     assert position[runner.SUMMARY] < position[runner.TRAJECTORY] < position[runner.CHAIN]
     assert min(position[name] for name in expiries) > max(position[name] for name in names if name not in expiries)
@@ -312,6 +312,17 @@ one three-layer chain carries R-D-L1-002's 50 and R-D-L2-003's 55 together and t
 earlier run found the two accusations on different chains and the search empty. The ARP anomaly's own row count did
 not move, because it groups by the contested address, and neither did the summary's, because the spoof's rows join a
 group the window already had.
+"""
+
+BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES = {
+    "Behavior summary - per-layer scores": 8969,
+}
+"""What every run before plan section 3.3's trajectories found where its corpora changed the answer.
+
+The application corpus gained a client that probes the web server a little more every morning and the endpoint corpus
+a build server that takes up its peer's tools one a day, and the summary groups both; the two searches section 3.3
+added are absent from the earlier runs and are not compared. R-B-L7-004 returns the same eleven rows and raises one by
+the watchlist's boost, which a row count does not see. Each older step's summary figure overrides this one's.
 """
 
 
@@ -528,7 +539,7 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS
     }
-    assert len(run["searches"]) == 52 and len(expected) == 83
+    assert len(run["searches"]) == 52 and len(expected) == 85
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
 
 
@@ -568,7 +579,7 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
         **BEFORE_THE_LEASES,
         **BEFORE_THE_PLATFORM
     }
-    assert len(run["searches"]) == 62 and len(expected) == 83
+    assert len(run["searches"]) == 62 and len(expected) == 85
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -599,7 +610,7 @@ def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arriv
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
     }
-    assert len(run["searches"]) == 66 and len(expected) == 83
+    assert len(run["searches"]) == 66 and len(expected) == 85
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -629,7 +640,7 @@ def test_the_ninth_run_differs_from_what_is_written_only_where_the_services_arri
         **_present(BEFORE_THE_DEVICES, run),
         **BEFORE_THE_SERVICES
     }
-    assert len(run["searches"]) == 72 and len(expected) == 83
+    assert len(run["searches"]) == 72 and len(expected) == 85
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -656,7 +667,7 @@ def test_the_tenth_run_differs_from_what_is_written_only_where_the_devices_arriv
     assert differing == {
         **_present(BEFORE_THE_DESK_SPOOF, run), **_present(BEFORE_THE_TRAJECTORIES, run), **BEFORE_THE_DEVICES
     }
-    assert len(run["searches"]) == 75 and len(expected) == 83
+    assert len(run["searches"]) == 75 and len(expected) == 85
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 213
 
 
@@ -695,7 +706,7 @@ def test_the_eleventh_run_differs_from_what_is_written_only_where_the_host_segme
     }
 
     assert differing == {**BEFORE_THE_DESK_SPOOF, **BEFORE_THE_HOSTS}
-    assert len(run["searches"]) == 78 and len(expected) == 83
+    assert len(run["searches"]) == 78 and len(expected) == 85
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 221
 
 
@@ -720,8 +731,8 @@ def test_the_twelfth_run_differs_from_what_is_written_only_where_the_trajectory_
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == {**BEFORE_THE_DESK_SPOOF, **BEFORE_THE_TRAJECTORIES}
-    assert len(run["searches"]) == 80 and len(expected) == 83
+    assert differing == {**BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES, **BEFORE_THE_DESK_SPOOF, **BEFORE_THE_TRAJECTORIES}
+    assert len(run["searches"]) == 80 and len(expected) == 85
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 224
     assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009"}
 
@@ -733,8 +744,9 @@ THIRTEENTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-23T1125Z.js
 def test_the_thirteenth_run_differs_from_what_is_written_only_where_the_desk_spoof_arrived():
     # Made on 2026-10-23 when the daily drift reached the TLS and DNS columns: all eighty-two then matched, with 233
     # risk records, and the host watchlist held R-P-L3-009's three, R-P-L6-006's three and R-P-L7-009's four. Against
-    # the events the desk spoof regenerated it differs in the chain search alone, which it found empty for the
-    # last of its four reasons: the two detections that accused a three-layer chain accused different chains.
+    # the events the desk spoof regenerated it differs in the chain search, which it found empty for the last of its
+    # four reasons: the two detections that accused a three-layer chain accused different chains; and against the
+    # events section 3.3 added, in the summary.
     with open(THIRTEENTH_RUN, encoding="utf-8") as handle:
         run = json.load(handle)
 
@@ -746,13 +758,47 @@ def test_the_thirteenth_run_differs_from_what_is_written_only_where_the_desk_spo
         for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
     }
 
-    assert differing == BEFORE_THE_DESK_SPOOF
-    assert len(run["searches"]) == 82 and len(expected) == 83
+    assert differing == {**BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES, **BEFORE_THE_DESK_SPOOF}
+    assert len(run["searches"]) == 82 and len(expected) == 85
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 233
     assert {
         row["total_risk"]: int(row["count"])
         for row in run["checks"]["three_layer_chain_risk"]
     } == {
         "0": 13, "50": 1, "55": 1
+    }
+    assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009", "R-P-L6-006", "R-P-L7-009"}
+
+
+FOURTEENTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-26T1224Z.json")
+"""The run over the events the desk spoof and the network inventory added; it matched everything then written."""
+
+
+def test_the_fourteenth_run_differs_from_what_is_written_only_where_the_http_and_process_trajectories_arrived():
+    # Made on 2026-10-26 when the network inventory arrived: all eighty-three then matched, with 235 risk records, and
+    # the host watchlist held the three host rules' entries. Against the events section 3.3 added it differs in the
+    # summary alone, and has neither R-P-L7-010 nor R-P-L7-011.
+    with open(FOURTEENTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES
+    assert len(run["searches"]) == 83 and len(expected) == 85
+    assert set(expected) - set(run["searches"]) == {
+        "R-P-L7-010 - Path count trajectory", "R-P-L7-011 - Process breadth trajectory"
+    }
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 235
+    assert {
+        row["total_risk"]: int(row["count"])
+        for row in run["checks"]["three_layer_chain_risk"]
+    } == {
+        "0": 13, "135": 1, "55": 1
     }
     assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009", "R-P-L6-006", "R-P-L7-009"}
