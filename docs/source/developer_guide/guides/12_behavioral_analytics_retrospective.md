@@ -302,7 +302,7 @@ because every reader marked persistence as out of the delivery lens's remit.
 
 **Re-verified 2026-10-22**, against the tree at the merge of pull request #99, by reading each row's claim
 against the code, the saved searches and the contracts rather than against the plan's status paragraphs. Of
-the eighty-nine rows, seventy-one are closed: the capability the row says is missing is in the tree with a
+the eighty-nine rows, seventy-two are closed: the capability the row says is missing is in the tree with a
 test, a stanza or a contract column behind it. Both rows marked blocking are among them: G03 by host
 identity (#63) and G10 by the service entity (#64). Eleven are narrowed to a remainder the row did not
 state (G09, G12, G20, G23, G39, G45, G49, G60, G65, G79, G82), of which one is open work: G20, hysteresis,
@@ -316,10 +316,12 @@ run and, given the level a rule fires at, counts the windows until the line reac
 section 3.1 to the layer 2 join: layer 1 keys a port on its `ifIndex` and a switch on its chassis serial, so a
 renamed port keeps its key, its history and its binding, but the layer 2 collectors still report the new name, and a
 renamed port meets them only through `reported_entity_key`. G70, TC-0 context keyed on a port, a device or a VLAN, closed under plan section 3.2: the network inventory's records
-are joined onto layer 1, the device class and layer 2, and R-D-L1-010 reads a port's commissioning level. Seven hold
-(G08, G48, G56, G69, G72, G74, G88): five as recorded decisions
-or out-of-scope items, and two, G72 (`TC1FeatureStage` in no composed pipeline) and G88 (control 13's
-fourth check through `CompareDataFrameStage` for the lineage pipeline only), as plain open items that no
+are joined onto layer 1, the device class and layer 2, and R-D-L1-010 reads a port's commissioning level. G88, control 13's fourth check
+through `CompareDataFrameStage` for the lineage pipeline only, closed under plan section 3.4:
+`test_golden_via_compare_dataframe_stage.py` sends every composed pipeline's canonical output through the stage
+against its golden, in both execution modes, with a negative control that changes one cell. Six hold
+(G08, G48, G56, G69, G72, G74): five as recorded decisions
+or out-of-scope items, and one, G72 (`TC1FeatureStage` in no composed pipeline), as a plain open item that no
 step has taken. G90, the ninetieth gap the critic added, now has a row, closed by step 16's first part.
 The Check column carries both verdicts, the readers' of 2026-10-03 and this one; the paragraphs above it
 are left as the readers wrote them. The gaps the plan's own status paragraphs name as closed (steps 10 to
@@ -419,7 +421,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G85 | minor | stands → closed | all | Part 6 Must-be-built table omits most not built items and keeps a stale row | #52 |
 | G86 | minor | stands → closed | all | Guide Summary and Part 3 contradict themselves and the code on what ships | #52 |
 | G87 | minor | stands → closed | all | GPU and model-run verdict artifacts are not in the tree | #58 |
-| G88 | minor | stands → holds | all | Control 13 check 4 (CompareDataFrameStage) exists only for the lineage pipeline | #52 |
+| G88 | minor | stands → holds → closed | all | Control 13 check 4 (CompareDataFrameStage) exists only for the lineage pipeline | #52 |
 | G89 | minor | stands → closed | users | Field-contract linter omits the estate golden | #53 |
 | G90 | major | added 2026-10-04 → closed | all | Tracker state does not survive a process restart: every per-entity tracker is rebuilt empty, so a resumed pipeline forgets every baseline | #68 |
 

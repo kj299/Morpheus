@@ -65,6 +65,7 @@ TARGETS=(
     tests/morpheus/determinism/test_determinism_harness.py
     tests/morpheus/determinism/test_endpoint_harness.py
     tests/morpheus/determinism/test_estate_harness.py
+    tests/morpheus/determinism/test_golden_via_compare_dataframe_stage.py
     tests/morpheus/determinism/test_gpu_parity.py
     tests/morpheus/determinism/test_host_score_harness.py
     tests/morpheus/determinism/test_network_harness.py
