@@ -473,6 +473,64 @@ def test_the_search_carries_the_weights_this_harness_asserts():
     assert "ctx_owner" in search
 
 
+# --- R-P-L7-011: the creeping build server, quiet to R-B-L7-004 and over the trajectory ---------------------------
+
+RISING_WINDOWS = 4
+RISE_SIGMAS = 1.5
+"""R-P-L7-011's trajectory, R-P-L5-006's two conditions asked of a host's daily breadth. The validation package reads
+them from the stanza; here they are stated, so a changed rule and a changed corpus fail differently."""
+
+
+def _daily_breadth(result: pd.DataFrame, host: str) -> pd.DataFrame:
+    rows = result[result["endpoint_host"] == host]
+    days = rows["event_time"].astype("int64") // (ep_.DAY_SECONDS * ep_.NS_PER_SECOND)
+
+    return rows.assign(day=days).groupby("day").agg(pairs=("endpoint_pair", "nunique"),
+                                                    rising=("drift_rising_windows", "max"),
+                                                    rise_sigmas=("drift_rise_sigmas", "max"),
+                                                    mature=("drift_mature", "max")).reset_index()
+
+
+@pytest.mark.cpu_mode
+def test_the_creeping_build_server_is_watchlisted_on_the_last_three_days_of_its_creep(result: pd.DataFrame):
+    # Four pairs a day for thirty days, then one more of its peer's tools each day until it runs all five, and on the
+    # decisive day the compile and the curl as well: a run of rising days that is four long on the creep's third day,
+    # the first R-P-L7-011 can report, and over on its fifth.
+    daily = _daily_breadth(result, ep_.CREEPING).set_index("day")
+    tools = len(ep_.BUILD_TOOLS)
+    creep = range(ep_.CREEP_FIRST_DAY, ep_.CREEP_FIRST_DAY + tools)
+
+    assert set(daily.loc[:ep_.CREEP_FIRST_DAY - 1, "pairs"]) == {4}
+    assert list(daily.loc[list(creep), "pairs"]) == [4 + k for k in range(1, tools + 1)]
+    assert set(daily.loc[ep_.CREEP_FIRST_DAY + tools:ep_.LAST_DAY - 1, "pairs"]) == {4 + tools}
+    assert daily.loc[ep_.LAST_DAY, "pairs"] == 4 + tools + 2
+
+    fired = daily[daily["mature"].astype("boolean").fillna(False) & (daily["rising"] >= RISING_WINDOWS)
+                  & (daily["rise_sigmas"].astype("Float64").fillna(0) > RISE_SIGMAS)]
+
+    assert list(fired.index) == list(range(ep_.CREEP_FIRST_DAY + RISING_WINDOWS - 2, creep[-1] + 1))
+
+
+@pytest.mark.cpu_mode
+def test_no_pair_the_creeping_build_server_takes_up_is_new_to_its_peer_group(result: pd.DataFrame):
+    # Why the trajectory exists: every tool it takes up its peer has run every morning, so R-B-L7-004 is quiet on all
+    # of them and fires on the build server only for the curl, as before.
+    creeping = result[result["endpoint_host"] == ep_.CREEPING]
+    tools = {f"{normalize_image_path(parent)} -> {normalize_image_path(image)}" for (parent, image) in ep_.BUILD_TOOLS}
+    taken_up = creeping[creeping["endpoint_pair"].isin(tools)]
+
+    assert set(taken_up["endpoint_pair"]) == tools
+    assert not _flag(taken_up["endpoint_pair_novel"]).any()
+    assert _flag(taken_up["endpoint_peer_seen"]).all()
+
+
+@pytest.mark.cpu_mode
+def test_no_other_host_widens_for_four_days(result: pd.DataFrame):
+    others = result[result["endpoint_host"] != ep_.CREEPING]
+
+    assert others["drift_rising_windows"].astype("Float64").max() < RISING_WINDOWS
+
+
 # --- Stamping ------------------------------------------------------------------------------------------------------
 
 

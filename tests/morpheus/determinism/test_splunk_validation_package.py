@@ -38,6 +38,8 @@ import typing
 import pandas as pd
 import pytest
 
+from morpheus.stages.telemetry.tc7_endpoint_stage import normalize_image_path
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 VALIDATE = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "validate")
 EXPECTED = os.path.join(VALIDATE, "expected_results.json")
@@ -55,6 +57,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import campaign_pipeline  # noqa: E402
+import endpoint_pipeline  # noqa: E402
 import session_pipeline as sp  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 
@@ -104,6 +107,12 @@ STACK_RISING_THRESHOLD = threshold(STACK_TRAJECTORY, r"rising_threshold\s*=\s*([
 STACK_SIGMA_THRESHOLD = threshold(STACK_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
 SUBDOMAIN_RISING_THRESHOLD = threshold(SUBDOMAIN_TRAJECTORY, r"rising_threshold\s*=\s*([\d.]+)")
 SUBDOMAIN_SIGMA_THRESHOLD = threshold(SUBDOMAIN_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
+PATH_TRAJECTORY = "R-P-L7-010 - Path count trajectory"
+BREADTH_TRAJECTORY = "R-P-L7-011 - Process breadth trajectory"
+PATH_RISING_THRESHOLD = threshold(PATH_TRAJECTORY, r"rising_threshold\s*=\s*([\d.]+)")
+PATH_SIGMA_THRESHOLD = threshold(PATH_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
+BREADTH_RISING_THRESHOLD = threshold(BREADTH_TRAJECTORY, r"rising_threshold\s*=\s*([\d.]+)")
+BREADTH_SIGMA_THRESHOLD = threshold(BREADTH_TRAJECTORY, r"sigma_threshold\s*=\s*([\d.]+)")
 FAILURE_RUN_THRESHOLD = threshold("R-D-L5-009 - Failed authentication run ending in success",
                                   r"failure_threshold\s*=\s*([\d.]+)")
 COMPOSITE_MAX_THRESHOLD = threshold("R-B-L5-001 - Composite authentication anomaly", r"max_threshold\s*=\s*([\d.]+)")
@@ -361,7 +370,7 @@ def test_the_host_drift_rule_returns_exactly_what_is_written(expected: dict):
     assert scored and all(event.get("max_abs_z") is not None and event.get("osi_layer") == 3 for event in scored)
 
 
-def _trajectory_days(events: list, rising: float, sigmas: float) -> tuple:
+def _trajectory_days(events: list, rising: float, sigmas: float, key: str = "src_ip") -> tuple:
     """A trajectory rule as its search states it: the rows that carry the trajectory, and the client-days they make."""
     fires = [
         event for event in events
@@ -374,7 +383,7 @@ def _trajectory_days(events: list, rising: float, sigmas: float) -> tuple:
         and float(event.get("drift_rise_sigmas") or 0) > sigmas
     ]
 
-    return (fires, immature, sorted({(event["src_ip"], int(event["day_window_id"])) for event in fires}))
+    return (fires, immature, sorted({(event[key], int(event["day_window_id"])) for event in fires}))
 
 
 def _asserts_one_client_from_its_fifth_day(entry: dict, fires: list, immature: list, client_days: list) -> None:
@@ -451,12 +460,71 @@ def test_the_subdomain_trajectory_returns_exactly_what_is_written(expected: dict
     assert rising[tunneller] == len(days)
     assert max(count for (client, count) in rising.items() if client != tunneller) < SUBDOMAIN_RISING_THRESHOLD
 
-    # The HTTP and service rows carry no trajectory, so the `dns_registered_domain=*` term costs nothing here; what it
-    # keeps out is the SaaS corpus's weekly drift, which shares the sourcetype and is R-P-L7-006's.
-    without = [event for event in _layer_7_events() if event.get("telemetry_class") in ("tc7_http", "tc7_service")]
+    # The HTTP rows carry a trajectory of their own, R-P-L7-010's, and the service rows none. The
+    # `dns_registered_domain=*` term keeps the slow enumerator's rising days out of this rule, as it keeps the SaaS
+    # corpus's weekly drift, which shares the sourcetype and is R-P-L7-006's.
+    http = [event for event in _layer_7_events() if event.get("telemetry_class") == "tc7_http"]
+    services = [event for event in _layer_7_events() if event.get("telemetry_class") == "tc7_service"]
 
-    assert without and all(event.get("drift_rising_windows") is None for event in without)
+    assert services and all(event.get("drift_rising_windows") is None for event in services)
+    assert _trajectory_days(http, SUBDOMAIN_RISING_THRESHOLD, SUBDOMAIN_SIGMA_THRESHOLD)[0]
+    assert not any(event.get("dns_registered_domain") for event in http)
     assert {event.get("host_key") for event in fires} == {"ws-0-46"}
+
+
+def test_the_path_trajectory_returns_exactly_what_is_written(expected: dict):
+    # R-P-L7-010 over the HTTP rows, as the search reads them: `http_distinct_paths=*` is the HTTP variant's row. The
+    # slow enumerator reads the column R-D-L7-005 reads and never reaches that rule's floor, which the layer 7 tests
+    # assert from the other side; its line is projected to reach it, and the row carries how many days that takes.
+    events = [event for event in _layer_7_events() if event.get("http_distinct_paths") is not None]
+    (fires, immature, client_days) = _trajectory_days(events, PATH_RISING_THRESHOLD, PATH_SIGMA_THRESHOLD)
+    entry = expected["searches"][PATH_TRAJECTORY]
+
+    _asserts_one_client_from_its_fifth_day(entry, fires, immature, client_days)
+
+    enumerator = client_days[0][0]
+    busiest = collections.defaultdict(int)
+    to_ceiling = {}
+
+    for event in events:
+        if (event.get("day_window_id") is not None and event["src_ip"] == enumerator):
+            day = int(event["day_window_id"])
+            busiest[day] = max(busiest[day], int(event["http_distinct_paths"]))
+            to_ceiling[day] = event.get("drift_windows_to_ceiling")
+
+    counts = [busiest[day] for day in sorted(busiest)]
+    floor = threshold("R-D-L7-005 - Enumeration", r"http_distinct_paths>(\d+)")
+
+    assert counts == sorted(counts) and len(set(counts)) == len(counts), "the probing climbs every day"
+    assert max(counts) < floor, "and never reaches the floor R-D-L7-005 reads"
+    assert [to_ceiling[day] for (_, day) in client_days] == [row["windows_to_ceiling"] for row in entry["key_values"]]
+    assert all(days > 0 for days in to_ceiling.values() if days is not None)
+    assert len({event.get("host_key") or event["src_ip"] for event in fires}) == 1
+
+
+def test_the_process_breadth_trajectory_returns_exactly_what_is_written(expected: dict):
+    # R-P-L7-011 over the endpoint rows, keyed on the host as the search deduplicates. Every pair the creeping build
+    # server takes up its peer already runs, so R-B-L7-004 is quiet on all of them; the breadth is what moves.
+    events = [event for event in _layer_7_events() if event.get("endpoint_pair") is not None]
+    (fires, _, host_days) = _trajectory_days(events, BREADTH_RISING_THRESHOLD, BREADTH_SIGMA_THRESHOLD, "endpoint_host")
+    entry = expected["searches"][BREADTH_TRAJECTORY]
+
+    assert entry["contributing_rows"] == len(fires)
+    assert entry["expected_rows"] == len(host_days)
+    assert [(row["endpoint_host"], row["day_window_id"]) for row in entry["key_values"]] == host_days
+    assert len({host for (host, _) in host_days}) == 1
+    tools = _peer_tool_pairs()
+
+    assert not any(event.get("endpoint_pair_novel") is True for event in fires if event.get("endpoint_pair") in tools)
+    assert {event.get("host_key") for event in fires} == {host_days[0][0]}
+
+
+def _peer_tool_pairs() -> set:
+    """The pairs the creeping build server takes up, as the endpoint stage spells them."""
+    return {
+        f"{normalize_image_path(parent)} -> {normalize_image_path(image)}"
+        for (parent, image) in endpoint_pipeline.BUILD_TOOLS
+    }
 
 
 def _true(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -590,8 +658,10 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
             assert re.search(rf"\b{field}\b", host_search), f"{name} writes no {field}"
 
     # The layer 6 and 7 rows name the host through the lease; a row the lease does not cover is keyed on its address.
-    for name in (STACK_TRAJECTORY, SUBDOMAIN_TRAJECTORY):
+    for name in (STACK_TRAJECTORY, SUBDOMAIN_TRAJECTORY, PATH_TRAJECTORY):
         assert "host_key = coalesce(host_key, src_ip)" in _stanza_search(name), name
+
+    assert "host_key = coalesce(host_key, endpoint_host)" in _stanza_search(BREADTH_TRAJECTORY)
 
     assert "lookup host_watchlist host_key AS endpoint_host OUTPUT" in _stanza_search(
         "R-B-L7-004 - Process ancestry novelty")
@@ -610,6 +680,10 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
     assert f"`R-P-L3-009` with `host-drift-trajectory` and {host_drift['expected_rows']} entries" in document
     assert f"`R-P-L6-006` with `stack-trajectory` and {stack['expected_rows']} entries" in document
     assert f"`R-P-L7-009` with `subdomain-trajectory` and {subdomains['expected_rows']} entries" in document
+    assert f"`R-P-L7-010` with `path-trajectory` and {expected['searches'][PATH_TRAJECTORY]['expected_rows']} entries" \
+        in document
+    assert (f"`R-P-L7-011` with `process-breadth-trajectory` and "
+            f"{expected['searches'][BREADTH_TRAJECTORY]['expected_rows']} entries") in document
 
     # None of the principals the bulk rule reports is watched, which is why its severities stand as written.
     watched = {row["user_principal"] for row in drift["key_values"] + breadth["key_values"]}
@@ -617,19 +691,13 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
 
     assert watched and not watched & bulk
 
-    # And none of the hosts the process-ancestry rule reports is on the hosts' list: the host corpus's machines
-    # share nothing with the endpoint corpus's, so R-B-L7-004's severities stand as written too.
-    watched_hosts = {row["host_key"] for row in host_drift["key_values"]}
-    handshakes = _events_of("morpheus_score_l6.jsonlines")
-    queries = [event for event in _events_of("morpheus_score_l7.jsonlines") if event.get("dns_registered_domain")]
-
-    for (events, rising, sigmas) in ((handshakes, STACK_RISING_THRESHOLD, STACK_SIGMA_THRESHOLD),
-                                     (queries, SUBDOMAIN_RISING_THRESHOLD, SUBDOMAIN_SIGMA_THRESHOLD)):
-        watched_hosts |= {event["host_key"] for event in _trajectory_days(events, rising, sigmas)[0]}
+    # And one host the process-ancestry rule reports is on the hosts' list: the creeping build server R-P-L7-011
+    # watches, whose curl is raised by the boost. The host corpus's machines share nothing with the endpoint corpus's.
+    watched_hosts = {entry["host_key"] for entry in _host_watchlist()}
     ancestry = expected["searches"]["R-B-L7-004 - Process ancestry novelty"]
     reported_hosts = {row["endpoint_host"] for row in ancestry["key_values"]}
 
-    assert len(watched_hosts) == 3 and reported_hosts and not watched_hosts & reported_hosts
+    assert len(watched_hosts) == 5 and watched_hosts & reported_hosts == {endpoint_pipeline.CREEPING}
 
 
 SCAN_SYN_RATIO = 0.9
@@ -1143,9 +1211,13 @@ def test_the_saas_detections_return_exactly_what_is_written(expected: dict):
 
 def test_the_endpoint_detection_returns_exactly_what_is_written(expected: dict):
     # Evaluated over the events the app is fed, the way the search reads them: one row at a time, the stage's
-    # novelty flag the trigger and the integrity level the severity, with no level at the default.
+    # novelty flag the trigger and the integrity level the severity, with no level at the default, and a host on the
+    # hosts' list raised by the boost. The list is the predictive searches' entries, which the runner dispatches
+    # first and expires last.
     severity = {"system": 70, "high": 55, "medium": 40, "low": 25}
     scale = {"high": 1.5, "low": 0.5}
+    boost = threshold("R-B-L7-004 - Process ancestry novelty", r"watchlist_boost\s*=\s*(\d+)")
+    watched = {entry["host_key"] for entry in _host_watchlist()}
     novel = [event for event in _layer_7_events() if event.get("endpoint_pair_novel") is True]
     derived = sorted(({
         "endpoint_host":
@@ -1157,7 +1229,8 @@ def test_the_endpoint_detection_returns_exactly_what_is_written(expected: dict):
         "endpoint_host_only":
             event["endpoint_host_only"],
         "risk_score":
-            round(severity.get(event.get("endpoint_integrity"), 40) * scale.get(event.get("ctx_criticality"), 1.0)),
+            round(severity.get(event.get("endpoint_integrity"), 40) * scale.get(event.get("ctx_criticality"), 1.0)) +
+            (boost if event["endpoint_host"] in watched else 0),
     } for event in novel),
                      key=lambda row: (row["endpoint_host"], row["risk_score"]))
     entry = expected["searches"]["R-B-L7-004 - Process ancestry novelty"]
@@ -1746,6 +1819,8 @@ NUMBER_WORDS = {
     "eighty-one": 81,
     "eighty-two": 82,
     "eighty-three": 83,
+    "eighty-four": 84,
+    "eighty-five": 85,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -2617,7 +2692,7 @@ def _principal_watchlist() -> list:
 
 
 def _host_watchlist() -> list:
-    """The rows the three host rules write: the latest row of each host-day each fired, keyed as the stanzas key them,
+    """The rows the five host rules write: the latest row of each host-day each fired, keyed as the stanzas key them,
     on the host the lease names or the address where no lease covers the row."""
     drift = [
         event for event in _events_of("morpheus_score_host.jsonlines")
@@ -2631,19 +2706,26 @@ def _host_watchlist() -> list:
                        "host_key")
     queries = [event for event in _layer_7_events() if event.get("dns_registered_domain") is not None]
 
-    for (name, rule_id, events, rising, sigmas) in ((STACK_TRAJECTORY,
-                                                     "R-P-L6-006",
-                                                     _events_of("morpheus_score_l6.jsonlines"),
-                                                     STACK_RISING_THRESHOLD,
-                                                     STACK_SIGMA_THRESHOLD),
-                                                    (SUBDOMAIN_TRAJECTORY,
-                                                     "R-P-L7-009",
-                                                     queries,
-                                                     SUBDOMAIN_RISING_THRESHOLD,
-                                                     SUBDOMAIN_SIGMA_THRESHOLD)):
+    requests = [event for event in _layer_7_events() if event.get("http_distinct_paths") is not None]
+    processes = [event for event in _layer_7_events() if event.get("endpoint_pair") is not None]
+    handshakes = _events_of("morpheus_score_l6.jsonlines")
+
+    trajectories = [
+        (STACK_TRAJECTORY, "R-P-L6-006", handshakes, STACK_RISING_THRESHOLD, STACK_SIGMA_THRESHOLD, "src_ip"),
+        (SUBDOMAIN_TRAJECTORY, "R-P-L7-009", queries, SUBDOMAIN_RISING_THRESHOLD, SUBDOMAIN_SIGMA_THRESHOLD, "src_ip"),
+        (PATH_TRAJECTORY, "R-P-L7-010", requests, PATH_RISING_THRESHOLD, PATH_SIGMA_THRESHOLD, "src_ip"),
+        (BREADTH_TRAJECTORY,
+         "R-P-L7-011",
+         processes,
+         BREADTH_RISING_THRESHOLD,
+         BREADTH_SIGMA_THRESHOLD,
+         "endpoint_host"),
+    ]
+
+    for (name, rule_id, events, rising, sigmas, subject) in trajectories:
         fires = [
-            dict(event, host_key=event.get("host_key") or event["src_ip"])
-            for event in _trajectory_days(events, rising, sigmas)[0]
+            dict(event, host_key=event.get("host_key") or event[subject])
+            for event in _trajectory_days(events, rising, sigmas, subject)[0]
         ]
         entries += _entries(name, _latest_per_day(fires, "host_key"), rule_id, "host_key")
 
@@ -2702,7 +2784,9 @@ def test_the_host_watchlist_expiry_keeps_exactly_what_is_written(expected: dict)
         {
             "R-P-L3-009": "R-P-L3-009 - Host drift trajectory",
             "R-P-L6-006": STACK_TRAJECTORY,
-            "R-P-L7-009": SUBDOMAIN_TRAJECTORY
+            "R-P-L7-009": SUBDOMAIN_TRAJECTORY,
+            "R-P-L7-010": PATH_TRAJECTORY,
+            "R-P-L7-011": BREADTH_TRAJECTORY
         })
 
 

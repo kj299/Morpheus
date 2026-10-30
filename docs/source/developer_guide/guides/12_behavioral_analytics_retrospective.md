@@ -302,18 +302,22 @@ because every reader marked persistence as out of the delivery lens's remit.
 
 **Re-verified 2026-10-22**, against the tree at the merge of pull request #99, by reading each row's claim
 against the code, the saved searches and the contracts rather than against the plan's status paragraphs. Of
-the eighty-nine rows, sixty-nine are closed: the capability the row says is missing is in the tree with a
+the eighty-nine rows, seventy-one are closed: the capability the row says is missing is in the tree with a
 test, a stanza or a contract column behind it. Both rows marked blocking are among them: G03 by host
-identity (#63) and G10 by the service entity (#64). Twelve are narrowed to a remainder the row did not
-state (G09, G12, G20, G23, G39, G45, G49, G53, G60, G65, G79, G82), of which one is open work: G20, hysteresis,
+identity (#63) and G10 by the service entity (#64). Eleven are narrowed to a remainder the row did not
+state (G09, G12, G20, G23, G39, G45, G49, G60, G65, G79, G82), of which one is open work: G20, hysteresis,
 which is deferred. G23, the host score, closed when the host half's third part put a daily trajectory over the
-TLS and DNS columns beside the host model's; G53, predictive mechanisms for the application layer, narrowed to
-HTTP and process behaviour, since DNS and TLS now carry one. G39, port identity across a rename, narrowed under plan
+TLS and DNS columns beside the host model's. G53, predictive mechanisms for the application layer, narrowed to
+HTTP and process behaviour once DNS and TLS carried one, and closed under plan section 3.3: R-P-L7-010 reads a daily
+trajectory over each HTTP client's distinct paths and R-P-L7-011 one over the distinct process pairs each host
+starts. G21, the forecast-residual mechanism outside layer 1 optics, closed under the same section without
+`TimeSeriesStage`, which Pass 4 rejects: `TC5DriftStage` projects every rising trajectory along the line through its
+run and, given the level a rule fires at, counts the windows until the line reaches it. G39, port identity across a rename, narrowed under plan
 section 3.1 to the layer 2 join: layer 1 keys a port on its `ifIndex` and a switch on its chassis serial, so a
 renamed port keeps its key, its history and its binding, but the layer 2 collectors still report the new name, and a
 renamed port meets them only through `reported_entity_key`. G70, TC-0 context keyed on a port, a device or a VLAN, closed under plan section 3.2: the network inventory's records
-are joined onto layer 1, the device class and layer 2, and R-D-L1-010 reads a port's commissioning level. Eight hold
-(G08, G21, G48, G56, G69, G72, G74, G88): six as recorded decisions
+are joined onto layer 1, the device class and layer 2, and R-D-L1-010 reads a port's commissioning level. Seven hold
+(G08, G48, G56, G69, G72, G74, G88): five as recorded decisions
 or out-of-scope items, and two, G72 (`TC1FeatureStage` in no composed pipeline) and G88 (control 13's
 fourth check through `CompareDataFrameStage` for the lineage pipeline only), as plain open items that no
 step has taken. G90, the ninetieth gap the critic added, now has a row, closed by step 16's first part.
@@ -342,7 +346,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G13 | major | narrowed → closed | users, network objects | Cadence, novelty and optical-deviation per-entity baselines are read by no search and are outside the sourcetype contracts | #55 |
 | G14 | major | stands → closed | users | R-P-L5-006 watchlist has no consumer; the 'raise layer 7 sensitivity' half is absent | #55 |
 | G15 | major | stands → closed | users | R-B-L5-001/002/005 have producers but no saved search; z-loss columns outside the contract | #55 |
-| G21 | major | stands → holds | users, nodes, all | Forecast-residual predictive mechanism (TimeSeriesStage) has no fork producer outside layer 1 optics | #52 |
+| G21 | major | stands → closed | users, nodes, all | Forecast-residual predictive mechanism (TimeSeriesStage) has no fork producer outside layer 1 optics | #52 |
 | G22 | major | stands → closed | systems | R-B-L3-001 uses a fixed fan-out threshold; no per-source 14-day percentile history tracker | #60 |
 | G23 | major | stands → closed | systems | No host-level score or model; predictive mechanisms 1-3 absent for hosts | #59 |
 | G24 | major | stands → closed | all | 'Binding health - unresolved rate' reads `resolution_method` on `morpheus:score:l3`, which no layer 3 producer writes | #53 |
@@ -374,7 +378,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G50 | major | stands → closed | applications | DNS and HTTP clients have no per-entity baseline; R-B-L7-001 is fixed thresholds | #64 |
 | G51 | major | stands → closed | applications | TC-0 has no application-to-server or service-account-to-team kind | #64 |
 | G52 | major | stands → closed | applications, all | Layers 4/6/7 carry no shared hard join key (`flow_id`/session_id/trace_id); cross-layer chains are value joins only | #63 |
-| G53 | major | narrowed → narrowed | applications | Predictive mechanisms absent for DNS, HTTP, TLS and process behaviour | #59 |
+| G53 | major | narrowed → closed | applications | Predictive mechanisms absent for DNS, HTTP, TLS and process behaviour | #59 |
 | G54 | major | narrowed → closed | all | Stage refusals, late arrivals and other operational health signals are log lines, not fields or searches | #62 |
 | G55 | major | stands → closed | platforms | No platform is a behavioural entity: IdP, SaaS tenant and collector have no key or baseline | #62 |
 | G56 | major | stands → holds | platforms | Cloud control planes and Kubernetes audit are outside the design | not scheduled |
@@ -446,7 +450,7 @@ tunes a plan against them.
   `tc7_service`, the application kind of TC-0 and both baselines.
 - **Platforms.** Nearly every sentence: the envelope fields are produced and validated, the determinism
   stamp runs in all thirteen pipelines, `morpheus:health` exists, Kafka Connect is configured and all
-  eighty-three searches have run on a search head.
+  eighty-five searches have run on a search head.
 
 ## The plan
 

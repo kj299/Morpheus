@@ -49,7 +49,7 @@ for row.
 
 ## The result
 
-All fifty-nine shipped detections are swept, each over the pipeline that feeds it, through
+All sixty-one shipped detections are swept, each over the pipeline that feeds it, through
 [`rules.py`](./rules.py), which reduces every rule to what it accuses and reads every threshold, join tolerance
 and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hundred, one second, ten, thirty and
 sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
@@ -138,13 +138,21 @@ holds the largest: the creeping host's three days and the slow tunnel's four are
 nothing else moved. The sweeps move only the lease and inventory binding identifiers the hosts resolve through, as
 they did before.
 
-What a sweep can say depends on the clocks in the corpus, and the fifty-nine fall into three groups that must
+It was run again on 2026-10-28, for the application and endpoint corpora, after plan section 3.3 gave the HTTP and
+endpoint classes a daily trajectory each and a rule to read it, R-P-L7-010 and R-P-L7-011. R-P-L7-010 reads the
+requests the proxy sends, so it joins the uniform-shift group, twenty-three now, and the slow enumerator's four days are
+the same at every spread swept. R-P-L7-011 reads process starts each host's agent stamps on its own clock, so it is
+measured beside R-B-L7-004 against clocks that disagree, thirty-six rules now: the creeping build server's three days
+are the same to a minute of spread across the seven hosts. With quarantine on, ten seconds holds every application
+record, and R-P-L7-010 loses its four days with the other application rules, as R-P-L7-009 does.
+
+What a sweep can say depends on the clocks in the corpus, and the sixty-one fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
-| Inputs on clocks that disagree | 35 | A tolerance, or the spread at which the rule changes |
-| Inputs on one clock, in a corpus with several | 22 | Boundary sensitivity under a uniform shift, not a tolerance |
+| Inputs on clocks that disagree | 36 | A tolerance, or the spread at which the rule changes |
+| Inputs on one clock, in a corpus with several | 23 | Boundary sensitivity under a uniform shift, not a tolerance |
 | Corpus with one clock | 2 | Nothing; reported as not measured |
 
 **Measured against clocks that disagree** -- the estate's six collectors and three switches for layers 1 and 2,
@@ -159,7 +167,7 @@ flow exporter, inspection point and EDR, whose records meet in one row of the ho
 | R-D-L1-001, 002, 003, 006 and 010, R-B-L1-005 and 007, R-P-L1-004, R-D-L2-001, 003 and 005, R-B-L2-002, 006, 007 and 008 | unchanged to 60s on collectors and on switches |
 | R-D-L1-008, configuration change outside the window, and R-P-L1-009, reboot-rate trajectory | unchanged to 60s on collectors; the devices' polls are on no switch clock |
 | **R-D-L2-004, MAC in two places** | unchanged to 60s on collectors; **changes at 60s on switches** |
-| R-B-L7-004, process ancestry novelty | unchanged to 60s on host clocks |
+| R-B-L7-004, process ancestry novelty, and R-P-L7-011, process breadth trajectory | unchanged to 60s on host clocks |
 | R-P-L3-009, host drift trajectory | unchanged to 60s on the five collector clocks that feed and resolve the host frame |
 | R-B-L3-001, 002, 004, 006 and 007, R-D-L3-003 and 008 | unchanged to 60s on router clocks |
 | R-B-L6-001, new TLS client fingerprint, and R-B-L4-004, stack fingerprint mismatch | unchanged to 60s on collector clocks |
@@ -175,12 +183,13 @@ comes through the identity provider, so for the eight sign-in rules -- R-D-L5-00
 R-B-L5-001 and 002, and R-P-L5-006 -- the sweep moves all their inputs together; R-B-L5-005's session starts and
 ends each come through one collector too. The application corpus has five, one per class -- the resolver, the
 proxy and the load balancer -- and the DHCP server and inventory feed its hosts resolve through, and each of its
-five rules reads one class, the subdomain count trajectory a daily seal of what the resolver sent. The transport and
+six rules reads one class, the subdomain and path count trajectories a daily seal of what the resolver and the proxy
+sent. The transport and
 presentation corpora have three each since step 12, but every packet comes through the packet sensor and every
 handshake through the inspection point, so three of their four layer 4 rules and five of their six layer 6 rules read
 one clock, the client stack trajectory among them: it is keyed on the address the handshake carries, and only the
-watchlist entry it writes names the machine. For these twenty-two the sweep is a uniform shift, which measures how
-close the events sit to a window edge and nothing about disagreement. All twenty-two are unchanged to a minute; R-P-L5-006 used to change at a
+watchlist entry it writes names the machine. For these twenty-three the sweep is a uniform shift, which measures how
+close the events sit to a window edge and nothing about disagreement. All twenty-three are unchanged to a minute; R-P-L5-006 used to change at a
 millisecond, for the reason below.
 
 **On a corpus with one clock.** The SaaS corpus arrives through the provider's audit log alone, so a collector

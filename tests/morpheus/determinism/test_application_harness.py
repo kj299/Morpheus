@@ -487,6 +487,73 @@ def test_the_slow_tunnel_clears_every_literal_but_the_count_and_is_never_twice_i
     assert others["drift_rising_windows"].astype("Float64").max() < RISING_WINDOWS
 
 
+@pytest.mark.cpu_mode
+def test_the_slow_tunnel_is_projected_to_reach_the_count_it_never_reaches(result: pd.DataFrame):
+    # The forecast: six more chunks a day, a line through the run that climbs by exactly that, and the hundred eight
+    # days on from the event day's fifty-two. Gap G21's mechanism, carried on the row R-P-L7-009 returns.
+    slow = _dns(result)[_dns(result)["src_ip"] == ap_.SLOW_TUNNELLER]
+    event_day = slow[slow["event_time"].astype("int64") >= ap_.event(0)]
+    busiest = ap_.SLOW_START + ap_.SLOW_STEP * ap_.HISTORY_DAYS
+
+    assert set(event_day["drift_trend_per_window"].astype("Float64")) == {float(ap_.SLOW_STEP)}
+    assert set(event_day["drift_forecast_next"].astype("Float64")) == {float(busiest + ap_.SLOW_STEP)}
+    assert set(event_day["drift_windows_to_ceiling"].astype("Int64")) == {
+        -(-(ap_.SUBDOMAIN_THRESHOLD - busiest) // ap_.SLOW_STEP)
+    }
+
+
+# --- R-P-L7-010: the slow enumerator, under both floors and over the trajectory --------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_the_slow_enumerator_is_watchlisted_from_its_fifth_day(result: pd.DataFrame):
+    # Ten more paths every morning: the busiest ten minutes of each day rise by the same step, so the rule reports the
+    # client from the fifth day, the first the drift stage calls mature, through the event day, as R-P-L7-009 does
+    # the slow tunnel.
+    http = _http(result)
+    slow = http[http["src_ip"] == ap_.SLOW_ENUMERATOR]
+    days = slow["event_time"].astype("int64") // (ap_.DAY_SECONDS * ap_.NS_PER_SECOND)
+    daily = slow.assign(day=days).groupby("day").agg(busiest=("http_distinct_paths", "max"),
+                                                     rising=("drift_rising_windows", "max"),
+                                                     rise_sigmas=("drift_rise_sigmas", "max"),
+                                                     mature=("drift_mature", "max"),
+                                                     to_ceiling=("drift_windows_to_ceiling", "max")).reset_index()
+
+    assert list(
+        daily["busiest"]) == [ap_.SLOW_PATH_START + ap_.SLOW_PATH_STEP * day for day in range(ap_.HISTORY_DAYS + 1)]
+    assert list(daily["rising"]) == list(range(1, ap_.HISTORY_DAYS + 2))
+
+    fired = daily[daily["mature"].astype("boolean").fillna(False) & (daily["rising"] >= RISING_WINDOWS)
+                  & (daily["rise_sigmas"].astype("Float64").fillna(0) > RISE_SIGMAS)]
+
+    assert sorted(fired["day"]) == list(range(RISING_WINDOWS, ap_.HISTORY_DAYS + 1))
+
+    # And its line reaches R-D-L7-005's two hundred nine days after the event day's hundred and ten.
+    busiest = ap_.SLOW_PATH_START + ap_.SLOW_PATH_STEP * ap_.HISTORY_DAYS
+
+    assert daily["to_ceiling"].iloc[-1] == -(-(ap_.PATH_THRESHOLD - busiest) // ap_.SLOW_PATH_STEP)
+
+
+@pytest.mark.cpu_mode
+def test_the_slow_enumerator_is_never_an_enumerator(result: pd.DataFrame):
+    # Why the trajectory exists: no day reaches the two hundred, and the event day is a tenth above its busiest.
+    http = _http(result)
+    slow = http[http["src_ip"] == ap_.SLOW_ENUMERATOR]
+
+    assert slow["http_distinct_paths"].astype("Int64").max() < ap_.PATH_THRESHOLD
+    assert ap_.SLOW_ENUMERATOR not in _enumerating(http)
+
+    event_day = slow[slow["event_time"].astype("int64") >= ap_.event(0)]
+
+    assert _true(event_day, "http_distinct_paths_baseline_mature").all()
+    assert 1 < event_day["http_distinct_paths_ratio"].astype("Float64").max() < ap_.BASELINE_MULTIPLE
+
+    # No other client's busiest ten minutes rise for four days: the scanner's mornings are as busy as each other.
+    others = http[http["src_ip"] != ap_.SLOW_ENUMERATOR]
+
+    assert others["drift_rising_windows"].astype("Float64").max() < RISING_WINDOWS
+
+
 # --- R-D-L7-005: the enumerators, and one control per condition --------------------------------------------------
 
 

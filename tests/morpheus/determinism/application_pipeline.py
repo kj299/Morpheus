@@ -121,7 +121,7 @@ DAY_SECONDS = DAY_HOURS * PERIOD_SECONDS
 DRIFT_PREFIX = "day_"
 SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS, "day_seconds": DAY_SECONDS}
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-B-L7-001", "R-D-L7-005", "R-B-L7-007", "R-B-L7-008", "R-B-L4-004", "R-P-L7-009")
+RULES = ("R-B-L7-001", "R-D-L7-005", "R-B-L7-007", "R-B-L7-008", "R-B-L4-004", "R-P-L7-009", "R-P-L7-010")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 # The rules' own thresholds, stated once so the corpus is built to clear them deliberately.
@@ -212,6 +212,9 @@ BROKEN_CLIENT = "10.0.0.43"
 READER = "10.0.0.44"
 SCANNER = "10.0.0.45"
 """The vulnerability scanner that walks the web server every morning."""
+SLOW_ENUMERATOR = "10.0.0.47"
+"""A client whose probing ramps: a few more paths every morning, never reaching R-D-L7-005's two hundred and never
+twice its own busiest day, which is R-P-L7-010's trajectory."""
 
 # The transport corpus's clients, whose stacks R-B-L4-004 sets against the user agents they send here.
 STACK_CONSISTENT = "10.0.0.60"
@@ -223,6 +226,11 @@ WEB_PORT = 443
 
 HTTP_VOLUME = 220
 """Distinct paths each high-volume HTTP actor requests. Above R-D-L7-005's two hundred."""
+
+SLOW_PATH_START = 40
+SLOW_PATH_STEP = 10
+"""The slow enumerator's distinct paths on its first morning and the day-on-day increase: forty to a hundred and ten
+over the eight days, the last barely a tenth above its busiest and ninety short of the floor."""
 
 SCANNER_HISTORY = 200
 """Paths the scanner walks each morning of its first week: at the rule's two hundred, for the reason the reputation
@@ -462,6 +470,16 @@ def _build_http(rng: random.Random) -> pd.DataFrame:
                 on(day, HISTORY_HOUR, 600 + index),
                 SCANNER_AGENT)
 
+    # The slow enumerator: the same probing as the enumerator below, in the browser it always uses, ten more paths
+    # every morning of the week and the day after it. Every one of its windows is under both of R-D-L7-005's floors.
+    for day in range(HISTORY_DAYS + 1):
+        for index in range(SLOW_PATH_START + SLOW_PATH_STEP * day):
+            status = 200 if index % ENUMERATOR_HIT_EVERY == 0 else 404
+            add(SLOW_ENUMERATOR,
+                f"/{words[index % len(words)]}/{index}",
+                status,
+                on(day, HISTORY_HOUR, 1800 + index * 2))
+
     # The enumerator: a different path every second, nine in ten not there, from a tool it has never run.
     for index in range(HTTP_VOLUME):
         status = 200 if index % ENUMERATOR_HIT_EVERY == 0 else 404
@@ -657,7 +675,25 @@ def _run_class(config: Config,
                           entity_column="src_ip",
                           score_column="dns_subdomains_per_domain",
                           window_column=f"{DRIFT_PREFIX}window_id",
-                          aggregate="max"))
+                          aggregate="max",
+                          ceiling=SUBDOMAIN_THRESHOLD))
+
+    if (telemetry_class == HTTP_CLASS):
+        # The daily trajectory R-P-L7-010 reads, built as the DNS one is: each client's busiest ten minutes of distinct
+        # paths in the day, projected to R-D-L7-005's floor.
+        pipe.add_stage(
+            WindowSealStage(config,
+                            period_seconds=DAY_SECONDS,
+                            lateness_seconds=LATENESS_SECONDS,
+                            order_columns=list(DEFAULT_ORDER_COLUMNS),
+                            column_prefix=DRIFT_PREFIX))
+        pipe.add_stage(
+            TC5DriftStage(config,
+                          entity_column="src_ip",
+                          score_column="http_distinct_paths",
+                          window_column=f"{DRIFT_PREFIX}window_id",
+                          aggregate="max",
+                          ceiling=PATH_THRESHOLD))
 
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()

@@ -14,6 +14,7 @@
 """Tracks whether an entity's reconstruction error is climbing across consecutive windows."""
 
 import logging
+import math
 import statistics
 import typing
 
@@ -44,7 +45,8 @@ logger = logging.getLogger(__name__)
 AGGREGATE_NONE = "none"
 AGGREGATE_MEAN = "mean"
 AGGREGATE_MAX = "max"
-AGGREGATES = (AGGREGATE_NONE, AGGREGATE_MEAN, AGGREGATE_MAX)
+AGGREGATE_DISTINCT = "distinct"
+AGGREGATES = (AGGREGATE_NONE, AGGREGATE_MEAN, AGGREGATE_MAX, AGGREGATE_DISTINCT)
 
 
 @register_stage("tc5-drift")
@@ -70,6 +72,14 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
     fed several rows for one entity in one window would count each as a separate window and report a run four
     long inside a single afternoon. Place it after the aggregation that produces one score per entity per
     window; a frame carrying more is counted and warned about rather than silently misread.
+
+    **A rising run is also projected.** `drift_trend_per_window` is the least-squares slope through the current
+    run's windows and `drift_forecast_next` the value it gives the next one, from a run of three windows on; see
+    `morpheus.utils.drift_trajectory`. Given a `ceiling` -- the level a rule fires at, in the score's own units --
+    `drift_windows_to_ceiling` says how many more windows the line takes to reach it: zero for a window already at
+    or above it, and null for a run not rising. This is the forecast the guide names as its third predictive
+    mechanism, "this entity is projected to exceed its envelope", carried for every trajectory rather than only
+    for a port's receive light.
 
     The stage is stateful across messages and must run single-engine, or sharded by entity --
     {py:mod}`~morpheus.utils.sharding` is determinism control 4, and this is exactly the kind of stage it exists
@@ -102,7 +112,12 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
         holding the whole window, which is what `WindowSealStage` emits: a fragment would give the mean of a
         fragment, and nothing here can tell the difference. `"max"` reduces them to the largest score instead,
         which is the reduction for a running count -- the distinct object types a principal has touched so far
-        this week -- whose last value is the window's total and whose mean is not.
+        this week -- whose last value is the window's total and whose mean is not. `"distinct"` reduces them to
+        the number of distinct values the score column takes, which is the reduction for breadth -- the distinct
+        process pairs a host started in a day -- and the one aggregate whose score column need not be a number.
+    ceiling : float, optional
+        The level `drift_windows_to_ceiling` counts windows to, in the score's own units. Left unset, that column is
+        null on every row and the trend and the forecast are still written.
     """
 
     _checkpoint_attributes = ("_tracker", )
@@ -116,7 +131,8 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                  min_windows: int = DEFAULT_MIN_WINDOWS,
                  max_entities: int = 100_000,
                  decimals: int = DEFAULT_FLOAT_DECIMALS,
-                 aggregate: str = AGGREGATE_NONE):
+                 aggregate: str = AGGREGATE_NONE,
+                 ceiling: float = None):
         super().__init__(c)
 
         if (aggregate not in AGGREGATES):
@@ -126,6 +142,8 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
         self._score_column = score_column
         self._window_column = window_column
         self._aggregate = aggregate
+        self._ceiling = None if ceiling is None else float(ceiling)
+        self._decimals = decimals
         self._warned_scoreless = False
 
         self._tracker = DriftTrajectoryTracker(max_windows=max_windows,
@@ -141,6 +159,9 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
         self._needed_columns["drift_rise_sigmas"] = TypeId.FLOAT64
         self._needed_columns["drift_mature"] = TypeId.BOOL8
         self._needed_columns["drift_run_restarted"] = TypeId.BOOL8
+        self._needed_columns["drift_trend_per_window"] = TypeId.FLOAT64
+        self._needed_columns["drift_forecast_next"] = TypeId.FLOAT64
+        self._needed_columns["drift_windows_to_ceiling"] = TypeId.INT64
 
         # Mark this stage to log timestamps if requested
         self._should_log_timestamps = True
@@ -216,6 +237,9 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
             rise_sigmas: list = []
             mature: list = []
             restarted: list = []
+            trend: list = []
+            forecast: list = []
+            to_ceiling: list = []
             unscored = 0
             unordered = 0
             seen: dict = {}
@@ -225,7 +249,7 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
             # so the mean depends on membership alone, the same property the chain root has.
             reduced: dict = {}
 
-            if (self._aggregate in (AGGREGATE_MEAN, AGGREGATE_MAX)):
+            if (self._aggregate != AGGREGATE_NONE):
                 members: dict = {}
 
                 for position in range(row_count):
@@ -236,9 +260,14 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                     if (entity is None or window is None or pd.isna(score)):
                         continue
 
-                    members.setdefault((entity, int(window)), []).append(float(score))
+                    member = str(score) if self._aggregate == AGGREGATE_DISTINCT else float(score)
+                    members.setdefault((entity, int(window)), []).append(member)
 
-                reduce = statistics.fmean if self._aggregate == AGGREGATE_MEAN else max
+                reduce = {
+                    AGGREGATE_MEAN: statistics.fmean,
+                    AGGREGATE_MAX: max,
+                    AGGREGATE_DISTINCT: lambda values: float(len(set(values))),
+                }[self._aggregate]
                 reduced = {key: reduce(sorted(values)) for (key, values) in members.items()}
 
             observed: dict = {}
@@ -257,22 +286,27 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                     rise_sigmas.append(None)
                     mature.append(False)
                     restarted.append(False)
+                    trend.append(None)
+                    forecast.append(None)
+                    to_ceiling.append(None)
                     unscored += 1
                     continue
 
                 window_id = int(window)
 
-                if (self._aggregate in (AGGREGATE_MEAN, AGGREGATE_MAX)):
+                if (self._aggregate != AGGREGATE_NONE):
                     key = (entity, window_id)
+                    value = reduced[key]
 
                     if (key not in observed):
-                        observed[key] = self._tracker.observe(entity, window_id, reduced[key])
+                        observed[key] = self._tracker.observe(entity, window_id, value)
 
                     result = observed[key]
                 else:
                     repeated += int(seen.get(entity) == window_id)
                     seen[entity] = window_id
-                    result = self._tracker.observe(entity, window_id, float(score))
+                    value = float(score)
+                    result = self._tracker.observe(entity, window_id, value)
 
                 velocity.append(result.velocity)
                 acceleration.append(result.acceleration)
@@ -282,6 +316,9 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                 rise_sigmas.append(result.rise_sigmas)
                 mature.append(result.mature)
                 restarted.append(result.run_restarted)
+                trend.append(result.trend_per_window)
+                forecast.append(result.forecast_next)
+                to_ceiling.append(self._windows_to_ceiling(value, result.trend_per_window))
                 unordered += int(result.out_of_order)
 
             assign_nullable_float_column(df, "drift_velocity", velocity)
@@ -292,6 +329,9 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
             assign_nullable_float_column(df, "drift_rise_sigmas", rise_sigmas)
             df["drift_mature"] = mature
             df["drift_run_restarted"] = restarted
+            assign_nullable_float_column(df, "drift_trend_per_window", trend)
+            assign_nullable_float_column(df, "drift_forecast_next", forecast)
+            assign_nullable_int_column(df, "drift_windows_to_ceiling", to_ceiling)
 
         if (not has_scores and not self._warned_scoreless):
             self._warned_scoreless = True
@@ -323,6 +363,20 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                 row_count)
 
         return message
+
+    def _windows_to_ceiling(self, value: float, trend: typing.Optional[float]) -> typing.Optional[int]:
+        """Windows the run's line takes from this one to the ceiling: zero at or above it, null for no rising line."""
+        if (self._ceiling is None or trend is None):
+            return None
+
+        if (value >= self._ceiling):
+            return 0
+
+        if (trend <= 0):
+            return None
+
+        # Rounded before the ceiling so a quotient that is whole in decimal is not lifted by its binary tail.
+        return math.ceil(round((self._ceiling - value) / trend, self._decimals))
 
     def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
         node = builder.make_node(self.unique_name, ops.map(self.on_data))

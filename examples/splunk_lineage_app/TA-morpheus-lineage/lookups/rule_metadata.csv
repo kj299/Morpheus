@@ -58,3 +58,5 @@ R-P-L5-006,R-P-L5-006 - Drift trajectory,"user_principal,day_window_id",2d,none
 R-P-L6-006,R-P-L6-006 - Client stack trajectory,"src_ip,day_window_id",2d,none
 R-P-L7-006,R-P-L7-006 - Access breadth trajectory,user_principal,28d,none
 R-P-L7-009,R-P-L7-009 - Subdomain count trajectory,"src_ip,day_window_id",2d,none
+R-P-L7-010,R-P-L7-010 - Path count trajectory,"src_ip,day_window_id",2d,none
+R-P-L7-011,R-P-L7-011 - Process breadth trajectory,"endpoint_host,day_window_id",2d,none

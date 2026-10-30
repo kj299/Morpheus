@@ -372,6 +372,52 @@ def test_aggregate_keeps_entities_apart(config: Config):
     assert velocity[3] == pytest.approx(0.5)
 
 
+@pytest.mark.gpu_and_cpu_mode
+def test_a_rising_run_is_projected_to_the_ceiling(config: Config):
+    # Ten, sixteen, twenty-two, twenty-eight: six a window, and a ceiling of a hundred is twelve windows on.
+    meta = run(config, frame([10.0, 16.0, 22.0, 28.0]), ceiling=100)
+
+    assert _as_list(meta, "drift_trend_per_window") == [None, None, pytest.approx(6.0), pytest.approx(6.0)]
+    assert _as_list(meta, "drift_forecast_next")[-1] == pytest.approx(34.0)
+    assert _as_list(meta, "drift_windows_to_ceiling") == [None, None, 13, 12]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_window_at_the_ceiling_is_zero_windows_from_it(config: Config):
+    meta = run(config, frame([80.0, 90.0, 100.0, 110.0]), ceiling=100)
+
+    assert _as_list(meta, "drift_windows_to_ceiling")[-2:] == [0, 0]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_without_a_ceiling_the_trend_is_written_and_the_count_is_not(config: Config):
+    meta = run(config, frame([10.0, 16.0, 22.0, 28.0]))
+
+    assert _as_list(meta, "drift_trend_per_window")[-1] == pytest.approx(6.0)
+    assert _as_list(meta, "drift_windows_to_ceiling") == [None] * 4
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_a_falling_window_is_no_distance_from_the_ceiling(config: Config):
+    meta = run(config, frame([10.0, 16.0, 22.0, 12.0]), ceiling=100)
+
+    assert _as_list(meta, "drift_windows_to_ceiling")[-1] is None
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_aggregate_distinct_counts_the_values_a_window_takes(config: Config):
+    # Breadth: the distinct process pairs a host started in a day, whatever the count of each.
+    pairs = ["a", "a", "b", "a", "b", "c", "c"]
+    windows = [100, 100, 100, 101, 101, 101, 101]
+    meta = run(config, {
+        "user_principal": [ALICE] * len(pairs), "window_id": windows, "endpoint_pair": pairs
+    },
+               score_column="endpoint_pair",
+               aggregate="distinct")
+
+    assert _as_list(meta, "drift_velocity") == [None, None, None, 1.0, 1.0, 1.0, 1.0]
+
+
 def test_an_unknown_aggregate_is_refused(config: Config):
     with pytest.raises(ValueError, match="aggregate"):
         TC5DriftStage(config, aggregate="median")
