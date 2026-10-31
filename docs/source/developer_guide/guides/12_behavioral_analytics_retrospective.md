@@ -461,7 +461,7 @@ tunes a plan against them.
   `tc7_service`, the application kind of TC-0 and both baselines.
 - **Platforms.** Nearly every sentence: the envelope fields are produced and validated, the determinism
   stamp runs in all thirteen pipelines, `morpheus:health` exists, Kafka Connect is configured and all
-  eighty-five searches have run on a search head.
+  eighty-six searches have run on a search head.
 
 ## The plan
 

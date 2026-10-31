@@ -2461,10 +2461,12 @@ def test_the_stage_counts_name_each_class_a_stage_could_not_fully_handle(expecte
 
     assert entry["expected_rows"] == len(flagged)
     assert entry["expected_empty"] is (len(flagged) == 0)
-    assert [(row["collector_id"], row["telemetry_class"], row["tenant_id"], {
-        name: row[name]
-        for name in STAGE_COUNTS if name in row
-    }) for row in entry["key_values"]] == [(*key, counts) for (key, counts) in flagged]
+    assert [(row["collector_id"],
+             row["telemetry_class"],
+             row["tenant_id"], {
+                 name: row[name]
+                 for name in STAGE_COUNTS if name in row
+             }) for row in entry["key_values"]] == [(*key, counts) for (key, counts) in flagged]
 
 
 def test_late_arrivals_are_counted_by_class(expected: dict):

@@ -792,7 +792,9 @@ def test_the_fourteenth_run_differs_from_what_is_written_only_where_the_http_and
     assert differing == BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES
     assert len(run["searches"]) == 83 and len(expected) == 86
     assert set(expected) - set(run["searches"]) == {
-        "R-P-L7-010 - Path count trajectory", "R-P-L7-011 - Process breadth trajectory"
+        "R-P-L7-010 - Path count trajectory",
+        "R-P-L7-011 - Process breadth trajectory",
+        "Pipeline health - stage counts",
     }
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 235
     assert {
@@ -827,4 +829,3 @@ def test_the_fifteenth_run_differs_from_what_is_written_only_by_the_stage_counts
     assert len(run["searches"]) == 85 and len(expected) == 86
     assert set(expected) - set(run["searches"]) == {"Pipeline health - stage counts"}
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 242
-

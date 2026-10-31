@@ -305,8 +305,11 @@ def test_the_tc5_fields_the_guide_calls_unread_are_the_ones_nothing_reads():
     read = {field for field in required if field in contracted or field in searched or f"ctx_{field}" in searched}
     unread = [field for field in required if field not in read]
 
-    stated = re.search(r"(\w+) of these are read by a stage or a shipped search\. (\w+) are specified and not yet read "
-                       r"by anything:\s*(.*?)\.", guide[start:], re.S)
+    stated = re.search(
+        r"(\w+) of these are read by a stage or a shipped search\. (\w+) are specified and not yet read "
+        r"by anything:\s*(.*?)\.",
+        guide[start:],
+        re.S)
 
     assert len(required) == 21
     assert stated is not None, "Part 2's TC-5 paragraph no longer says which fields nothing reads"

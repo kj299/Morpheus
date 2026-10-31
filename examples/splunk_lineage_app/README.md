@@ -358,7 +358,7 @@ plants both a simultaneous and a cross-switch spoof for, alongside a legitimate 
 the stanzas parse on a search head. Run `btool savedsearches list` after installing.
 
 The run that would settle that is packaged: `validate/run_search_head.sh` starts the validation container, indexes
-the sample events, dispatches all eighty-five searches in the order `validate/VALIDATION.md` prescribes, and writes
+the sample events, dispatches all eighty-six searches in the order `validate/VALIDATION.md` prescribes, and writes
 `validate/search_head_results.json`, which `tests/morpheus/determinism/test_search_head_run.py` compares with
 `expected_results.json` while it is committed; when a change supersedes a run, the run moves to
 `validate/search_head_runs/` with a test of exactly how it differs from what is now written. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:
@@ -413,10 +413,14 @@ over the events regenerated for the desk spoof and the network inventory on `con
 events, returned what was then written for all eighty-three -- R-D-L1-010 two ports, and Chain assembly the tapped
 desk's chain at 135 -- and held the 235 risk records the detections returned. It is kept in `validate/search_head_runs/`
 too, because on 2026-10-28 plan section 3.3 gave the HTTP and endpoint classes a daily trajectory each, and a fifteenth,
-on the same install, ran over the events that regenerated: it indexed all 25,632 events, returned what is written for
-all eighty-five -- R-P-L7-010 the slow enumerator's last four days, R-P-L7-011 the creeping build server's last three,
-and R-B-L7-004 the build server's `curl` at 75 for the watchlist entry -- and held the 242 risk records the detections
-returned.
+on the same install, ran over the events that regenerated: it indexed all 25,632 events, returned what was then
+written for all eighty-five -- R-P-L7-010 the slow enumerator's last four days, R-P-L7-011 the creeping build server's
+last three, and R-B-L7-004 the build server's `curl` at 75 for the watchlist entry -- and held the 242 risk records the
+detections returned. It is kept in `validate/search_head_runs/` as well, because plan section 3.7 added `Pipeline
+health - stage counts`, and a sixteenth, on 2026-10-31 on Splunk 10.2.8 unpacked from the official tarball and run as
+its own user rather than in the container, indexed the same 25,632 events, returned what is written for all
+eighty-six -- the new search its five classes -- and held the same 242 risk records, every one of them carrying the
+`thresholds_hash` its rule's `rule_metadata` row holds.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

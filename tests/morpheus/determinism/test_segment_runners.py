@@ -183,6 +183,7 @@ switch's MAC table -- and a binding still open when the first run stops is close
 second. A deployment holds those bindings in the SIEM's lookups, refreshed from `binding:*`; the compositions build
 them per run, so for them this equality is not the property to ask for. Their stages restore all the same."""
 
+
 def _files(directory: pathlib.Path) -> dict[str, list[str]]:
     return {path.stem: path.read_text(encoding="utf-8").splitlines() for path in directory.glob("*.jsonlines")}
 
