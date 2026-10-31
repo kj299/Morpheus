@@ -63,8 +63,8 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 #99, for a cause the repository does not show -- and in GPU mode on one card, where the twelve that existed then
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
-That is sixty stages and fifty-one supporting
-modules, covered by 2,655 distinct tests, itemized in
+That is sixty stages and fifty-two supporting
+modules, covered by 2,674 distinct tests, itemized in
 [Part 6](#provided). Sixty-one of the sixty-three rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -1722,6 +1722,19 @@ derived from a baseline period in your own data before the rule goes live.
 Treat a threshold copied from this document straight into production as an untuned rule, and expect it
 to behave accordingly. The `hysteresis` field exists partly so that the first tuning pass does not
 have to be perfect.
+
+The app makes both halves of that checkable. `lookups/rule_thresholds.csv` lists every threshold the
+detections compare against -- seventy-two over the sixty-one rules -- with its operator and value as the search
+writes them and its kind: `conventional`, `placeholder`, `gate` (a floor on how much evidence a judgement needs),
+`window` (a time a chain's steps must fall within) or `definition` (a number the condition is made of, such as
+more than one MAC claiming an address). A placeholder that a scored event carries also names its field,
+sourcetype, class and quantile, and `validate/derive_thresholds.py` reads a baseline period of the estate's
+exported events and proposes each such value at its quantile by nearest rank, beside the shipped one; it
+proposes and never edits. Every detection looks its rule's `thresholds_hash` up from `rule_metadata.csv` into
+the risk record it writes, so two notables fired under different thresholds differ in a field, and
+{py:mod}`~morpheus.utils.rule_thresholds` computes the digest through the same canonical rendering as
+`config_hash`. A test holds the searches, the registry and the digests together, so a retune changes all
+three or fails.
 
 ### Rule specification format
 
@@ -3801,8 +3814,8 @@ the boundary, which is a distinct problem from float noise and much more common 
 **As built.** Suppression ships and hysteresis does not. Every detection in the Splunk app is a per-result alert
 (`alert.digest_mode = 0`) suppressed on the deduplication key its stanza states, for the length of its own dispatch
 window rounded up to the hour and never under one: a row two overlapping windows both return raises one notable.
-`lookups/rule_metadata.csv` holds the key, the period and a `hysteresis` column that reads `none` for every rule,
-and a test holds the stanzas to it. Suppression throttles the notable, not the record: every run still collects
+`lookups/rule_metadata.csv` holds the key, the period, a `hysteresis` column that reads `none` for every rule and
+the `thresholds_hash` each detection writes into its risk record, and tests hold the stanzas to it. Suppression throttles the notable, not the record: every run still collects
 what it returned into `behavior_risk`, and the chain search counts each record once. Hysteresis waits for a
 model that scores near a threshold, which the reference arithmetic in every shipped pipeline does not.
 
@@ -4502,6 +4515,13 @@ Pass 4 measures each of these and records which the fork reuses.
   keep 400 days, five longer than the events they attribute; edges keep 30, because an edge is derivable
   from the events it links (gap G74, closed). Thirteen months is the design's requirement, not a lawful
   basis, and an estate still reconciles it against its own policy.
+- Thresholds as configuration, under plan section 3.6 ({py:mod}`~morpheus.utils.rule_thresholds`): the app's
+  `rule_thresholds.csv` registers every threshold the detections compare against, `validate/derive_thresholds.py`
+  proposes each placeholder from a baseline period of exported events by nearest rank, and every risk record
+  carries its rule's `thresholds_hash`, digested as `config_hash` is. The sample corpora plant their attacks inside
+  the only period they have, so the tool is shown working on them rather than proposing values to ship; the
+  shipped thresholds remain the guide's placeholders until an estate runs it over a quiet period of its own
+  (gap G60, closed).
 - The determinism envelope on every event and the model stamp on every scored one
   ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`, behind the feature
   stages of all thirteen composed pipelines): every golden row carries `determinism_tier`,

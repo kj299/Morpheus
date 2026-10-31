@@ -189,6 +189,19 @@ side alone breaks the joins silently.
     `behavior_quarantine`. A quarantined record is timed on `ingest_time`, so it is filed when it arrived rather
     than wherever the broken clock said. Fix the collector and replay the quarantined records by the backfill
     procedure above.
+12. **Thresholds, and tuning them from a baseline period.** Most thresholds in these searches are the guide's
+    placeholders: the right shape, not a value for any estate. `lookups/rule_thresholds.csv` lists all seventy-two,
+    each with its kind, and for a placeholder that a scored event carries, the field and quantile to derive it
+    from. Export a period the estate believes was quiet, one `morpheus_score_<layer>.jsonlines` file per score
+    sourcetype, and run
+
+        python validate/derive_thresholds.py --events <export> --start YYYY-MM-DD --end YYYY-MM-DD
+
+    for a proposal beside every shipped value. Accepting one means editing the stanza, its row in
+    `rule_thresholds.csv` and the rule's `thresholds_hash` in `rule_metadata.csv` together
+    (`morpheus.utils.rule_thresholds.thresholds_hash` computes it); `tests/morpheus/utils/test_rule_thresholds.py`
+    fails until the three agree. Every detection looks `thresholds_hash` up into its risk record, so notables from
+    before and after a retune are told apart by a field rather than by memory.
 
 ## What to expect once data flows
 
@@ -210,7 +223,8 @@ side alone breaks the joins silently.
   horizon. R-P-L3-005 reads from it; the five chained rules read the scored events directly. Detections
   trail real time by design; the guide's Part 5 explains why that trade is correct.
 - `behavior_risk` fills as the detections fire: one record per row a detection returns, carrying the rule, its
-  risk score, the layer, the accused entity and the lineage it was accused on. Overlapping windows write a row
+  risk score, the layer, the accused entity, the lineage it was accused on and the `thresholds_hash` of the
+  numbers it fired at. Overlapping windows write a row
   more than once; suppression throttles the notable, not the record, and Chain assembly counts each record once.
   `index=behavior_risk | stats count BY rule_id` is the quickest way to see which rules are firing at all.
 - `behavior_health` fills one record per sealed window, collector, class and tenant. `Collector health` returns

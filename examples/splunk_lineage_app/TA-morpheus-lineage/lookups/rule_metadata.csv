@@ -1,62 +1,62 @@
-rule_id,saved_search,suppress_fields,suppress_period,hysteresis
-R-B-L1-005,R-B-L1-005 - Error rate step,entity_key,1h,none
-R-B-L1-007,R-B-L1-007 - Interface volume departure,entity_key,1h,none
-R-B-L2-002,R-B-L2-002 - Port-to-MAC binding novelty,port_key,1h,none
-R-B-L2-006,R-B-L2-006 - New vendor on a VLAN,vlan_key,1h,none
-R-B-L2-007,R-B-L2-007 - Slow 802.1X authorization,event_uid,1h,none
-R-B-L2-008,R-B-L2-008 - Instant 802.1X authorization,event_uid,1h,none
-R-B-L3-001,R-B-L3-001 - Fan-out expansion,src_ip,1h,none
-R-B-L3-002,R-B-L3-002 - Beaconing,flow_pair_key,1h,none
-R-B-L3-004,R-B-L3-004 - TTL fingerprint shift,src_ip,1h,none
-R-B-L3-006,R-B-L3-006 - Fan-in onto a workstation,dst_ip,1h,none
-R-B-L3-007,R-B-L3-007 - First-contact upload,"src_ip,bgp_as_dst",1h,none
-R-B-L4-004,R-B-L4-004 - Stack fingerprint mismatch,host_key,1h,none
-R-B-L4-005,R-B-L4-005 - Transfer envelope breach,transfer_triple,1h,none
-R-B-L5-001,R-B-L5-001 - Composite authentication anomaly,"user_principal,window_id",1h,none
-R-B-L5-002,R-B-L5-002 - Location novelty anomaly,"user_principal,window_id",1h,none
-R-B-L5-005,R-B-L5-005 - Session duration anomaly,session_key,1h,none
-R-B-L6-001,R-B-L6-001 - New TLS client fingerprint,src_ip,1h,none
-R-B-L6-004,R-B-L6-004 - Cipher downgrade,tls_pair_key,1h,none
-R-B-L7-001,R-B-L7-001 - DNS tunneling,dns_registered_domain,1h,none
-R-B-L7-002,R-B-L7-002 - Bulk data access,"user_principal,operation",1h,none
-R-B-L7-004,R-B-L7-004 - Process ancestry novelty,"endpoint_host,endpoint_pair",1h,none
-R-B-L7-007,R-B-L7-007 - Service reached by new clients,service_key,1h,none
-R-B-L7-008,R-B-L7-008 - Domain generation,src_ip,1h,none
-R-C-001,R-C-001 - Lateral movement chain,"src_ip,user_principal,target",3h,none
-R-C-002,R-C-002 - TLS anomaly precedes beaconing,"src_ip,dst_ip",3h,none
-R-C-003,R-C-003 - Physical compromise chain,"port_key,mac_address",5h,none
-R-C-004,R-C-004 - Staged exfiltration,"user_principal,src_ip",12h,none
-R-C-005,R-C-005 - Credential replay across the stack,"user_principal,event_uid",24h,none
-R-D-L1-001,R-D-L1-001 - Transceiver substitution,"entity_key,transceiver_serial",1h,none
-R-D-L1-002,R-D-L1-002 - Optical tap step,entity_key,1h,none
-R-D-L1-003,R-D-L1-003 - Link flap instability,entity_key,1h,none
-R-D-L1-006,R-D-L1-006 - LLDP neighbor change,"entity_key,link_key",1h,none
-R-D-L1-008,R-D-L1-008 - Configuration change outside the change window,"entity_key,running_config_hash",1h,none
-R-D-L2-001,R-D-L2-001 - MAC address count exceeded on an access port,"port_key,mac_address",1h,none
-R-D-L2-003,R-D-L2-003 - ARP anomaly,arp_sender_ip,1h,none
-R-D-L2-004,R-D-L2-004 - MAC in two places at once,"mac_address,bind_start",1h,none
-R-D-L2-005,R-D-L2-005 - Authorization without authentication,event_uid,1h,none
-R-D-L3-003,R-D-L3-003 - Reserved-range egress,event_uid,1h,none
-R-D-L3-008,R-D-L3-008 - Port sweep,src_ip,1h,none
-R-P-L3-009,R-P-L3-009 - Host drift trajectory,"host_key,day_window_id",2d,none
-R-D-L4-002,R-D-L4-002 - SYN without completion,src_ip,1h,none
-R-D-L4-003,R-D-L4-003 - RST ratio,"entity_key,refusal_direction",1h,none
-R-D-L5-003,R-D-L5-003 - Impossible travel,"user_principal,window_id",1h,none
-R-D-L5-004,R-D-L5-004 - Multi-factor fatigue,"user_principal,window_id",1h,none
-R-D-L5-007,R-D-L5-007 - Off-hours authentication,"user_principal,window_id",1h,none
-R-D-L5-008,R-D-L5-008 - New authentication location or device,"user_principal,window_id",1h,none
-R-D-L5-009,R-D-L5-009 - Failed authentication run ending in success,"user_principal,window_id",1h,none
-R-D-L6-002,R-D-L6-002 - Certificate issuer anomaly,tls_destination_key,1h,none
-R-D-L6-003,R-D-L6-003 - Self-signed to external destination,dst_ip,1h,none
-R-D-L6-005,R-D-L6-005 - Content type mismatch,"src_ip,dst_ip",1h,none
-R-D-L7-005,R-D-L7-005 - Enumeration,src_ip,1h,none
-R-P-L1-004,R-P-L1-004 - Optical degradation forecast,entity_key,1h,none
-R-P-L1-009,R-P-L1-009 - Reboot-rate trajectory,entity_key,1h,none
-R-D-L1-010,R-D-L1-010 - Optical level below commissioning,entity_key,1h,none
-R-P-L3-005,R-P-L3-005 - Fan-out trajectory,entity_key,4h,none
-R-P-L5-006,R-P-L5-006 - Drift trajectory,"user_principal,day_window_id",2d,none
-R-P-L6-006,R-P-L6-006 - Client stack trajectory,"src_ip,day_window_id",2d,none
-R-P-L7-006,R-P-L7-006 - Access breadth trajectory,user_principal,28d,none
-R-P-L7-009,R-P-L7-009 - Subdomain count trajectory,"src_ip,day_window_id",2d,none
-R-P-L7-010,R-P-L7-010 - Path count trajectory,"src_ip,day_window_id",2d,none
-R-P-L7-011,R-P-L7-011 - Process breadth trajectory,"endpoint_host,day_window_id",2d,none
+rule_id,saved_search,suppress_fields,suppress_period,hysteresis,thresholds_hash
+R-B-L1-005,R-B-L1-005 - Error rate step,entity_key,1h,none,648eef6b9d7bb465
+R-B-L1-007,R-B-L1-007 - Interface volume departure,entity_key,1h,none,ce8ade2d54195457
+R-B-L2-002,R-B-L2-002 - Port-to-MAC binding novelty,port_key,1h,none,ce8ade2d54195457
+R-B-L2-006,R-B-L2-006 - New vendor on a VLAN,vlan_key,1h,none,ce8ade2d54195457
+R-B-L2-007,R-B-L2-007 - Slow 802.1X authorization,event_uid,1h,none,05fce9f8fcec2f24
+R-B-L2-008,R-B-L2-008 - Instant 802.1X authorization,event_uid,1h,none,a8ff1dec28743592
+R-B-L3-001,R-B-L3-001 - Fan-out expansion,src_ip,1h,none,07f920bf06d6cc07
+R-B-L3-002,R-B-L3-002 - Beaconing,flow_pair_key,1h,none,0348f8361bfe4cd7
+R-B-L3-004,R-B-L3-004 - TTL fingerprint shift,src_ip,1h,none,5e3358d25d88a266
+R-B-L3-006,R-B-L3-006 - Fan-in onto a workstation,dst_ip,1h,none,91554a3cd8dda7a2
+R-B-L3-007,R-B-L3-007 - First-contact upload,"src_ip,bgp_as_dst",1h,none,3b1def60e7d02d11
+R-B-L4-004,R-B-L4-004 - Stack fingerprint mismatch,host_key,1h,none,ce8ade2d54195457
+R-B-L4-005,R-B-L4-005 - Transfer envelope breach,transfer_triple,1h,none,ce8ade2d54195457
+R-B-L5-001,R-B-L5-001 - Composite authentication anomaly,"user_principal,window_id",1h,none,0e08ef3b1146e540
+R-B-L5-002,R-B-L5-002 - Location novelty anomaly,"user_principal,window_id",1h,none,7b33a95a1443f372
+R-B-L5-005,R-B-L5-005 - Session duration anomaly,session_key,1h,none,0701cfac24e63aac
+R-B-L6-001,R-B-L6-001 - New TLS client fingerprint,src_ip,1h,none,fd57dc369fe00ec6
+R-B-L6-004,R-B-L6-004 - Cipher downgrade,tls_pair_key,1h,none,ce8ade2d54195457
+R-B-L7-001,R-B-L7-001 - DNS tunneling,dns_registered_domain,1h,none,ec116b0e32e9ccff
+R-B-L7-002,R-B-L7-002 - Bulk data access,"user_principal,operation",1h,none,dd684fdcee19502f
+R-B-L7-004,R-B-L7-004 - Process ancestry novelty,"endpoint_host,endpoint_pair",1h,none,ce8ade2d54195457
+R-B-L7-007,R-B-L7-007 - Service reached by new clients,service_key,1h,none,4038a568d58d8191
+R-B-L7-008,R-B-L7-008 - Domain generation,src_ip,1h,none,efa6479b3d6ffb58
+R-C-001,R-C-001 - Lateral movement chain,"src_ip,user_principal,target",3h,none,417b3ee9750b7fe1
+R-C-002,R-C-002 - TLS anomaly precedes beaconing,"src_ip,dst_ip",3h,none,da77784e72a16f0f
+R-C-003,R-C-003 - Physical compromise chain,"port_key,mac_address",5h,none,cbcae8002104e746
+R-C-004,R-C-004 - Staged exfiltration,"user_principal,src_ip",12h,none,eefb333610056bc1
+R-C-005,R-C-005 - Credential replay across the stack,"user_principal,event_uid",24h,none,be40d3ba62ec8f54
+R-D-L1-001,R-D-L1-001 - Transceiver substitution,"entity_key,transceiver_serial",1h,none,ce8ade2d54195457
+R-D-L1-002,R-D-L1-002 - Optical tap step,entity_key,1h,none,77850466fc69fdc6
+R-D-L1-003,R-D-L1-003 - Link flap instability,entity_key,1h,none,aafddd16fe732d6f
+R-D-L1-006,R-D-L1-006 - LLDP neighbor change,"entity_key,link_key",1h,none,ce8ade2d54195457
+R-D-L1-008,R-D-L1-008 - Configuration change outside the change window,"entity_key,running_config_hash",1h,none,ce8ade2d54195457
+R-D-L2-001,R-D-L2-001 - MAC address count exceeded on an access port,"port_key,mac_address",1h,none,ce8ade2d54195457
+R-D-L2-003,R-D-L2-003 - ARP anomaly,arp_sender_ip,1h,none,f9217fbc46e362e2
+R-D-L2-004,R-D-L2-004 - MAC in two places at once,"mac_address,bind_start",1h,none,978b1860b8e40afc
+R-D-L2-005,R-D-L2-005 - Authorization without authentication,event_uid,1h,none,ce8ade2d54195457
+R-D-L3-003,R-D-L3-003 - Reserved-range egress,event_uid,1h,none,ce8ade2d54195457
+R-D-L3-008,R-D-L3-008 - Port sweep,src_ip,1h,none,46a531640eac3580
+R-P-L3-009,R-P-L3-009 - Host drift trajectory,"host_key,day_window_id",2d,none,b6322768d8b08241
+R-D-L4-002,R-D-L4-002 - SYN without completion,src_ip,1h,none,987c662893e47171
+R-D-L4-003,R-D-L4-003 - RST ratio,"entity_key,refusal_direction",1h,none,edc3e3b017a9afec
+R-D-L5-003,R-D-L5-003 - Impossible travel,"user_principal,window_id",1h,none,948323e19cd825d9
+R-D-L5-004,R-D-L5-004 - Multi-factor fatigue,"user_principal,window_id",1h,none,1e986a9817e8e765
+R-D-L5-007,R-D-L5-007 - Off-hours authentication,"user_principal,window_id",1h,none,ce8ade2d54195457
+R-D-L5-008,R-D-L5-008 - New authentication location or device,"user_principal,window_id",1h,none,ce8ade2d54195457
+R-D-L5-009,R-D-L5-009 - Failed authentication run ending in success,"user_principal,window_id",1h,none,fd5f59a0eb89023c
+R-D-L6-002,R-D-L6-002 - Certificate issuer anomaly,tls_destination_key,1h,none,ce8ade2d54195457
+R-D-L6-003,R-D-L6-003 - Self-signed to external destination,dst_ip,1h,none,ce8ade2d54195457
+R-D-L6-005,R-D-L6-005 - Content type mismatch,"src_ip,dst_ip",1h,none,ce8ade2d54195457
+R-D-L7-005,R-D-L7-005 - Enumeration,src_ip,1h,none,1be70aaf4a926519
+R-P-L1-004,R-P-L1-004 - Optical degradation forecast,entity_key,1h,none,25712af04c9e3546
+R-P-L1-009,R-P-L1-009 - Reboot-rate trajectory,entity_key,1h,none,48e044618fbcee19
+R-D-L1-010,R-D-L1-010 - Optical level below commissioning,entity_key,1h,none,6daea6128131f997
+R-P-L3-005,R-P-L3-005 - Fan-out trajectory,entity_key,4h,none,ce8ade2d54195457
+R-P-L5-006,R-P-L5-006 - Drift trajectory,"user_principal,day_window_id",2d,none,86bc8bd84e22c9f8
+R-P-L6-006,R-P-L6-006 - Client stack trajectory,"src_ip,day_window_id",2d,none,b6322768d8b08241
+R-P-L7-006,R-P-L7-006 - Access breadth trajectory,user_principal,28d,none,56408aa4912dccf2
+R-P-L7-009,R-P-L7-009 - Subdomain count trajectory,"src_ip,day_window_id",2d,none,b6322768d8b08241
+R-P-L7-010,R-P-L7-010 - Path count trajectory,"src_ip,day_window_id",2d,none,b6322768d8b08241
+R-P-L7-011,R-P-L7-011 - Process breadth trajectory,"endpoint_host,day_window_id",2d,none,b6322768d8b08241
