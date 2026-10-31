@@ -158,8 +158,8 @@ Two adjustments make the run faithful, and both are the runner's rather than the
   itself: `MAX_DAYS_AGO` cannot exceed about thirty years, and an event outside it is silently given another time.
   The runner moves every timestamp forward by one whole number of weeks, so the newest event lands a few days
   before the run; hours of day, weekdays and every bin boundary stay where they were, and every search compares
-  `_time` only with another `_time`. The events then span sixty days, more than the thirty layer 1 allows,
-  so the runner installs `validation_app/`, a separate app whose `local/props.conf` raises `MAX_DAYS_AGO` for
+  `_time` only with another `_time`. The events then span sixty days, more than the thirty the app allows edges,
+  quarantined records and health records, so the runner installs `validation_app/`, a separate app whose `local/props.conf` raises `MAX_DAYS_AGO` for
   this run and whose `local/indexes.conf` gives the indexes local paths. It is never deployed.
 - **The searches look back from now**, over windows like `-2h@m` to `-5m@m`. Each is dispatched as
   `| savedsearch` with an explicit time range covering every event, which overrides the stanza's window, so each

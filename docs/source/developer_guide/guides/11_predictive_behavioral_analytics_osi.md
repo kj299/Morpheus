@@ -64,7 +64,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
 That is sixty stages and fifty-one supporting
-modules, covered by 2,651 distinct tests, itemized in
+modules, covered by 2,655 distinct tests, itemized in
 [Part 6](#provided). Sixty-one of the sixty-three rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -2990,7 +2990,7 @@ Four indexes, split by volume and retention rather than by layer:
 homePath   = $SPLUNK_DB/behavior_events/db
 coldPath   = $SPLUNK_DB/behavior_events/colddb
 thawedPath = $SPLUNK_DB/behavior_events/thaweddb
-frozenTimePeriodInSecs = 7776000
+frozenTimePeriodInSecs = 34128000
 
 [behavior_lineage]
 homePath   = $SPLUNK_DB/behavior_lineage/db
@@ -3014,7 +3014,7 @@ frozenTimePeriodInSecs = 34560000
 homePath   = $SPLUNK_DB/behavior_summary/db
 coldPath   = $SPLUNK_DB/behavior_summary/colddb
 thawedPath = $SPLUNK_DB/behavior_summary/thaweddb
-frozenTimePeriodInSecs = 7776000
+frozenTimePeriodInSecs = 34128000
 ```
 
 Sourcetypes within them:
@@ -3035,10 +3035,12 @@ exempt from license metering, so consumers filter on the index alone.
 
 Four deliberate choices here.
 
-**Bindings and context are retained for 400 days while events are retained for 90.** Bindings are the
-only thing that makes a historical attribution reconstructible: an incident investigated in month eleven
-needs to know which host held an address in month one, and if the binding has aged out, the layer 3 event
-that survived is unattributable. Bindings are also two to three orders of magnitude smaller than events,
+**Events are retained for 395 days and bindings and context for 400.** The 395 are the thirteen months
+Part 2 asks of TC-1, TC-5, TC-6 and TC-7, and every index derived from a scored event -- the summary, the
+risk records, the health records, the quarantine and the late rows -- keeps them too. Bindings outlast the
+events by design: they are the only thing that makes a historical attribution reconstructible, an incident
+investigated in month twelve needs to know which host held an address in month one, and if the binding has
+aged out, the layer 3 event that survived is unattributable. Bindings are also two to three orders of magnitude smaller than events,
 so the long retention is close to free. Getting this backwards, with long event retention and short
 binding retention, is a common and expensive mistake.
 
@@ -3063,7 +3065,7 @@ TRUNCATE           = 0
 TIME_PREFIX        = "event_time":"
 TIME_FORMAT        = %Y-%m-%dT%H:%M:%S.%6N%Z
 MAX_TIMESTAMP_LOOKAHEAD = 32
-MAX_DAYS_AGO       = 30
+MAX_DAYS_AGO       = 395
 category           = Custom
 disabled           = false
 ```
@@ -3071,11 +3073,12 @@ disabled           = false
 `TIME_PREFIX` anchored to `event_time` is the single most important line in the Splunk configuration.
 Without it, `_time` drifts toward `ingest_time` and every windowed rule silently becomes a rule about when
 the pipeline was busy. `MAX_DAYS_AGO` must exceed the longest backfill you intend to run, or replayed
-history is quietly rejected.
+history is quietly rejected. The app sets it to 395 on every score stanza and on `morpheus:late`, the
+retention of `behavior_events`, so any window the index still holds can be replayed into it.
 
 Repeat the stanza per layer, or use a single `morpheus:score` sourcetype with `osi_layer` as a field. One
-sourcetype per layer is worth the duplication because it lets you set different `MAX_DAYS_AGO` values,
-since SaaS audit APIs at layer 7 backfill far later than NetFlow at layer 3, and because it makes index-time
+sourcetype per layer is worth the duplication because it lets an estate that shortens retention set
+different `MAX_DAYS_AGO` values, since SaaS audit APIs at layer 7 backfill far later than NetFlow at layer 3, and because it makes index-time
 routing per layer possible later without reindexing.
 
 `KV_MODE = json` extracts at search time, which keeps the index small. `tstats` cannot see search-time
@@ -4492,11 +4495,13 @@ Pass 4 measures each of these and records which the fork reuses.
   (`cyclic_histogram`, `transfer_envelope`, `bucket_peak`) or includes it (`distinct_window`), and
   `quantize_value` is applied inside four modules and at the stage in the rest. Recorded here so a new
   tracker chooses deliberately (gap G82).
-- A retention departure, recorded rather than resolved: Part 2 asks for thirteen months on TC-1, TC-5, TC-6
-  and TC-7, and the app retains events ninety days with `MAX_DAYS_AGO` 30 on `morpheus:score:l1` to `l4` and
-  `l6` and 90 on `l5` and `l7`, so a backfill older than that is dropped at index time. The ninety days are
-  the deliberate choice Part 4 makes; Part 2's figure is the requirement an estate reconciles against its
-  own policy (gap G74).
+- Retention, reconciled under plan section 3.5: Part 2 asks for thirteen months on TC-1, TC-5, TC-6 and
+  TC-7, and the app now retains `behavior_events` and every index derived from a scored event (summary,
+  risk, health, quarantine, late) for 395 days, with `MAX_DAYS_AGO` 395 on every score stanza and on
+  `morpheus:late`, so a backfill the index can still hold is not dropped at index time. Bindings and context
+  keep 400 days, five longer than the events they attribute; edges keep 30, because an edge is derivable
+  from the events it links (gap G74, closed). Thirteen months is the design's requirement, not a lawful
+  basis, and an estate still reconciles it against its own policy.
 - The determinism envelope on every event and the model stamp on every scored one
   ({py:class}`~morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage`, behind the feature
   stages of all thirteen composed pipelines): every golden row carries `determinism_tier`,

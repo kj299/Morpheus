@@ -101,6 +101,9 @@ side alone breaks the joins silently.
 2. **Binding retention, 400 days.** `frozenTimePeriodInSecs` on `behavior_bindings` and the cutoffs
    in the `Binding lookup - L2/L3 expiry` and `Binding lookup - L1 history expiry` searches must move
    together. A lookup that expires before its index produces unattributable events.
+   It must also stay longer than the 395 days `behavior_events` and every index derived from a scored
+   event keep, the thirteen months the guide's Part 2 asks for: an event that outlives its binding is
+   unattributable too.
 3. **The Community ID seed, zero.** Not a Splunk setting, but the reason the `community_id` field
    joins against Zeek and Suricata data in the same estate. If any producer changes the seed, they
    all must.
@@ -148,7 +151,7 @@ side alone breaks the joins silently.
    index, in the categories `morpheus.utils.personal_data` classifies columns into. It is not a legal
    position and sets no lawful basis; it is the half of a retention decision that was missing, since a
    period is not a decision until somebody can say what it applies to. `behavior_events` carries all five
-   personal categories for 90 days, and most of what it carries is behavioural profile the pipeline derived
+   personal categories for 395 days, and most of what it carries is behavioural profile the pipeline derived
    rather than anything a collector sent. `behavior_bindings` carries addresses and locations for 400 days
    and is, by design, the thing that re-identifies the rest. Minimization is upstream of all of it --
    `morpheus.stages.lineage.minimization_stage.MinimizationStage` before the sink -- and is not a substitute:
