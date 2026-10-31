@@ -784,9 +784,9 @@ PRODUCED: dict = {
             producer="`morpheus.stages.lineage.pipeline_health_stage.PipelineHealthStage` behind WindowSealStage, one "
             "record per window, collector, class and tenant; `envelope.health` over every score corpus in "
             "`tests/morpheus/determinism/`.",
-            # `event_time` is the window's end. The three health searches read these: the refusal rate the counts,
-            # Collector health the sequence and the clock, and the platform step the record count against its own
-            # history.
+            # `event_time` is the window's end. The four health searches read these: the refusal rate the refusals,
+            # Collector health the sequence and the clock, the stage counts what the stages could not do, and the
+            # platform step the record count against its own history.
             required_columns=("window_id",
                               "collector_id",
                               "telemetry_class",

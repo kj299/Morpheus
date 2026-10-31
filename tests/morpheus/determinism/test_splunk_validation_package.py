@@ -1821,6 +1821,7 @@ NUMBER_WORDS = {
     "eighty-three": 83,
     "eighty-four": 84,
     "eighty-five": 85,
+    "eighty-six": 86,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""
@@ -2437,6 +2438,35 @@ def test_collector_health_names_the_collectors_whose_streams_are_broken(expected
     assert entry["expected_rows"] == len(flagged)
     assert [(row["collector_id"], row["seq_gap"], row["seq_regressed"]) for row in entry["key_values"]
             ] == [(collector, gaps[collector], regressed[collector]) for collector in flagged]
+
+
+STAGE_COUNTS = ("keyless", "unpaired", "abandoned", "unclassified", "out_of_order", "saturated", "fallback")
+"""The health counts `Pipeline health - stage counts` sums, each a thing a stage could not do."""
+
+
+def test_the_stage_counts_name_each_class_a_stage_could_not_fully_handle(expected: dict):
+    # Splunk's sum skips a null, and a count no row of the class can answer is null in the record, so a class whose
+    # stages never write a column sums to nothing rather than to zero and is kept only for a count it can answer.
+    sums: dict = collections.defaultdict(dict)
+
+    for event in _events_of("morpheus_health.jsonlines"):
+        key = (event["collector_id"], event["telemetry_class"], event["tenant_id"])
+
+        for name in STAGE_COUNTS:
+            if (event.get(name) is not None):
+                sums[key][name] = sums[key].get(name, 0) + event[name]
+
+    flagged = [(key, sums[key]) for key in sorted(sums) if any(value > 0 for value in sums[key].values())]
+    entry = expected["searches"]["Pipeline health - stage counts"]
+
+    assert entry["expected_rows"] == len(flagged)
+    assert entry["expected_empty"] is (len(flagged) == 0)
+    assert [(row["collector_id"],
+             row["telemetry_class"],
+             row["tenant_id"], {
+                 name: row[name]
+                 for name in STAGE_COUNTS if name in row
+             }) for row in entry["key_values"]] == [(*key, counts) for (key, counts) in flagged]
 
 
 def test_late_arrivals_are_counted_by_class(expected: dict):

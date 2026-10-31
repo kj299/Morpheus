@@ -279,3 +279,40 @@ def test_the_two_tables_agree():
     (guide, readme) = (_listed(DOCUMENTS["guide"]), _listed(DOCUMENTS["app README"]))
 
     assert guide == readme
+
+
+INPUT_CONTRACTS = os.path.join(REPO_ROOT, "examples", "behavioral_analytics", "input_contracts.json")
+NUMBER_WORDS = {"Nine": 9, "Ten": 10, "Eleven": 11, "Twelve": 12, "Thirteen": 13, "Fourteen": 14, "Eight": 8}
+
+
+def test_the_tc5_fields_the_guide_calls_unread_are_the_ones_nothing_reads():
+    # Gap G65: Part 2 asks a TC-5 collector for twenty-one fields, and says which of them nothing reads yet. A field
+    # is read when a TC-5 stage takes it from the input contract, a search names it, or `TC0EnrichStage` attaches it
+    # from the identity context as `ctx_<field>`. The guide's list of the unread has to be exactly the rest, so a
+    # field that gains a reader, or loses one, fails here until the sentence is changed.
+    with open(DOCUMENTS["guide"], encoding="utf-8") as handle:
+        guide = handle.read()
+
+    start = guide.index("**Required fields:** `session_id`, `user_principal`")
+    paragraph = guide[start:guide.index("\n\n", start)]
+    required = re.findall(r"`([a-z_0-9]+)`", paragraph)
+
+    with open(INPUT_CONTRACTS, encoding="utf-8") as handle:
+        classes = json.load(handle)["classes"]
+
+    contracted = {column["name"] for name in ("tc5_auth", "tc5_session") for column in classes[name]["columns"]}
+    searched = _searched()
+    read = {field for field in required if field in contracted or field in searched or f"ctx_{field}" in searched}
+    unread = [field for field in required if field not in read]
+
+    stated = re.search(
+        r"(\w+) of these are read by a stage or a shipped search\. (\w+) are specified and not yet read "
+        r"by anything:\s*(.*?)\.",
+        guide[start:],
+        re.S)
+
+    assert len(required) == 21
+    assert stated is not None, "Part 2's TC-5 paragraph no longer says which fields nothing reads"
+    assert NUMBER_WORDS[stated.group(1)] == len(read)
+    assert NUMBER_WORDS[stated.group(2)] == len(unread)
+    assert re.findall(r"`([a-z_0-9]+)`", stated.group(3)) == unread

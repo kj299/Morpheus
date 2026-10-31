@@ -237,6 +237,23 @@ class PipelineHealthStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
         return int(sum(1 for row in flags if any(row)))
 
     @staticmethod
+    def _answered_count(group: pd.DataFrame, columns: typing.Iterable[str]) -> typing.Optional[int]:
+        """
+        `_count`, but null when the columns are null on every row of the window as well as when they are absent.
+
+        For a flag a stage writes only on the rows it acted on. `model_fallback_used` is stamped on a scored row and
+        null on one the model never saw, so a window with no scored row cannot say how many fell back -- and whether
+        the column survives into the frame depends on what else the run held, a whole replay or a run stopped before
+        the first scored week. Answering from the window's own rows makes the count the same either way.
+        """
+        present = [name for name in columns if name in group.columns]
+
+        if (not any(normalize_text(value) is not None for name in present for value in group[name])):
+            return None
+
+        return PipelineHealthStage._count(group, present)
+
+    @staticmethod
     def _sum(group: pd.DataFrame, columns: typing.Iterable[str]) -> typing.Optional[int]:
         present = [name for name in columns if name in group.columns]
 
@@ -289,7 +306,7 @@ class PipelineHealthStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             "unresolved": (None if "resolution_method" not in group else int(
                 sum(1 for value in group["resolution_method"] if normalize_text(value) == UNRESOLVED))),
             "saturated": self._count(group, saturated),
-            "fallback": self._count(group, self._fallback),
+            "fallback": self._answered_count(group, self._fallback),
             "seq_gap": self._sum(group, ("collector_seq_gap", )),
             "seq_regressed": regressions,
             "max_ingest_lag_seconds": self._lag(group, "ingest_time", "observed_time"),

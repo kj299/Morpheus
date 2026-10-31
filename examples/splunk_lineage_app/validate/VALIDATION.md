@@ -124,15 +124,23 @@ beside the flooding host's chain at 55; and the twenty inventory records index a
 no search, because the scores carry what they say. It differs from what is now written in the summary alone, and has
 neither of the two searches plan section 3.3 added.
 
-The fifteenth, `search_head_results.json` beside this file, was made on 2026-10-28 on the same install over the
+The fifteenth, kept as `search_head_runs/2026-10-28T1645Z.json`, was made on 2026-10-28 on the same install over the
 events regenerated for plan section 3.3, which gave the HTTP and endpoint classes a daily trajectory each, the slow
-enumerator and the creeping build server to read, and R-P-L7-010 and R-P-L7-011. It returned what is written
-for all eighty-five over 25,632 indexed events, and the detections wrote 242 risk records, so the run checks that
-the index holds exactly those rows -- 242 -- before the searches that read them run. R-P-L7-010 returns the slow enumerator's
+enumerator and the creeping build server to read, and R-P-L7-010 and R-P-L7-011. It returned what was then written
+for all eighty-five, and the detections wrote 242 risk records. R-P-L7-010 returns the slow enumerator's
 last four days and R-P-L7-011 the build server's three, and both write `host_watchlist`: the run reads the list after
 the predictive searches and finds five rows, and R-B-L7-004 raises the build server's `curl` from 60 to 75 for the
 entry, which no row count shows and the risk index does. The summary grew by the 865 new requests and process starts,
-to 9032 rows.
+to 9032 rows. It differs from what is now written only by lacking the search plan section 3.7 added.
+
+The sixteenth, `search_head_results.json` beside this file, was made on 2026-10-31 on Splunk 10.2.8 unpacked from the
+official tarball and run as its own user, not in the container, over the events regenerated for plan section 3.7,
+whose health records answer the fallback count from each window's own rows. It returned what is written
+for all eighty-six over 25,632 indexed events, and the detections wrote 242 risk records, so the run checks that
+the index holds exactly those rows -- 242 -- before the searches that read them run. `Pipeline health - stage
+counts` returns its five classes. Every risk record carries the `thresholds_hash` plan section 3.6 added, and a query
+over `behavior_risk` after the run found all 242 equal to their rule's entry in `rule_metadata`, over the sixty rules
+that fired.
 
 ## Running it
 
@@ -145,7 +153,7 @@ SPLUNK_PASSWORD='choose-one' examples/splunk_lineage_app/validate/run_search_hea
 
 It starts the container, waits for it to report healthy, and runs [`run_search_head.py`](./run_search_head.py)
 inside it under Splunk's own interpreter. That indexes every file in `sample_events/`, makes the two checks
-below, dispatches all eighty-five searches in the order this document prescribes, and writes
+below, dispatches all eighty-six searches in the order this document prescribes, and writes
 `search_head_results.json` beside this file: the Splunk version, the date, what was indexed, a row count per
 search, how many risk records the detections wrote and the index holds, and the risk on every chain that spans
 three layers. Commit it; `tests/morpheus/determinism/test_search_head_run.py` compares it with
@@ -285,11 +293,12 @@ should return nothing:
 | Binding health, unresolved rate | **1** | The ARP stream, the one class whose records carry a resolution outcome: 180 unresolved of 1,220 (0.148), under the 0.2 that marks a class degraded. It read five while the wire sent null fields: four classes carry `resolution_method` with no value, `resolution_method=*` matched the nulls, and the search reported them as resolving with nothing unresolved. An operational metric; the value matters, not whether it fired. |
 | Pipeline health, refusal rate | **1** | The DMZ poller: three polls reported 4500 ms out on an undisciplined clock, all three quarantined, none delivered -- a refusal rate of 1.0. Every other collector delivered everything. An operational metric. |
 | Collector health | **1** | The ARP sensor, whose sequence skips the three observations it never delivered. No collector repeats a number, every offset is within twenty milliseconds, and every record reached the pipeline two seconds after the sensor saw it. Empty is the healthy answer. |
+| Pipeline health, stage counts | **5** | What the stages could not do, by collector and class: the host frame's 56 and the sign-ins' 20 rows a fallback model scored, the RADIUS authorizations' two unpaired exchanges, the RADIUS accounting feed's two unpaired session records and one abandoned session, and the identity provider's one session record out of order. A count no stage of a class writes is null and stays out of the sum. An operational metric. |
 | Late arrivals by class | **1** | The layer 3 corpus's one late flow, routed to `morpheus:late` and so read by no detection. |
 | Platform baseline step | **1** | The SaaS corpus's second tenant, whose sync doubled for its last two days and held there. The identity provider's one-hour burst to twice its peak does not hold into the next window and is not a step. |
 | R-P-L5-006, drift trajectory | **6** | Two principals, neither of them behaviour, explained in `expected_results.json`: the two whose week repeats their fortnight climb on its last three days by hundredths a day, as the cadence features keep moving after their models were trained, and the rule measures that against a day-to-day spread that is nearly zero. The principals whose week does depart all cross the mean ceiling and leave. Watchlist, never a page: every firing is written to `principal_watchlist`. |
 
-**One of the eighty-five should return nothing.** That is the point of writing them down. An empty result is
+**One of the eighty-six should return nothing.** That is the point of writing them down. An empty result is
 this app's characteristic failure, and without a list saying which emptiness is correct, a deployment cannot
 tell a rule that is working from a rule that is broken. The ratio has moved both ways, which is what makes it
 worth stating: it improved as layers 3, 4, 5, 6 and 7 gained producers, and went the other way when the L2/L3 refresh

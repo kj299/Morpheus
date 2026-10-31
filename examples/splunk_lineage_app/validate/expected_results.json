@@ -1343,6 +1343,56 @@
         }
       ]
     },
+    "Pipeline health - stage counts": {
+      "expected_rows": 5,
+      "expected_empty": false,
+      "why": "Five classes, each for what one of its stages could not do. The host frame and the sign-ins carry the rows a fallback model scored rather than a pinned one: 56 host-hours and 20 sign-ins. The RADIUS authorizations carry two unpaired exchanges; the RADIUS accounting feed two unpaired session records and one session a later record abandoned; the identity provider's session feed one record out of order. Every other class answers zero, or cannot answer at all because none of its stages writes the column, and a null count stays out of the sum. Since plan section 3.7 the fallback count is null for a window no model scored, so it reads the same from a run stopped before the scored week as from one over the whole replay.",
+      "key_values": [
+        {
+          "collector_id": "host-frame",
+          "telemetry_class": "host_score",
+          "tenant_id": "corp",
+          "keyless": 0,
+          "fallback": 56
+        },
+        {
+          "collector_id": "idp",
+          "telemetry_class": "tc5_auth",
+          "tenant_id": "corp",
+          "keyless": 0,
+          "saturated": 0,
+          "fallback": 20
+        },
+        {
+          "collector_id": "idp-sessions",
+          "telemetry_class": "tc5_session",
+          "tenant_id": "corp",
+          "keyless": 0,
+          "unpaired": 0,
+          "abandoned": 0,
+          "unclassified": 0,
+          "out_of_order": 1
+        },
+        {
+          "collector_id": "radius",
+          "telemetry_class": "tc2_auth",
+          "tenant_id": "corp",
+          "keyless": 0,
+          "unpaired": 2,
+          "abandoned": 0
+        },
+        {
+          "collector_id": "radius-accounting",
+          "telemetry_class": "tc5_session",
+          "tenant_id": "corp",
+          "keyless": 0,
+          "unpaired": 2,
+          "abandoned": 1,
+          "unclassified": 0,
+          "out_of_order": 0
+        }
+      ]
+    },
     "Late arrivals by class": {
       "expected_rows": 1,
       "expected_empty": false,

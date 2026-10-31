@@ -110,7 +110,7 @@ def test_every_search_is_dispatched_once_in_the_prescribed_order(runner):
     order = [name for (name, _) in runner.ordered(names)]
     phases = dict(runner.ordered(names))
 
-    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 85
+    assert sorted(order) == sorted(names) and len(order) == len(set(order)) == 86
 
     position = {name: index for (index, name) in enumerate(order)}
     refreshes = [name for name in names if phases[name] == "refresh"]
@@ -539,7 +539,7 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS
     }
-    assert len(run["searches"]) == 52 and len(expected) == 85
+    assert len(run["searches"]) == 52 and len(expected) == 86
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
 
 
@@ -579,7 +579,7 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
         **BEFORE_THE_LEASES,
         **BEFORE_THE_PLATFORM
     }
-    assert len(run["searches"]) == 62 and len(expected) == 85
+    assert len(run["searches"]) == 62 and len(expected) == 86
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -610,7 +610,7 @@ def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arriv
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
     }
-    assert len(run["searches"]) == 66 and len(expected) == 85
+    assert len(run["searches"]) == 66 and len(expected) == 86
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -640,7 +640,7 @@ def test_the_ninth_run_differs_from_what_is_written_only_where_the_services_arri
         **_present(BEFORE_THE_DEVICES, run),
         **BEFORE_THE_SERVICES
     }
-    assert len(run["searches"]) == 72 and len(expected) == 85
+    assert len(run["searches"]) == 72 and len(expected) == 86
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -667,7 +667,7 @@ def test_the_tenth_run_differs_from_what_is_written_only_where_the_devices_arriv
     assert differing == {
         **_present(BEFORE_THE_DESK_SPOOF, run), **_present(BEFORE_THE_TRAJECTORIES, run), **BEFORE_THE_DEVICES
     }
-    assert len(run["searches"]) == 75 and len(expected) == 85
+    assert len(run["searches"]) == 75 and len(expected) == 86
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 213
 
 
@@ -706,7 +706,7 @@ def test_the_eleventh_run_differs_from_what_is_written_only_where_the_host_segme
     }
 
     assert differing == {**BEFORE_THE_DESK_SPOOF, **BEFORE_THE_HOSTS}
-    assert len(run["searches"]) == 78 and len(expected) == 85
+    assert len(run["searches"]) == 78 and len(expected) == 86
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 221
 
 
@@ -732,7 +732,7 @@ def test_the_twelfth_run_differs_from_what_is_written_only_where_the_trajectory_
     }
 
     assert differing == {**BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES, **BEFORE_THE_DESK_SPOOF, **BEFORE_THE_TRAJECTORIES}
-    assert len(run["searches"]) == 80 and len(expected) == 85
+    assert len(run["searches"]) == 80 and len(expected) == 86
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 224
     assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009"}
 
@@ -759,7 +759,7 @@ def test_the_thirteenth_run_differs_from_what_is_written_only_where_the_desk_spo
     }
 
     assert differing == {**BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES, **BEFORE_THE_DESK_SPOOF}
-    assert len(run["searches"]) == 82 and len(expected) == 85
+    assert len(run["searches"]) == 82 and len(expected) == 86
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 233
     assert {
         row["total_risk"]: int(row["count"])
@@ -790,9 +790,11 @@ def test_the_fourteenth_run_differs_from_what_is_written_only_where_the_http_and
     }
 
     assert differing == BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES
-    assert len(run["searches"]) == 83 and len(expected) == 85
+    assert len(run["searches"]) == 83 and len(expected) == 86
     assert set(expected) - set(run["searches"]) == {
-        "R-P-L7-010 - Path count trajectory", "R-P-L7-011 - Process breadth trajectory"
+        "R-P-L7-010 - Path count trajectory",
+        "R-P-L7-011 - Process breadth trajectory",
+        "Pipeline health - stage counts",
     }
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 235
     assert {
@@ -802,3 +804,28 @@ def test_the_fourteenth_run_differs_from_what_is_written_only_where_the_http_and
         "0": 13, "135": 1, "55": 1
     }
     assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009", "R-P-L6-006", "R-P-L7-009"}
+
+
+FIFTEENTH_RUN = os.path.join(VALIDATE, "search_head_runs", "2026-10-28T1645Z.json")
+"""The run over the events plan section 3.3 added; it matched everything then written."""
+
+
+def test_the_fifteenth_run_differs_from_what_is_written_only_by_the_stage_counts_it_predates():
+    # Made on 2026-10-28 when the HTTP and process trajectories arrived: all eighty-five then matched, with 242 risk
+    # records. Section 3.7 changed only the health records' fallback count, which no search it ran reads, and added
+    # the search that reads it, so the fifteenth run agrees with every row count now written and lacks that search.
+    with open(FIFTEENTH_RUN, encoding="utf-8") as handle:
+        run = json.load(handle)
+
+    with open(EXPECTED, encoding="utf-8") as handle:
+        expected = json.load(handle)["searches"]
+
+    differing = {
+        name: entry["rows"]
+        for (name, entry) in run["searches"].items() if entry["rows"] != expected[name]["expected_rows"]
+    }
+
+    assert differing == {}
+    assert len(run["searches"]) == 85 and len(expected) == 86
+    assert set(expected) - set(run["searches"]) == {"Pipeline health - stage counts"}
+    assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 242

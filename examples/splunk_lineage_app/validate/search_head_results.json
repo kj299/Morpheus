@@ -1,10 +1,10 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-28T16:45:29.821686+00:00",
-  "timestamp_shift_weeks": 2955,
+  "at": "2026-10-31T22:19:57.050178+00:00",
+  "timestamp_shift_weeks": 2956,
   "dispatch_window": {
-    "earliest": 1787097600,
-    "latest": 1793209357
+    "earliest": 1787702400,
+    "latest": 1793488661
   },
   "indexed": {
     "binding:bucketed": 3000,
@@ -52,8 +52,8 @@
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-5262180.000000",
-        "min_drift": "-6021780.000000"
+        "max_drift": "-4936671.000000",
+        "min_drift": "-5696271.000000"
       }
     ],
     "binding_tables": [
@@ -441,6 +441,7 @@
     "Binding health - unresolved rate",
     "Pipeline health - refusal rate",
     "Collector health",
+    "Pipeline health - stage counts",
     "Late arrivals by class",
     "Platform baseline step",
     "R-D-L5-003 - Impossible travel",
@@ -725,6 +726,10 @@
     "Collector health": {
       "phase": "search",
       "rows": 1
+    },
+    "Pipeline health - stage counts": {
+      "phase": "search",
+      "rows": 5
     },
     "Late arrivals by class": {
       "phase": "search",
