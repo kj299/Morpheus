@@ -302,10 +302,10 @@ because every reader marked persistence as out of the delivery lens's remit.
 
 **Re-verified 2026-10-22**, against the tree at the merge of pull request #99, by reading each row's claim
 against the code, the saved searches and the contracts rather than against the plan's status paragraphs. Of
-the eighty-nine rows, seventy-three are closed: the capability the row says is missing is in the tree with a
+the eighty-nine rows, seventy-four are closed: the capability the row says is missing is in the tree with a
 test, a stanza or a contract column behind it. Both rows marked blocking are among them: G03 by host
-identity (#63) and G10 by the service entity (#64). Eleven are narrowed to a remainder the row did not
-state (G09, G12, G20, G23, G39, G45, G49, G60, G65, G79, G82), of which one is open work: G20, hysteresis,
+identity (#63) and G10 by the service entity (#64). Ten are narrowed to a remainder the row did not
+state (G09, G12, G20, G23, G39, G45, G49, G65, G79, G82), of which one is open work: G20, hysteresis,
 which is deferred. G23, the host score, closed when the host half's third part put a daily trajectory over the
 TLS and DNS columns beside the host model's. G53, predictive mechanisms for the application layer, narrowed to
 HTTP and process behaviour once DNS and TLS carried one, and closed under plan section 3.3: R-P-L7-010 reads a daily
@@ -322,7 +322,10 @@ through `CompareDataFrameStage` for the lineage pipeline only, closed under plan
 against its golden, in both execution modes, with a negative control that changes one cell. G74, retention
 against the guide's thirteen months, closed under plan section 3.5: `behavior_events` and every index derived from
 a scored event keep 395 days, every score sourcetype accepts a backfill that old, and the bindings keep 400, which
-`test_splunk_app_contracts.py` holds in place. Five hold
+`test_splunk_app_contracts.py` holds in place. G60, thresholds from a baseline period and a digest over the
+shipped ones, closed under plan section 3.6: `rule_thresholds.csv` registers all seventy-two thresholds the
+detections compare against, `derive_thresholds.py` proposes each placeholder from a baseline period of exported
+events, and every risk record carries its rule's `thresholds_hash`. Five hold
 (G08, G48, G56, G69, G72): four as recorded decisions
 or out-of-scope items, and one, G72 (`TC1FeatureStage` in no composed pipeline), as a plain open item that no
 step has taken. G90, the ninetieth gap the critic added, now has a row, closed by step 16's first part.
@@ -390,7 +393,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G57 | major | stands → closed | platforms | R-C-004 hard-codes one identity provider's session lifecycle vocabulary; no normalized lifecycle column | #56 |
 | G58 | major | stands → closed | all | Join method of the layer 5 -> port hop is invisible to every search and contract | #57 |
 | G59 | major | stands → closed | users | Drift velocity and acceleration are emitted but given a threshold by no rule and outside the contract | #55 |
-| G60 | major | stands → narrowed | all | No tooling derives thresholds from a baseline period; `config_hash` not computed over shipped thresholds | not scheduled |
+| G60 | major | stands → narrowed → closed | all | No tooling derives thresholds from a baseline period; `config_hash` not computed over shipped thresholds | not scheduled |
 | G61 | major | narrowed → closed | all | Late-arrival rows have no delivery path and feed detections as if complete | #62 |
 | G62 | major | stands → closed | all | Machine-checkable collector input contract exists for one of fourteen input classes | #66 |
 | G63 | major | stands → closed | all | No CI has ever run the test suite on this fork | #53 |
