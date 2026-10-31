@@ -183,14 +183,6 @@ switch's MAC table -- and a binding still open when the first run stops is close
 second. A deployment holds those bindings in the SIEM's lookups, refreshed from `binding:*`; the compositions build
 them per run, so for them this equality is not the property to ask for. Their stages restore all the same."""
 
-UNANSWERED_FALLBACK = "fallback"
-"""The one health count still read as unanswered or zero by where the run was cut. `envelope.health` drops a column
-that is null on every row of the class before `PipelineHealthStage` sees it, so a class whose `model_fallback_used`
-is null until the scored week answers null from a run stopped before that week and zero from a run over the whole
-replay. The other counts, `clock_refused` among them, are compared as written: their stages declare the column, so
-it is on every row with a value."""
-
-
 def _files(directory: pathlib.Path) -> dict[str, list[str]]:
     return {path.stem: path.read_text(encoding="utf-8").splitlines() for path in directory.glob("*.jsonlines")}
 
@@ -201,11 +193,11 @@ def _without_resume_marker(lines: dict[str, list[str]]) -> dict[str, list[str]]:
     for (name, values) in lines.items():
         records = [json.loads(value) for value in values]
 
+        # Every health count is compared as written. The fallback count was the one exception until plan section
+        # 3.7: it read null from a run stopped before the scored week and zero from a run over the whole replay, and
+        # it now answers from the window's own rows, which are the same either way.
         for record in records:
             record.pop("resumed_from_state", None)
-
-            if (name == "morpheus_health"):
-                record.setdefault(UNANSWERED_FALLBACK, 0)
 
         stripped[name] = sorted(json.dumps(record, sort_keys=True) for record in records)
 

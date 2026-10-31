@@ -64,7 +64,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
 That is sixty stages and fifty-two supporting
-modules, covered by 2,674 distinct tests, itemized in
+modules, covered by 2,677 distinct tests, itemized in
 [Part 6](#provided). Sixty-one of the sixty-three rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -1677,9 +1677,12 @@ same {py:mod}`~morpheus.utils.bucket_peak` tracker a port's MAC count uses; the 
 lag from sensor to pipeline. Every score sourcetype carries `tenant_id` and `collector_id` as required columns, so
 the key is on every row a platform search groups.
 
-**What it detects.** Four reports ship. `Pipeline health - refusal rate` is the share of a collector's records the
+**What it detects.** Five reports ship. `Pipeline health - refusal rate` is the share of a collector's records the
 pipeline refused or quarantined; `Collector health` a collector that skipped or repeated sequence numbers,
-reported an offset beyond a second, or delivered late; `Late arrivals by class` what reached the pipeline after its
+reported an offset beyond a second, or delivered late; `Pipeline health - stage counts` what the stages themselves
+could not do -- keyless rows, unpaired or abandoned exchanges, unclassified actions, samples out of order, saturated
+counts and fallback scores -- by collector, class and tenant, the seven counts no search read until plan section
+3.7; `Late arrivals by class` what reached the pipeline after its
 window sealed; and `Platform baseline step` a feed whose volume held at twice its own peak for two consecutive
 windows. One window over is a burst, and a burst is what the detections are for; a platform step -- a tenant
 onboarding, a collector double-sending, an export schedule changing -- holds into the next window. The SaaS

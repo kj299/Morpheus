@@ -325,7 +325,10 @@ a scored event keep 395 days, every score sourcetype accepts a backfill that old
 `test_splunk_app_contracts.py` holds in place. G60, thresholds from a baseline period and a digest over the
 shipped ones, closed under plan section 3.6: `rule_thresholds.csv` registers all seventy-two thresholds the
 detections compare against, `derive_thresholds.py` proposes each placeholder from a baseline period of exported
-events, and every risk record carries its rule's `thresholds_hash`. Five hold
+events, and every risk record carries its rule's `thresholds_hash`. G65 stays narrowed under plan section 3.7, to
+the nine TC-5 fields Part 2 names as read by nothing and the per-session privilege escalation feature no stage
+produces, but the list is now a test: `test_feature_coverage.py` computes which required fields a stage, a search or
+the identity context reads and holds Part 2's sentence to the rest. Five hold
 (G08, G48, G56, G69, G72): four as recorded decisions
 or out-of-scope items, and one, G72 (`TC1FeatureStage` in no composed pipeline), as a plain open item that no
 step has taken. G90, the ninetieth gap the critic added, now has a row, closed by step 16's first part.

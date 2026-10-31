@@ -131,6 +131,18 @@ def test_a_count_nothing_on_the_rows_can_answer_is_null_rather_than_zero(config:
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_a_window_no_model_scored_cannot_say_how_many_fell_back(config: Config):
+    # Window 0 is the unscored week: the stamp leaves `model_fallback_used` null on every row. Window 1 was scored,
+    # once by the fallback. The answer for window 0 is the same whether or not window 1 is in the batch, which is
+    # what makes a run stopped before the scored week agree with one over the whole replay.
+    together = health(config, sealed([0, 0, 1, 1], model_fallback_used=[None, None, True, False]))
+    alone = health(config, sealed([0, 0], model_fallback_used=[None, None]))
+
+    assert _values(together, "fallback") == [None, 1]
+    assert _values(alone, "fallback") == [None]
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_the_lags_and_the_offsets_are_measured(config: Config):
     payload = sealed([0, 0, 0],
                      event_time=[0, 10 * SECOND_NS, 20 * SECOND_NS],
