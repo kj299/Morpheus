@@ -302,7 +302,7 @@ because every reader marked persistence as out of the delivery lens's remit.
 
 **Re-verified 2026-10-22**, against the tree at the merge of pull request #99, by reading each row's claim
 against the code, the saved searches and the contracts rather than against the plan's status paragraphs. Of
-the eighty-nine rows, seventy-two are closed: the capability the row says is missing is in the tree with a
+the eighty-nine rows, seventy-three are closed: the capability the row says is missing is in the tree with a
 test, a stanza or a contract column behind it. Both rows marked blocking are among them: G03 by host
 identity (#63) and G10 by the service entity (#64). Eleven are narrowed to a remainder the row did not
 state (G09, G12, G20, G23, G39, G45, G49, G60, G65, G79, G82), of which one is open work: G20, hysteresis,
@@ -319,8 +319,11 @@ renamed port meets them only through `reported_entity_key`. G70, TC-0 context ke
 are joined onto layer 1, the device class and layer 2, and R-D-L1-010 reads a port's commissioning level. G88, control 13's fourth check
 through `CompareDataFrameStage` for the lineage pipeline only, closed under plan section 3.4:
 `test_golden_via_compare_dataframe_stage.py` sends every composed pipeline's canonical output through the stage
-against its golden, in both execution modes, with a negative control that changes one cell. Six hold
-(G08, G48, G56, G69, G72, G74): five as recorded decisions
+against its golden, in both execution modes, with a negative control that changes one cell. G74, retention
+against the guide's thirteen months, closed under plan section 3.5: `behavior_events` and every index derived from
+a scored event keep 395 days, every score sourcetype accepts a backfill that old, and the bindings keep 400, which
+`test_splunk_app_contracts.py` holds in place. Five hold
+(G08, G48, G56, G69, G72): four as recorded decisions
 or out-of-scope items, and one, G72 (`TC1FeatureStage` in no composed pipeline), as a plain open item that no
 step has taken. G90, the ninetieth gap the critic added, now has a row, closed by step 16's first part.
 The Check column carries both verdicts, the readers' of 2026-10-03 and this one; the paragraphs above it
@@ -407,7 +410,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G71 | minor | stands → closed | network objects | Stateful TC-1/TC-2 stages other than binding and auth do not guard event time | #62 |
 | G72 | minor | stands → holds → closed | network objects | TC1FeatureStage runs in no composed pipeline, golden or sourcetype; removed 2026-10-24 (audit ruling D5) | #52 |
 | G73 | minor | stands → closed | network objects | TC-1 field names and counter contract in guide/README do not match stage inputs and outputs | #52 |
-| G74 | minor | narrowed → holds | network objects, platforms, users, applications | Index retention and `MAX_DAYS_AGO` contradict the guide's 13-month requirement for TC-1/5/6/7 | #52 |
+| G74 | minor | narrowed → holds → closed | network objects, platforms, users, applications | Index retention and `MAX_DAYS_AGO` contradict the guide's 13-month requirement for TC-1/5/6/7 | #52 |
 | G75 | minor | stands → closed | nodes | Layer 3 rows carry no exporter device column, so flow exporter clock cannot be perturbed or quarantined | #62 |
 | G76 | minor | stands → closed | applications | R-B-L6-001 drops its managed-endpoint condition without recording the departure | #60 |
 | G77 | minor | stands → closed | applications | TLS destination identity is `dst_ip` only; `sni` never read | #64 |

@@ -23,6 +23,10 @@ in the estate agrees with. Prose in three documents is not enforcement, so these
 configuration directly and compare it against the values in code.
 
 The fourth contract, the `event_time` rendering, lives in `test_siem_wire.py` beside the renderer it constrains.
+
+A fifth, the thirteen months Part 2 of the guide asks every scored class to be kept, sits here beside the binding
+retention it is ordered against: the scored indexes keep 395 days, the score sourcetypes accept a backfill that old,
+and the bindings that attribute those events outlive them.
 """
 
 import configparser
@@ -42,6 +46,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file_
 APP_ROOT = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheus-lineage")
 SAVEDSEARCHES_PATH = os.path.join(APP_ROOT, "default", "savedsearches.conf")
 INDEXES_PATH = os.path.join(APP_ROOT, "default", "indexes.conf")
+PROPS_PATH = os.path.join(APP_ROOT, "default", "props.conf")
 GUIDE_PATH = os.path.join(REPO_ROOT,
                           "docs",
                           "source",
@@ -56,6 +61,20 @@ EXPIRY_PATTERN = re.compile(r"floor\(\(now\(\)\s*-\s*(\d+)\)\s*/\s*(\d+)\)")
 DISCRETIZE_PATTERN = re.compile(r"floor\(_time\s*/\s*(\d+)\)")
 
 BINDING_INDEXES = ["behavior_bindings"]
+
+SCORED_RETENTION_DAYS = 395
+"""Thirteen months, what Part 2 asks of TC-1, TC-5, TC-6 and TC-7, and what the app keeps every scored event for."""
+
+SCORED_INDEXES = [
+    "behavior_events",
+    "behavior_summary",
+    "behavior_risk",
+    "behavior_health",
+    "behavior_quarantine",
+    "behavior_late",
+]
+"""The scored events' index and every index derived from them: rollups, risk records, the pipeline's account of the
+windows they were scored in, and the whole events held back for a clock or a seal."""
 
 
 def read_text(path: str) -> str:
@@ -130,6 +149,77 @@ def test_the_guide_and_the_app_agree_on_both_numbers():
     # The guide quotes the app's stanzas; when the two disagree the app is normative, but disagreement is still a
     # documentation defect and it has happened before on this branch.
     assert set(expiry_pairs(GUIDE_PATH)) == set(expiry_pairs(SAVEDSEARCHES_PATH))
+
+
+def _retention_by_index() -> dict:
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(INDEXES_PATH)
+
+    return {name: int(parser[name]["frozenTimePeriodInSecs"]) for name in parser.sections()}
+
+
+def _max_days_ago_by_sourcetype() -> dict:
+    values = {}
+    sourcetype = None
+
+    for line in read_text(PROPS_PATH).splitlines():
+        stanza = re.match(r"^\[(.+)\]\s*$", line)
+        setting = re.match(r"^MAX_DAYS_AGO\s*=\s*(\d+)", line)
+
+        if (stanza):
+            sourcetype = stanza.group(1)
+        elif (setting):
+            values[sourcetype] = int(setting.group(1))
+
+    return values
+
+
+def test_every_scored_index_keeps_thirteen_months():
+    # Contract 5 (gap G74). Ninety days was the app's figure until plan section 3.5, against a requirement of
+    # thirteen months that the guide stated and the app contradicted: an optic investigated in month eleven had no
+    # events left to explain its score.
+    retention = _retention_by_index()
+
+    short = {name: retention[name] for name in SCORED_INDEXES if retention[name] != SCORED_RETENTION_DAYS * 86400}
+
+    assert short == {}, f"scored indexes not kept {SCORED_RETENTION_DAYS} days: {short}"
+
+    # Every index is either scored, a binding or context store, or the derivable edges; a new one has to say which.
+    assert set(retention) == set(SCORED_INDEXES) | set(BINDING_INDEXES) | {"behavior_context", "behavior_lineage"}
+
+
+def test_bindings_outlive_the_events_they_attribute():
+    # The asymmetry the index file calls load-bearing, now that the events' side moved: an event kept longer than
+    # the binding that names its host is an event nobody can attribute.
+    retention = _retention_by_index()
+
+    for name in BINDING_INDEXES + ["behavior_context"]:
+        assert retention[name] > max(retention[scored] for scored in SCORED_INDEXES), name
+
+    assert retention["behavior_lineage"] < retention["behavior_events"]
+
+
+def test_every_score_sourcetype_accepts_a_backfill_as_old_as_its_index_keeps():
+    # The other half of G74: a backfill older than `MAX_DAYS_AGO` is not rejected but quietly re-timed, so a
+    # retention the sourcetype cannot be replayed into is a retention on paper.
+    max_days_ago = _max_days_ago_by_sourcetype()
+    scored = {name: days for (name, days) in max_days_ago.items() if name.startswith("morpheus:score:")}
+
+    assert len(scored) == 8
+    assert scored == {name: SCORED_RETENTION_DAYS for name in scored}
+    assert max_days_ago["morpheus:late"] == SCORED_RETENTION_DAYS
+
+
+def test_the_guide_quotes_the_app_s_retention():
+    quoted = {
+        name: int(seconds)
+        for (name, seconds) in re.findall(r"^\[(behavior_\w+)\]\n(?:[^\[\n]*\n)*?frozenTimePeriodInSecs = (\d+)",
+                                          read_text(GUIDE_PATH), re.MULTILINE)
+    }
+    retention = _retention_by_index()
+
+    assert "behavior_events" in quoted
+    assert quoted == {name: retention[name] for name in quoted}
 
 
 def _stanza_names() -> list:

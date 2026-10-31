@@ -32,8 +32,8 @@ boundary where it was, and every search compares `_time` only with another `_tim
 unchanged. Only the timestamp strings move; the window identifiers and buckets in the events are left as they are,
 which is harmless because they still agree with one another and the binding refreshes recompute each bucket from
 `_time` rather than read the stored one. The span of the events is still about sixty days, which is wider than
-layer 1's thirty-day `MAX_DAYS_AGO`, so `run_search_head.sh` installs a validation-only app whose `props.conf` raises it
-for this run alone.
+the thirty-day `MAX_DAYS_AGO` the shipped app gives edges, quarantined records and health records, so
+`run_search_head.sh` installs a validation-only app whose `props.conf` raises it for this run alone.
 
 **The searches look back from now.** Every stanza dispatches over a window like `-2h@m` to `-5m@m`. Each is run
 here as `| savedsearch` with an explicit time range covering every event, which overrides the stanza's own window,
