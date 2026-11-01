@@ -33,6 +33,7 @@ import logging
 import typing
 
 import mrc
+import pandas as pd
 from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
@@ -143,7 +144,9 @@ class TC7SidScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 raise KeyError(f"TC7SidScoreStage scores {self._text_column!r}, which the DataFrame does not carry. "
                                f"Available columns: {sorted(df.columns)}")
 
-            texts = [None if value is None else str(value) for value in to_host_list(df, self._text_column)]
+            # A body read from a file arrives as NaN where it was null, and `str` would make it the text "nan" and
+            # score it; a missing body is no text, whatever the reader spelled it as.
+            texts = [None if pd.isna(value) else str(value) for value in to_host_list(df, self._text_column)]
             probabilities = self._scorer.probabilities(texts)
             labels = self._scorer.labels
 

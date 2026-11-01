@@ -79,6 +79,17 @@ def test_a_row_with_nothing_to_read_has_no_score_rather_than_an_empty_finding(co
     assert not pd.isna(list(result[SID_LABELS])[2])
 
 
+@pytest.mark.cpu_mode
+def test_a_missing_body_read_from_a_file_is_not_the_text_nan(config: Config):
+    # A JSON lines reader gives a null string column as NaN, and `str(nan)` is "nan", which the model would read and
+    # score: every bodyless request in a file-fed segment came out with probabilities and an empty finding.
+    result = run(config, {"body": [float("nan"), KEY]})
+
+    assert pd.isna(list(result[SID_LABELS])[0])
+    assert pd.isna(list(result[score_column("password")])[0])
+    assert "secret_keys" in list(result[SID_LABELS])[1].split(",")
+
+
 @pytest.mark.gpu_and_cpu_mode
 def test_the_text_column_is_a_parameter(config: Config):
     result = run(config, {"response_content": [KEY]}, text_column="response_content")
