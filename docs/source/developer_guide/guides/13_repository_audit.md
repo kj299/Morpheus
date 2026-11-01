@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,053 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,055 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -91,7 +91,7 @@ context stage, its test, the two samples it produces and the search-head run ove
 sends every composed pipeline's output through `CompareDataFrameStage`) and the four section 3.6 added (the
 threshold module, its test, the threshold registry and the derivation tool) and the one section 3.7 added (the
 search-head run it superseded, kept as history) and the one section 4.1 added (the run before it, kept as
-history too), less the 1,397 files
+history too) and the two section 4.2 added (the reference data module and its test), less the 1,397 files
 removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4.
@@ -100,7 +100,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4.
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 414 |
+| `keep` | 416 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -386,7 +386,13 @@ that replaces it. Each item says how to know it is done.
    whose digest differs.
 3. **Pin every reference dataset in the determinism envelope.** The Public Suffix List and the time zone database
    change under a running pipeline and change its output. Record each one's digest in the envelope as the models'
-   already are. Done when a changed list changes the envelope and a test says so.
+   already are. Done when a changed list changes the envelope and a test says so. *Built under plan section 4.2:*
+   `morpheus.utils.reference_data` reads the suffix list once per process for `query_entropy` and digests the
+   same bytes, every scored row carries the digest as `reference_data` and the fingerprint folds it in, and
+   `test_reference_data.py` adds one private rule to a copy of the list and finds a different column, a different
+   fingerprint, the same `config_hash`, and a tunnel's registered domain moved. The time zone database turned out
+   not to be one of these pipelines' datasets: no stage resolves a named zone, because TC-5 takes a fixed offset
+   for exactly this reason, so instead of a digest it has a test that fails on the first module to import one.
 4. **Ingest from Kafka and HTTP with provenance and without silent loss.** The kept sources drop the topic, partition
    and offset, the sink sends no message key, and a failed produce is logged and lost. Carry offset and partition
    into the lineage columns, key messages on `entity_key`, retry or route a failed produce to the quarantine stream,

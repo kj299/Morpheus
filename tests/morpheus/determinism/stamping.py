@@ -35,6 +35,8 @@ from morpheus.utils.determinism_envelope import UNKNOWN
 from morpheus.utils.determinism_envelope import DeterminismEnvelope
 from morpheus.utils.determinism_envelope import pipeline_fingerprint
 from morpheus.utils.determinism_envelope import settings_hash
+from morpheus.utils.reference_data import reference_digests
+from morpheus.utils.reference_data import render_reference_data
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 SAVED_SEARCHES = os.path.join(REPO_ROOT,
@@ -124,11 +126,13 @@ def envelope_for(telemetry_class: str,
         The seed a model path would be handed; the arithmetic corpora have none and record zero.
     """
     configuration = settings_hash(settings)
+    digests = reference_digests()
     fingerprint = pipeline_fingerprint(configuration=configuration,
                                        schema_versions={telemetry_class: schema_version},
                                        thresholds=rule_thresholds(rules) or {"none": {}},
                                        code_commit=UNKNOWN,
-                                       image_digest=UNKNOWN)
+                                       image_digest=UNKNOWN,
+                                       reference_data=digests)
 
     return DeterminismEnvelope(tier=tier,
                                fingerprint=fingerprint,
@@ -137,4 +141,5 @@ def envelope_for(telemetry_class: str,
                                image_digest=UNKNOWN,
                                feature_schema_version=f"{telemetry_class}/{schema_version}",
                                rng_seed=rng_seed,
+                               reference_data=render_reference_data(digests),
                                resumed_from=resumable.resumed_from())

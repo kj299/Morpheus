@@ -51,11 +51,10 @@ rule pairs it with a label-length condition.
 
 import collections
 import math
-import os
 import typing
 
-SUFFIX_LIST_NAME = "public_suffix_list.dat"
-"""The file upstream Morpheus bundles in its data directory."""
+from morpheus.utils.reference_data import PUBLIC_SUFFIX_LIST
+from morpheus.utils.reference_data import read_dataset
 
 _RULES: typing.Optional[tuple] = None
 
@@ -63,35 +62,33 @@ _RULES: typing.Optional[tuple] = None
 def _load_rules() -> tuple:
     """The list's rules as three sets: exact suffixes, wildcard parents, and exceptions.
 
-    Read once per process. Both the ICANN and the private sections are kept.
+    Read once per process, through `morpheus.utils.reference_data`, so the copy parsed here is the copy whose
+    digest the determinism envelope carries. Both the ICANN and the private sections are kept.
     """
     global _RULES  # pylint: disable=global-statement
 
     if (_RULES is not None):
         return _RULES
 
-    import morpheus  # pylint: disable=import-outside-toplevel
-
     exact: set = set()
     wildcards: set = set()
     exceptions: set = set()
 
-    with open(os.path.join(morpheus.DATA_DIR, SUFFIX_LIST_NAME), encoding="utf-8") as handle:
-        for line in handle:
-            # The list's own format: one rule per line, the rule ends at the first whitespace, `//` starts a comment.
-            rule = line.strip().split()[0] if line.strip() else ""
+    for line in read_dataset(PUBLIC_SUFFIX_LIST)[0].splitlines():
+        # The list's own format: one rule per line, the rule ends at the first whitespace, `//` starts a comment.
+        rule = line.strip().split()[0] if line.strip() else ""
 
-            if (not rule or rule.startswith("//")):
-                continue
+        if (not rule or rule.startswith("//")):
+            continue
 
-            rule = rule.lower()
+        rule = rule.lower()
 
-            if (rule.startswith("!")):
-                exceptions.add(rule[1:])
-            elif (rule.startswith("*.")):
-                wildcards.add(rule[2:])
-            else:
-                exact.add(rule)
+        if (rule.startswith("!")):
+            exceptions.add(rule[1:])
+        elif (rule.startswith("*.")):
+            wildcards.add(rule[2:])
+        else:
+            exact.add(rule)
 
     _RULES = (frozenset(exact), frozenset(wildcards), frozenset(exceptions))
 

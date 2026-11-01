@@ -63,8 +63,8 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 #99, for a cause the repository does not show -- and in GPU mode on one card, where the twelve that existed then
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
-That is sixty stages and fifty-two supporting
-modules, covered by 2,685 distinct tests, itemized in
+That is sixty stages and fifty-three supporting
+modules, covered by 2,696 distinct tests, itemized in
 [Part 6](#provided). Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -3894,6 +3894,17 @@ determinism from a claim into a verifiable property:
 Twelve fields of overhead per event is not free at billions of events per day. Two mitigations: put the
 block on the scored and alerted events only, not on raw telemetry, and intern the static portion into a
 `pipeline_fingerprint` lookup so only the fingerprint and the varying fields travel with each event.
+
+A model is not the only file outside the configuration that decides what a feature means. The Public Suffix
+List decides which part of a query name is the registered domain, and so what R-B-L7-001 counts and measures;
+it is revised every few days upstream, and the same events split by a newer copy can cross the rule's
+threshold with nothing in the configuration changed. The fork therefore adds a field, `reference_data`,
+naming each reference dataset with the digest of the copy the process parsed
+(`public_suffix_list:3d1e812e00ca5c14`), and folds the same digests into `pipeline_fingerprint`. The digest is
+taken from the bytes the stage read, in the same read (`morpheus.utils.reference_data`), so a list replaced on
+disk under a running process changes neither its features nor its envelope until it restarts. The time zone
+database would be the second such dataset, and is not, because no stage resolves a named zone: TC-5's cadence
+features take a fixed offset so that a `tzdata` update cannot move them.
 
 ### Control 13: Prove it in CI
 

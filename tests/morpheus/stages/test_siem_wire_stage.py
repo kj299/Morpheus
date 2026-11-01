@@ -60,6 +60,7 @@ SCORE_L2_COLUMNS = {
     "determinism_tier": ["D1", "D1"],
     "pipeline_fingerprint": ["f1", "f1"],
     "config_hash": ["c1", "c1"],
+    "reference_data": ["public_suffix_list:5f0e3c1a9b7d2486", "public_suffix_list:5f0e3c1a9b7d2486"],
     "resumed_from_state": ["cold-start", "cold-start"],
     "port_key": ["site-1:sw1:Gi1/0/1", "site-1:sw1:Gi1/0/2"],
     "mac_address": ["aa:bb:cc:00:00:01", "aa:bb:cc:00:00:02"],
@@ -256,6 +257,7 @@ def test_a_shared_sourcetype_accepts_any_one_sub_class_in_full(config: Config, v
         "determinism_tier": ["D1"],
         "pipeline_fingerprint": ["f1"],
         "config_hash": ["c1"],
+        "reference_data": ["public_suffix_list:5f0e3c1a9b7d2486"],
         "resumed_from_state": ["cold-start"],
         **{
             column: [None]
@@ -287,6 +289,7 @@ def test_a_shared_sourcetype_refuses_a_record_with_no_sub_class_in_full(config: 
         "determinism_tier": ["D1"],
         "pipeline_fingerprint": ["f1"],
         "config_hash": ["c1"],
+        "reference_data": ["public_suffix_list:5f0e3c1a9b7d2486"],
         "resumed_from_state": ["cold-start"],
         **{
             column: [None]

@@ -25,8 +25,8 @@ to a behavioral change -- which at layer 5 means telling somebody an employee's 
 shifted was a threshold.
 
 **Nothing may be omitted quietly.** `Config.to_string` covers the pipeline's own settings and not the schema
-definitions, the thresholds, the code commit or the image digest, and a fingerprint that silently skipped what
-it did not know would claim comparability it cannot support. Every component is therefore required, and a
+definitions, the thresholds, the code commit, the image digest or the reference datasets, and a fingerprint that
+silently skipped what it did not know would claim comparability it cannot support. Every component is therefore required, and a
 deployment that genuinely does not know one passes `UNKNOWN` -- which is itself hashed, so events produced
 without a known commit are visibly not comparable with events produced with one. Refusing to guess is the whole
 value of the field.
@@ -65,6 +65,7 @@ TIER_COLUMN = "determinism_tier"
 FINGERPRINT_COLUMN = "pipeline_fingerprint"
 CONFIG_HASH_COLUMN = "config_hash"
 RESUMED_FROM_COLUMN = "resumed_from_state"
+REFERENCE_DATA_COLUMN = "reference_data"
 
 COLD_START = "cold-start"
 """What `resumed_from_state` carries when the process began with no saved state.
@@ -150,6 +151,7 @@ def pipeline_fingerprint(*,
                          thresholds: dict,
                          code_commit: str,
                          image_digest: str,
+                         reference_data: dict,
                          decimals: int = DIGEST_CHARACTERS) -> str:
     """
     A digest over everything that decides what a score means.
@@ -169,6 +171,10 @@ def pipeline_fingerprint(*,
         The commit the pipeline was built from.
     image_digest : str
         The container image digest.
+    reference_data : dict
+        Reference dataset name to the digest of the copy the process read, from
+        `morpheus.utils.reference_data.reference_digests`. A list update changes the fingerprint, because it can
+        change a feature with nothing in the configuration changed.
     decimals : int, default = 16
         Hex characters to keep.
 
@@ -189,6 +195,7 @@ def pipeline_fingerprint(*,
         "thresholds": thresholds,
         "code_commit": code_commit,
         "image_digest": image_digest,
+        "reference_data": reference_data,
     }
 
     for (name, value) in components.items():
@@ -223,6 +230,9 @@ class DeterminismEnvelope:
         The version of the feature schema the scored columns were produced under, for example `TC-5/2.1.0`.
     rng_seed : int
         The seed handed to `morpheus.utils.seed.manual_seed`.
+    reference_data : str
+        The digests of the reference datasets the process read, as `morpheus.utils.reference_data.
+        render_reference_data` renders them, so a row says which Public Suffix List its domains were split by.
     resumed_from : str, default = `COLD_START`
         The `state_digest` of the checkpoint this process restored its stages from, so a scored event names the
         per-entity history it was scored against. `COLD_START` when it restored none.
@@ -235,6 +245,7 @@ class DeterminismEnvelope:
     image_digest: str
     feature_schema_version: str
     rng_seed: int
+    reference_data: str
     resumed_from: str = COLD_START
 
     def __post_init__(self):
@@ -262,5 +273,6 @@ class DeterminismEnvelope:
             "image_digest": self.image_digest,
             "feature_schema_version": self.feature_schema_version,
             "rng_seed": self.rng_seed,
+            REFERENCE_DATA_COLUMN: self.reference_data,
             RESUMED_FROM_COLUMN: self.resumed_from,
         }
