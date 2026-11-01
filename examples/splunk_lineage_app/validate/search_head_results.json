@@ -1,10 +1,10 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-10-31T22:19:57.050178+00:00",
+  "at": "2026-11-01T00:27:12.404558+00:00",
   "timestamp_shift_weeks": 2956,
   "dispatch_window": {
     "earliest": 1787702400,
-    "latest": 1793488661
+    "latest": 1793496297
   },
   "indexed": {
     "binding:bucketed": 3000,
@@ -15,7 +15,7 @@
     "context:identity": 23,
     "context:network": 20,
     "morpheus:edge": 2768,
-    "morpheus:health": 1099,
+    "morpheus:health": 1100,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
     "morpheus:score:host": 1568,
@@ -25,7 +25,7 @@
     "morpheus:score:l4": 1011,
     "morpheus:score:l5": 661,
     "morpheus:score:l6": 649,
-    "morpheus:score:l7": 9219
+    "morpheus:score:l7": 9225
   },
   "expected_indexed": {
     "binding:bucketed": 3000,
@@ -36,7 +36,7 @@
     "context:identity": 23,
     "context:network": 20,
     "morpheus:edge": 2768,
-    "morpheus:health": 1099,
+    "morpheus:health": 1100,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
     "morpheus:score:host": 1568,
@@ -46,14 +46,14 @@
     "morpheus:score:l4": 1011,
     "morpheus:score:l5": 661,
     "morpheus:score:l6": 649,
-    "morpheus:score:l7": 9219
+    "morpheus:score:l7": 9225
   },
   "btool_check": "",
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-4936671.000000",
-        "min_drift": "-5696271.000000"
+        "max_drift": "-4944310.000000",
+        "min_drift": "-5703910.000000"
       }
     ],
     "binding_tables": [
@@ -128,8 +128,8 @@
       }
     ],
     "risk_records": {
-      "written": 242,
-      "indexed": 242,
+      "written": 245,
+      "indexed": 245,
       "by_rule": [
         {
           "rule_id": "R-B-L1-005",
@@ -210,6 +210,10 @@
         {
           "rule_id": "R-B-L7-002",
           "count": "8"
+        },
+        {
+          "rule_id": "R-B-L7-003",
+          "count": "3"
         },
         {
           "rule_id": "R-B-L7-004",
@@ -427,6 +431,7 @@
     "R-D-L6-005 - Content type mismatch",
     "TLS table coverage - unrecognized values",
     "R-B-L7-001 - DNS tunneling",
+    "R-B-L7-003 - Sensitive data in transit",
     "R-D-L7-005 - Enumeration",
     "R-B-L7-007 - Service reached by new clients",
     "R-B-L7-008 - Domain generation",
@@ -671,6 +676,10 @@
       "phase": "search",
       "rows": 1
     },
+    "R-B-L7-003 - Sensitive data in transit": {
+      "phase": "search",
+      "rows": 3
+    },
     "R-D-L7-005 - Enumeration": {
       "phase": "search",
       "rows": 2
@@ -773,7 +782,7 @@
     },
     "Behavior summary - per-layer scores": {
       "phase": "summary",
-      "rows": 9032
+      "rows": 9036
     },
     "R-P-L3-005 - Fan-out trajectory": {
       "phase": "trajectory",
