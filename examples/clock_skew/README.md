@@ -49,7 +49,7 @@ for row.
 
 ## The result
 
-All sixty-one shipped detections are swept, each over the pipeline that feeds it, through
+All sixty-two shipped detections are swept, each over the pipeline that feeds it, through
 [`rules.py`](./rules.py), which reduces every rule to what it accuses and reads every threshold, join tolerance
 and window from `savedsearches.conf`. The ladder is one millisecond, ten, a hundred, one second, ten, thirty and
 sixty; the chained rules continue to two minutes, four, ten, thirty, an hour, two and three, because their join
@@ -146,13 +146,13 @@ measured beside R-B-L7-004 against clocks that disagree, thirty-six rules now: t
 are the same to a minute of spread across the seven hosts. With quarantine on, ten seconds holds every application
 record, and R-P-L7-010 loses its four days with the other application rules, as R-P-L7-009 does.
 
-What a sweep can say depends on the clocks in the corpus, and the sixty-one fall into three groups that must
+What a sweep can say depends on the clocks in the corpus, and the sixty-two fall into three groups that must
 not be added together:
 
 | Group | Rules | What the sweep measured |
 | --- | --- | --- |
 | Inputs on clocks that disagree | 36 | A tolerance, or the spread at which the rule changes |
-| Inputs on one clock, in a corpus with several | 23 | Boundary sensitivity under a uniform shift, not a tolerance |
+| Inputs on one clock, in a corpus with several | 24 | Boundary sensitivity under a uniform shift, not a tolerance |
 | Corpus with one clock | 2 | Nothing; reported as not measured |
 
 **Measured against clocks that disagree** -- the estate's six collectors and three switches for layers 1 and 2,
@@ -188,8 +188,8 @@ sent. The transport and
 presentation corpora have three each since step 12, but every packet comes through the packet sensor and every
 handshake through the inspection point, so three of their four layer 4 rules and five of their six layer 6 rules read
 one clock, the client stack trajectory among them: it is keyed on the address the handshake carries, and only the
-watchlist entry it writes names the machine. For these twenty-three the sweep is a uniform shift, which measures how
-close the events sit to a window edge and nothing about disagreement. All twenty-three are unchanged to a minute; R-P-L5-006 used to change at a
+watchlist entry it writes names the machine. For these twenty-four the sweep is a uniform shift, which measures how
+close the events sit to a window edge and nothing about disagreement. All twenty-four are unchanged to a minute, R-B-L7-003 among them since plan section 4.1; R-P-L5-006 used to change at a
 millisecond, for the reason below.
 
 **On a corpus with one clock.** The SaaS corpus arrives through the provider's audit log alone, so a collector

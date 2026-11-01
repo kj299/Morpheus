@@ -449,8 +449,8 @@ Below that:
 
 **How much of this is real, measured.** [`examples/clock_skew/run_experiment.py`](./examples/clock_skew/README.md)
 spreads the clocks across a window of a given width, re-runs the composed pipelines over the same seeded corpora,
-and reports at what width each of the sixty-one shipped detections changes what it accuses. What it can say
-depends on the clocks each corpus has, so the sixty-one split three ways. **Thirty-six read inputs from clocks that
+and reports at what width each of the sixty-two shipped detections changes what it accuses. What it can say
+depends on the clocks each corpus has, so the sixty-two split three ways. **Thirty-six read inputs from clocks that
 genuinely disagree**: the layer 1 and 2 rules are untouched by a minute of spread except R-D-L2-004, which is
 immune to collector skew and fails at a minute of switch skew, as the row above says; the layer 3 rules hold to a
 minute on their routers' clocks but R-P-L3-005, which loses one rise at thirty seconds; the host drift rule is
@@ -460,9 +460,9 @@ server's and the inventory feed's clocks, R-B-L6-001 and R-B-L4-004; and the cha
 times their two-minute join tolerance, then four of them first break at 800, 1400, 4000 and 7201 seconds -- the first
 three by **accusing a control** the corpus planted for them to stay quiet on, before they lose their attacker, and
 R-C-005 by losing its attacker -- while R-C-003, whose first two steps come through one poller, holds to the three
-hours the ladder reaches. **Twenty-three read inputs that all come through one clock** in a corpus with several, so their
-sweep is a uniform shift: all twenty-two are unmoved, the daily trajectories over a host's TLS stacks and a client's
-subdomain counts among them. R-P-L5-006 appeared
+hours the ladder reaches. **Twenty-four read inputs that all come through one clock** in a corpus with several, so their
+sweep is a uniform shift: all twenty-three are unmoved, the daily trajectories over a host's TLS stacks and a client's
+subdomain counts and R-B-L7-003's request bodies among them. R-P-L5-006 appeared
 to fail at one millisecond under the reference arithmetic and did not -- a hundred and twenty-seven of the layer 5
 corpus's three hundred and eighty-five authentications sit exactly on an hour mark, an event on a boundary changes
 hour under an offset of one nanosecond, and moving the same events into the middle of their windows leaves a full
