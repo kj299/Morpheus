@@ -1745,6 +1745,14 @@
           "required": true,
           "source": "http.log `user_agent`",
           "notes": ""
+        },
+        {
+          "name": "request_body",
+          "type": "string",
+          "unit": "",
+          "required": true,
+          "source": "A content-inspecting proxy's record of the request body (Zeek `http.log` carries none)",
+          "notes": "Null on a request with no body, and on every request from a proxy that does not inspect content. Read by `TC7SidScoreStage` for R-B-L7-003; sensitive content by definition, so the risk record never carries it."
         }
       ]
     },

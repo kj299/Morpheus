@@ -52,6 +52,7 @@ stages are cumulative -- a running bin total and a trailing quantile -- so the p
 catch.
 """
 
+import os
 import random
 import typing
 
@@ -76,6 +77,7 @@ from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc4_envelope_stage import TC4EnvelopeStage
+from morpheus.stages.telemetry.tc4_abp_score_stage import TC4AbpScoreStage
 from morpheus.stages.telemetry.tc4_flow_stage import TC4FlowStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
@@ -92,6 +94,14 @@ CORPUS_SEED = 20260921
 PERIOD_SECONDS = 3600
 LATENESS_SECONDS = 900
 BIN_SECONDS = 60
+MODEL_INVENTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "..",
+                               "..",
+                               "..",
+                               "models",
+                               "inventory",
+                               "inventory.json")
+"""The repository's model inventory, which pins the ABP booster's bytes."""
 CORPUS_HOURS = 2
 CORPUS_SECONDS = CORPUS_HOURS * PERIOD_SECONDS
 
@@ -285,6 +295,10 @@ def build_stages(config: Config, applications=None) -> list:
 
     return [
         TC4FlowStage(config, bin_seconds=BIN_SECONDS),
+        # R-B-L4-001's model over the thirteen features the rollup writes. Every flow carries the score; no search
+        # reads it, because the booster scores every flow in this corpus between 0.89 and 0.93 and so would fire on
+        # all of them at the upstream threshold (see the model inventory's README).
+        TC4AbpScoreStage(config, inventory_path=MODEL_INVENTORY),
         TC4EnvelopeStage(config, window_seconds=CORPUS_SECONDS * 4),
         CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"),
         application_context.enrich_stage(config, store),

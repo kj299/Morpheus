@@ -346,7 +346,11 @@ def write_tls(directory: str):
 
 
 def write_http(directory: str):
-    """`http.log`. Every seventh request carries a query string, which the schema has to strip."""
+    """`http.log`. Every seventh request carries a query string, which the schema has to strip.
+
+    A posted body is logged as `post_body`, the field Zeek's HTTP post-body package adds; stock Zeek logs only its
+    length, and the schema reads a missing field as no body.
+    """
     rows = []
 
     for (index, row) in enumerate(sample("application", "tc7_http")):
@@ -364,10 +368,11 @@ def write_http(directory: str):
             uri,
             "1.1",
             row["user_agent"],
-            0,
+            len(row.get("request_body") or ""),
             0,
             row["status_code"],
-            STATUS_MESSAGES.get(row["status_code"])
+            STATUS_MESSAGES.get(row["status_code"]),
+            row.get("request_body")
         ])
 
     _zeek_log(os.path.join(directory, "http.log"),
@@ -375,7 +380,8 @@ def write_http(directory: str):
               [("ts", "time"), ("uid", "string"), ("id.orig_h", "addr"), ("id.orig_p", "port"), ("id.resp_h", "addr"),
                ("id.resp_p", "port"), ("trans_depth", "count"), ("method", "string"), ("host", "string"),
                ("uri", "string"), ("version", "string"), ("user_agent", "string"), ("request_body_len", "count"),
-               ("response_body_len", "count"), ("status_code", "count"), ("status_msg", "string")],
+               ("response_body_len", "count"), ("status_code", "count"), ("status_msg", "string"),
+               ("post_body", "string")],
               rows)
 
 

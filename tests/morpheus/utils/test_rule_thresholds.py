@@ -173,7 +173,7 @@ def test_the_registry_is_every_threshold_the_searches_compare_against():
     detections = _detections()
     registered = _registered()
 
-    assert len(detections) == 61
+    assert len(detections) == 62
     assert set(registered) <= set(detections)
 
     for (rule_id, search) in detections.items():

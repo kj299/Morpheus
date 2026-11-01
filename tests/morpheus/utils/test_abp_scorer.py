@@ -136,3 +136,14 @@ def test_a_feature_without_a_column_is_refused(scorer: AbpScorer):
 def test_a_matrix_of_the_wrong_width_is_refused(scorer: AbpScorer):
     with pytest.raises(ValueError, match="13 features"):
         scorer.probabilities(np.zeros((1, 12), dtype=np.float32))
+
+
+def test_a_copied_stage_shares_the_scorer_rather_than_copying_the_runtime(scorer: AbpScorer):
+    # A composition that copies its stages before wiring them -- the resumable pipelines do -- must not try to
+    # pickle the model runtime, and has no need to: the loaded model never changes.
+    import copy  # pylint: disable=import-outside-toplevel
+
+    holder = {"scorer": scorer}
+
+    assert copy.deepcopy(scorer) is scorer
+    assert copy.deepcopy(holder)["scorer"] is scorer

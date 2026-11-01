@@ -115,6 +115,19 @@ class SidScorer:
             raise ValueError(f"{entry.name} returns {[output.shape for output in outputs]}, and the inventory names "
                              f"{len(self._labels)} labels")
 
+    def __deepcopy__(self, memo: dict):
+        """
+        The scorer itself, not a copy.
+
+        A loaded scorer never changes -- its model, its settings and its version are fixed when the inventory entry is
+        read -- so a copied stage may share it. It also cannot be copied: it holds the model runtime, which a
+        deep copy would try to pickle. A pipeline that copies its stages before wiring them, as the resumable
+        compositions do, gets a stage scoring with the same verified bytes.
+        """
+        memo[id(self)] = self
+
+        return self
+
     @property
     def version(self) -> str:
         """The scored model, as `name:<digest>`."""

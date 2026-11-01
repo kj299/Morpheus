@@ -926,6 +926,25 @@ def test_the_layer_7_detections_return_exactly_what_is_written(expected: dict):
     assert written == derived
 
 
+def test_the_sensitive_data_detection_names_what_the_model_found_in_each_body(expected: dict):
+    # A row predicate over the events the app is fed: `sid_labels=*` drops a request that carried no body, whose
+    # field the serializer leaves out, and `len(sid_labels) > 0` drops a body the model read and found clean.
+    found = [
+        event for event in _layer_7_events()
+        if event.get("window_complete") is True and event.get("sid_labels") not in (None, "")
+    ]
+    read_clean = [event for event in _layer_7_events() if event.get("sid_labels") == ""]
+    entry = expected["searches"]["R-B-L7-003 - Sensitive data in transit"]
+
+    assert entry["expected_rows"] == entry["contributing_rows"] == len(found)
+    assert entry["key_values"] == sorted(({
+        "src_ip": event["src_ip"], "sid_labels": event["sid_labels"]
+    } for event in found),
+                                         key=lambda row: row["sid_labels"])
+    assert {event["src_ip"] for event in read_clean} == {"10.0.0.49"}
+    assert all("request_body" not in row for row in entry["key_values"])
+
+
 def test_the_service_and_generation_detections_return_exactly_what_is_written(expected: dict):
     # R-B-L7-007 aggregates per service and hour and then thresholds the aggregate, so the predicate is evaluated
     # on the groups; R-B-L7-008 is a row predicate and a `stats ... BY src_ip`.
@@ -1822,6 +1841,7 @@ NUMBER_WORDS = {
     "eighty-four": 84,
     "eighty-five": 85,
     "eighty-six": 86,
+    "eighty-seven": 87,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""

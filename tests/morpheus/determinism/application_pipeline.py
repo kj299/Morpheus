@@ -66,6 +66,7 @@ check has something to catch.
 """
 
 import base64
+import os
 import random
 import typing
 
@@ -92,6 +93,7 @@ from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc7_dns_stage import TC7DnsStage
 from morpheus.stages.telemetry.tc7_http_stage import TC7HttpStage
+from morpheus.stages.telemetry.tc7_sid_score_stage import TC7SidScoreStage
 from morpheus.stages.telemetry.tc7_service_stage import SERVICE_KEY
 from morpheus.stages.telemetry.tc7_service_stage import TC7ServiceStage
 from morpheus.utils.binding_table import NS_PER_SECOND
@@ -114,6 +116,16 @@ SERVICE_ENTITY_COLUMNS = [SERVICE_KEY]
 
 DNS_CLASS = "tc7_dns"
 HTTP_CLASS = "tc7_http"
+BODY_COLUMN = "request_body"
+"""The HTTP column the SID model reads: the request body a content-inspecting proxy records."""
+MODEL_INVENTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "..",
+                               "..",
+                               "..",
+                               "models",
+                               "inventory",
+                               "inventory.json")
+"""The repository's model inventory, which pins the SID model's bytes."""
 SERVICE_CLASS = "tc7_service"
 TELEMETRY_CLASSES = (DNS_CLASS, HTTP_CLASS, SERVICE_CLASS)
 
@@ -121,7 +133,7 @@ DAY_SECONDS = DAY_HOURS * PERIOD_SECONDS
 DRIFT_PREFIX = "day_"
 SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECONDS, "day_seconds": DAY_SECONDS}
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
-RULES = ("R-B-L7-001", "R-D-L7-005", "R-B-L7-007", "R-B-L7-008", "R-B-L4-004", "R-P-L7-009", "R-P-L7-010")
+RULES = ("R-B-L7-001", "R-B-L7-003", "R-D-L7-005", "R-B-L7-007", "R-B-L7-008", "R-B-L4-004", "R-P-L7-009", "R-P-L7-010")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 # The rules' own thresholds, stated once so the corpus is built to clear them deliberately.
@@ -213,6 +225,10 @@ READER = "10.0.0.44"
 SCANNER = "10.0.0.45"
 """The vulnerability scanner that walks the web server every morning."""
 SLOW_ENUMERATOR = "10.0.0.47"
+LEAKER = "10.0.0.48"
+"""Posts forms carrying a government identifier, a password and a cloud key to the web server: R-B-L7-003's plant."""
+FORM_CLIENT = "10.0.0.49"
+"""Posts ordinary order forms to the same endpoint: the control R-B-L7-003 must stay quiet on."""
 """A client whose probing ramps: a few more paths every morning, never reaching R-D-L7-005's two hundred and never
 twice its own busiest day, which is R-P-L7-010's trajectory."""
 
@@ -429,10 +445,25 @@ def _build_dns(rng: random.Random) -> pd.DataFrame:
     return _ordered(rows)
 
 
+LEAKED_BODIES = (
+    "employee=jdoe&ssn=123-45-6789&dob=1980-02-14",
+    "username=admin&password=Sup3rS3cret!",
+    "aws_access_key_id=AKIAIOSFODNN7EXAMPLE&aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+)
+"""The leaker's bodies, each carrying one kind of sensitive value the SID model has a label for."""
+
+ORDER_BODIES = (
+    "q=weather+forecast&lang=en",
+    '{"items":[{"sku":"A-100","qty":2}],"note":"leave at door"}',
+    '{"items":[{"sku":"B-220","qty":1}],"gift":false}',
+)
+"""The ordinary client's bodies: a search and two orders, none of them sensitive."""
+
+
 def _build_http(rng: random.Random) -> pd.DataFrame:
     rows: list[dict] = []
 
-    def add(client, path, status, event_time_ns, agent=CHROME_WINDOWS):
+    def add(client, path, status, event_time_ns, agent=CHROME_WINDOWS, method="GET", body=None):
         rows.append({
             **_envelope("proxy-01", "tc7_http.v1", len(rows), f"{client}>{path}@{event_time_ns}"),
             "event_time":
@@ -444,13 +475,16 @@ def _build_http(rng: random.Random) -> pd.DataFrame:
             "dst_port":
                 WEB_PORT,
             "http_method":
-                "GET",
+                method,
             "url_path":
                 path,
             "status_code":
                 status,
             "user_agent":
                 agent,
+            # What a proxy that inspects content records of the request it carried; null where there was none.
+            "request_body":
+                body,
         })
 
     words = ["admin", "backup", "config", "api", "login", "old", "test", "dev", "private", "upload"]
@@ -512,6 +546,14 @@ def _build_http(rng: random.Random) -> pd.DataFrame:
     for (client, agent) in ((STACK_CONSISTENT, CHROME_WINDOWS), (STACK_SPOOFER, CHROME_WINDOWS), (STACK_TOOL, CURL)):
         for index in range(5):
             add(client, f"/portal/{index}", 200, event(3, 60 + index * 60), agent)
+
+    # The forms: the leaker posts what no form on this server asks for, a government identifier, a password and a
+    # cloud key, and the ordinary client posts orders to the same endpoint.
+    for (index, body) in enumerate(LEAKED_BODIES):
+        add(LEAKER, "/api/submit", 200, event(4, 60 + index * 120), CURL, "POST", body)
+
+    for (index, body) in enumerate(ORDER_BODIES):
+        add(FORM_CLIENT, "/api/submit", 200, event(4, 90 + index * 120), CHROME_WINDOWS, "POST", body)
 
     return _ordered(rows)
 
@@ -610,7 +652,11 @@ def build_stages(config: Config, telemetry_class: str, applications=None) -> lis
     store = application_context.store(config) if applications is None else applications
 
     if (telemetry_class == HTTP_CLASS):
-        return [TC7HttpStage(config), application_context.enrich_stage(config, store)]
+        return [
+            TC7HttpStage(config),
+            TC7SidScoreStage(config, inventory_path=MODEL_INVENTORY, text_column=BODY_COLUMN),
+            application_context.enrich_stage(config, store)
+        ]
 
     if (telemetry_class == SERVICE_CLASS):
         return [TC7ServiceStage(config), application_context.enrich_stage(config, store)]

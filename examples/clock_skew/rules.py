@@ -680,8 +680,8 @@ def _measured(frame: pd.DataFrame, column: str, multiple: float) -> pd.Series:
 
 def application_decisions(result: pd.DataFrame) -> dict:
     """
-    R-B-L7-001, R-B-L7-008 and R-P-L7-009 over DNS, R-D-L7-005 and R-P-L7-010 over HTTP and R-B-L7-007 over the
-    services. The two trajectories are keyed on the client and the day each fired, as the searches deduplicate, and
+    R-B-L7-001, R-B-L7-008 and R-P-L7-009 over DNS, R-B-L7-003, R-D-L7-005 and R-P-L7-010 over HTTP and R-B-L7-007
+    over the services. The two trajectories are keyed on the client and the day each fired, as the searches deduplicate, and
     read the daily drift the hourly rows carry; a row without a registered domain is not a DNS row to R-P-L7-009, and
     one without a distinct-path count is not an HTTP row to R-P-L7-010.
     """
@@ -702,6 +702,9 @@ def application_decisions(result: pd.DataFrame) -> dict:
     slow = dns[dns["dns_registered_domain"].notna() & true(dns, "drift_mature")
                & (number(dns, "drift_rising_windows") >= SUBDOMAIN_RISING_WINDOWS)
                & (number(dns, "drift_rise_sigmas") > SUBDOMAIN_RISE_SIGMAS)]
+    # R-B-L7-003 reads what the model found in one request's body, a property of the request alone, so a clock moves
+    # the row's window and nothing it decides; keyed on the client and what was found, as the search deduplicates.
+    leaking = http[http["sid_labels"].fillna("").astype(str) != ""] if "sid_labels" in http.columns else http.iloc[0:0]
     probing = http[http["http_distinct_paths"].notna() & true(http, "drift_mature")
                    & (number(http, "drift_rising_windows") >= PATH_RISING_WINDOWS)
                    & (number(http, "drift_rise_sigmas") > PATH_RISE_SIGMAS)]
@@ -722,6 +725,7 @@ def application_decisions(result: pd.DataFrame) -> dict:
     return {
         "R-B-L7-001": {(str(domain), str(window))
                        for (domain, window) in counts[counts > TUNNEL_SUBDOMAINS].index},
+        "R-B-L7-003": keys(leaking, ["src_ip", "sid_labels"]),
         "R-D-L7-005": keys(enumerating, ["src_ip"]),
         "R-B-L7-007": reached,
         "R-B-L7-008": keys(generating, ["src_ip"]),

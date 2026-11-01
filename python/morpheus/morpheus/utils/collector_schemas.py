@@ -300,7 +300,8 @@ def zeek_ssl_schema(profile: CollectorProfile) -> DataFrameInputSchema:
 
 def zeek_http_schema(profile: CollectorProfile) -> DataFrameInputSchema:
     """
-    `tc7_http` from Zeek `http.log`. `url_path` is the `uri` without its query string.
+    `tc7_http` from Zeek `http.log`. `url_path` is the `uri` without its query string, and `request_body` is the
+    post-body package's `post_body` where the log carries it.
 
     Parameters
     ----------
@@ -329,6 +330,9 @@ def zeek_http_schema(profile: CollectorProfile) -> DataFrameInputSchema:
         url_path,
         _count("status_code", "status_code"),
         _text("user_agent", "user_agent"),
+        # The field Zeek's HTTP post-body package adds; stock Zeek logs only `request_body_len`, and a log without
+        # the field gives every request no body.
+        _text("request_body", "post_body"),
     ] + tail)
 
 
