@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import logging
 import time
 import typing
@@ -44,7 +45,9 @@ class AutoOffsetReset(Enum):
     NONE = "none"
 
 
-@register_stage("from-kafka", modes=[PipelineModes.FIL, PipelineModes.NLP, PipelineModes.OTHER])
+@register_stage("from-kafka",
+                modes=[PipelineModes.FIL, PipelineModes.NLP, PipelineModes.OTHER],
+                ignore_args=["parser_kwargs"])
 class KafkaSourceStage(PreallocatorMixin, GpuAndCpuMixin, SingleOutputSource):
     """
     Load messages from a Kafka cluster.
@@ -78,7 +81,29 @@ class KafkaSourceStage(PreallocatorMixin, GpuAndCpuMixin, SingleOutputSource):
         Stops ingesting after emitting `stop_after` records (rows in the dataframe). Useful for testing. Disabled if `0`
     async_commits: bool, default = True
         Enable commits to be performed asynchronously. Ignored if `disable_commit` is `True`.
+    provenance : bool, default = False
+        Add the topic, partition and offset each row was read from as `kafka_topic`, `kafka_partition` and
+        `kafka_offset`. Kafka orders a partition and nothing else, so a consumer of more than one partition needs them
+        to put its rows in one order (`PartitionMergeStage`) and to recognise a message delivered twice; and they
+        are where a scored row came from. Uses the Python implementation.
+    parser_kwargs : dict, optional
+        Passed to the JSON reader, as `FileSourceStage` takes them. A deployment reading the fork's collector records
+        passes `{"convert_dates": False, "dtype": False, "precise_float": True}`, so an AS number sent as a string
+        stays a string and `event_time` is not guessed into a date. Uses the Python implementation.
+    stop_at_end : bool, default = False
+        Stop once every assigned partition has reported its end, which is how a replay of a topic finishes. Uses the
+        Python implementation.
+
+    Notes
+    -----
+    On the Python implementation a batch is committed only after it has been parsed and passed downstream, so a
+    process that stops between the two reads the batch again rather than losing it. A line that is not a JSON
+    object is not dropped: it becomes a row holding the line in `raw_payload`, which carries no envelope and is
+    quarantined by the envelope check rather than vanishing in a log message.
     """
+
+    _consumer_factory: typing.ClassVar[typing.Callable[[dict], typing.Any]] = staticmethod(ck.Consumer)
+    """How the consumer is built. A class attribute so a test can stand a recorded topic in for a broker."""
 
     def __init__(self,
                  config: Config,
@@ -91,7 +116,10 @@ class KafkaSourceStage(PreallocatorMixin, GpuAndCpuMixin, SingleOutputSource):
                  disable_pre_filtering: bool = False,
                  auto_offset_reset: AutoOffsetReset = AutoOffsetReset.LATEST,
                  stop_after: int = 0,
-                 async_commits: bool = True):
+                 async_commits: bool = True,
+                 provenance: bool = False,
+                 parser_kwargs: dict = None,
+                 stop_at_end: bool = False):
         super().__init__(config)
 
         if (input_topic is None):
@@ -115,8 +143,15 @@ class KafkaSourceStage(PreallocatorMixin, GpuAndCpuMixin, SingleOutputSource):
         if isinstance(input_topic, str):
             input_topic = [input_topic]
 
-        # Remove duplicate topics if there are any.
-        self._topics = list(set(input_topic))
+        # Remove duplicate topics if there are any, in a fixed order: a set's order follows the string hash, which
+        # changes with PYTHONHASHSEED.
+        self._topics = sorted(set(input_topic))
+        self._provenance = provenance
+        self._parser_kwargs = dict(parser_kwargs or {})
+        self._stop_at_end = stop_at_end
+
+        if (stop_at_end):
+            self._consumer_params["enable.partition.eof"] = True
         self._max_batch_size = config.pipeline_batch_size
         self._max_concurrent = config.num_threads
         self._disable_commit = disable_commit
@@ -139,55 +174,104 @@ class KafkaSourceStage(PreallocatorMixin, GpuAndCpuMixin, SingleOutputSource):
         return "from-kafka"
 
     def supports_cpp_node(self):
-        return True
+        # The C++ source carries no provenance, takes no parser arguments and does not stop at the end.
+        return not (self._provenance or self._parser_kwargs or self._stop_at_end)
 
     def compute_schema(self, schema: StageSchema):
         schema.output_schema.set_type(MessageMeta)
 
-    def _process_batch(self, consumer, batch):
-        message_meta = None
-        if len(batch):
-            buffer = StringIO()
+    def _parse(self, lines: list[str]) -> DataFrameType:
+        """
+        The lines as one frame, in their order, with any line that is not a JSON object kept as `raw_payload`.
 
-            for msg in batch:
-                payload = msg.value()
-                if payload is not None:
-                    buffer.write(payload.decode("utf-8"))
-                    buffer.write("\n")
+        Each line is checked on its own first, so one malformed message costs one row rather than the batch.
+        """
+        good = []
+        bad = []
 
-            df = None
+        for (position, line) in enumerate(lines):
             try:
-                buffer.seek(0)
-                df = self._json_reader(buffer, lines=True, orient='records')
-            except Exception as e:
-                logger.error("Error parsing payload into a dataframe : %s", e)
-            finally:
-                if (not self._disable_commit):
-                    for msg in batch:
-                        consumer.commit(message=msg, asynchronous=self._async_commits)
+                is_object = isinstance(json.loads(line), dict)
+            except ValueError:
+                is_object = False
 
-            if df is not None:
-                num_records = len(df)
-                message_meta = MessageMeta(df)
-                self._records_emitted += num_records
-                self._num_messages += 1
+            (good if is_object else bad).append(position)
 
-                if self._stop_after > 0 and self._records_emitted >= self._stop_after:
-                    self.request_stop()
+        frames = []
 
-            batch.clear()
+        if (good):
+            buffer = StringIO("\n".join(lines[position] for position in good) + "\n")
+            parsed = self._json_reader(buffer, lines=True, orient='records', **self._parser_kwargs)
 
-        return message_meta
+            if (hasattr(parsed, "to_pandas")):
+                parsed = parsed.to_pandas()
+
+            parsed.index = good
+            frames.append(parsed)
+
+        if (bad):
+            logger.error(
+                "%d of %d Kafka messages are not JSON objects; each is kept as a row in raw_payload, which "
+                "the envelope check quarantines.",
+                len(bad),
+                len(lines))
+            frames.append(pd.DataFrame({"raw_payload": [lines[position] for position in bad]}, index=bad))
+
+        return pd.concat(frames).sort_index().reset_index(drop=True)
+
+    def _process_batch(self, batch: list) -> typing.Optional[MessageMeta]:
+        """The batch as one message, or None for a batch with nothing in it. Commits nothing."""
+        lines = []
+        provenance = []
+
+        for msg in batch:
+            payload = msg.value()
+
+            # A tombstone carries no record: a deleted key, not a row.
+            if payload is not None:
+                lines.append(payload.decode("utf-8"))
+                provenance.append((msg.topic(), msg.partition(), msg.offset()))
+
+        if (len(lines) == 0):
+            return None
+
+        df = self._parse(lines)
+
+        if (self._provenance):
+            df["kafka_topic"] = [entry[0] for entry in provenance]
+            df["kafka_partition"] = pd.array([entry[1] for entry in provenance], dtype="Int64")
+            df["kafka_offset"] = pd.array([entry[2] for entry in provenance], dtype="Int64")
+
+        if (self._config.execution_mode.name == "GPU"):
+            import cudf  # pylint: disable=import-outside-toplevel
+
+            df = cudf.from_pandas(df)
+
+        num_records = len(df)
+        self._records_emitted += num_records
+        self._num_messages += 1
+
+        if self._stop_after > 0 and self._records_emitted >= self._stop_after:
+            self.request_stop()
+
+        return MessageMeta(df)
+
+    def _commit(self, consumer, batch: list):
+        if (not self._disable_commit):
+            for msg in batch:
+                consumer.commit(message=msg, asynchronous=self._async_commits)
 
     def _source_generator(self, subscription: mrc.Subscription):
         consumer = None
         try:
-            consumer = ck.Consumer(self._consumer_params)
+            consumer = type(self)._consumer_factory(self._consumer_params)
             consumer.subscribe(self._topics)
 
             batch = []
+            ended: set = set()
 
             while not self.is_stop_requested() and subscription.is_subscribed():
+
                 do_process_batch = False
                 do_sleep = False
 
@@ -198,28 +282,42 @@ class KafkaSourceStage(PreallocatorMixin, GpuAndCpuMixin, SingleOutputSource):
 
                 else:
                     msg_error = msg.error()
+
                     if msg_error is None:
                         batch.append(msg)
+                        ended.discard((msg.topic(), msg.partition()))
                         if len(batch) == self._max_batch_size:
                             do_process_batch = True
 
-                    elif msg_error == ck.KafkaError._PARTITION_EOF:
+                    elif msg_error.code() == ck.KafkaError._PARTITION_EOF:
+                        ended.add((msg.topic(), msg.partition()))
                         do_process_batch = True
-                        do_sleep = True
+                        do_sleep = not self._stop_at_end
+
                     else:
                         raise ck.KafkaException(msg_error)
 
                 if do_process_batch:
-                    message_meta = self._process_batch(consumer, batch)
+                    message_meta = self._process_batch(batch)
                     if message_meta is not None:
                         yield message_meta
+                    # Committed once the batch has been handed downstream, so a stop between the two reads it again.
+                    self._commit(consumer, batch)
+                    batch = []
+
+                if (self._stop_at_end and len(batch) == 0):
+                    assigned = {(part.topic, part.partition) for part in consumer.assignment()}
+
+                    if (len(assigned) > 0 and assigned <= ended):
+                        break
 
                 if do_sleep and not self.is_stop_requested():
                     time.sleep(self._poll_interval)
 
-            message_meta = self._process_batch(consumer, batch)
+            message_meta = self._process_batch(batch)
             if message_meta is not None:
                 yield message_meta
+            self._commit(consumer, batch)
 
         finally:
             # Close the consumer and call on_completed

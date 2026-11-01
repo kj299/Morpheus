@@ -86,17 +86,50 @@ def test_an_ambiguous_destination_is_refused(config: Config, kwargs: dict):
 
 
 class _Recorder:
+    """A producer whose broker acknowledges everything but the first `failures` produces to `failing_topic` (any)."""
 
-    def __init__(self, servers: str):
+    def __init__(self, servers: str, failures: int = 0, failing_topic: str = None):
         self.servers = servers
         self.produced: list = []
+        self.keys: list = []
         self.flushed = 0
+        self.failures = failures
+        self.failing_topic = failing_topic
+        self._reports: list = []
 
-    def produce(self, topic: str, value: bytes):
-        self.produced.append((topic, value))
+    def produce(self, topic: str, value: bytes, key: bytes = None, on_delivery=None):
+        failed = self.failures > 0 and (self.failing_topic is None or topic == self.failing_topic)
 
-    def flush(self):
+        if (failed):
+            self.failures -= 1
+        else:
+            self.produced.append((topic, value))
+            self.keys.append(key)
+
+        self._reports.append((on_delivery, "broker unavailable" if failed else None))
+
+    def poll(self, timeout: float = None):
+        del timeout
+
+    def flush(self, timeout: float = None):
+        del timeout
         self.flushed += 1
+
+        for (report, error) in self._reports:
+            report(error, None)
+
+        self._reports.clear()
+
+        return 0
+
+
+def _install(monkeypatch, **recorder) -> list:
+    built = []
+    monkeypatch.setattr(SiemWireSinkStage,
+                        "_producer_factory",
+                        staticmethod(lambda servers: built.append(_Recorder(servers, **recorder)) or built[-1]))
+
+    return built
 
 
 @pytest.mark.cpu_mode
@@ -117,3 +150,70 @@ def test_kafka_receives_the_same_wire_lines(config: Config, monkeypatch):
     assert [topic for (topic, _) in producer.produced] == ["morpheus.score.l2"] * 4
     assert "macs_per_port_step" not in json.loads(producer.produced[1][1])
     assert producer.flushed == 2
+
+
+@pytest.mark.cpu_mode
+def test_each_message_is_keyed_on_its_entity(config: Config, monkeypatch):
+    # Keyed, one entity's records share a partition and keep their order for whatever reads the topic next.
+    built = _install(monkeypatch)
+    stage = SiemWireSinkStage(config, kafka_topic="morpheus.score.l2", kafka_bootstrap_servers="broker:9092")
+    stage.on_data(records(config))
+
+    lines = [json.loads(value) for (_, value) in built[0].produced]
+
+    assert built[0].keys == [
+        None if line.get("entity_key") is None else line["entity_key"].encode("utf-8") for line in lines
+    ]
+
+
+@pytest.mark.cpu_mode
+def test_a_message_the_broker_refused_is_produced_again(config: Config, monkeypatch):
+    built = _install(monkeypatch, failures=1, failing_topic="morpheus.score.l2")
+    stage = SiemWireSinkStage(config, kafka_topic="morpheus.score.l2", kafka_bootstrap_servers="broker:9092")
+    stage.on_data(records(config))
+
+    assert len(built[0].produced) == 2
+    assert stage.quarantined == 0
+
+
+@pytest.mark.cpu_mode
+def test_a_message_the_broker_keeps_refusing_goes_to_quarantine(config: Config, monkeypatch):
+    built = _install(monkeypatch, failures=100, failing_topic="morpheus.score.l2")
+    stage = SiemWireSinkStage(config,
+                              kafka_topic="morpheus.score.l2",
+                              kafka_bootstrap_servers="broker:9092",
+                              max_retries=2,
+                              quarantine_topic="morpheus.quarantine")
+    stage.on_data(records(config))
+
+    quarantined = [json.loads(value) for (topic, value) in built[0].produced if topic == "morpheus.quarantine"]
+
+    assert stage.quarantined == 2
+    assert len(quarantined) == 2
+    assert {record["quarantine_reason"] for record in quarantined} == {"produce_failed"}
+    assert {record["intended_topic"] for record in quarantined} == {"morpheus.score.l2"}
+    assert all("broker unavailable" in record["error"] for record in quarantined)
+    assert all(json.loads(record["payload"]) for record in quarantined)
+
+
+@pytest.mark.cpu_mode
+def test_a_message_with_nowhere_to_go_stops_the_pipeline(config: Config, monkeypatch):
+    # The upstream sink logged a failed produce and carried on; a record lost that way leaves no trace downstream.
+    _install(monkeypatch, failures=100, failing_topic="morpheus.score.l2")
+    stage = SiemWireSinkStage(config, kafka_topic="morpheus.score.l2", kafka_bootstrap_servers="b:9092", max_retries=1)
+
+    with pytest.raises(RuntimeError, match="Stopping rather than losing them"):
+        stage.on_data(records(config))
+
+
+@pytest.mark.cpu_mode
+def test_a_quarantine_topic_that_also_refuses_stops_the_pipeline(config: Config, monkeypatch):
+    _install(monkeypatch, failures=100, failing_topic=None)
+    stage = SiemWireSinkStage(config,
+                              kafka_topic="morpheus.score.l2",
+                              kafka_bootstrap_servers="b:9092",
+                              max_retries=0,
+                              quarantine_topic="morpheus.quarantine")
+
+    with pytest.raises(RuntimeError, match="or to the quarantine topic"):
+        stage.on_data(records(config))

@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,057 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,061 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -92,7 +92,8 @@ sends every composed pipeline's output through `CompareDataFrameStage`) and the 
 threshold module, its test, the threshold registry and the derivation tool) and the one section 3.7 added (the
 search-head run it superseded, kept as history) and the one section 4.1 added (the run before it, kept as
 history too) and the two section 4.2 added (the reference data module and its test) and the two section 4.3
-added (the telemetry base class and its test), less the 1,397 files
+added (the telemetry base class and its test) and the four section 4.4 added (the partition merge stage, its test,
+the Kafka source's broker-free test and the recorded-topic helper), less the 1,397 files
 removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4.
@@ -101,7 +102,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4.
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 418 |
+| `keep` | 422 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -398,7 +399,20 @@ that replaces it. Each item says how to know it is done.
    and offset, the sink sends no message key, and a failed produce is logged and lost. Carry offset and partition
    into the lineage columns, key messages on `entity_key`, retry or route a failed produce to the quarantine stream,
    and put `TotalOrderStage` directly behind a multi-partition source. Done when the transport harness replays a
-   two-partition topic in two orders and gets one output.
+   two-partition topic in two orders and gets one output. *Built under plan section 4.4:* `KafkaSourceStage` takes
+   `provenance`, which puts `kafka_topic`, `kafka_partition` and `kafka_offset` on every row, `parser_kwargs`, and
+   `stop_at_end` for a replay; on its Python reader a batch is committed only after it is parsed and passed on, a
+   line that is not a JSON object is kept in `raw_payload` for the envelope check to quarantine, and topics are
+   subscribed in sorted rather than hash order. Sorting a batch was not enough on its own: which rows share a batch
+   is the interleaving, so the new `PartitionMergeStage` sits directly behind the source and releases a row only
+   once every partition has passed it in event time, dropping a redelivered offset. `SiemWireSinkStage` keys each
+   message on `entity_key`, retries what the broker does not acknowledge, and puts what it still refuses on a
+   quarantine topic or raises; the upstream `WriteToKafkaStage` no longer reads the value of a missing message in its
+   delivery report or skips a refused one. `test_transport_harness.py` produces the transport sample onto two
+   partitions keyed by source address, replays it alternating and one partition after the other, and gets one
+   output carrying each packet's partition and offset and otherwise equal to the golden; without the merge the two
+   orders differ. HTTP has no partition or offset to carry, and the HTTP server source answers a full queue with a
+   503 rather than dropping the request, so the HTTP half of the item needed no change.
 5. **Move deployable code out of the test tree.** The compositions, the shard split stage, the resumable pipeline
    and the host-frame helper are imported by deployments from `tests/`. Move them into the package, with the corpora
    and harnesses staying behind, and drop the path insertions. Done when nothing outside `tests/` imports from
