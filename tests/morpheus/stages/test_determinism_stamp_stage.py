@@ -38,7 +38,8 @@ ENVELOPE = DeterminismEnvelope(tier="D1",
                                code_commit="c6a3b56",
                                image_digest="sha256:1f0c",
                                feature_schema_version="TC-5/2.1.0",
-                               rng_seed=42)
+                               rng_seed=42,
+                               reference_data="public_suffix_list:5f0e3c1a9b7d2486")
 
 
 def manifest(**kwargs) -> ModelManifest:
@@ -214,4 +215,5 @@ def test_the_stage_refuses_an_uninterpretable_tier():
                             code_commit="c",
                             image_digest="d",
                             feature_schema_version="e",
-                            rng_seed=1)
+                            rng_seed=1,
+                            reference_data="public_suffix_list:5f0e3c1a9b7d2486")

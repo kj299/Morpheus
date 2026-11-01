@@ -3895,6 +3895,17 @@ Twelve fields of overhead per event is not free at billions of events per day. T
 block on the scored and alerted events only, not on raw telemetry, and intern the static portion into a
 `pipeline_fingerprint` lookup so only the fingerprint and the varying fields travel with each event.
 
+A model is not the only file outside the configuration that decides what a feature means. The Public Suffix
+List decides which part of a query name is the registered domain, and so what R-B-L7-001 counts and measures;
+it is revised every few days upstream, and the same events split by a newer copy can cross the rule's
+threshold with nothing in the configuration changed. The fork therefore adds a field, `reference_data`,
+naming each reference dataset with the digest of the copy the process parsed
+(`public_suffix_list:3d1e812e00ca5c14`), and folds the same digests into `pipeline_fingerprint`. The digest is
+taken from the bytes the stage read, in the same read (`morpheus.utils.reference_data`), so a list replaced on
+disk under a running process changes neither its features nor its envelope until it restarts. The time zone
+database would be the second such dataset, and is not, because no stage resolves a named zone: TC-5's cadence
+features take a fixed offset so that a `tzdata` update cannot move them.
+
 ### Control 13: Prove it in CI
 
 Determinism claims decay silently. Enforce them:

@@ -199,6 +199,7 @@ UNMARKED=(
     tests/morpheus/utils/test_outcome_run.py
     tests/morpheus/utils/test_personal_data.py
     tests/morpheus/utils/test_ratio_window.py
+    tests/morpheus/utils/test_reference_data.py
     tests/morpheus/utils/test_rule_thresholds.py
     tests/morpheus/utils/test_session_timer.py
     tests/morpheus/utils/test_sharding.py

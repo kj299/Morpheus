@@ -1413,7 +1413,8 @@ def _envelope(tier: str = "D1", seed: int = 42) -> DeterminismEnvelope:
                                code_commit="c6a3b56",
                                image_digest="sha256:1f0c",
                                feature_schema_version="TC-5/2.1.0",
-                               rng_seed=seed)
+                               rng_seed=seed,
+                               reference_data="public_suffix_list:5f0e3c1a9b7d2486")
 
 
 def _manifest(fallback=None, scores_from_ns=None) -> ModelManifest:

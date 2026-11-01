@@ -36,6 +36,9 @@ COMPONENTS = {
     },
     "code_commit": "c6a3b56",
     "image_digest": "sha256:1f0c",
+    "reference_data": {
+        "public_suffix_list": "5f0e3c1a9b7d2486"
+    },
 }
 
 
@@ -48,6 +51,7 @@ def envelope(**kwargs) -> DeterminismEnvelope:
         "image_digest": "sha256:1f0c",
         "feature_schema_version": "TC-5/2.1.0",
         "rng_seed": 42,
+        "reference_data": "public_suffix_list:5f0e3c1a9b7d2486",
     }
     defaults.update(kwargs)
 
@@ -132,6 +136,7 @@ def test_the_envelope_reaches_a_siem_as_flat_columns():
     assert columns["config_hash"] == "7d2e4a1f9c3b5e80"
     assert columns["rng_seed"] == 42
     assert columns["feature_schema_version"] == "TC-5/2.1.0"
+    assert columns["reference_data"] == "public_suffix_list:5f0e3c1a9b7d2486"
 
 
 @pytest.mark.parametrize("tier", TIERS)

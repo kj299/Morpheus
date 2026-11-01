@@ -792,6 +792,7 @@ _OPERATIONAL = (
     "model_version",
     "sid_model_version",
     "pipeline_fingerprint",
+    "reference_data",
     "resumed_from_state",
     "rng_seed",
     # A single-record session's bounds: timestamps, like event_time.
