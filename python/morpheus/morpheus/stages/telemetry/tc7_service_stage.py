@@ -44,18 +44,11 @@ import dataclasses
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.bucket_peak import BucketPeakTracker
 from morpheus.utils.bucket_peak import measure_rows
@@ -68,12 +61,7 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
 logger = logging.getLogger(__name__)
@@ -167,7 +155,7 @@ def _number(value: typing.Any) -> typing.Optional[float]:
 
 
 @register_stage("tc7-service")
-class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7ServiceStage(CheckpointMixin, TelemetryStage):
     """
     Key each connection on the service it reached, and write that service's window counts and client novelty.
 
@@ -232,7 +220,7 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                  baseline_window_seconds: int = DEFAULT_BASELINE_WINDOW_SECONDS,
                  baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -280,30 +268,10 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         self._needed_columns[CLIENTS_BASELINE_MATURE] = TypeId.BOOL8
         self._needed_columns[CLIENTS_RATIO] = TypeId.FLOAT64
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc7-service"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @staticmethod
     def service_key(address: typing.Any, port: typing.Any, name: typing.Any) -> tuple:
@@ -331,140 +299,117 @@ class TC7ServiceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
 
         return (key, KEYED_BY_ADDRESS) if key is not None else (None, None)
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [self._client_column, self._address_column, self._port_column, self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the service key and the service's window counts, client novelty and baseline.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming connection records.
-
-        Returns
-        -------
-        The input message, with the service columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the client, address, port or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        rows = len(df)
+        clients = to_host_list(df, self._client_column)
+        addresses = to_host_list(df, self._address_column)
+        ports = to_host_list(df, self._port_column)
+        names = to_host_list(df, self._name_column) if self._name_column in df.columns else [None] * rows
+        sizes = to_host_list(df, self._bytes_column) if self._bytes_column in df.columns else [None] * rows
+        fingerprints = (to_host_list(df, self._fingerprint_column)
+                        if self._fingerprint_column in df.columns else [None] * rows)
+        # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
+        # below already treat as a connection with nothing to count.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        if (meta is None or meta.count == 0):
-            return message
+        keys: list = []
+        sources: list = []
+        connections: list = []
+        volumes: list = []
+        reached_by: list = []
+        saturated: list = []
+        first_seen: list = []
+        known: list = []
+        unusable = 0
+        unordered = 0
 
-        with meta.mutable_dataframe() as df:
-            required = [self._client_column, self._address_column, self._port_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        for position in range(rows):
+            (key, source) = self.service_key(addresses[position], ports[position], names[position])
+            event_time_ns = times[position]
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC7ServiceStage requires columns {missing} which are not present in the DataFrame. "
-                               f"Available columns: {sorted(df.columns)}")
+            keys.append(key)
+            sources.append(source)
 
-            rows = len(df)
-            clients = to_host_list(df, self._client_column)
-            addresses = to_host_list(df, self._address_column)
-            ports = to_host_list(df, self._port_column)
-            names = to_host_list(df, self._name_column) if self._name_column in df.columns else [None] * rows
-            sizes = to_host_list(df, self._bytes_column) if self._bytes_column in df.columns else [None] * rows
-            fingerprints = (to_host_list(df, self._fingerprint_column)
-                            if self._fingerprint_column in df.columns else [None] * rows)
-            # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
-            # below already treat as a connection with nothing to count.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            client = normalize_text(clients[position])
 
-            keys: list = []
-            sources: list = []
-            connections: list = []
-            volumes: list = []
-            reached_by: list = []
-            saturated: list = []
-            first_seen: list = []
-            known: list = []
-            unusable = 0
-            unordered = 0
+            if (key is None or event_time_ns is None):
+                unusable += int(not refused[position])
 
-            for position in range(rows):
-                (key, source) = self.service_key(addresses[position], ports[position], names[position])
-                event_time_ns = times[position]
+                for column in (connections, volumes, reached_by, first_seen, known):
+                    column.append(None)
 
-                keys.append(key)
-                sources.append(source)
+                saturated.append(False)
+                continue
 
-                client = normalize_text(clients[position])
+            sums = self._sums.observe(key, event_time_ns, _number(sizes[position]))
+            unordered += int(sums is None)
+            connections.append(None if sums is None else sums[0])
+            volumes.append(None if sums is None else sums[1])
 
-                if (key is None or event_time_ns is None):
-                    unusable += int(not refused[position])
+            if (client is None):
+                reached_by.append(None)
+                saturated.append(False)
+            else:
+                result = self._clients.observe(key, event_time_ns, client)
+                reached_by.append(result.distinct)
+                saturated.append(result.saturated)
 
-                    for column in (connections, volumes, reached_by, first_seen, known):
-                        column.append(None)
+            fingerprint = normalize_text(fingerprints[position])
 
-                    saturated.append(False)
-                    continue
+            if (fingerprint is None):
+                first_seen.append(None)
+                known.append(None)
+            else:
+                novelty = self._fingerprints.observe(key, event_time_ns, {FINGERPRINT_FIELD: fingerprint})
+                first_seen.append(novelty.first_seen[FINGERPRINT_FIELD])
+                known.append(None if novelty.out_of_order else novelty.distinct_counts[FINGERPRINT_FIELD])
 
-                sums = self._sums.observe(key, event_time_ns, _number(sizes[position]))
-                unordered += int(sums is None)
-                connections.append(None if sums is None else sums[0])
-                volumes.append(None if sums is None else sums[1])
+        measured = measure_rows(self._baseline, keys, reached_by, times)
 
-                if (client is None):
-                    reached_by.append(None)
-                    saturated.append(False)
-                else:
-                    result = self._clients.observe(key, event_time_ns, client)
-                    reached_by.append(result.distinct)
-                    saturated.append(result.saturated)
+        assign_str_column(df, SERVICE_KEY, keys)
+        assign_str_column(df, SERVICE_KEY_SOURCE, sources)
+        assign_nullable_int_column(df, CONNECTIONS, connections)
+        assign_nullable_float_column(df, BYTES, volumes)
+        assign_nullable_int_column(df, CLIENTS, reached_by)
+        assign_nullable_bool_column(df, CLIENTS_SATURATED, saturated)
+        assign_nullable_bool_column(df, FINGERPRINT_FIRST_SEEN, first_seen)
+        assign_nullable_int_column(df, FINGERPRINTS, known)
+        assign_nullable_int_column(df, CLIENTS_BASELINE, measured.references)
+        assign_nullable_int_column(df, CLIENTS_BASELINE_DAYS, measured.buckets)
+        assign_nullable_bool_column(df, CLIENTS_BASELINE_MATURE, measured.mature)
+        assign_nullable_float_column(df, CLIENTS_RATIO, ratios_to_reference(measured, reached_by))
 
-                fingerprint = normalize_text(fingerprints[position])
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="connections",
+                     outcome="they entered no window, set clock_refused and expired nothing.")
 
-                if (fingerprint is None):
-                    first_seen.append(None)
-                    known.append(None)
-                else:
-                    novelty = self._fingerprints.observe(key, event_time_ns, {FINGERPRINT_FIELD: fingerprint})
-                    first_seen.append(novelty.first_seen[FINGERPRINT_FIELD])
-                    known.append(None if novelty.out_of_order else novelty.distinct_counts[FINGERPRINT_FIELD])
+        if (unusable > 0):
+            logger.warning(
+                "TC7ServiceStage left %d of %d connections out of every service for want of a port, a name or "
+                "address, or a usable event time.",
+                unusable,
+                rows)
 
-            measured = measure_rows(self._baseline, keys, reached_by, times)
-
-            assign_str_column(df, SERVICE_KEY, keys)
-            assign_str_column(df, SERVICE_KEY_SOURCE, sources)
-            assign_nullable_int_column(df, CONNECTIONS, connections)
-            assign_nullable_float_column(df, BYTES, volumes)
-            assign_nullable_int_column(df, CLIENTS, reached_by)
-            assign_nullable_bool_column(df, CLIENTS_SATURATED, saturated)
-            assign_nullable_bool_column(df, FINGERPRINT_FIRST_SEEN, first_seen)
-            assign_nullable_int_column(df, FINGERPRINTS, known)
-            assign_nullable_int_column(df, CLIENTS_BASELINE, measured.references)
-            assign_nullable_int_column(df, CLIENTS_BASELINE_DAYS, measured.buckets)
-            assign_nullable_bool_column(df, CLIENTS_BASELINE_MATURE, measured.mature)
-            assign_nullable_float_column(df, CLIENTS_RATIO, ratios_to_reference(measured, reached_by))
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC7ServiceStage",
-                        what="connections",
-                        outcome="they entered no window, set clock_refused and expired nothing.")
-
-            if (unusable > 0):
-                logger.warning(
-                    "TC7ServiceStage left %d of %d connections out of every service for want of a port, a name or "
-                    "address, or a usable event time.",
-                    unusable,
-                    rows)
-
-            if (unordered > 0):
-                logger.warning(
-                    "TC7ServiceStage saw %d connections arrive earlier than their service's previous one; they were "
-                    "not counted.",
-                    unordered)
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
+        if (unordered > 0):
+            logger.warning(
+                "TC7ServiceStage saw %d connections arrive earlier than their service's previous one; they were "
+                "not counted.",
+                unordered)

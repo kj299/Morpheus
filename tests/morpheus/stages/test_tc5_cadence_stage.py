@@ -73,8 +73,10 @@ def office_week(days: int = 20) -> list:
 @pytest.mark.gpu_and_cpu_mode
 def test_the_hour_and_weekday_match_the_calendar(config: Config):
     # Integer arithmetic on the epoch, checked against the standard library rather than against itself.
+    # The last time is fifty-two years after the others, which the stage's clock would refuse by default; the guard
+    # is widened here because this test is about the calendar, not about the clock.
     times = [at(0, 0), at(1, 13), at(19_000, 7)]
-    meta = run(config, frame(times))
+    meta = run(config, frame(times), max_clock_skew_seconds=60 * 365 * 24 * 3600)
 
     expected = [datetime.datetime.fromtimestamp(time / 10**9, tz=datetime.timezone.utc) for time in times]
 

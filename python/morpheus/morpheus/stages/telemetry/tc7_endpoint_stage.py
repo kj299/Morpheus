@@ -49,29 +49,17 @@ import logging
 import re
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.pair_history import DAY_NS
 from morpheus.utils.pair_history import DEFAULT_MAX_ENTITIES
 from morpheus.utils.pair_history import DEFAULT_MAX_PAIRS
@@ -163,7 +151,7 @@ def normalize_integrity(level: typing.Any) -> typing.Optional[str]:
 
 
 @register_stage("tc7-endpoint")
-class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7EndpointStage(CheckpointMixin, TelemetryStage):
     """
     Write whether each process's parent-image pairing is new to its host and to its host's peer group.
 
@@ -221,7 +209,7 @@ class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                  max_pairs: int = DEFAULT_MAX_PAIRS,
                  max_entities: int = DEFAULT_MAX_ENTITIES,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_days <= 0):
             raise ValueError(f"window_days must be positive, received {window_days}")
@@ -258,158 +246,115 @@ class TC7EndpointStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
         self._needed_columns[NOVEL] = TypeId.BOOL8
         self._needed_columns[INTEGRITY] = TypeId.STRING
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc7-endpoint"
 
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
 
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
+        required = [self._host_column, self._parent_image_column, self._image_column, self._time_column]
 
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
+        return required
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _process(self, df):
         """
         Write the pair, what its host and peer group had seen, and whether it is novel, for every process.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming EDR process records.
-
-        Returns
-        -------
-        The input message, with the endpoint columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the host, parent image, image or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        hosts = to_host_list(df, self._host_column)
+        parents = to_host_list(df, self._parent_image_column)
+        images = to_host_list(df, self._image_column)
+        levels = (to_host_list(df, self._integrity_column) if self._integrity_column in df.columns else [None] *
+                  len(hosts))
+        groups = (to_host_list(df, self._peer_group_column) if self._peer_group_column in df.columns else [None] *
+                  len(hosts))
+        # Guarded once, before either history is shown a time: a refused time becomes `None`, which the rows
+        # below already treat as a process with nothing to judge.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        if (meta is None or meta.count == 0):
-            return message
+        keys: list = []
+        pairs: list = []
+        peer_groups: list = []
+        host_seen: list = []
+        peer_seen: list = []
+        host_only: list = []
+        mature: list = []
+        novel: list = []
+        integrity: list = []
+        unusable = 0
+        unordered = 0
 
-        with meta.mutable_dataframe() as df:
-            required = [self._host_column, self._parent_image_column, self._image_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        for (position, raw_host) in enumerate(hosts):
+            host = normalize_hostname(raw_host)
+            parent = normalize_image_path(parents[position])
+            image = normalize_image_path(images[position])
+            group = normalize_text(groups[position])
+            pair = None if (parent is None or image is None) else f"{parent}{PAIR_SEPARATOR}{image}"
+            event_time_ns = times[position]
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC7EndpointStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+            keys.append(host)
+            pairs.append(pair)
+            peer_groups.append(group)
+            integrity.append(normalize_integrity(levels[position]))
+            host_only.append(host is not None and group is None)
 
-            hosts = to_host_list(df, self._host_column)
-            parents = to_host_list(df, self._parent_image_column)
-            images = to_host_list(df, self._image_column)
-            levels = (to_host_list(df, self._integrity_column) if self._integrity_column in df.columns else [None] *
-                      len(hosts))
-            groups = (to_host_list(df, self._peer_group_column) if self._peer_group_column in df.columns else [None] *
-                      len(hosts))
-            # Guarded once, before either history is shown a time: a refused time becomes `None`, which the rows
-            # below already treat as a process with nothing to judge.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            if (host is None or pair is None or event_time_ns is None):
+                unusable += int(not refused[position])
+                host_seen.append(None)
+                peer_seen.append(None)
+                mature.append(False)
+                novel.append(None)
+                continue
 
-            keys: list = []
-            pairs: list = []
-            peer_groups: list = []
-            host_seen: list = []
-            peer_seen: list = []
-            host_only: list = []
-            mature: list = []
-            novel: list = []
-            integrity: list = []
-            unusable = 0
-            unordered = 0
+            on_host = self._hosts.observe(host, event_time_ns, pair)
+            in_group = None if group is None else self._groups.observe(group, event_time_ns, pair)
+            basis = on_host if in_group is None else in_group
 
-            for (position, raw_host) in enumerate(hosts):
-                host = normalize_hostname(raw_host)
-                parent = normalize_image_path(parents[position])
-                image = normalize_image_path(images[position])
-                group = normalize_text(groups[position])
-                pair = None if (parent is None or image is None) else f"{parent}{PAIR_SEPARATOR}{image}"
-                event_time_ns = times[position]
+            host_seen.append(on_host.seen)
+            peer_seen.append(None if in_group is None else in_group.seen)
+            mature.append(basis.mature)
 
-                keys.append(host)
-                pairs.append(pair)
-                peer_groups.append(group)
-                integrity.append(normalize_integrity(levels[position]))
-                host_only.append(host is not None and group is None)
+            if (on_host.out_of_order or (in_group is not None and in_group.out_of_order)):
+                unordered += 1
+                novel.append(None)
+            elif (not basis.mature):
+                novel.append(None)
+            else:
+                novel.append(not on_host.seen and (in_group is None or not in_group.seen))
 
-                if (host is None or pair is None or event_time_ns is None):
-                    unusable += int(not refused[position])
-                    host_seen.append(None)
-                    peer_seen.append(None)
-                    mature.append(False)
-                    novel.append(None)
-                    continue
+        assign_str_column(df, HOST, keys)
+        assign_str_column(df, HOST_KEY, keys)
+        assign_str_column(df, PAIR, pairs)
+        assign_str_column(df, PEER_GROUP, peer_groups)
+        assign_nullable_bool_column(df, HOST_SEEN, host_seen)
+        assign_nullable_bool_column(df, PEER_SEEN, peer_seen)
+        assign_nullable_bool_column(df, HOST_ONLY, host_only)
+        assign_nullable_bool_column(df, MATURE, mature)
+        assign_nullable_bool_column(df, NOVEL, novel)
+        assign_str_column(df, INTEGRITY, integrity)
 
-                on_host = self._hosts.observe(host, event_time_ns, pair)
-                in_group = None if group is None else self._groups.observe(group, event_time_ns, pair)
-                basis = on_host if in_group is None else in_group
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="processes",
+                     outcome="they were judged by nothing, set clock_refused and aged nothing out.")
 
-                host_seen.append(on_host.seen)
-                peer_seen.append(None if in_group is None else in_group.seen)
-                mature.append(basis.mature)
+        if (unusable > 0):
+            logger.warning(
+                "TC7EndpointStage judged nothing for %d of %d processes for want of a host, a parent and "
+                "image path, or a usable event time.",
+                unusable,
+                len(hosts))
 
-                if (on_host.out_of_order or (in_group is not None and in_group.out_of_order)):
-                    unordered += 1
-                    novel.append(None)
-                elif (not basis.mature):
-                    novel.append(None)
-                else:
-                    novel.append(not on_host.seen and (in_group is None or not in_group.seen))
-
-            assign_str_column(df, HOST, keys)
-            assign_str_column(df, HOST_KEY, keys)
-            assign_str_column(df, PAIR, pairs)
-            assign_str_column(df, PEER_GROUP, peer_groups)
-            assign_nullable_bool_column(df, HOST_SEEN, host_seen)
-            assign_nullable_bool_column(df, PEER_SEEN, peer_seen)
-            assign_nullable_bool_column(df, HOST_ONLY, host_only)
-            assign_nullable_bool_column(df, MATURE, mature)
-            assign_nullable_bool_column(df, NOVEL, novel)
-            assign_str_column(df, INTEGRITY, integrity)
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC7EndpointStage",
-                        what="processes",
-                        outcome="they were judged by nothing, set clock_refused and aged nothing out.")
-
-            if (unusable > 0):
-                logger.warning(
-                    "TC7EndpointStage judged nothing for %d of %d processes for want of a host, a parent and "
-                    "image path, or a usable event time.",
-                    unusable,
-                    len(hosts))
-
-            if (unordered > 0):
-                logger.warning(
-                    "TC7EndpointStage saw %d processes arrive earlier than their host's or peer group's previous "
-                    "one; they were not judged, and did not join the history that refused them.",
-                    unordered)
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
+        if (unordered > 0):
+            logger.warning(
+                "TC7EndpointStage saw %d processes arrive earlier than their host's or peer group's previous "
+                "one; they were not judged, and did not join the history that refused them.",
+                unordered)

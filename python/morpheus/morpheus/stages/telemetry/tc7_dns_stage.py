@@ -52,20 +52,12 @@ with a stale search suffix is told no constantly about one.
 """
 
 import logging
-import typing
-
-import mrc
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.bucket_peak import BucketPeakTracker
 from morpheus.utils.bucket_peak import measure_rows
@@ -78,12 +70,7 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.query_entropy import mean_label_length
 from morpheus.utils.query_entropy import registered_domain
 from morpheus.utils.query_entropy import subdomain
@@ -130,7 +117,7 @@ BASELINED = (SUBDOMAINS_PER_DOMAIN, DOMAINS_PER_CLIENT)
 
 
 @register_stage("tc7-dns", ignore_args=["key_columns"])
-class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7DnsStage(CheckpointMixin, TelemetryStage):
     """
     Split each query name into its parts and write the three measurements the tunnelling rule reads.
 
@@ -190,7 +177,7 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
                  baseline_window_seconds: int = DEFAULT_BASELINE_WINDOW_SECONDS,
                  baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -247,153 +234,116 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
             self._needed_columns[column + BASELINE_MATURE_SUFFIX] = TypeId.BOOL8
             self._needed_columns[column + RATIO_SUFFIX] = TypeId.FLOAT64
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc7-dns"
 
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
 
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
+        required = list(self._key_columns) + [self._query_column, self._time_column]
 
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
+        return required
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _process(self, df):
         """
         Write the registered domain, the subdomain, its entropy and label length, and the distinct count.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming DNS query records.
-
-        Returns
-        -------
-        The input message, with the DNS columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the query column or the time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        names = to_host_list(df, self._query_column)
+        key_parts = {name: to_host_list(df, name) for name in self._key_columns}
+        responses = (to_host_list(df, self._response_column) if self._response_column in df.columns else [None] *
+                     len(names))
+        # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
+        # below already treat as a query with nothing to count.
+        (times, clock_refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        if (meta is None or meta.count == 0):
-            return message
+        domains: list = []
+        below: list = []
+        entropies: list = []
+        label_means: list = []
+        per_domain: list = []
+        saturated: list = []
+        keys: list = []
+        per_client: list = []
+        client_saturated: list = []
+        refused: list = []
+        answered: list = []
+        refused_share: list = []
+        unordered = 0
 
-        with meta.mutable_dataframe() as df:
-            required = list(self._key_columns) + [self._query_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        for (position, name) in enumerate(names):
+            domain = registered_domain(name)
+            part = subdomain(name)
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC7DnsStage requires columns {missing} which are not present in the DataFrame. "
-                               f"Available columns: {sorted(df.columns)}")
+            domains.append(domain)
+            below.append(part)
+            entropies.append(subdomain_entropy(name))
+            label_means.append(mean_label_length(part))
+            event_time_ns = times[position]
 
-            names = to_host_list(df, self._query_column)
-            key_parts = {name: to_host_list(df, name) for name in self._key_columns}
-            responses = (to_host_list(df, self._response_column) if self._response_column in df.columns else [None] *
-                         len(names))
-            # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
-            # below already treat as a query with nothing to count.
-            (times, clock_refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            key = compose_key([normalize_text(key_parts[column][position]) for column in self._key_columns])
+            keys.append(key)
 
-            domains: list = []
-            below: list = []
-            entropies: list = []
-            label_means: list = []
-            per_domain: list = []
-            saturated: list = []
-            keys: list = []
-            per_client: list = []
-            client_saturated: list = []
-            refused: list = []
-            answered: list = []
-            refused_share: list = []
-            unordered = 0
+            self._observe_client(key,
+                                 event_time_ns,
+                                 domain,
+                                 normalize_text(responses[position]),
+                                 (per_client, client_saturated, refused, answered, refused_share))
 
-            for (position, name) in enumerate(names):
-                domain = registered_domain(name)
-                part = subdomain(name)
+            # An apex query is not a subdomain, so it neither counts toward the figure nor reads one.
+            if (domain is None or part is None or event_time_ns is None):
+                per_domain.append(None)
+                saturated.append(False)
+                continue
 
-                domains.append(domain)
-                below.append(part)
-                entropies.append(subdomain_entropy(name))
-                label_means.append(mean_label_length(part))
-                event_time_ns = times[position]
+            result = self._tracker.observe(domain, event_time_ns, part)
 
-                key = compose_key([normalize_text(key_parts[column][position]) for column in self._key_columns])
-                keys.append(key)
+            per_domain.append(result.distinct)
+            saturated.append(result.saturated)
+            unordered += int(result.out_of_order)
 
-                self._observe_client(key,
-                                     event_time_ns,
-                                     domain,
-                                     normalize_text(responses[position]),
-                                     (per_client, client_saturated, refused, answered, refused_share))
+        assign_str_column(df, REGISTERED_DOMAIN, domains)
+        assign_str_column(df, SUBDOMAIN, below)
+        assign_nullable_float_column(df, SUBDOMAIN_ENTROPY, entropies)
+        assign_nullable_float_column(df, MEAN_LABEL_LENGTH, label_means)
+        assign_nullable_int_column(df, SUBDOMAINS_PER_DOMAIN, per_domain)
+        assign_nullable_bool_column(df, SUBDOMAINS_SATURATED, saturated)
+        assign_str_column(df, CLIENT_KEY, keys)
+        assign_nullable_int_column(df, DOMAINS_PER_CLIENT, per_client)
+        assign_nullable_bool_column(df, DOMAINS_SATURATED, client_saturated)
+        assign_nullable_int_column(df, NXDOMAIN_IN_WINDOW, refused)
+        assign_nullable_int_column(df, ANSWERED_IN_WINDOW, answered)
+        assign_nullable_float_column(df, NXDOMAIN_RATIO, refused_share)
 
-                # An apex query is not a subdomain, so it neither counts toward the figure nor reads one.
-                if (domain is None or part is None or event_time_ns is None):
-                    per_domain.append(None)
-                    saturated.append(False)
-                    continue
+        # Each client's days, after the window counts, so each query is measured as it was counted.
+        for (column, values) in ((SUBDOMAINS_PER_DOMAIN, per_domain), (DOMAINS_PER_CLIENT, per_client)):
+            measured = measure_rows(self._baselines[column], keys, values, times)
 
-                result = self._tracker.observe(domain, event_time_ns, part)
+            assign_nullable_int_column(df, column + BASELINE_SUFFIX, measured.references)
+            assign_nullable_int_column(df, column + BASELINE_DAYS_SUFFIX, measured.buckets)
+            assign_nullable_bool_column(df, column + BASELINE_MATURE_SUFFIX, measured.mature)
+            assign_nullable_float_column(df, column + RATIO_SUFFIX, ratios_to_reference(measured, values))
 
-                per_domain.append(result.distinct)
-                saturated.append(result.saturated)
-                unordered += int(result.out_of_order)
+        self._refuse(df,
+                     clock_refused,
+                     logger=logger,
+                     what="queries",
+                     outcome="they entered no window, set clock_refused and expired nothing.")
 
-            assign_str_column(df, REGISTERED_DOMAIN, domains)
-            assign_str_column(df, SUBDOMAIN, below)
-            assign_nullable_float_column(df, SUBDOMAIN_ENTROPY, entropies)
-            assign_nullable_float_column(df, MEAN_LABEL_LENGTH, label_means)
-            assign_nullable_int_column(df, SUBDOMAINS_PER_DOMAIN, per_domain)
-            assign_nullable_bool_column(df, SUBDOMAINS_SATURATED, saturated)
-            assign_str_column(df, CLIENT_KEY, keys)
-            assign_nullable_int_column(df, DOMAINS_PER_CLIENT, per_client)
-            assign_nullable_bool_column(df, DOMAINS_SATURATED, client_saturated)
-            assign_nullable_int_column(df, NXDOMAIN_IN_WINDOW, refused)
-            assign_nullable_int_column(df, ANSWERED_IN_WINDOW, answered)
-            assign_nullable_float_column(df, NXDOMAIN_RATIO, refused_share)
-
-            # Each client's days, after the window counts, so each query is measured as it was counted.
-            for (column, values) in ((SUBDOMAINS_PER_DOMAIN, per_domain), (DOMAINS_PER_CLIENT, per_client)):
-                measured = measure_rows(self._baselines[column], keys, values, times)
-
-                assign_nullable_int_column(df, column + BASELINE_SUFFIX, measured.references)
-                assign_nullable_int_column(df, column + BASELINE_DAYS_SUFFIX, measured.buckets)
-                assign_nullable_bool_column(df, column + BASELINE_MATURE_SUFFIX, measured.mature)
-                assign_nullable_float_column(df, column + RATIO_SUFFIX, ratios_to_reference(measured, values))
-
-            refuse_rows(df,
-                        clock_refused,
-                        logger=logger,
-                        stage="TC7DnsStage",
-                        what="queries",
-                        outcome="they entered no window, set clock_refused and expired nothing.")
-
-            if (unordered > 0):
-                logger.warning(
-                    "TC7DnsStage saw %d of %d queries arrive earlier than their registered domain's previous one; "
-                    "they were not counted. Equal timestamps are accepted -- a resolver logging at one-second "
-                    "resolution puts a whole tunnel burst on one tick.",
-                    unordered,
-                    len(names))
-
-        return message
+        if (unordered > 0):
+            logger.warning(
+                "TC7DnsStage saw %d of %d queries arrive earlier than their registered domain's previous one; "
+                "they were not counted. Equal timestamps are accepted -- a resolver logging at one-second "
+                "resolution puts a whole tunnel burst on one tick.",
+                unordered,
+                len(names))
 
     def _observe_client(self, key, event_time_ns, domain, response, outputs: tuple) -> None:
         """The client's distinct registered domains and its NXDOMAIN share, appended to `outputs`."""
@@ -425,9 +375,3 @@ class TC7DnsStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
         refused.append(share.numerator)
         answered.append(share.denominator)
         refused_share.append(share.ratio)
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

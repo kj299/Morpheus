@@ -16,23 +16,16 @@
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.outcome_run import NS_PER_SECOND
 from morpheus.utils.outcome_run import OutcomeRunTracker
@@ -62,7 +55,7 @@ TRUE_VALUES = ("true", "yes", "y", "1", "t")
 
 
 @register_stage("tc5-risk")
-class TC5RiskStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5RiskStage(CheckpointMixin, TelemetryStage):
     """
     Write the TC-5 failure, multi-factor and run features for each authenticating principal.
 
@@ -128,9 +121,15 @@ class TC5RiskStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         built rather than leaving a column silently null.
     max_entities : int, default = 100000
         Principals tracked before the least recently seen is forgotten.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a record's event time may be before it is refused. The run and ratio
+        windows expire on event time, so one record from a clock wrong by years would empty every principal's ten-minute
+        failure and denial windows at once, and a password spray or MFA fatigue run in progress would start again from
+        zero. A refused record carries no features from this stage, sets `clock_refused`, and moves no state. See
+        `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_auth_runs", "_mfa_runs", "_mfa_ratio")
+    _checkpoint_attributes = ("_auth_runs", "_mfa_runs", "_mfa_ratio", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -146,8 +145,9 @@ class TC5RiskStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                  ratio_window_seconds: int = DEFAULT_RATIO_WINDOW_SECONDS,
                  min_denominator: int = DEFAULT_MIN_DENOMINATOR,
                  max_samples: int = 4096,
-                 max_entities: int = 100_000):
-        super().__init__(c)
+                 max_entities: int = 100_000,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (run_window_seconds <= 0):
             raise ValueError(f"run_window_seconds must be positive, received {run_window_seconds}")
@@ -187,28 +187,10 @@ class TC5RiskStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         self._needed_columns["auth_failed_then_succeeded"] = TypeId.BOOL8
         self._needed_columns["risk_counts_saturated"] = TypeId.BOOL8
 
-        # Mark this stage to log timestamps if requested
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc5-risk"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @property
     def tracked_principals(self) -> int:
@@ -225,144 +207,134 @@ class TC5RiskStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
         return text is not None and text.lower() in TRUE_VALUES
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [self._principal_column, self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the multi-factor proportion and the failure and denial counts.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming authentication records.
-
-        Returns
-        -------
-        The input message, with the TC-5 risk columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the principal or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        principals = to_host_list(df, self._principal_column)
+        # Guarded once, before any history is shown a time: a refused time reads below as a record without one.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
+        row_count = len(principals)
 
-        if (meta is None or meta.count == 0):
-            return message
+        def optional(column: str) -> list:
+            return to_host_list(df, column) if column in df.columns else [None] * row_count
 
-        with meta.mutable_dataframe() as df:
-            required = [self._principal_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        results = optional(self._result_column)
+        mfa_flags = optional(self._mfa_column)
+        mfa_results = optional(self._mfa_result_column)
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC5RiskStage requires columns {missing} which are not present in the DataFrame. "
-                               f"Available columns: {sorted(df.columns)}")
+        ratio: list = []
+        challenge: list = []
+        mfa_attempts: list = []
+        mfa_denials: list = []
+        mfa_run: list = []
+        mfa_pattern: list = []
+        auth_attempts: list = []
+        auth_failures: list = []
+        auth_run: list = []
+        auth_pattern: list = []
+        saturated: list = []
+        keyless = 0
+        outcomeless = 0
+        unordered = 0
 
-            principals = to_host_list(df, self._principal_column)
-            raw_times = to_host_list(df, self._time_column)
-            row_count = len(principals)
+        for (position, raw_principal) in enumerate(principals):
+            principal = normalize_text(raw_principal)
 
-            def optional(column: str) -> list:
-                return to_host_list(df, column) if column in df.columns else [None] * row_count
+            event_time_ns = times[position]
 
-            results = optional(self._result_column)
-            mfa_flags = optional(self._mfa_column)
-            mfa_results = optional(self._mfa_result_column)
+            mfa_result = normalize_text(mfa_results[position])
+            is_challenge = self._is_true(mfa_flags[position]) or mfa_result is not None
+            challenge.append(is_challenge)
 
-            ratio: list = []
-            challenge: list = []
-            mfa_attempts: list = []
-            mfa_denials: list = []
-            mfa_run: list = []
-            mfa_pattern: list = []
-            auth_attempts: list = []
-            auth_failures: list = []
-            auth_run: list = []
-            auth_pattern: list = []
-            saturated: list = []
-            keyless = 0
-            outcomeless = 0
-            unordered = 0
+            if (principal is None or event_time_ns is None):
+                # Pooling records under a fabricated principal would make every unattributed failure in the
+                # estate look like one account under sustained attack.
+                ratio.append(None)
+                mfa_attempts.append(None)
+                mfa_denials.append(None)
+                mfa_run.append(None)
+                mfa_pattern.append(None)
+                auth_attempts.append(None)
+                auth_failures.append(None)
+                auth_run.append(None)
+                auth_pattern.append(None)
+                saturated.append(False)
+                keyless += int(not refused[position])
+                continue
 
-            for (position, raw_principal) in enumerate(principals):
-                principal = normalize_text(raw_principal)
+            proportion = self._mfa_ratio.observe(principal, event_time_ns, is_challenge)
+            ratio.append(proportion.ratio)
 
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+            result = normalize_text(results[position])
+            row_saturated = proportion.saturated
 
-                mfa_result = normalize_text(mfa_results[position])
-                is_challenge = self._is_true(mfa_flags[position]) or mfa_result is not None
-                challenge.append(is_challenge)
+            if (result is None):
+                # An unknown outcome counted as a failure inflates a run, and counted as a success ends one
+                # that is still going. Neither is better than declining to guess.
+                auth_attempts.append(None)
+                auth_failures.append(None)
+                auth_run.append(None)
+                auth_pattern.append(None)
+                outcomeless += 1
+            else:
+                outcome = self._auth_runs.observe(principal, event_time_ns, result.lower() in self._success_values)
+                auth_attempts.append(outcome.attempts)
+                auth_failures.append(outcome.failures)
+                auth_run.append(outcome.consecutive_failures)
+                auth_pattern.append(outcome.failure_then_success)
+                row_saturated = row_saturated or outcome.saturated
+                unordered += int(outcome.out_of_order)
 
-                if (principal is None or event_time_ns is None):
-                    # Pooling records under a fabricated principal would make every unattributed failure in the
-                    # estate look like one account under sustained attack.
-                    ratio.append(None)
-                    mfa_attempts.append(None)
-                    mfa_denials.append(None)
-                    mfa_run.append(None)
-                    mfa_pattern.append(None)
-                    auth_attempts.append(None)
-                    auth_failures.append(None)
-                    auth_run.append(None)
-                    auth_pattern.append(None)
-                    saturated.append(False)
-                    keyless += 1
-                    continue
+            if (not is_challenge or mfa_result is None):
+                # A record flagged as a challenge but carrying no outcome says a factor was involved, not how
+                # it resolved, so it cannot join a run of denials or end one.
+                mfa_attempts.append(None)
+                mfa_denials.append(None)
+                mfa_run.append(None)
+                mfa_pattern.append(None)
+            else:
+                factor = self._mfa_runs.observe(principal,
+                                                event_time_ns,
+                                                mfa_result.lower() in self._mfa_success_values)
+                mfa_attempts.append(factor.attempts)
+                mfa_denials.append(factor.failures)
+                mfa_run.append(factor.consecutive_failures)
+                mfa_pattern.append(factor.failure_then_success)
+                row_saturated = row_saturated or factor.saturated
 
-                proportion = self._mfa_ratio.observe(principal, event_time_ns, is_challenge)
-                ratio.append(proportion.ratio)
+            saturated.append(row_saturated)
 
-                result = normalize_text(results[position])
-                row_saturated = proportion.saturated
+        assign_nullable_float_column(df, "mfa_ratio", ratio)
+        df["mfa_challenge"] = challenge
+        assign_nullable_int_column(df, "mfa_attempts_in_window", mfa_attempts)
+        assign_nullable_int_column(df, "mfa_denials_in_window", mfa_denials)
+        assign_nullable_int_column(df, "consecutive_mfa_denials", mfa_run)
+        assign_nullable_bool_column(df, "mfa_denied_then_approved", mfa_pattern)
+        assign_nullable_int_column(df, "auth_attempts_in_window", auth_attempts)
+        assign_nullable_int_column(df, "auth_failures_in_window", auth_failures)
+        assign_nullable_int_column(df, "consecutive_auth_failures", auth_run)
+        assign_nullable_bool_column(df, "auth_failed_then_succeeded", auth_pattern)
+        df["risk_counts_saturated"] = saturated
 
-                if (result is None):
-                    # An unknown outcome counted as a failure inflates a run, and counted as a success ends one
-                    # that is still going. Neither is better than declining to guess.
-                    auth_attempts.append(None)
-                    auth_failures.append(None)
-                    auth_run.append(None)
-                    auth_pattern.append(None)
-                    outcomeless += 1
-                else:
-                    outcome = self._auth_runs.observe(principal, event_time_ns, result.lower() in self._success_values)
-                    auth_attempts.append(outcome.attempts)
-                    auth_failures.append(outcome.failures)
-                    auth_run.append(outcome.consecutive_failures)
-                    auth_pattern.append(outcome.failure_then_success)
-                    row_saturated = row_saturated or outcome.saturated
-                    unordered += int(outcome.out_of_order)
-
-                if (not is_challenge or mfa_result is None):
-                    # A record flagged as a challenge but carrying no outcome says a factor was involved, not how
-                    # it resolved, so it cannot join a run of denials or end one.
-                    mfa_attempts.append(None)
-                    mfa_denials.append(None)
-                    mfa_run.append(None)
-                    mfa_pattern.append(None)
-                else:
-                    factor = self._mfa_runs.observe(principal,
-                                                    event_time_ns,
-                                                    mfa_result.lower() in self._mfa_success_values)
-                    mfa_attempts.append(factor.attempts)
-                    mfa_denials.append(factor.failures)
-                    mfa_run.append(factor.consecutive_failures)
-                    mfa_pattern.append(factor.failure_then_success)
-                    row_saturated = row_saturated or factor.saturated
-
-                saturated.append(row_saturated)
-
-            assign_nullable_float_column(df, "mfa_ratio", ratio)
-            df["mfa_challenge"] = challenge
-            assign_nullable_int_column(df, "mfa_attempts_in_window", mfa_attempts)
-            assign_nullable_int_column(df, "mfa_denials_in_window", mfa_denials)
-            assign_nullable_int_column(df, "consecutive_mfa_denials", mfa_run)
-            assign_nullable_bool_column(df, "mfa_denied_then_approved", mfa_pattern)
-            assign_nullable_int_column(df, "auth_attempts_in_window", auth_attempts)
-            assign_nullable_int_column(df, "auth_failures_in_window", auth_failures)
-            assign_nullable_int_column(df, "consecutive_auth_failures", auth_run)
-            assign_nullable_bool_column(df, "auth_failed_then_succeeded", auth_pattern)
-            df["risk_counts_saturated"] = saturated
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="authentications",
+                     outcome="they carry no counts and moved no window.")
 
         if (keyless > 0):
             logger.warning(
@@ -387,11 +359,3 @@ class TC5RiskStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                 "ordering upstream with TotalOrderStage.",
                 unordered,
                 len(principals))
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

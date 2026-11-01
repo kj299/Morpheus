@@ -51,18 +51,12 @@ says, and the drift trajectory downstream treats a null as a break in the run ra
 import logging
 import typing
 
-import mrc
 import pandas as pd
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import to_host_list
@@ -108,7 +102,7 @@ class Scorer(typing.Protocol):
 
 
 @register_stage("tc5-score", modes=[])
-class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5ScoreStage(TelemetryStage):
     """
     Attach per-entity model scores to layer 5 rows.
 
@@ -170,136 +164,107 @@ class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         for name in self._feature_columns:
             self._needed_columns[f"{name}{LOSS_SUFFIX}"] = TypeId.FLOAT64
 
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc5-score"
 
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
 
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
+        required = [self._entity_column] + self._feature_columns
 
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
+        if (self._manifest.scores_from_ns is not None):
+            required.append(self._time_column)
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+        return required
+
+    def _process(self, df):
         """
         Score every row whose entity has a model and whose features are complete.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming layer 5 rows.
-
-        Returns
-        -------
-        The same message, with the score columns attached.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
 
         Raises
         ------
-        KeyError
-            If the entity column or any feature column is absent.
         ValueError
             If a row belongs to a window this manifest was not resolved for.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        entities = to_host_list(df, self._entity_column)
+        row_count = len(entities)
+        features = {name: to_host_list(df, name) for name in self._feature_columns}
+        windows = to_host_list(df, self._window_column) if self._window_column in df.columns else None
+        times = ([to_epoch_ns(value) for value in to_host_list(df, self._time_column)]
+                 if self._manifest.scores_from_ns is not None else None)
 
-        if (meta is None or meta.count == 0):
-            return message
+        # Grouped by entity, and the groups visited in sorted order. A scorer with shared state would
+        # otherwise depend on which entity came first, which depends on batching.
+        groups: dict = {}
+        unscorable = 0
+        in_training = 0
 
-        with meta.mutable_dataframe() as df:
-            required = [self._entity_column] + self._feature_columns
+        for position in range(row_count):
+            if (times is not None and not self._manifest.covers(times[position])):
+                in_training += 1
+                continue
 
-            if (self._manifest.scores_from_ns is not None):
-                required.append(self._time_column)
+            entity = normalize_text(entities[position])
+            row = {name: features[name][position] for name in self._feature_columns}
 
-            missing = [name for name in required if name not in df.columns]
+            if (entity is None or any(pd.isna(value) for value in row.values())):
+                unscorable += 1
+                continue
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC5ScoreStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+            if (windows is not None and windows[position] is not None):
+                # Raises when the row is not this manifest's window. Deliberately not caught: a window scored
+                # against models pinned for another is the defect control 1 exists to prevent, and continuing
+                # would produce scores that look ordinary.
+                self._manifest.resolve(entity, int(windows[position]))
 
-            entities = to_host_list(df, self._entity_column)
-            row_count = len(entities)
-            features = {name: to_host_list(df, name) for name in self._feature_columns}
-            windows = to_host_list(df, self._window_column) if self._window_column in df.columns else None
-            times = ([to_epoch_ns(value) for value in to_host_list(df, self._time_column)]
-                     if self._manifest.scores_from_ns is not None else None)
+            groups.setdefault(entity, []).append((position, row))
 
-            # Grouped by entity, and the groups visited in sorted order. A scorer with shared state would
-            # otherwise depend on which entity came first, which depends on batching.
-            groups: dict = {}
-            unscorable = 0
-            in_training = 0
+        means: list = [None] * row_count
+        maxima: list = [None] * row_count
+        losses: dict = {name: [None] * row_count for name in self._feature_columns}
 
-            for position in range(row_count):
-                if (times is not None and not self._manifest.covers(times[position])):
-                    in_training += 1
-                    continue
+        for entity in sorted(groups):
+            positions = [position for (position, _) in groups[entity]]
+            rows = [row for (_, row) in groups[entity]]
+            resolution = self._manifest.resolve(entity, self._manifest.window_id)
+            scored = self._scorer.score(resolution.model_version, rows)
 
-                entity = normalize_text(entities[position])
-                row = {name: features[name][position] for name in self._feature_columns}
+            if (len(scored) != len(rows)):
+                raise ValueError(f"the scorer returned {len(scored)} rows for {entity}, which was given "
+                                 f"{len(rows)}. A scorer that drops or invents rows cannot be aligned back "
+                                 f"onto the frame, and silently misaligned scores are worse than none.")
 
-                if (entity is None or any(pd.isna(value) for value in row.values())):
-                    unscorable += 1
-                    continue
+            for (index, position) in enumerate(positions):
+                # Quantized first, then summarized, so the mean is the mean of the numbers actually
+                # published rather than of the ones behind them. Averaging the raw losses and rounding
+                # afterwards is marginally more accurate and leaves `mean_abs_z` disagreeing with the ten
+                # loss columns beside it by up to half a quantum -- an analyst who adds up what is on the
+                # row gets a different answer than the row gives, which is a worse failure than a
+                # ten-thousandth of a deviation.
+                per_feature = [
+                    quantize_value(abs(float(scored[index][name])), decimals=self._decimals)
+                    for name in self._feature_columns
+                ]
 
-                if (windows is not None and windows[position] is not None):
-                    # Raises when the row is not this manifest's window. Deliberately not caught: a window scored
-                    # against models pinned for another is the defect control 1 exists to prevent, and continuing
-                    # would produce scores that look ordinary.
-                    self._manifest.resolve(entity, int(windows[position]))
+                for (name, value) in zip(self._feature_columns, per_feature):
+                    losses[name][position] = value
 
-                groups.setdefault(entity, []).append((position, row))
+                means[position] = quantize_value(sum(per_feature) / len(per_feature), decimals=self._decimals)
+                maxima[position] = max(per_feature)
 
-            means: list = [None] * row_count
-            maxima: list = [None] * row_count
-            losses: dict = {name: [None] * row_count for name in self._feature_columns}
+        assign_nullable_float_column(df, MEAN_COLUMN, means)
+        assign_nullable_float_column(df, MAX_COLUMN, maxima)
 
-            for entity in sorted(groups):
-                positions = [position for (position, _) in groups[entity]]
-                rows = [row for (_, row) in groups[entity]]
-                resolution = self._manifest.resolve(entity, self._manifest.window_id)
-                scored = self._scorer.score(resolution.model_version, rows)
-
-                if (len(scored) != len(rows)):
-                    raise ValueError(f"the scorer returned {len(scored)} rows for {entity}, which was given "
-                                     f"{len(rows)}. A scorer that drops or invents rows cannot be aligned back "
-                                     f"onto the frame, and silently misaligned scores are worse than none.")
-
-                for (index, position) in enumerate(positions):
-                    # Quantized first, then summarized, so the mean is the mean of the numbers actually
-                    # published rather than of the ones behind them. Averaging the raw losses and rounding
-                    # afterwards is marginally more accurate and leaves `mean_abs_z` disagreeing with the ten
-                    # loss columns beside it by up to half a quantum -- an analyst who adds up what is on the
-                    # row gets a different answer than the row gives, which is a worse failure than a
-                    # ten-thousandth of a deviation.
-                    per_feature = [
-                        quantize_value(abs(float(scored[index][name])), decimals=self._decimals)
-                        for name in self._feature_columns
-                    ]
-
-                    for (name, value) in zip(self._feature_columns, per_feature):
-                        losses[name][position] = value
-
-                    means[position] = quantize_value(sum(per_feature) / len(per_feature), decimals=self._decimals)
-                    maxima[position] = max(per_feature)
-
-            assign_nullable_float_column(df, MEAN_COLUMN, means)
-            assign_nullable_float_column(df, MAX_COLUMN, maxima)
-
-            for name in self._feature_columns:
-                assign_nullable_float_column(df, f"{name}{LOSS_SUFFIX}", losses[name])
+        for name in self._feature_columns:
+            assign_nullable_float_column(df, f"{name}{LOSS_SUFFIX}", losses[name])
 
         if (unscorable > 0):
             logger.warning(
@@ -315,11 +280,3 @@ class TC5ScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
                 "scores_from_ns, inside the data its models were trained on.",
                 in_training,
                 row_count)
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

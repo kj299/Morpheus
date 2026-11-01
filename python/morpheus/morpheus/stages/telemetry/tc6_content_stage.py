@@ -34,19 +34,11 @@ claiming a coverage it does not have, and the count on the row is how an estate 
 """
 
 import logging
-import typing
-
-import mrc
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
@@ -63,7 +55,7 @@ CATEGORY_UNCLASSIFIED = "content_category_unclassified"
 
 
 @register_stage("tc6-content")
-class TC6ContentStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC6ContentStage(TelemetryStage):
     """
     Write the category of each record's declared and detected content types, and whether they disagree.
 
@@ -93,40 +85,19 @@ class TC6ContentStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         self._needed_columns[CATEGORY_CROSSED] = TypeId.BOOL8
         self._needed_columns[CATEGORY_UNCLASSIFIED] = TypeId.BOOL8
 
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc6-content"
 
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
-
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _process(self, df):
         """
         Write the two categories and the verdict between them.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming handshake or transfer records.
-
-        Returns
-        -------
-        The input message, with the content columns populated.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
 
         Raises
         ------
@@ -135,62 +106,48 @@ class TC6ContentStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             verdict on every row, which is correct; a frame carrying neither is a feed that cannot support this
             rule at all, and is worth failing on rather than filling with nulls.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        if (self._declared_column not in df.columns and self._detected_column not in df.columns):
+            raise KeyError(f"TC6ContentStage requires at least one of {self._declared_column!r} and "
+                           f"{self._detected_column!r}, and the DataFrame carries neither. Available "
+                           f"columns: {sorted(df.columns)}")
 
-        if (meta is None or meta.count == 0):
-            return message
+        rows = len(df)
+        declared_values = (to_host_list(df, self._declared_column) if self._declared_column in df.columns else [None] *
+                           rows)
+        detected_values = (to_host_list(df, self._detected_column) if self._detected_column in df.columns else [None] *
+                           rows)
 
-        with meta.mutable_dataframe() as df:
-            if (self._declared_column not in df.columns and self._detected_column not in df.columns):
-                raise KeyError(f"TC6ContentStage requires at least one of {self._declared_column!r} and "
-                               f"{self._detected_column!r}, and the DataFrame carries neither. Available "
-                               f"columns: {sorted(df.columns)}")
+        declared: list = []
+        detected: list = []
+        crossed: list = []
+        unclassified: list = []
 
-            rows = meta.count
-            declared_values = (to_host_list(df, self._declared_column)
-                               if self._declared_column in df.columns else [None] * rows)
-            detected_values = (to_host_list(df, self._detected_column)
-                               if self._detected_column in df.columns else [None] * rows)
+        for position in range(rows):
+            left = category(declared_values[position])
+            right = category(detected_values[position])
+            verdict = crosses_category(declared_values[position], detected_values[position])
 
-            declared: list = []
-            detected: list = []
-            crossed: list = []
-            unclassified: list = []
+            declared.append(left)
+            detected.append(right)
+            crossed.append(verdict)
 
-            for position in range(rows):
-                left = category(declared_values[position])
-                right = category(detected_values[position])
-                verdict = crosses_category(declared_values[position], detected_values[position])
+            # A row where something was declared or detected and the map could not place it. A row carrying
+            # neither type is not a gap in the map, it is a record this rule does not apply to.
+            present = (normalize(declared_values[position]) is not None
+                       or normalize(detected_values[position]) is not None)
+            unclassified.append(present and verdict is None)
 
-                declared.append(left)
-                detected.append(right)
-                crossed.append(verdict)
+        assign_str_column(df, DECLARED_CATEGORY, declared)
+        assign_str_column(df, DETECTED_CATEGORY, detected)
+        assign_nullable_bool_column(df, CATEGORY_CROSSED, crossed)
+        assign_nullable_bool_column(df, CATEGORY_UNCLASSIFIED, unclassified)
 
-                # A row where something was declared or detected and the map could not place it. A row carrying
-                # neither type is not a gap in the map, it is a record this rule does not apply to.
-                present = (normalize(declared_values[position]) is not None
-                           or normalize(detected_values[position]) is not None)
-                unclassified.append(present and verdict is None)
+        unplaced = sum(1 for value in unclassified if value)
 
-            assign_str_column(df, DECLARED_CATEGORY, declared)
-            assign_str_column(df, DETECTED_CATEGORY, detected)
-            assign_nullable_bool_column(df, CATEGORY_CROSSED, crossed)
-            assign_nullable_bool_column(df, CATEGORY_UNCLASSIFIED, unclassified)
-
-            unplaced = sum(1 for value in unclassified if value)
-
-            if (unplaced > 0):
-                logger.warning(
-                    "TC6ContentStage could not place %d of %d records' content types in a category, so "
-                    "R-D-L6-005 cannot fire on them. Add the types to morpheus.utils.media_type rather than "
-                    "reading the silence as an absence of mismatches.",
-                    unplaced,
-                    rows)
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
+        if (unplaced > 0):
+            logger.warning(
+                "TC6ContentStage could not place %d of %d records' content types in a category, so "
+                "R-D-L6-005 cannot fire on them. Add the types to morpheus.utils.media_type rather than "
+                "reading the silence as an absence of mismatches.",
+                unplaced,
+                rows)

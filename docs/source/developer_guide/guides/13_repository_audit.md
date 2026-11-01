@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,055 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,057 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -91,7 +91,8 @@ context stage, its test, the two samples it produces and the search-head run ove
 sends every composed pipeline's output through `CompareDataFrameStage`) and the four section 3.6 added (the
 threshold module, its test, the threshold registry and the derivation tool) and the one section 3.7 added (the
 search-head run it superseded, kept as history) and the one section 4.1 added (the run before it, kept as
-history too) and the two section 4.2 added (the reference data module and its test), less the 1,397 files
+history too) and the two section 4.2 added (the reference data module and its test) and the two section 4.3
+added (the telemetry base class and its test), less the 1,397 files
 removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4.
@@ -100,7 +101,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4.
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 416 |
+| `keep` | 418 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -412,7 +413,17 @@ that replaces it. Each item says how to know it is done.
 8. **A base class for the telemetry stages, with an event-clock guard.** The stateful stages of TC-3 to TC-7 repeat
    the same column checks, state hooks and null-preserving assignments, and only `TC5SessionStage` refuses an event time far
    in the future. One base class carries the guard for all of them. Done when one far-future row cannot expire every
-   window in any stage.
+   window in any stage. *Built under plan section 4.3:* `TelemetryStage` carries the message handling, the column
+   check, the host-only node and the clock, and all twenty-five TC-3 to TC-7 stages now derive from it, the
+   stateful ones with `CheckpointMixin` before it. The plan's premise had aged: by then sixteen of these stages
+   already guarded their clocks, and the gap was four layer 5 stages -- `TC5CadenceStage`, `TC5NoveltyStage`,
+   `TC5RiskStage` and `TC5TravelStage` -- which kept histograms, windows and a last sighting on event time with no
+   guard; one far-future record emptied every principal's ten-minute failure window in `TC5RiskStage`. All four
+   are guarded now. `test_telemetry_base.py` inserts one row ten years ahead into every guarded stage's liveness
+   corpus, at every layer, and finds no other row changed, with a negative control that loosens the clock and
+   does find one; the five stages without a clock are listed with the reason each keeps no event-time state. Twelve
+   of the thirteen goldens did not move; the estate golden's layer 5 rows now carry `clock_refused` as false rather
+   than blank.
 9. **Exercise the GPU path end to end in CI, or say on every run that it was not.** The runners force the CPU, and
    the C++ file source ignores the parser arguments the Python one honors. Add a GPU job when a runner exists, and
    until then make the conformance artifact's date part of the CI summary. Done when the GPU verdict is never older

@@ -34,29 +34,17 @@ as a shift away from it.
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.ttl_profile import DEFAULT_MIN_SAMPLES
 from morpheus.utils.ttl_profile import DEFAULT_MIN_SHIFT
 from morpheus.utils.ttl_profile import MAX_TTL
@@ -77,7 +65,7 @@ TTL_SATURATED = "ip_ttl_saturated"
 
 
 @register_stage("tc3-ttl", ignore_args=["key_columns"])
-class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC3TtlStage(CheckpointMixin, TelemetryStage):
     """
     Compare each flow's TTL against its source's established value.
 
@@ -127,7 +115,7 @@ class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
                  min_shift: int = DEFAULT_MIN_SHIFT,
                  max_samples: int = 512,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -154,30 +142,10 @@ class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
         self._needed_columns[TTL_MATURE] = TypeId.BOOL8
         self._needed_columns[TTL_SATURATED] = TypeId.BOOL8
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc3-ttl"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @staticmethod
     def _ttl_of(value: typing.Any) -> typing.Optional[int]:
@@ -202,111 +170,88 @@ class TC3TtlStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePort
         except (TypeError, ValueError):
             return None
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = list(self._key_columns) + [self._ttl_column, self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the established TTL, the per-flow shift, and the flags around them.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming flow records.
-
-        Returns
-        -------
-        The input message, with the TTL columns populated.
-
-        Raises
-        ------
-        KeyError
-            If a key column, the TTL column, or the time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        key_parts = {name: to_host_list(df, name) for name in self._key_columns}
+        raw_ttls = to_host_list(df, self._ttl_column)
+        # Guarded once, before the tracker is shown any time: a refused time becomes `None`, which the rows
+        # below already treat as a flow with nothing to profile.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        if (meta is None or meta.count == 0):
-            return message
+        established: list = []
+        shifts: list = []
+        distinct: list = []
+        shifted: list = []
+        mature: list = []
+        saturated: list = []
+        unusable = 0
+        unordered = 0
 
-        with meta.mutable_dataframe() as df:
-            required = list(self._key_columns) + [self._ttl_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        for (position, raw_ttl) in enumerate(raw_ttls):
+            key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
+            ttl = self._ttl_of(raw_ttl)
+            event_time_ns = times[position]
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC3TtlStage requires columns {missing} which are not present in the DataFrame. "
-                               f"Available columns: {sorted(df.columns)}")
+            if (key is None or ttl is None or event_time_ns is None):
+                unusable += int(not refused[position])
+                established.append(None)
+                shifts.append(None)
+                distinct.append(None)
+                shifted.append(None)
+                mature.append(False)
+                saturated.append(False)
+                continue
 
-            key_parts = {name: to_host_list(df, name) for name in self._key_columns}
-            raw_ttls = to_host_list(df, self._ttl_column)
-            # Guarded once, before the tracker is shown any time: a refused time becomes `None`, which the rows
-            # below already treat as a flow with nothing to profile.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            result = self._tracker.observe(key, event_time_ns, ttl)
 
-            established: list = []
-            shifts: list = []
-            distinct: list = []
-            shifted: list = []
-            mature: list = []
-            saturated: list = []
-            unusable = 0
-            unordered = 0
+            established.append(result.established)
+            shifts.append(result.shift)
+            distinct.append(result.distinct)
+            shifted.append(result.shifted)
+            mature.append(result.mature)
+            saturated.append(result.saturated)
+            unordered += int(result.out_of_order)
 
-            for (position, raw_ttl) in enumerate(raw_ttls):
-                key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
-                ttl = self._ttl_of(raw_ttl)
-                event_time_ns = times[position]
+        assign_nullable_int_column(df, TTL_ESTABLISHED, established)
+        assign_nullable_int_column(df, TTL_SHIFT, shifts)
+        assign_nullable_int_column(df, TTL_DISTINCT, distinct)
+        assign_nullable_bool_column(df, TTL_SHIFTED, shifted)
+        df[TTL_MATURE] = mature
+        df[TTL_SATURATED] = saturated
 
-                if (key is None or ttl is None or event_time_ns is None):
-                    unusable += int(not refused[position])
-                    established.append(None)
-                    shifts.append(None)
-                    distinct.append(None)
-                    shifted.append(None)
-                    mature.append(False)
-                    saturated.append(False)
-                    continue
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="flows",
+                     outcome="they joined no reference, set clock_refused and expired nothing.")
 
-                result = self._tracker.observe(key, event_time_ns, ttl)
+        if (unusable > 0):
+            logger.info(
+                "TC3TtlStage left %d of %d flows unprofiled for want of a key, a usable event time, or a "
+                "time-to-live in the field's range. Cloud flow logs mostly omit the field, and substituting "
+                "a default would build a reference out of an assumption.",
+                unusable,
+                len(raw_ttls))
 
-                established.append(result.established)
-                shifts.append(result.shift)
-                distinct.append(result.distinct)
-                shifted.append(result.shifted)
-                mature.append(result.mature)
-                saturated.append(result.saturated)
-                unordered += int(result.out_of_order)
-
-            assign_nullable_int_column(df, TTL_ESTABLISHED, established)
-            assign_nullable_int_column(df, TTL_SHIFT, shifts)
-            assign_nullable_int_column(df, TTL_DISTINCT, distinct)
-            assign_nullable_bool_column(df, TTL_SHIFTED, shifted)
-            df[TTL_MATURE] = mature
-            df[TTL_SATURATED] = saturated
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC3TtlStage",
-                        what="flows",
-                        outcome="they joined no reference, set clock_refused and expired nothing.")
-
-            if (unusable > 0):
-                logger.info(
-                    "TC3TtlStage left %d of %d flows unprofiled for want of a key, a usable event time, or a "
-                    "time-to-live in the field's range. Cloud flow logs mostly omit the field, and substituting "
-                    "a default would build a reference out of an assumption.",
-                    unusable,
-                    len(raw_ttls))
-
-            if (unordered > 0):
-                logger.warning(
-                    "TC3TtlStage saw %d of %d flows out of order; they did not join any reference. The "
-                    "reference is over prior flows, and which flows are prior is what an out-of-order arrival "
-                    "disagrees about.",
-                    unordered,
-                    len(raw_ttls))
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
+        if (unordered > 0):
+            logger.warning(
+                "TC3TtlStage saw %d of %d flows out of order; they did not join any reference. The "
+                "reference is over prior flows, and which flows are prior is what an out-of-order arrival "
+                "disagrees about.",
+                unordered,
+                len(raw_ttls))

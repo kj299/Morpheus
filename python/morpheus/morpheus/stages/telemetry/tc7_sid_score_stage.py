@@ -30,20 +30,13 @@ nothing to checkpoint.
 """
 
 import logging
-import typing
 
-import mrc
 import pandas as pd
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
@@ -62,7 +55,7 @@ def score_column(label: str) -> str:
 
 
 @register_stage("tc7-sid-score")
-class TC7SidScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7SidScoreStage(TelemetryStage):
     """
     Score a text column with the inventory's SID model.
 
@@ -101,74 +94,41 @@ class TC7SidScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         """Stage name."""
         return "tc7-sid-score"
 
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
-
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _process(self, df):
         """
         Write each row's per-label probabilities, the labels found, and the model version.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Records carrying the text column.
-
-        Returns
-        -------
-        The input message, with the score columns populated.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
 
         Raises
         ------
         KeyError
             If the text column is absent.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        if (self._text_column not in df.columns):
+            raise KeyError(f"TC7SidScoreStage scores {self._text_column!r}, which the DataFrame does not carry. "
+                           f"Available columns: {sorted(df.columns)}")
 
-        if (meta is None or meta.count == 0):
-            return message
+        # A body read from a file arrives as NaN where it was null, and `str` would make it the text "nan" and
+        # score it; a missing body is no text, whatever the reader spelled it as.
+        texts = [None if pd.isna(value) else str(value) for value in to_host_list(df, self._text_column)]
+        probabilities = self._scorer.probabilities(texts)
+        labels = self._scorer.labels
 
-        with meta.mutable_dataframe() as df:
-            if (self._text_column not in df.columns):
-                raise KeyError(f"TC7SidScoreStage scores {self._text_column!r}, which the DataFrame does not carry. "
-                               f"Available columns: {sorted(df.columns)}")
+        for (index, label) in enumerate(labels):
+            assign_nullable_float_column(df,
+                                         score_column(label),
+                                         [None if row is None else float(row[index]) for row in probabilities])
 
-            # A body read from a file arrives as NaN where it was null, and `str` would make it the text "nan" and
-            # score it; a missing body is no text, whatever the reader spelled it as.
-            texts = [None if pd.isna(value) else str(value) for value in to_host_list(df, self._text_column)]
-            probabilities = self._scorer.probabilities(texts)
-            labels = self._scorer.labels
-
-            for (index, label) in enumerate(labels):
-                assign_nullable_float_column(df,
-                                             score_column(label),
-                                             [None if row is None else float(row[index]) for row in probabilities])
-
-            assign_str_column(
-                df,
-                SID_LABELS,
-                [
-                    None if row is None else ",".join(
-                        sorted(label for (index, label) in enumerate(labels) if row[index] > self._scorer.threshold))
-                    for row in probabilities
-                ])
-            assign_str_column(df, SID_MODEL_VERSION, [self._scorer.version] * meta.count)
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
+        assign_str_column(
+            df,
+            SID_LABELS,
+            [
+                None if row is None else ",".join(
+                    sorted(label for (index, label) in enumerate(labels) if row[index] > self._scorer.threshold))
+                for row in probabilities
+            ])
+        assign_str_column(df, SID_MODEL_VERSION, [self._scorer.version] * len(df))

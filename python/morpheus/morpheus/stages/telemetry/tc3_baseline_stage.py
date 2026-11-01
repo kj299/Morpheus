@@ -49,18 +49,11 @@ import logging
 import math
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.bucket_peak import DEFAULT_MAX_BUCKETS
 from morpheus.utils.bucket_peak import DEFAULT_MIN_BUCKETS
 from morpheus.utils.bucket_peak import NS_PER_SECOND
@@ -72,12 +65,7 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +99,7 @@ def _number(value: typing.Any, integral: bool) -> typing.Optional[typing.Union[i
 
 
 @register_stage("tc3-baseline")
-class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC3BaselineStage(CheckpointMixin, TelemetryStage):
     """
     Measure each host's fan-out, fan-in and byte asymmetry against the most it has shown in any hour of its history.
 
@@ -168,7 +156,7 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                  min_buckets: int = DEFAULT_MIN_BUCKETS,
                  max_buckets: int = DEFAULT_MAX_BUCKETS,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (bucket_seconds <= 0):
             raise ValueError(f"bucket_seconds must be positive, received {bucket_seconds}")
@@ -205,109 +193,72 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             self._needed_columns[f"{column}{MATURE_SUFFIX}"] = TypeId.BOOL8
             self._needed_columns[f"{column}{STEP_SUFFIX}"] = TypeId.INT64 if integral else TypeId.FLOAT64
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        # Mark this stage to log timestamps if requested
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc3-baseline"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @property
     def tracked_entities(self) -> dict:
         """Hosts currently holding a history, per value column."""
         return {column: tracker.tracked_entities for (column, tracker) in self._trackers.items()}
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [self._time_column
+                    ] + [column for (value, entity, _) in self._histories for column in (value, entity)]
+
+        if (self._group_column):
+            required.append(self._group_column)
+
+        return required
+
+    def _process(self, df):
         """
         Write each history's baseline, depth, maturity and this row's step above it.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming message.
-
-        Returns
-        -------
-        The input message, with the baseline columns populated.
-
-        Raises
-        ------
-        KeyError
-            If an entity, value, group or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        # Guarded once, before any history is shown a time: a refused time becomes `None`, which `measure_rows`
+        # already treats as a row with nothing to place in a period.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
+        row_count = len(times)
+        groups = to_host_list(df, self._group_column) if self._group_column else None
+        keyless = 0
+        unordered = 0
 
-        if (meta is None or meta.count == 0):
-            return message
+        for (value_column, entity_column, integral) in self._histories:
+            entities = to_host_list(df, entity_column)
 
-        with meta.mutable_dataframe() as df:
-            required = [self._time_column
-                        ] + [column for (value, entity, _) in self._histories for column in (value, entity)]
+            if (groups is None):
+                keys = [normalize_text(entity) for entity in entities]
+            else:
+                keys = [compose_key((group, entity)) for (group, entity) in zip(groups, entities)]
 
-            if (self._group_column):
-                required.append(self._group_column)
+            values = [_number(value, integral) for value in to_host_list(df, value_column)]
+            measured = measure_rows(self._trackers[value_column], keys, values, times)
+            # A refused row reads to `measure_rows` as one without a time; it is reported as refused, not unordered.
+            refused_here = sum(1 for (key, value, flag) in zip(keys, values, refused)
+                               if flag and key is not None and value is not None)
+            keyless = max(keyless, measured.keyless)
+            unordered = max(unordered, measured.unordered - refused_here)
 
-            missing = sorted({column for column in required if column not in df.columns})
+            assign = assign_nullable_int_column if integral else assign_nullable_float_column
+            assign(df, f"{value_column}{BASELINE_SUFFIX}", measured.references)
+            assign_nullable_int_column(df, f"{value_column}{BUCKETS_SUFFIX}", measured.buckets)
+            assign_nullable_bool_column(df, f"{value_column}{MATURE_SUFFIX}", measured.mature)
+            assign(df, f"{value_column}{STEP_SUFFIX}", measured.steps)
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC3BaselineStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
-
-            # Guarded once, before any history is shown a time: a refused time becomes `None`, which `measure_rows`
-            # already treats as a row with nothing to place in a period.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
-            row_count = len(times)
-            groups = to_host_list(df, self._group_column) if self._group_column else None
-            keyless = 0
-            unordered = 0
-
-            for (value_column, entity_column, integral) in self._histories:
-                entities = to_host_list(df, entity_column)
-
-                if (groups is None):
-                    keys = [normalize_text(entity) for entity in entities]
-                else:
-                    keys = [compose_key((group, entity)) for (group, entity) in zip(groups, entities)]
-
-                values = [_number(value, integral) for value in to_host_list(df, value_column)]
-                measured = measure_rows(self._trackers[value_column], keys, values, times)
-                # A refused row reads to `measure_rows` as one without a time; it is reported as refused, not unordered.
-                refused_here = sum(1 for (key, value, flag) in zip(keys, values, refused)
-                                   if flag and key is not None and value is not None)
-                keyless = max(keyless, measured.keyless)
-                unordered = max(unordered, measured.unordered - refused_here)
-
-                assign = assign_nullable_int_column if integral else assign_nullable_float_column
-                assign(df, f"{value_column}{BASELINE_SUFFIX}", measured.references)
-                assign_nullable_int_column(df, f"{value_column}{BUCKETS_SUFFIX}", measured.buckets)
-                assign_nullable_bool_column(df, f"{value_column}{MATURE_SUFFIX}", measured.mature)
-                assign(df, f"{value_column}{STEP_SUFFIX}", measured.steps)
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC3BaselineStage",
-                        what="rows",
-                        outcome="they carry no baseline, set clock_refused and closed no period.")
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="rows",
+                     outcome="they carry no baseline, set clock_refused and closed no period.")
 
         if (keyless > 0):
             logger.warning(
@@ -322,11 +273,3 @@ class TC3BaselineStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                 "no baseline and did not advance any history. Preserve per-host ordering upstream.",
                 unordered,
                 row_count)
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

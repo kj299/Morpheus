@@ -58,30 +58,18 @@ import logging
 import math
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.parsers import ip
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.ratio_window import DEFAULT_MIN_DENOMINATOR
 from morpheus.utils.ratio_window import NS_PER_SECOND
 from morpheus.utils.ratio_window import RatioWindowTracker
@@ -107,7 +95,7 @@ DEFAULT_ASN_COLUMN = "bgp_as_dst"
 
 
 @register_stage("tc3-reach", ignore_args=["management_prefixes"])
-class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC3ReachStage(CheckpointMixin, TelemetryStage):
     """
     Classify each flow's destination and describe the mix of destinations a source has been reaching.
 
@@ -166,7 +154,7 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                  max_samples: int = 4096,
                  management_prefixes: list[str] = None,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -202,30 +190,10 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
         self._needed_columns[ASN_FIRST_SEEN] = TypeId.BOOL8
         self._needed_columns[DST_MANAGEMENT] = TypeId.BOOL8
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc3-reach"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @staticmethod
     def _classify(df, column: str) -> dict[str, list]:
@@ -242,106 +210,88 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
             DST_MULTICAST: host(ip.is_multicast(series)),
         }
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [self._src_column, self._dst_column, self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Classify destinations, track the internal proportion, and write the asymmetry and novelty columns.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming flow records.
-
-        Returns
-        -------
-        The input message, with the reach columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the source, destination or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        classified = self._classify(df, self._dst_column)
+        sources = to_host_list(df, self._src_column)
 
-        if (meta is None or meta.count == 0):
-            return message
+        rows = len(sources)
+        asns = to_host_list(df, self._asn_column) if self._asn_column in df.columns else [None] * rows
+        out_bytes = (to_host_list(df, self._bytes_out_column) if self._bytes_out_column in df.columns else [None] *
+                     rows)
+        in_bytes = (to_host_list(df, self._bytes_in_column) if self._bytes_in_column in df.columns else [None] * rows)
+        # Guarded once, before either tracker is shown a time: a refused time becomes `None`, which the rows
+        # below already treat as a flow with nothing to measure.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        with meta.mutable_dataframe() as df:
-            required = [self._src_column, self._dst_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        ratios: list = []
+        internal_counts: list = []
+        ratio_saturated: list = []
+        asymmetry: list = []
+        asn_novel: list = []
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC3ReachStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+        for position in range(rows):
+            source = normalize_text(sources[position])
+            event_time_ns = times[position]
+            private = classified[DST_PRIVATE][position]
 
-            classified = self._classify(df, self._dst_column)
-            sources = to_host_list(df, self._src_column)
+            if (source is None or event_time_ns is None or private is None):
+                ratios.append(None)
+                internal_counts.append(None)
+                ratio_saturated.append(False)
+            else:
+                result = self._ratios.observe(source, event_time_ns, bool(private))
+                ratios.append(result.ratio)
+                internal_counts.append(result.numerator)
+                ratio_saturated.append(result.saturated)
 
-            rows = len(sources)
-            asns = to_host_list(df, self._asn_column) if self._asn_column in df.columns else [None] * rows
-            out_bytes = (to_host_list(df, self._bytes_out_column) if self._bytes_out_column in df.columns else [None] *
-                         rows)
-            in_bytes = (to_host_list(df, self._bytes_in_column) if self._bytes_in_column in df.columns else [None] *
-                        rows)
-            # Guarded once, before either tracker is shown a time: a refused time becomes `None`, which the rows
-            # below already treat as a flow with nothing to measure.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            asn = normalize_text(asns[position])
 
-            ratios: list = []
-            internal_counts: list = []
-            ratio_saturated: list = []
-            asymmetry: list = []
-            asn_novel: list = []
+            if (source is None or event_time_ns is None or asn is None):
+                # A flow with no ASN is not a flow to a new network. Reporting novelty here would make a
+                # collector that stopped populating the field look like a host that started roaming.
+                asn_novel.append(None)
+            else:
+                seen = self._novelty.observe(source, event_time_ns, {self._asn_column: asn})
+                # Left as the tracker reports it, nulls and all. A source's very first flow has no answer to
+                # "has it reached this network before", and coercing that to False would say it had.
+                asn_novel.append(seen.first_seen.get(self._asn_column))
 
-            for position in range(rows):
-                source = normalize_text(sources[position])
-                event_time_ns = times[position]
-                private = classified[DST_PRIVATE][position]
+            asymmetry.append(self._asymmetry(out_bytes[position], in_bytes[position]))
 
-                if (source is None or event_time_ns is None or private is None):
-                    ratios.append(None)
-                    internal_counts.append(None)
-                    ratio_saturated.append(False)
-                else:
-                    result = self._ratios.observe(source, event_time_ns, bool(private))
-                    ratios.append(result.ratio)
-                    internal_counts.append(result.numerator)
-                    ratio_saturated.append(result.saturated)
+        assign_nullable_float_column(df, INTERNAL_RATIO, ratios)
+        assign_nullable_int_column(df, INTERNAL_COUNT, internal_counts)
+        df[RATIO_SATURATED] = ratio_saturated
+        assign_nullable_float_column(df, BYTE_ASYMMETRY, asymmetry)
+        assign_nullable_bool_column(df, ASN_FIRST_SEEN, asn_novel)
 
-                asn = normalize_text(asns[position])
+        for (column, values) in classified.items():
+            assign_nullable_bool_column(df, column, values)
 
-                if (source is None or event_time_ns is None or asn is None):
-                    # A flow with no ASN is not a flow to a new network. Reporting novelty here would make a
-                    # collector that stopped populating the field look like a host that started roaming.
-                    asn_novel.append(None)
-                else:
-                    seen = self._novelty.observe(source, event_time_ns, {self._asn_column: asn})
-                    # Left as the tracker reports it, nulls and all. A source's very first flow has no answer to
-                    # "has it reached this network before", and coercing that to False would say it had.
-                    asn_novel.append(seen.first_seen.get(self._asn_column))
+        assign_nullable_bool_column(df,
+                                    DST_MANAGEMENT,
+                                    [self._is_management(value) for value in to_host_list(df, self._dst_column)])
 
-                asymmetry.append(self._asymmetry(out_bytes[position], in_bytes[position]))
-
-            assign_nullable_float_column(df, INTERNAL_RATIO, ratios)
-            assign_nullable_int_column(df, INTERNAL_COUNT, internal_counts)
-            df[RATIO_SATURATED] = ratio_saturated
-            assign_nullable_float_column(df, BYTE_ASYMMETRY, asymmetry)
-            assign_nullable_bool_column(df, ASN_FIRST_SEEN, asn_novel)
-
-            for (column, values) in classified.items():
-                assign_nullable_bool_column(df, column, values)
-
-            assign_nullable_bool_column(df,
-                                        DST_MANAGEMENT,
-                                        [self._is_management(value) for value in to_host_list(df, self._dst_column)])
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC3ReachStage",
-                        what="flows",
-                        outcome="they entered no window, set clock_refused and expired nothing.")
-
-        return message
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="flows",
+                     outcome="they entered no window, set clock_refused and expired nothing.")
 
     def _is_management(self, value: typing.Any) -> typing.Optional[bool]:
         """Whether a destination is inside one of the estate's management networks, or `None` where unanswerable:
@@ -383,9 +333,3 @@ class TC3ReachStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
             return None
 
         return sent / (received + 1.0)
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

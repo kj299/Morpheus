@@ -42,18 +42,11 @@ without changing either answer.
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
@@ -65,12 +58,7 @@ from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
 from morpheus.utils.determinism import quantize_value
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.lineage import window_id_from_timestamp
 from morpheus.utils.transfer_envelope import DEFAULT_MIN_SAMPLES
 from morpheus.utils.transfer_envelope import DEFAULT_QUANTILE
@@ -101,7 +89,7 @@ OBJECT_TYPES_IN_WEEK = "saas_object_types_in_week"
 
 
 @register_stage("tc7-saas")
-class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7SaasStage(CheckpointMixin, TelemetryStage):
     """
     Write each operation's record count against the principal's own baseline for it, and the week's breadth so far.
 
@@ -168,7 +156,7 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                  max_entities: int = 500_000,
                  decimals: int = DEFAULT_FLOAT_DECIMALS,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (baseline_days <= 0):
             raise ValueError(f"baseline_days must be positive, received {baseline_days}")
@@ -214,30 +202,10 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         self._needed_columns[WEEK_ID] = TypeId.INT64
         self._needed_columns[OBJECT_TYPES_IN_WEEK] = TypeId.INT64
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc7-saas"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     def _round(self, value: typing.Optional[float]) -> typing.Optional[float]:
         return None if value is None else quantize_value(value, self._decimals)
@@ -262,144 +230,121 @@ class TC7SaasStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
         return len(current[1])
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [
+            self._principal_column,
+            self._operation_column,
+            self._object_type_column,
+            self._record_count_column,
+            self._time_column
+        ]
+
+        return required
+
+    def _process(self, df):
         """
         Write the baseline, the ratio and the week's breadth for every operation.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming SaaS audit records.
-
-        Returns
-        -------
-        The input message, with the SaaS columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the principal, operation, object type, record count or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
-
-        if (meta is None or meta.count == 0):
-            return message
-
-        with meta.mutable_dataframe() as df:
-            required = [
-                self._principal_column,
-                self._operation_column,
-                self._object_type_column,
-                self._record_count_column,
-                self._time_column
-            ]
-            missing = [column for column in required if column not in df.columns]
-
-            if (len(missing) > 0):
-                raise KeyError(f"TC7SaasStage requires columns {missing} which are not present in the DataFrame. "
-                               f"Available columns: {sorted(df.columns)}")
-
-            principals = to_host_list(df, self._principal_column)
-            operations = to_host_list(df, self._operation_column)
-            object_types = to_host_list(df, self._object_type_column)
-            counts = to_host_list(df, self._record_count_column)
-            outcomes = (to_host_list(df, self._result_column) if self._result_column in df.columns else [None] *
-                        len(principals))
-            # Guarded once, before the baseline or any week is shown a time: a refused time becomes `None`, which
-            # the rows below already treat as an operation with nothing to measure.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
-
-            keys: list = []
-            baselines: list = []
-            ratios: list = []
-            samples: list = []
-            mature: list = []
-            saturated: list = []
-            failed: list = []
-            weeks: list = []
-            breadth: list = []
-            unusable = 0
-            unordered = 0
-
-            for (position, raw_principal) in enumerate(principals):
-                principal = normalize_text(raw_principal)
-                key = compose_key([principal, operations[position]])
-                outcome = normalize_text(outcomes[position])
-                did_fail = outcome is not None and outcome.lower() in FAILED_RESULTS
-                event_time_ns = times[position]
-
-                keys.append(key)
-                failed.append(did_fail)
-                week_id = (None if event_time_ns is None else window_id_from_timestamp(
-                    event_time_ns, WEEK_SECONDS * NS_PER_SECOND, epoch_ns=self._week_epoch_ns))
-                weeks.append(week_id)
-
-                if (principal is None or event_time_ns is None):
-                    unusable += int(not refused[position])
-                    baselines.append(None)
-                    ratios.append(None)
-                    samples.append(None)
-                    mature.append(False)
-                    saturated.append(False)
-                    breadth.append(None)
-                    continue
-
-                breadth.append(
-                    None if did_fail else self._tally(principal, week_id, normalize_text(object_types[position])))
-
-                count = counts[position]
-
-                if (did_fail or key is None or normalize_text(count) is None):
-                    baselines.append(None)
-                    ratios.append(None)
-                    samples.append(None)
-                    mature.append(False)
-                    saturated.append(False)
-                    continue
-
-                result = self._baselines.observe(key, event_time_ns, float(count))
-                unordered += int(result.out_of_order)
-
-                baselines.append(self._round(result.baseline))
-                ratios.append(self._round(result.ratio))
-                samples.append(result.samples)
-                mature.append(result.mature)
-                saturated.append(result.saturated)
-
-            assign_str_column(df, BASELINE_KEY, keys)
-            assign_nullable_float_column(df, RECORD_BASELINE, baselines)
-            assign_nullable_float_column(df, RECORD_RATIO, ratios)
-            assign_nullable_int_column(df, BASELINE_SAMPLES, samples)
-            assign_nullable_bool_column(df, BASELINE_MATURE, mature)
-            assign_nullable_bool_column(df, BASELINE_SATURATED, saturated)
-            assign_nullable_bool_column(df, OPERATION_FAILED, failed)
-            assign_nullable_int_column(df, WEEK_ID, weeks)
-            assign_nullable_int_column(df, OBJECT_TYPES_IN_WEEK, breadth)
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC7SaasStage",
-                        what="operations",
-                        outcome="they joined no baseline or week, set clock_refused and expired nothing.")
-
-            if (unusable > 0):
-                logger.warning(
-                    "TC7SaasStage measured nothing for %d of %d operations for want of a principal or a usable "
-                    "event time.",
-                    unusable,
+        principals = to_host_list(df, self._principal_column)
+        operations = to_host_list(df, self._operation_column)
+        object_types = to_host_list(df, self._object_type_column)
+        counts = to_host_list(df, self._record_count_column)
+        outcomes = (to_host_list(df, self._result_column) if self._result_column in df.columns else [None] *
                     len(principals))
+        # Guarded once, before the baseline or any week is shown a time: a refused time becomes `None`, which
+        # the rows below already treat as an operation with nothing to measure.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-            if (unordered > 0):
-                logger.warning(
-                    "TC7SaasStage saw %d operations arrive earlier than the previous one for the same principal "
-                    "and operation; they were compared with nothing and did not join the baseline.",
-                    unordered)
+        keys: list = []
+        baselines: list = []
+        ratios: list = []
+        samples: list = []
+        mature: list = []
+        saturated: list = []
+        failed: list = []
+        weeks: list = []
+        breadth: list = []
+        unusable = 0
+        unordered = 0
 
-        return message
+        for (position, raw_principal) in enumerate(principals):
+            principal = normalize_text(raw_principal)
+            key = compose_key([principal, operations[position]])
+            outcome = normalize_text(outcomes[position])
+            did_fail = outcome is not None and outcome.lower() in FAILED_RESULTS
+            event_time_ns = times[position]
 
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
+            keys.append(key)
+            failed.append(did_fail)
+            week_id = (None if event_time_ns is None else window_id_from_timestamp(
+                event_time_ns, WEEK_SECONDS * NS_PER_SECOND, epoch_ns=self._week_epoch_ns))
+            weeks.append(week_id)
 
-        return node
+            if (principal is None or event_time_ns is None):
+                unusable += int(not refused[position])
+                baselines.append(None)
+                ratios.append(None)
+                samples.append(None)
+                mature.append(False)
+                saturated.append(False)
+                breadth.append(None)
+                continue
+
+            breadth.append(
+                None if did_fail else self._tally(principal, week_id, normalize_text(object_types[position])))
+
+            count = counts[position]
+
+            if (did_fail or key is None or normalize_text(count) is None):
+                baselines.append(None)
+                ratios.append(None)
+                samples.append(None)
+                mature.append(False)
+                saturated.append(False)
+                continue
+
+            result = self._baselines.observe(key, event_time_ns, float(count))
+            unordered += int(result.out_of_order)
+
+            baselines.append(self._round(result.baseline))
+            ratios.append(self._round(result.ratio))
+            samples.append(result.samples)
+            mature.append(result.mature)
+            saturated.append(result.saturated)
+
+        assign_str_column(df, BASELINE_KEY, keys)
+        assign_nullable_float_column(df, RECORD_BASELINE, baselines)
+        assign_nullable_float_column(df, RECORD_RATIO, ratios)
+        assign_nullable_int_column(df, BASELINE_SAMPLES, samples)
+        assign_nullable_bool_column(df, BASELINE_MATURE, mature)
+        assign_nullable_bool_column(df, BASELINE_SATURATED, saturated)
+        assign_nullable_bool_column(df, OPERATION_FAILED, failed)
+        assign_nullable_int_column(df, WEEK_ID, weeks)
+        assign_nullable_int_column(df, OBJECT_TYPES_IN_WEEK, breadth)
+
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="operations",
+                     outcome="they joined no baseline or week, set clock_refused and expired nothing.")
+
+        if (unusable > 0):
+            logger.warning(
+                "TC7SaasStage measured nothing for %d of %d operations for want of a principal or a usable "
+                "event time.",
+                unusable,
+                len(principals))
+
+        if (unordered > 0):
+            logger.warning(
+                "TC7SaasStage saw %d operations arrive earlier than the previous one for the same principal "
+                "and operation; they were compared with nothing and did not join the baseline.",
+                unordered)

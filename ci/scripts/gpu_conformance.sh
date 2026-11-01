@@ -161,6 +161,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_verdict_artifacts.py
     tests/morpheus/stages/test_lineage_stage_cli.py
     tests/morpheus/stages/test_stage_checkpoint.py
+    tests/morpheus/stages/test_telemetry_base.py
     tests/morpheus/utils/test_abp_scorer.py
     tests/morpheus/utils/test_arrival_regularity.py
     tests/morpheus/utils/test_binding_closer.py

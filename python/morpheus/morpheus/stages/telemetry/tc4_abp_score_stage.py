@@ -28,19 +28,11 @@ so it may run at any concurrency and has nothing to checkpoint.
 """
 
 import logging
-import typing
-
-import mrc
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.stages.telemetry.tc4_flow_stage import MODEL_FEATURES
 from morpheus.utils.abp_scorer import AbpScorer
 from morpheus.utils.column_assign import assign_nullable_bool_column
@@ -57,7 +49,7 @@ ABP_MODEL_VERSION = "abp_model_version"
 
 
 @register_stage("tc4-abp-score")
-class TC4AbpScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC4AbpScoreStage(TelemetryStage):
     """
     Score each flow record with the inventory's `abp-pcap-xgb` booster.
 
@@ -92,33 +84,14 @@ class TC4AbpScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
         """Stage name."""
         return "tc4-abp-score"
 
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
-
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _process(self, df):
         """
         Write each row's probability, verdict and model version.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Flow records carrying `TC4FlowStage`'s feature columns.
-
-        Returns
-        -------
-        The input message, with the score columns populated.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
 
         Raises
         ------
@@ -126,31 +99,15 @@ class TC4AbpScoreStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
             If a feature column is absent. A frame without them has not been through `TC4FlowStage`, and scoring it
             would mean scoring nulls.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        absent = [column for column in MODEL_FEATURES.values() if column not in df.columns]
 
-        if (meta is None or meta.count == 0):
-            return message
+        if (absent):
+            raise KeyError(f"TC4AbpScoreStage reads TC4FlowStage's feature columns, and {absent} are absent. "
+                           f"Available columns: {sorted(df.columns)}")
 
-        with meta.mutable_dataframe() as df:
-            absent = [column for column in MODEL_FEATURES.values() if column not in df.columns]
+        matrix = self._scorer.matrix({feature: to_host_list(df, column) for (feature, column) in MODEL_FEATURES.items()})
+        probabilities = [float(value) for value in self._scorer.probabilities(matrix)]
 
-            if (absent):
-                raise KeyError(f"TC4AbpScoreStage reads TC4FlowStage's feature columns, and {absent} are absent. "
-                               f"Available columns: {sorted(df.columns)}")
-
-            matrix = self._scorer.matrix(
-                {feature: to_host_list(df, column)
-                 for (feature, column) in MODEL_FEATURES.items()})
-            probabilities = [float(value) for value in self._scorer.probabilities(matrix)]
-
-            assign_nullable_float_column(df, ABP_SCORE, probabilities)
-            assign_nullable_bool_column(df, ABP_ANOMALOUS, [value > self._scorer.threshold for value in probabilities])
-            assign_str_column(df, ABP_MODEL_VERSION, [self._scorer.version] * meta.count)
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
+        assign_nullable_float_column(df, ABP_SCORE, probabilities)
+        assign_nullable_bool_column(df, ABP_ANOMALOUS, [value > self._scorer.threshold for value in probabilities])
+        assign_str_column(df, ABP_MODEL_VERSION, [self._scorer.version] * len(df))

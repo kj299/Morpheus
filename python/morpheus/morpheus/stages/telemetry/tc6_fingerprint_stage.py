@@ -46,32 +46,19 @@ exists to surface, and the saturation flag says so on the row.
 
 import collections
 import logging
-import typing
-
-import mrc
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.value_novelty import DEFAULT_MAX_VALUES
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
@@ -86,7 +73,7 @@ JA4_SATURATED = "ja4_client_saturated"
 
 
 @register_stage("tc6-fingerprint", ignore_args=["key_columns"])
-class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC6FingerprintStage(CheckpointMixin, TelemetryStage):
     """
     Write whether each handshake's client fingerprint is new to the host that offered it.
 
@@ -130,7 +117,7 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                  max_values: int = DEFAULT_MAX_VALUES,
                  max_entities: int = 100_000,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         key_columns = ["src_ip"] if key_columns is None else list(key_columns)
 
@@ -164,139 +151,102 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
         self._needed_columns[JA4_OBSERVATIONS] = TypeId.INT64
         self._needed_columns[JA4_SATURATED] = TypeId.BOOL8
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc6-fingerprint"
 
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
 
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
+        required = list(self._key_columns) + [self._fingerprint_column, self._time_column]
 
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
+        return required
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _process(self, df):
         """
         Write the host key and whether its fingerprint is novel.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming handshake records.
-
-        Returns
-        -------
-        The input message, with the fingerprint columns populated.
-
-        Raises
-        ------
-        KeyError
-            If a key column, the fingerprint column, or the time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        key_parts = {name: to_host_list(df, name) for name in self._key_columns}
+        fingerprints = to_host_list(df, self._fingerprint_column)
+        # Guarded once, before the history is shown any time: a refused time becomes `None`, which the rows
+        # below already treat as a handshake that teaches the history nothing.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        if (meta is None or meta.count == 0):
-            return message
+        keys: list = []
+        first_seen: list = []
+        changed: list = []
+        distinct: list = []
+        observations: list = []
+        saturated: list = []
+        unusable = 0
+        unordered = 0
 
-        with meta.mutable_dataframe() as df:
-            required = list(self._key_columns) + [self._fingerprint_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        for (position, raw_fingerprint) in enumerate(fingerprints):
+            key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
+            fingerprint = normalize_text(raw_fingerprint)
+            event_time_ns = times[position]
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC6FingerprintStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+            keys.append(key)
 
-            key_parts = {name: to_host_list(df, name) for name in self._key_columns}
-            fingerprints = to_host_list(df, self._fingerprint_column)
-            # Guarded once, before the history is shown any time: a refused time becomes `None`, which the rows
-            # below already treat as a handshake that teaches the history nothing.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            # A handshake with no fingerprint is not a host with a new one. The collector either did not
+            # compute it or the record is not a handshake, and either way the history must not learn a null
+            # as though it were a stack.
+            if (key is None or fingerprint is None or event_time_ns is None):
+                unusable += int(not refused[position])
+                first_seen.append(None)
+                changed.append(None)
+                distinct.append(None)
+                observations.append(None)
+                saturated.append(False)
+                continue
 
-            keys: list = []
-            first_seen: list = []
-            changed: list = []
-            distinct: list = []
-            observations: list = []
-            saturated: list = []
-            unusable = 0
-            unordered = 0
+            # Read before this handshake is counted, so the figure is the history behind the row rather
+            # than one this row has already joined.
+            observations.append(self._seen(key, event_time_ns))
 
-            for (position, raw_fingerprint) in enumerate(fingerprints):
-                key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
-                fingerprint = normalize_text(raw_fingerprint)
-                event_time_ns = times[position]
+            result = self._tracker.observe(key, event_time_ns, {self._fingerprint_column: fingerprint})
+            count = result.distinct_counts.get(self._fingerprint_column, 0)
 
-                keys.append(key)
+            first_seen.append(result.first_seen.get(self._fingerprint_column))
+            changed.append(result.changed.get(self._fingerprint_column))
+            distinct.append(count)
+            saturated.append(count >= self._max_values)
+            unordered += int(result.out_of_order)
 
-                # A handshake with no fingerprint is not a host with a new one. The collector either did not
-                # compute it or the record is not a handshake, and either way the history must not learn a null
-                # as though it were a stack.
-                if (key is None or fingerprint is None or event_time_ns is None):
-                    unusable += int(not refused[position])
-                    first_seen.append(None)
-                    changed.append(None)
-                    distinct.append(None)
-                    observations.append(None)
-                    saturated.append(False)
-                    continue
+        assign_str_column(df, CLIENT_KEY, keys)
+        assign_nullable_bool_column(df, JA4_FIRST_SEEN, first_seen)
+        assign_nullable_bool_column(df, JA4_CHANGED, changed)
+        assign_nullable_int_column(df, JA4_DISTINCT, distinct)
+        assign_nullable_int_column(df, JA4_OBSERVATIONS, observations)
+        assign_nullable_bool_column(df, JA4_SATURATED, saturated)
 
-                # Read before this handshake is counted, so the figure is the history behind the row rather
-                # than one this row has already joined.
-                observations.append(self._seen(key, event_time_ns))
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="handshakes",
+                     outcome="they entered no history, set clock_refused and moved no host's instant.")
 
-                result = self._tracker.observe(key, event_time_ns, {self._fingerprint_column: fingerprint})
-                count = result.distinct_counts.get(self._fingerprint_column, 0)
+        if (unusable > 0):
+            logger.warning(
+                "TC6FingerprintStage left %d of %d records out of their host's history for want of a key, a "
+                "fingerprint, or a usable event time.",
+                unusable,
+                len(fingerprints))
 
-                first_seen.append(result.first_seen.get(self._fingerprint_column))
-                changed.append(result.changed.get(self._fingerprint_column))
-                distinct.append(count)
-                saturated.append(count >= self._max_values)
-                unordered += int(result.out_of_order)
-
-            assign_str_column(df, CLIENT_KEY, keys)
-            assign_nullable_bool_column(df, JA4_FIRST_SEEN, first_seen)
-            assign_nullable_bool_column(df, JA4_CHANGED, changed)
-            assign_nullable_int_column(df, JA4_DISTINCT, distinct)
-            assign_nullable_int_column(df, JA4_OBSERVATIONS, observations)
-            assign_nullable_bool_column(df, JA4_SATURATED, saturated)
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC6FingerprintStage",
-                        what="handshakes",
-                        outcome="they entered no history, set clock_refused and moved no host's instant.")
-
-            if (unusable > 0):
-                logger.warning(
-                    "TC6FingerprintStage left %d of %d records out of their host's history for want of a key, a "
-                    "fingerprint, or a usable event time.",
-                    unusable,
-                    len(fingerprints))
-
-            if (unordered > 0):
-                logger.warning(
-                    "TC6FingerprintStage saw %d of %d handshakes arrive earlier than their host's previous "
-                    "one; they did not enter the history. Whether a fingerprint is new is a question about what "
-                    "came before it, which is what an out-of-order arrival disagrees about.",
-                    unordered,
-                    len(fingerprints))
-
-        return message
+        if (unordered > 0):
+            logger.warning(
+                "TC6FingerprintStage saw %d of %d handshakes arrive earlier than their host's previous "
+                "one; they did not enter the history. Whether a fingerprint is new is a question about what "
+                "came before it, which is what an out-of-order arrival disagrees about.",
+                unordered,
+                len(fingerprints))
 
     def _seen(self, key: str, event_time_ns: int) -> int:
         """
@@ -319,9 +269,3 @@ class TC6FingerprintStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             self._observations.pop(next(iter(self._observations)))
 
         return prior
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

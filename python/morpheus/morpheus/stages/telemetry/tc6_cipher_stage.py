@@ -37,20 +37,12 @@ number nobody chose.
 """
 
 import logging
-import typing
-
-import mrc
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.cipher_strength import rank as cipher_rank
 from morpheus.utils.cipher_strength import tier_name
@@ -63,12 +55,7 @@ from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.established_value import DEFAULT_MIN_SAMPLES
 from morpheus.utils.established_value import ValueHistoryTracker
 from morpheus.utils.established_value import minimum_of
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +74,7 @@ CIPHER_UNRECOGNIZED = "cipher_unrecognized"
 
 
 @register_stage("tc6-cipher", ignore_args=["key_columns"])
-class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC6CipherStage(CheckpointMixin, TelemetryStage):
     """
     Rank each negotiated cipher suite and compare it against its pair's own historical floor.
 
@@ -134,7 +121,7 @@ class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                  min_samples: int = DEFAULT_MIN_SAMPLES,
                  max_samples: int = 512,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -163,150 +150,107 @@ class TC6CipherStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
         for column in (CIPHER_DOWNGRADED, CIPHER_MATURE, CIPHER_SATURATED, CIPHER_UNRECOGNIZED):
             self._needed_columns[column] = TypeId.BOOL8
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc6-cipher"
 
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
 
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
+        required = list(self._key_columns) + [self._cipher_column, self._time_column]
 
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
+        return required
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _process(self, df):
         """
         Write each handshake's strength tier, its pair's floor, and whether this negotiation fell below it.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming handshake records.
-
-        Returns
-        -------
-        The input message, with the cipher columns populated.
-
-        Raises
-        ------
-        KeyError
-            If a key column, the cipher column, or the time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        key_parts = {name: to_host_list(df, name) for name in self._key_columns}
+        suites = to_host_list(df, self._cipher_column)
+        # Guarded once, before the tracker is shown any time: a refused time becomes `None`, which the rows
+        # below already treat as a handshake with nothing to compare.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        if (meta is None or meta.count == 0):
-            return message
+        keys: list = []
+        ranks: list = []
+        tiers: list = []
+        floors: list = []
+        floor_tiers: list = []
+        downgraded: list = []
+        mature: list = []
+        saturated: list = []
+        unrecognized: list = []
+        unknown_names: set = set()
+        unordered = 0
 
-        with meta.mutable_dataframe() as df:
-            required = list(self._key_columns) + [self._cipher_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        for (position, raw_suite) in enumerate(suites):
+            key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
+            suite = normalize_text(raw_suite)
+            rank = cipher_rank(suite)
+            event_time_ns = times[position]
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC6CipherStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+            keys.append(key)
+            ranks.append(rank)
+            tiers.append(tier_name(rank))
+            unrecognized.append(suite is not None and rank is None)
 
-            key_parts = {name: to_host_list(df, name) for name in self._key_columns}
-            suites = to_host_list(df, self._cipher_column)
-            # Guarded once, before the tracker is shown any time: a refused time becomes `None`, which the rows
-            # below already treat as a handshake with nothing to compare.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            if (suite is not None and rank is None):
+                unknown_names.add(suite)
 
-            keys: list = []
-            ranks: list = []
-            tiers: list = []
-            floors: list = []
-            floor_tiers: list = []
-            downgraded: list = []
-            mature: list = []
-            saturated: list = []
-            unrecognized: list = []
-            unknown_names: set = set()
-            unordered = 0
+            # An unranked suite is kept out of the floor as well as out of the comparison. Admitting it
+            # under any default would set the floor to that default and measure every later negotiation
+            # against a number nobody chose.
+            if (key is None or rank is None or event_time_ns is None):
+                floors.append(None)
+                floor_tiers.append(None)
+                downgraded.append(None)
+                mature.append(False)
+                saturated.append(False)
+                continue
 
-            for (position, raw_suite) in enumerate(suites):
-                key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
-                suite = normalize_text(raw_suite)
-                rank = cipher_rank(suite)
-                event_time_ns = times[position]
+            result = self._tracker.observe(key, event_time_ns, rank)
 
-                keys.append(key)
-                ranks.append(rank)
-                tiers.append(tier_name(rank))
-                unrecognized.append(suite is not None and rank is None)
+            floors.append(result.reference)
+            floor_tiers.append(tier_name(result.reference))
+            downgraded.append(None if result.reference is None else rank < result.reference)
+            mature.append(result.mature)
+            saturated.append(result.saturated)
+            unordered += int(result.out_of_order)
 
-                if (suite is not None and rank is None):
-                    unknown_names.add(suite)
+        assign_str_column(df, PAIR_KEY, keys)
+        assign_nullable_int_column(df, CIPHER_RANK, ranks)
+        assign_str_column(df, CIPHER_TIER, tiers)
+        assign_nullable_int_column(df, CIPHER_FLOOR, floors)
+        assign_str_column(df, CIPHER_FLOOR_TIER, floor_tiers)
+        assign_nullable_bool_column(df, CIPHER_DOWNGRADED, downgraded)
+        assign_nullable_bool_column(df, CIPHER_MATURE, mature)
+        assign_nullable_bool_column(df, CIPHER_SATURATED, saturated)
+        assign_nullable_bool_column(df, CIPHER_UNRECOGNIZED, unrecognized)
 
-                # An unranked suite is kept out of the floor as well as out of the comparison. Admitting it
-                # under any default would set the floor to that default and measure every later negotiation
-                # against a number nobody chose.
-                if (key is None or rank is None or event_time_ns is None):
-                    floors.append(None)
-                    floor_tiers.append(None)
-                    downgraded.append(None)
-                    mature.append(False)
-                    saturated.append(False)
-                    continue
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="handshakes",
+                     outcome="they entered no floor, set clock_refused and expired nothing.")
 
-                result = self._tracker.observe(key, event_time_ns, rank)
+        if (len(unknown_names) > 0):
+            logger.warning(
+                "TC6CipherStage did not recognize %d cipher suite name(s), for example %r. They were ranked "
+                "as nothing rather than guessed at, so R-B-L6-004 cannot fire on them. Add them to "
+                "morpheus.utils.cipher_strength, or translate the feed's naming scheme at the collector.",
+                len(unknown_names),
+                sorted(unknown_names)[0])
 
-                floors.append(result.reference)
-                floor_tiers.append(tier_name(result.reference))
-                downgraded.append(None if result.reference is None else rank < result.reference)
-                mature.append(result.mature)
-                saturated.append(result.saturated)
-                unordered += int(result.out_of_order)
-
-            assign_str_column(df, PAIR_KEY, keys)
-            assign_nullable_int_column(df, CIPHER_RANK, ranks)
-            assign_str_column(df, CIPHER_TIER, tiers)
-            assign_nullable_int_column(df, CIPHER_FLOOR, floors)
-            assign_str_column(df, CIPHER_FLOOR_TIER, floor_tiers)
-            assign_nullable_bool_column(df, CIPHER_DOWNGRADED, downgraded)
-            assign_nullable_bool_column(df, CIPHER_MATURE, mature)
-            assign_nullable_bool_column(df, CIPHER_SATURATED, saturated)
-            assign_nullable_bool_column(df, CIPHER_UNRECOGNIZED, unrecognized)
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC6CipherStage",
-                        what="handshakes",
-                        outcome="they entered no floor, set clock_refused and expired nothing.")
-
-            if (len(unknown_names) > 0):
-                logger.warning(
-                    "TC6CipherStage did not recognize %d cipher suite name(s), for example %r. They were ranked "
-                    "as nothing rather than guessed at, so R-B-L6-004 cannot fire on them. Add them to "
-                    "morpheus.utils.cipher_strength, or translate the feed's naming scheme at the collector.",
-                    len(unknown_names),
-                    sorted(unknown_names)[0])
-
-            if (unordered > 0):
-                logger.warning(
-                    "TC6CipherStage saw %d of %d handshakes arrive earlier than their pair's previous one; "
-                    "they did not enter the floor.",
-                    unordered,
-                    len(suites))
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
+        if (unordered > 0):
+            logger.warning(
+                "TC6CipherStage saw %d of %d handshakes arrive earlier than their pair's previous one; "
+                "they did not enter the floor.",
+                unordered,
+                len(suites))
