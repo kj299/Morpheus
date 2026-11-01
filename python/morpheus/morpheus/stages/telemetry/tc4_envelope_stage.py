@@ -32,30 +32,18 @@ without the other. Each gets its own tracker and its own columns, so a search ca
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.transfer_envelope import DEFAULT_MIN_SAMPLES
 from morpheus.utils.transfer_envelope import DEFAULT_MULTIPLIER
 from morpheus.utils.transfer_envelope import DEFAULT_QUANTILE
@@ -74,7 +62,7 @@ TRIPLE_KEY = "transfer_triple"
 
 
 @register_stage("tc4-envelope", ignore_args=["magnitude_columns", "key_columns"])
-class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC4EnvelopeStage(CheckpointMixin, TelemetryStage):
     """
     Compare each record's transfer magnitudes against the envelope its triple has kept.
 
@@ -130,7 +118,7 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
                  min_samples: int = DEFAULT_MIN_SAMPLES,
                  max_samples: int = 4096,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -168,30 +156,10 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             self._needed_columns[f"{column}_envelope_breached"] = TypeId.BOOL8
             self._needed_columns[f"{column}_envelope_mature"] = TypeId.BOOL8
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc4-envelope"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @staticmethod
     def _magnitude(value: typing.Any) -> typing.Optional[float]:
@@ -209,116 +177,93 @@ class TC4EnvelopeStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
         # pylint: disable=comparison-with-itself
         return None if (number != number or number in (float("inf"), float("-inf"))) else number
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = list(self._key_columns) + [self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the triple key and each magnitude's envelope, ratio and breach flag.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming transport records.
-
-        Returns
-        -------
-        The input message, with the envelope columns populated.
-
-        Raises
-        ------
-        KeyError
-            If a key column or the time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        key_parts = {name: to_host_list(df, name) for name in self._key_columns}
+        # Guarded once, before any envelope is shown a time: a refused time becomes `None`, which the rows
+        # below already treat as a record with nothing to measure.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
+        rows = len(times)
 
-        if (meta is None or meta.count == 0):
-            return message
+        magnitudes = {
+            column: (to_host_list(df, column) if column in df.columns else [None] * rows)
+            for column in self._magnitude_columns
+        }
 
-        with meta.mutable_dataframe() as df:
-            required = list(self._key_columns) + [self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        keys: list = []
+        envelopes: dict[str, list] = {column: [] for column in self._magnitude_columns}
+        ratios: dict[str, list] = {column: [] for column in self._magnitude_columns}
+        breached: dict[str, list] = {column: [] for column in self._magnitude_columns}
+        mature: dict[str, list] = {column: [] for column in self._magnitude_columns}
+        unusable = 0
+        unordered = 0
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC4EnvelopeStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+        for position in range(rows):
+            key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
+            event_time_ns = times[position]
 
-            key_parts = {name: to_host_list(df, name) for name in self._key_columns}
-            # Guarded once, before any envelope is shown a time: a refused time becomes `None`, which the rows
-            # below already treat as a record with nothing to measure.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
-            rows = len(times)
+            keys.append(key)
 
-            magnitudes = {
-                column: (to_host_list(df, column) if column in df.columns else [None] * rows)
-                for column in self._magnitude_columns
-            }
-
-            keys: list = []
-            envelopes: dict[str, list] = {column: [] for column in self._magnitude_columns}
-            ratios: dict[str, list] = {column: [] for column in self._magnitude_columns}
-            breached: dict[str, list] = {column: [] for column in self._magnitude_columns}
-            mature: dict[str, list] = {column: [] for column in self._magnitude_columns}
-            unusable = 0
-            unordered = 0
-
-            for position in range(rows):
-                key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
-                event_time_ns = times[position]
-
-                keys.append(key)
-
-                if (key is None or event_time_ns is None):
-                    unusable += int(not refused[position])
-
-                for column in self._magnitude_columns:
-                    value = self._magnitude(magnitudes[column][position])
-
-                    if (key is None or event_time_ns is None or value is None):
-                        envelopes[column].append(None)
-                        ratios[column].append(None)
-                        breached[column].append(None)
-                        mature[column].append(False)
-                        continue
-
-                    result = self._trackers[column].observe(key, event_time_ns, value)
-
-                    envelopes[column].append(result.baseline)
-                    ratios[column].append(result.ratio)
-                    breached[column].append(result.breached)
-                    mature[column].append(result.mature)
-                    unordered += int(result.out_of_order)
-
-            assign_str_column(df, TRIPLE_KEY, keys)
+            if (key is None or event_time_ns is None):
+                unusable += int(not refused[position])
 
             for column in self._magnitude_columns:
-                assign_nullable_float_column(df, f"{column}_envelope", envelopes[column])
-                assign_nullable_float_column(df, f"{column}_envelope_ratio", ratios[column])
-                assign_nullable_bool_column(df, f"{column}_envelope_breached", breached[column])
-                df[f"{column}_envelope_mature"] = mature[column]
+                value = self._magnitude(magnitudes[column][position])
 
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC4EnvelopeStage",
-                        what="records",
-                        outcome="they joined no envelope, set clock_refused and expired nothing.")
+                if (key is None or event_time_ns is None or value is None):
+                    envelopes[column].append(None)
+                    ratios[column].append(None)
+                    breached[column].append(None)
+                    mature[column].append(False)
+                    continue
 
-            if (unusable > 0):
-                logger.info(
-                    "TC4EnvelopeStage left %d of %d records unmeasured for want of a triple or a usable event "
-                    "time.",
-                    unusable,
-                    rows)
+                result = self._trackers[column].observe(key, event_time_ns, value)
 
-            if (unordered > 0):
-                logger.warning(
-                    "TC4EnvelopeStage saw %d magnitude observations arrive out of order; they did not join any "
-                    "envelope. The baseline is over prior transfers, and which are prior is what an "
-                    "out-of-order arrival disagrees about.",
-                    unordered)
+                envelopes[column].append(result.baseline)
+                ratios[column].append(result.ratio)
+                breached[column].append(result.breached)
+                mature[column].append(result.mature)
+                unordered += int(result.out_of_order)
 
-        return message
+        assign_str_column(df, TRIPLE_KEY, keys)
 
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
+        for column in self._magnitude_columns:
+            assign_nullable_float_column(df, f"{column}_envelope", envelopes[column])
+            assign_nullable_float_column(df, f"{column}_envelope_ratio", ratios[column])
+            assign_nullable_bool_column(df, f"{column}_envelope_breached", breached[column])
+            df[f"{column}_envelope_mature"] = mature[column]
 
-        return node
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="records",
+                     outcome="they joined no envelope, set clock_refused and expired nothing.")
+
+        if (unusable > 0):
+            logger.info(
+                "TC4EnvelopeStage left %d of %d records unmeasured for want of a triple or a usable event "
+                "time.",
+                unusable,
+                rows)
+
+        if (unordered > 0):
+            logger.warning(
+                "TC4EnvelopeStage saw %d magnitude observations arrive out of order; they did not join any "
+                "envelope. The baseline is over prior transfers, and which are prior is what an "
+                "out-of-order arrival disagrees about.",
+                unordered)

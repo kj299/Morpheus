@@ -14,21 +14,12 @@
 """Scores when a principal authenticated against the hours and days that principal has used before."""
 
 import logging
-import typing
-
-import mrc
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
@@ -36,6 +27,7 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.cyclic_histogram import DEFAULT_MIN_SAMPLES
 from morpheus.utils.cyclic_histogram import CyclicHistogramTracker
 from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.entity_key import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -52,7 +44,7 @@ EPOCH_WEEKDAY = 3
 
 
 @register_stage("tc5-cadence")
-class TC5CadenceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5CadenceStage(CheckpointMixin, TelemetryStage):
     """
     Write how unusual an authentication's hour of day and day of week are for the principal making it.
 
@@ -102,9 +94,14 @@ class TC5CadenceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         Principals tracked before the least recently seen is forgotten.
     decimals : int, default = 4
         Decimal places the two quantized scores are rounded to, under determinism control 9.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a record's event time may be before it is refused. The histograms
+        count each principal's hours and weekdays on event time, so one record from a clock wrong by years would add an
+        hour no principal keeps to its histogram and be compared against for ever. A refused record carries no features
+        from this stage, sets `clock_refused`, and moves no state. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_hours", "_weekdays")
+    _checkpoint_attributes = ("_hours", "_weekdays", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -114,8 +111,9 @@ class TC5CadenceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                  utc_offset_minutes: int = 0,
                  min_samples: int = DEFAULT_MIN_SAMPLES,
                  max_entities: int = 100_000,
-                 decimals: int = DEFAULT_FLOAT_DECIMALS):
-        super().__init__(c)
+                 decimals: int = DEFAULT_FLOAT_DECIMALS,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (abs(utc_offset_minutes) >= 24 * 60):
             raise ValueError(f"utc_offset_minutes must be inside a day, received {utc_offset_minutes}")
@@ -145,28 +143,10 @@ class TC5CadenceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         self._needed_columns["cadence_samples"] = TypeId.INT64
         self._needed_columns["cadence_mature"] = TypeId.BOOL8
 
-        # Mark this stage to log timestamps if requested
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc5-cadence"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @property
     def tracked_principals(self) -> int:
@@ -185,106 +165,96 @@ class TC5CadenceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
 
         return ((local_ns // NS_PER_HOUR) % HOURS_IN_DAY, (days + EPOCH_WEEKDAY) % DAYS_IN_WEEK)
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [self._principal_column, self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the local hour and weekday and how unusual each is for this principal.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming authentication records.
-
-        Returns
-        -------
-        The input message, with the cadence columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the principal or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        principals = to_host_list(df, self._principal_column)
+        # Guarded once, before any history is shown a time: a refused time reads below as a record without one.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        if (meta is None or meta.count == 0):
-            return message
+        hours: list = []
+        weekdays: list = []
+        hour_share: list = []
+        hour_bits: list = []
+        hour_unseen: list = []
+        weekday_share: list = []
+        weekday_bits: list = []
+        weekday_unseen: list = []
+        samples: list = []
+        mature: list = []
+        keyless = 0
+        unordered = 0
 
-        with meta.mutable_dataframe() as df:
-            required = [self._principal_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        for (position, raw_principal) in enumerate(principals):
+            principal = normalize_text(raw_principal)
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC5CadenceStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+            event_time_ns = times[position]
 
-            principals = to_host_list(df, self._principal_column)
-            raw_times = to_host_list(df, self._time_column)
+            if (event_time_ns is None):
+                hours.append(None)
+                weekdays.append(None)
+            else:
+                (hour, weekday) = self._buckets(event_time_ns)
+                hours.append(hour)
+                weekdays.append(weekday)
 
-            hours: list = []
-            weekdays: list = []
-            hour_share: list = []
-            hour_bits: list = []
-            hour_unseen: list = []
-            weekday_share: list = []
-            weekday_bits: list = []
-            weekday_unseen: list = []
-            samples: list = []
-            mature: list = []
-            keyless = 0
-            unordered = 0
+            if (principal is None or event_time_ns is None):
+                # The hour and weekday are still written where the time allows: they are facts about the record
+                # rather than about the principal, and a rule may want them even where no history exists.
+                hour_share.append(None)
+                hour_bits.append(None)
+                hour_unseen.append(None)
+                weekday_share.append(None)
+                weekday_bits.append(None)
+                weekday_unseen.append(None)
+                samples.append(None)
+                mature.append(False)
+                keyless += int(not refused[position])
+                continue
 
-            for (position, raw_principal) in enumerate(principals):
-                principal = normalize_text(raw_principal)
+            hour_result = self._hours.observe(principal, event_time_ns, hours[position])
+            weekday_result = self._weekdays.observe(principal, event_time_ns, weekdays[position])
 
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+            hour_share.append(hour_result.smoothed_share)
+            hour_bits.append(hour_result.surprise_bits)
+            hour_unseen.append(hour_result.bucket_unseen)
+            weekday_share.append(weekday_result.smoothed_share)
+            weekday_bits.append(weekday_result.surprise_bits)
+            weekday_unseen.append(weekday_result.bucket_unseen)
+            samples.append(hour_result.samples)
+            mature.append(hour_result.mature)
+            unordered += int(hour_result.out_of_order)
 
-                if (event_time_ns is None):
-                    hours.append(None)
-                    weekdays.append(None)
-                else:
-                    (hour, weekday) = self._buckets(event_time_ns)
-                    hours.append(hour)
-                    weekdays.append(weekday)
+        assign_nullable_int_column(df, "local_hour", hours)
+        assign_nullable_int_column(df, "local_weekday", weekdays)
+        assign_nullable_float_column(df, "hour_share", hour_share)
+        assign_nullable_float_column(df, "hour_surprise_bits", hour_bits)
+        assign_nullable_bool_column(df, "hour_unseen", hour_unseen)
+        assign_nullable_float_column(df, "weekday_share", weekday_share)
+        assign_nullable_float_column(df, "weekday_surprise_bits", weekday_bits)
+        assign_nullable_bool_column(df, "weekday_unseen", weekday_unseen)
+        assign_nullable_int_column(df, "cadence_samples", samples)
+        df["cadence_mature"] = mature
 
-                if (principal is None or event_time_ns is None):
-                    # The hour and weekday are still written where the time allows: they are facts about the record
-                    # rather than about the principal, and a rule may want them even where no history exists.
-                    hour_share.append(None)
-                    hour_bits.append(None)
-                    hour_unseen.append(None)
-                    weekday_share.append(None)
-                    weekday_bits.append(None)
-                    weekday_unseen.append(None)
-                    samples.append(None)
-                    mature.append(False)
-                    keyless += 1
-                    continue
-
-                hour_result = self._hours.observe(principal, event_time_ns, hours[position])
-                weekday_result = self._weekdays.observe(principal, event_time_ns, weekdays[position])
-
-                hour_share.append(hour_result.smoothed_share)
-                hour_bits.append(hour_result.surprise_bits)
-                hour_unseen.append(hour_result.bucket_unseen)
-                weekday_share.append(weekday_result.smoothed_share)
-                weekday_bits.append(weekday_result.surprise_bits)
-                weekday_unseen.append(weekday_result.bucket_unseen)
-                samples.append(hour_result.samples)
-                mature.append(hour_result.mature)
-                unordered += int(hour_result.out_of_order)
-
-            assign_nullable_int_column(df, "local_hour", hours)
-            assign_nullable_int_column(df, "local_weekday", weekdays)
-            assign_nullable_float_column(df, "hour_share", hour_share)
-            assign_nullable_float_column(df, "hour_surprise_bits", hour_bits)
-            assign_nullable_bool_column(df, "hour_unseen", hour_unseen)
-            assign_nullable_float_column(df, "weekday_share", weekday_share)
-            assign_nullable_float_column(df, "weekday_surprise_bits", weekday_bits)
-            assign_nullable_bool_column(df, "weekday_unseen", weekday_unseen)
-            assign_nullable_int_column(df, "cadence_samples", samples)
-            df["cadence_mature"] = mature
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="authentications",
+                     outcome="they carry no hour or weekday surprise and entered no histogram.")
 
         if (keyless > 0):
             logger.warning(
@@ -300,11 +270,3 @@ class TC5CadenceStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                 "stood and did not join it. Preserve per-principal ordering upstream with TotalOrderStage.",
                 unordered,
                 len(principals))
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

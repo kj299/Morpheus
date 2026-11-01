@@ -38,32 +38,19 @@ window, so a count that stopped rising has to say whether the source stopped or 
 """
 
 import logging
-import typing
-
-import mrc
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import NS_PER_SECOND
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +66,7 @@ COUNTS = (DSTS_PER_SRC, SRCS_PER_DST, DST_PORTS_PER_SRC)
 
 
 @register_stage("tc3-cardinality")
-class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC3CardinalityStage(CheckpointMixin, TelemetryStage):
     """
     Count distinct layer 3 counterparties and ports per entity over a trailing window.
 
@@ -129,7 +116,7 @@ class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
                  window_seconds: int = DEFAULT_WINDOW_SECONDS,
                  max_samples: int = 4096,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -150,144 +137,101 @@ class TC3CardinalityStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             self._needed_columns[f"{name}_first_in_window"] = TypeId.BOOL8
             self._needed_columns[f"{name}_saturated"] = TypeId.BOOL8
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc3-cardinality"
 
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
 
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
+        required = [self._src_column, self._dst_column, self._dst_port_column, self._time_column]
 
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
+        return required
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _process(self, df):
         """
         Write the three distinct counts and their flags.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming flow records.
-
-        Returns
-        -------
-        The input message, with the cardinality columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the source, destination, port or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        sources = to_host_list(df, self._src_column)
+        destinations = to_host_list(df, self._dst_column)
+        dst_ports = to_host_list(df, self._dst_port_column)
+        # Guarded once, before any window is shown a time: a refused time becomes `None`, which the rows below
+        # already treat as a flow with nothing to count.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        if (meta is None or meta.count == 0):
-            return message
+        counts: dict[str, list] = {name: [] for name in COUNTS}
+        first: dict[str, list] = {name: [] for name in COUNTS}
+        saturated: dict[str, list] = {name: [] for name in COUNTS}
+        unordered = 0
+        keyless = 0
 
-        with meta.mutable_dataframe() as df:
-            required = [self._src_column, self._dst_column, self._dst_port_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        for (position, raw_source) in enumerate(sources):
+            source = normalize_text(raw_source)
+            destination = normalize_text(destinations[position])
+            # The port is normalized through the shared rule rather than through `str`, so a column widened to
+            # float by one null row does not fork port 443 into `443` and `443.0` and restart its count.
+            dst_port = normalize_text(dst_ports[position])
+            event_time_ns = times[position]
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC3CardinalityStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+            # Each count needs its own entity and its own value, and a flow missing either contributes to
+            # neither rather than to a fabricated key.
+            pairs = {
+                DSTS_PER_SRC: (source, destination),
+                SRCS_PER_DST: (destination, source),
+                DST_PORTS_PER_SRC: (source, dst_port),
+            }
 
-            sources = to_host_list(df, self._src_column)
-            destinations = to_host_list(df, self._dst_column)
-            dst_ports = to_host_list(df, self._dst_port_column)
-            # Guarded once, before any window is shown a time: a refused time becomes `None`, which the rows below
-            # already treat as a flow with nothing to count.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            missing_here = event_time_ns is None or any(part is None for pair in pairs.values() for part in pair)
 
-            counts: dict[str, list] = {name: [] for name in COUNTS}
-            first: dict[str, list] = {name: [] for name in COUNTS}
-            saturated: dict[str, list] = {name: [] for name in COUNTS}
-            unordered = 0
-            keyless = 0
+            if (missing_here):
+                keyless += int(not refused[position])
 
-            for (position, raw_source) in enumerate(sources):
-                source = normalize_text(raw_source)
-                destination = normalize_text(destinations[position])
-                # The port is normalized through the shared rule rather than through `str`, so a column widened to
-                # float by one null row does not fork port 443 into `443` and `443.0` and restart its count.
-                dst_port = normalize_text(dst_ports[position])
-                event_time_ns = times[position]
+            out_of_order = False
 
-                # Each count needs its own entity and its own value, and a flow missing either contributes to
-                # neither rather than to a fabricated key.
-                pairs = {
-                    DSTS_PER_SRC: (source, destination),
-                    SRCS_PER_DST: (destination, source),
-                    DST_PORTS_PER_SRC: (source, dst_port),
-                }
+            for (name, (entity, value)) in pairs.items():
+                if (event_time_ns is None or entity is None or value is None):
+                    counts[name].append(None)
+                    first[name].append(False)
+                    saturated[name].append(False)
+                    continue
 
-                missing_here = event_time_ns is None or any(part is None for pair in pairs.values() for part in pair)
+                result = self._trackers[name].observe(entity, event_time_ns, value)
+                counts[name].append(result.distinct)
+                first[name].append(result.first_in_window)
+                saturated[name].append(result.saturated)
+                out_of_order = out_of_order or result.out_of_order
 
-                if (missing_here):
-                    keyless += int(not refused[position])
+            unordered += int(out_of_order)
 
-                out_of_order = False
+        for name in COUNTS:
+            assign_nullable_int_column(df, name, counts[name])
+            assign_nullable_bool_column(df, f"{name}_first_in_window", first[name])
+            df[f"{name}_saturated"] = saturated[name]
 
-                for (name, (entity, value)) in pairs.items():
-                    if (event_time_ns is None or entity is None or value is None):
-                        counts[name].append(None)
-                        first[name].append(False)
-                        saturated[name].append(False)
-                        continue
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="flows",
+                     outcome="they entered no window, set clock_refused and expired nothing.")
 
-                    result = self._trackers[name].observe(entity, event_time_ns, value)
-                    counts[name].append(result.distinct)
-                    first[name].append(result.first_in_window)
-                    saturated[name].append(result.saturated)
-                    out_of_order = out_of_order or result.out_of_order
+        if (keyless > 0):
+            logger.warning(
+                "TC3CardinalityStage left %d of %d flows uncounted for want of an address, a port or a "
+                "usable event time. A flow with no destination is not a flow to nowhere; it is a record the "
+                "collector did not finish.",
+                keyless,
+                len(sources))
 
-                unordered += int(out_of_order)
-
-            for name in COUNTS:
-                assign_nullable_int_column(df, name, counts[name])
-                assign_nullable_bool_column(df, f"{name}_first_in_window", first[name])
-                df[f"{name}_saturated"] = saturated[name]
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC3CardinalityStage",
-                        what="flows",
-                        outcome="they entered no window, set clock_refused and expired nothing.")
-
-            if (keyless > 0):
-                logger.warning(
-                    "TC3CardinalityStage left %d of %d flows uncounted for want of an address, a port or a "
-                    "usable event time. A flow with no destination is not a flow to nowhere; it is a record the "
-                    "collector did not finish.",
-                    keyless,
-                    len(sources))
-
-            if (unordered > 0):
-                logger.warning(
-                    "TC3CardinalityStage saw %d of %d flows out of order; they did not advance any window. "
-                    "Shard by the counted entity and preserve per-entity ordering upstream.",
-                    unordered,
-                    len(sources))
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
+        if (unordered > 0):
+            logger.warning(
+                "TC3CardinalityStage saw %d of %d flows out of order; they did not advance any window. "
+                "Shard by the counted entity and preserve per-entity ordering upstream.",
+                unordered,
+                len(sources))

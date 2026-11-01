@@ -53,18 +53,11 @@ connections carry.
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.bucket_peak import BucketPeakTracker
 from morpheus.utils.bucket_peak import measure_rows
@@ -77,12 +70,7 @@ from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.ratio_window import RatioWindowTracker
 from morpheus.utils.user_agent import user_agent_family
 from morpheus.utils.user_agent import user_agent_os
@@ -119,7 +107,7 @@ UA_FAMILY_FIRST_SEEN = "http_ua_family_first_seen"
 
 
 @register_stage("tc7-http", ignore_args=["key_columns"])
-class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC7HttpStage(CheckpointMixin, TelemetryStage):
     """
     Write each client's windowed 4xx and 2xx counts, their ratio, and its distinct path count.
 
@@ -180,7 +168,7 @@ class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                  baseline_window_seconds: int = DEFAULT_BASELINE_WINDOW_SECONDS,
                  baseline_min_days: int = DEFAULT_BASELINE_MIN_DAYS,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -228,30 +216,10 @@ class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         self._needed_columns[UA_OS] = TypeId.STRING
         self._needed_columns[UA_FAMILY_FIRST_SEEN] = TypeId.BOOL8
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc7-http"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @staticmethod
     def _status_class(value: typing.Any) -> typing.Optional[str]:
@@ -269,163 +237,140 @@ class TC7HttpStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
         return f"{int(number) // 100}xx"
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = list(self._key_columns) + [self._status_column, self._path_column, self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the client key, the status class, the windowed counts and ratio, and the distinct path count.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming HTTP request records.
-
-        Returns
-        -------
-        The input message, with the HTTP columns populated.
-
-        Raises
-        ------
-        KeyError
-            If a key column, the status column, the path column, or the time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        key_parts = {name: to_host_list(df, name) for name in self._key_columns}
+        statuses = to_host_list(df, self._status_column)
+        paths = to_host_list(df, self._path_column)
+        agents = (to_host_list(df, self._user_agent_column) if self._user_agent_column in df.columns else [None] *
+                  len(statuses))
+        # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
+        # below already treat as a request with nothing to count.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-        if (meta is None or meta.count == 0):
-            return message
+        keys: list = []
+        classes: list = []
+        errors: list = []
+        successes: list = []
+        ratios: list = []
+        distinct: list = []
+        saturated: list = []
+        families: list = []
+        systems: list = []
+        first_seen: list = []
+        unusable = 0
+        unordered = 0
 
-        with meta.mutable_dataframe() as df:
-            required = list(self._key_columns) + [self._status_column, self._path_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        for position, status in enumerate(statuses):
+            key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
+            status_class = self._status_class(status)
+            path = normalize_text(paths[position])
+            event_time_ns = times[position]
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC7HttpStage requires columns {missing} which are not present in the DataFrame. "
-                               f"Available columns: {sorted(df.columns)}")
+            keys.append(key)
+            classes.append(status_class)
 
-            key_parts = {name: to_host_list(df, name) for name in self._key_columns}
-            statuses = to_host_list(df, self._status_column)
-            paths = to_host_list(df, self._path_column)
-            agents = (to_host_list(df, self._user_agent_column) if self._user_agent_column in df.columns else [None] *
-                      len(statuses))
-            # Guarded once, before any window or day is shown a time: a refused time becomes `None`, which the rows
-            # below already treat as a request with nothing to count.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+            family = user_agent_family(agents[position])
+            families.append(family)
+            systems.append(user_agent_os(agents[position]))
 
-            keys: list = []
-            classes: list = []
-            errors: list = []
-            successes: list = []
-            ratios: list = []
-            distinct: list = []
-            saturated: list = []
-            families: list = []
-            systems: list = []
-            first_seen: list = []
-            unusable = 0
-            unordered = 0
+            # A request with no header says nothing about the client's software, so it is not a sample of it.
+            if (key is None or event_time_ns is None or family is None):
+                first_seen.append(None)
+            else:
+                novelty = self._agents.observe(key, event_time_ns, {UA_FAMILY: family})
+                first_seen.append(novelty.first_seen[UA_FAMILY])
 
-            for position, status in enumerate(statuses):
-                key = compose_key([normalize_text(key_parts[name][position]) for name in self._key_columns])
-                status_class = self._status_class(status)
-                path = normalize_text(paths[position])
-                event_time_ns = times[position]
+            if (key is None or event_time_ns is None):
+                unusable += int(not refused[position])
+                errors.append(None)
+                successes.append(None)
+                ratios.append(None)
+                distinct.append(None)
+                saturated.append(False)
+                continue
 
-                keys.append(key)
-                classes.append(status_class)
+            window_saturated = False
 
-                family = user_agent_family(agents[position])
-                families.append(family)
-                systems.append(user_agent_os(agents[position]))
+            # Every request counts toward the paths, whatever it was answered with.
+            if (path is not None):
+                path_result = self._paths.observe(key, event_time_ns, path)
+                distinct.append(path_result.distinct)
+                window_saturated = path_result.saturated
+                unordered += int(path_result.out_of_order)
+            else:
+                distinct.append(None)
 
-                # A request with no header says nothing about the client's software, so it is not a sample of it.
-                if (key is None or event_time_ns is None or family is None):
-                    first_seen.append(None)
-                else:
-                    novelty = self._agents.observe(key, event_time_ns, {UA_FAMILY: family})
-                    first_seen.append(novelty.first_seen[UA_FAMILY])
+            # Only the two classes the rule names enter the ratio.
+            if (status_class in ("2xx", "4xx")):
+                response = self._responses.observe(key, event_time_ns, status_class == "4xx")
+                client_errors = response.numerator
+                ok = response.denominator - response.numerator
 
-                if (key is None or event_time_ns is None):
-                    unusable += int(not refused[position])
-                    errors.append(None)
-                    successes.append(None)
-                    ratios.append(None)
-                    distinct.append(None)
-                    saturated.append(False)
-                    continue
+                errors.append(client_errors)
+                successes.append(ok)
+                # Undefined, not zero, for a client that has had no success -- see the module docstring for why
+                # the search reads the counts rather than this column.
+                ratios.append(client_errors / ok if ok > 0 else None)
+                window_saturated = window_saturated or response.saturated
+                unordered += int(response.out_of_order)
+            else:
+                errors.append(None)
+                successes.append(None)
+                ratios.append(None)
 
-                window_saturated = False
+            saturated.append(window_saturated)
 
-                # Every request counts toward the paths, whatever it was answered with.
-                if (path is not None):
-                    path_result = self._paths.observe(key, event_time_ns, path)
-                    distinct.append(path_result.distinct)
-                    window_saturated = path_result.saturated
-                    unordered += int(path_result.out_of_order)
-                else:
-                    distinct.append(None)
+        assign_str_column(df, CLIENT_KEY, keys)
+        assign_str_column(df, STATUS_CLASS, classes)
+        assign_nullable_int_column(df, CLIENT_ERRORS, errors)
+        assign_nullable_int_column(df, SUCCESSES, successes)
+        assign_nullable_float_column(df, ERROR_RATIO, ratios)
+        assign_nullable_int_column(df, DISTINCT_PATHS, distinct)
+        assign_nullable_bool_column(df, WINDOW_SATURATED, saturated)
 
-                # Only the two classes the rule names enter the ratio.
-                if (status_class in ("2xx", "4xx")):
-                    response = self._responses.observe(key, event_time_ns, status_class == "4xx")
-                    client_errors = response.numerator
-                    ok = response.denominator - response.numerator
+        # The day's busiest window per client, after the window counts so each row is measured as it was counted.
+        measured = measure_rows(self._baseline, keys, distinct, times)
 
-                    errors.append(client_errors)
-                    successes.append(ok)
-                    # Undefined, not zero, for a client that has had no success -- see the module docstring for why
-                    # the search reads the counts rather than this column.
-                    ratios.append(client_errors / ok if ok > 0 else None)
-                    window_saturated = window_saturated or response.saturated
-                    unordered += int(response.out_of_order)
-                else:
-                    errors.append(None)
-                    successes.append(None)
-                    ratios.append(None)
+        assign_nullable_int_column(df, DISTINCT_PATHS_BASELINE, measured.references)
+        assign_nullable_int_column(df, DISTINCT_PATHS_BASELINE_DAYS, measured.buckets)
+        assign_nullable_bool_column(df, DISTINCT_PATHS_BASELINE_MATURE, measured.mature)
+        assign_nullable_float_column(df, DISTINCT_PATHS_RATIO, ratios_to_reference(measured, distinct))
+        assign_str_column(df, UA_FAMILY, families)
+        assign_str_column(df, UA_OS, systems)
+        assign_nullable_bool_column(df, UA_FAMILY_FIRST_SEEN, first_seen)
 
-                saturated.append(window_saturated)
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="requests",
+                     outcome="they entered no window, set clock_refused and expired nothing.")
 
-            assign_str_column(df, CLIENT_KEY, keys)
-            assign_str_column(df, STATUS_CLASS, classes)
-            assign_nullable_int_column(df, CLIENT_ERRORS, errors)
-            assign_nullable_int_column(df, SUCCESSES, successes)
-            assign_nullable_float_column(df, ERROR_RATIO, ratios)
-            assign_nullable_int_column(df, DISTINCT_PATHS, distinct)
-            assign_nullable_bool_column(df, WINDOW_SATURATED, saturated)
+        if (unusable > 0):
+            logger.warning(
+                "TC7HttpStage left %d of %d requests out of their client's windows for want of a key "
+                "or a usable event time.",
+                unusable,
+                len(statuses))
 
-            # The day's busiest window per client, after the window counts so each row is measured as it was counted.
-            measured = measure_rows(self._baseline, keys, distinct, times)
-
-            assign_nullable_int_column(df, DISTINCT_PATHS_BASELINE, measured.references)
-            assign_nullable_int_column(df, DISTINCT_PATHS_BASELINE_DAYS, measured.buckets)
-            assign_nullable_bool_column(df, DISTINCT_PATHS_BASELINE_MATURE, measured.mature)
-            assign_nullable_float_column(df, DISTINCT_PATHS_RATIO, ratios_to_reference(measured, distinct))
-            assign_str_column(df, UA_FAMILY, families)
-            assign_str_column(df, UA_OS, systems)
-            assign_nullable_bool_column(df, UA_FAMILY_FIRST_SEEN, first_seen)
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC7HttpStage",
-                        what="requests",
-                        outcome="they entered no window, set clock_refused and expired nothing.")
-
-            if (unusable > 0):
-                logger.warning(
-                    "TC7HttpStage left %d of %d requests out of their client's windows for want of a key "
-                    "or a usable event time.",
-                    unusable,
-                    len(statuses))
-
-            if (unordered > 0):
-                logger.warning(
-                    "TC7HttpStage saw %d requests arrive earlier than their client's previous one; they were not "
-                    "counted. Equal timestamps are accepted, since a proxy logging at one-second resolution puts an "
-                    "enumerator's whole burst on one tick.",
-                    unordered)
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
+        if (unordered > 0):
+            logger.warning(
+                "TC7HttpStage saw %d requests arrive earlier than their client's previous one; they were not "
+                "counted. Equal timestamps are accepted, since a proxy logging at one-second resolution puts an "
+                "enumerator's whole burst on one tick.",
+                unordered)

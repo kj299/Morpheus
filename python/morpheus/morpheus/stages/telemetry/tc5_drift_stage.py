@@ -18,19 +18,13 @@ import math
 import statistics
 import typing
 
-import mrc
 import pandas as pd
-from mrc.core import operators as ops
 
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import to_host_list
@@ -50,7 +44,7 @@ AGGREGATES = (AGGREGATE_NONE, AGGREGATE_MEAN, AGGREGATE_MAX, AGGREGATE_DISTINCT)
 
 
 @register_stage("tc5-drift")
-class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5DriftStage(CheckpointMixin, TelemetryStage):
     """
     Write the trajectory of an entity's score across consecutive windows.
 
@@ -163,114 +157,61 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
         self._needed_columns["drift_forecast_next"] = TypeId.FLOAT64
         self._needed_columns["drift_windows_to_ceiling"] = TypeId.INT64
 
-        # Mark this stage to log timestamps if requested
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc5-drift"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @property
     def tracked_entities(self) -> int:
         """Entities currently holding a trajectory."""
         return self._tracker.tracked_entities
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [self._entity_column, self._window_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the velocity, acceleration and rise of each entity's score.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming scored events, one row per entity per window.
-
-        Returns
-        -------
-        The input message, with the drift columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the entity or window column is absent. The score column may be absent -- that is a pipeline with
-            no model, which is a state this fork ships in -- and its absence yields nulls rather than an error.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        entities = to_host_list(df, self._entity_column)
+        windows = to_host_list(df, self._window_column)
+        row_count = len(entities)
+        has_scores = self._score_column in df.columns
+        scores = to_host_list(df, self._score_column) if has_scores else [None] * row_count
 
-        if (meta is None or meta.count == 0):
-            return message
+        velocity: list = []
+        acceleration: list = []
+        rising: list = []
+        total_rise: list = []
+        sigma: list = []
+        rise_sigmas: list = []
+        mature: list = []
+        restarted: list = []
+        trend: list = []
+        forecast: list = []
+        to_ceiling: list = []
+        unscored = 0
+        unordered = 0
+        seen: dict = {}
+        repeated = 0
 
-        with meta.mutable_dataframe() as df:
-            required = [self._entity_column, self._window_column]
-            missing = [column for column in required if column not in df.columns]
+        # One observation per entity per window, when asked for it. The members are summed in sorted order
+        # so the mean depends on membership alone, the same property the chain root has.
+        reduced: dict = {}
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC5DriftStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
-
-            entities = to_host_list(df, self._entity_column)
-            windows = to_host_list(df, self._window_column)
-            row_count = len(entities)
-            has_scores = self._score_column in df.columns
-            scores = to_host_list(df, self._score_column) if has_scores else [None] * row_count
-
-            velocity: list = []
-            acceleration: list = []
-            rising: list = []
-            total_rise: list = []
-            sigma: list = []
-            rise_sigmas: list = []
-            mature: list = []
-            restarted: list = []
-            trend: list = []
-            forecast: list = []
-            to_ceiling: list = []
-            unscored = 0
-            unordered = 0
-            seen: dict = {}
-            repeated = 0
-
-            # One observation per entity per window, when asked for it. The members are summed in sorted order
-            # so the mean depends on membership alone, the same property the chain root has.
-            reduced: dict = {}
-
-            if (self._aggregate != AGGREGATE_NONE):
-                members: dict = {}
-
-                for position in range(row_count):
-                    entity = normalize_text(entities[position])
-                    window = windows[position]
-                    score = scores[position]
-
-                    if (entity is None or window is None or pd.isna(score)):
-                        continue
-
-                    member = str(score) if self._aggregate == AGGREGATE_DISTINCT else float(score)
-                    members.setdefault((entity, int(window)), []).append(member)
-
-                reduce = {
-                    AGGREGATE_MEAN: statistics.fmean,
-                    AGGREGATE_MAX: max,
-                    AGGREGATE_DISTINCT: lambda values: float(len(set(values))),
-                }[self._aggregate]
-                reduced = {key: reduce(sorted(values)) for (key, values) in members.items()}
-
-            observed: dict = {}
+        if (self._aggregate != AGGREGATE_NONE):
+            members: dict = {}
 
             for position in range(row_count):
                 entity = normalize_text(entities[position])
@@ -278,60 +219,80 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                 score = scores[position]
 
                 if (entity is None or window is None or pd.isna(score)):
-                    velocity.append(None)
-                    acceleration.append(None)
-                    rising.append(None)
-                    total_rise.append(None)
-                    sigma.append(None)
-                    rise_sigmas.append(None)
-                    mature.append(False)
-                    restarted.append(False)
-                    trend.append(None)
-                    forecast.append(None)
-                    to_ceiling.append(None)
-                    unscored += 1
                     continue
 
-                window_id = int(window)
+                member = str(score) if self._aggregate == AGGREGATE_DISTINCT else float(score)
+                members.setdefault((entity, int(window)), []).append(member)
 
-                if (self._aggregate != AGGREGATE_NONE):
-                    key = (entity, window_id)
-                    value = reduced[key]
+            reduce = {
+                AGGREGATE_MEAN: statistics.fmean,
+                AGGREGATE_MAX: max,
+                AGGREGATE_DISTINCT: lambda values: float(len(set(values))),
+            }[self._aggregate]
+            reduced = {key: reduce(sorted(values)) for (key, values) in members.items()}
 
-                    if (key not in observed):
-                        observed[key] = self._tracker.observe(entity, window_id, value)
+        observed: dict = {}
 
-                    result = observed[key]
-                else:
-                    repeated += int(seen.get(entity) == window_id)
-                    seen[entity] = window_id
-                    value = float(score)
-                    result = self._tracker.observe(entity, window_id, value)
+        for position in range(row_count):
+            entity = normalize_text(entities[position])
+            window = windows[position]
+            score = scores[position]
 
-                velocity.append(result.velocity)
-                acceleration.append(result.acceleration)
-                rising.append(result.rising_windows)
-                total_rise.append(result.total_rise)
-                sigma.append(result.baseline_sigma)
-                rise_sigmas.append(result.rise_sigmas)
-                mature.append(result.mature)
-                restarted.append(result.run_restarted)
-                trend.append(result.trend_per_window)
-                forecast.append(result.forecast_next)
-                to_ceiling.append(self._windows_to_ceiling(value, result.trend_per_window))
-                unordered += int(result.out_of_order)
+            if (entity is None or window is None or pd.isna(score)):
+                velocity.append(None)
+                acceleration.append(None)
+                rising.append(None)
+                total_rise.append(None)
+                sigma.append(None)
+                rise_sigmas.append(None)
+                mature.append(False)
+                restarted.append(False)
+                trend.append(None)
+                forecast.append(None)
+                to_ceiling.append(None)
+                unscored += 1
+                continue
 
-            assign_nullable_float_column(df, "drift_velocity", velocity)
-            assign_nullable_float_column(df, "drift_acceleration", acceleration)
-            assign_nullable_int_column(df, "drift_rising_windows", rising)
-            assign_nullable_float_column(df, "drift_total_rise", total_rise)
-            assign_nullable_float_column(df, "drift_baseline_sigma", sigma)
-            assign_nullable_float_column(df, "drift_rise_sigmas", rise_sigmas)
-            df["drift_mature"] = mature
-            df["drift_run_restarted"] = restarted
-            assign_nullable_float_column(df, "drift_trend_per_window", trend)
-            assign_nullable_float_column(df, "drift_forecast_next", forecast)
-            assign_nullable_int_column(df, "drift_windows_to_ceiling", to_ceiling)
+            window_id = int(window)
+
+            if (self._aggregate != AGGREGATE_NONE):
+                key = (entity, window_id)
+                value = reduced[key]
+
+                if (key not in observed):
+                    observed[key] = self._tracker.observe(entity, window_id, value)
+
+                result = observed[key]
+            else:
+                repeated += int(seen.get(entity) == window_id)
+                seen[entity] = window_id
+                value = float(score)
+                result = self._tracker.observe(entity, window_id, value)
+
+            velocity.append(result.velocity)
+            acceleration.append(result.acceleration)
+            rising.append(result.rising_windows)
+            total_rise.append(result.total_rise)
+            sigma.append(result.baseline_sigma)
+            rise_sigmas.append(result.rise_sigmas)
+            mature.append(result.mature)
+            restarted.append(result.run_restarted)
+            trend.append(result.trend_per_window)
+            forecast.append(result.forecast_next)
+            to_ceiling.append(self._windows_to_ceiling(value, result.trend_per_window))
+            unordered += int(result.out_of_order)
+
+        assign_nullable_float_column(df, "drift_velocity", velocity)
+        assign_nullable_float_column(df, "drift_acceleration", acceleration)
+        assign_nullable_int_column(df, "drift_rising_windows", rising)
+        assign_nullable_float_column(df, "drift_total_rise", total_rise)
+        assign_nullable_float_column(df, "drift_baseline_sigma", sigma)
+        assign_nullable_float_column(df, "drift_rise_sigmas", rise_sigmas)
+        df["drift_mature"] = mature
+        df["drift_run_restarted"] = restarted
+        assign_nullable_float_column(df, "drift_trend_per_window", trend)
+        assign_nullable_float_column(df, "drift_forecast_next", forecast)
+        assign_nullable_int_column(df, "drift_windows_to_ceiling", to_ceiling)
 
         if (not has_scores and not self._warned_scoreless):
             self._warned_scoreless = True
@@ -362,8 +323,6 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
                 unordered,
                 row_count)
 
-        return message
-
     def _windows_to_ceiling(self, value: float, trend: typing.Optional[float]) -> typing.Optional[int]:
         """Windows the run's line takes from this one to the ceiling: zero at or above it, null for no rising line."""
         if (self._ceiling is None or trend is None):
@@ -377,9 +336,3 @@ class TC5DriftStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePo
 
         # Rounded before the ceiling so a quotient that is whole in decimal is not lifted by its binary tail.
         return math.ceil(round((self._ceiling - value) / trend, self._decimals))
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

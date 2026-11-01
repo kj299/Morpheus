@@ -1853,6 +1853,7 @@ REGISTRY: dict = {
             frame=logins,
             base={},
             knobs=(
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
                 Knob("location_columns",
                      DIFFERS,
@@ -2218,6 +2219,7 @@ REGISTRY: dict = {
             frame=logins,
             base={},
             knobs=(
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
@@ -2250,6 +2252,7 @@ REGISTRY: dict = {
             frame=journeys,
             base={},
             knobs=(
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
                 Knob("latitude_column", INPUT_COLUMN, benign="source_latitude"),
                 Knob("longitude_column", INPUT_COLUMN, benign="source_longitude"),
@@ -2288,6 +2291,7 @@ REGISTRY: dict = {
             frame=denials,
             base={"min_denominator": 1},
             knobs=(
+                Knob("max_clock_skew_seconds", DIFFERS, benign=7 * 24 * 3600, extreme=1),
                 Knob("principal_column", INPUT_COLUMN, benign="user_principal"),
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
@@ -2800,13 +2804,20 @@ def _stage_classes_on_disk() -> set:
     return found
 
 
+ABSTRACT_BASES = {
+    "TelemetryStage": ("the base of the TC-3 to TC-7 stages; it is never constructed alone, and its one parameter, "
+                       "max_clock_skew_seconds, is registered and exercised on every stage that passes it"),
+}
+"""Stage classes the scan finds that are bases rather than stages, each with why it has no scenario of its own."""
+
+
 def test_every_stage_in_the_fork_is_covered():
     # Scanned from the tree, not pinned to a number. The pinned version read as though it enforced this and did
     # not: a count only notices a stage being removed, never one arriving, so `TC1BindingStage` landed as the
     # twenty-third stage while the assertion `len(REGISTRY) == 22` stayed green and its own comment claimed a new
     # stage could not arrive uncovered. That is the same defect as a tier list that reads as total and is not,
     # which this repository has now found in four separate places.
-    on_disk = _stage_classes_on_disk()
+    on_disk = _stage_classes_on_disk() - set(ABSTRACT_BASES)
 
     assert len(on_disk) > 15, f"the header scan found only {sorted(on_disk)}; it has stopped identifying stages"
 

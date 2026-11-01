@@ -16,25 +16,18 @@
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.distinct_window import NS_PER_SECOND
 from morpheus.utils.distinct_window import DistinctWindowTracker
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_hostname
 from morpheus.utils.entity_key import normalize_text
@@ -81,7 +74,7 @@ audited separately.
 
 
 @register_stage("tc5-novelty")
-class TC5NoveltyStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5NoveltyStage(CheckpointMixin, TelemetryStage):
     """
     Write the TC-5 volume and novelty features for each authenticating principal.
 
@@ -161,9 +154,14 @@ class TC5NoveltyStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         it is off by default, because an identity provider's sign-in log has no such host and an always-null
         column would read as a feature that was measured. The stage also writes `target_host_key`, the host as
         `normalize_hostname` renders it, which is what the novelty is kept on and what R-C-001 joins on.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a record's event time may be before it is refused. The windows expire
+        on event time, so one record from a clock wrong by years would empty every principal's daily count and network
+        origins at once. A refused record carries no features from this stage, sets `clock_refused`, and moves no state.
+        See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_activity", "_asns", "_novelty", "_target_hosts")
+    _checkpoint_attributes = ("_activity", "_asns", "_novelty", "_target_hosts", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -178,8 +176,9 @@ class TC5NoveltyStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                  max_samples: int = 4096,
                  max_values: int = 256,
                  max_entities: int = 100_000,
-                 target_host_column: str = None):
-        super().__init__(c)
+                 target_host_column: str = None,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (window_seconds <= 0):
             raise ValueError(f"window_seconds must be positive, received {window_seconds}")
@@ -223,183 +222,155 @@ class TC5NoveltyStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
             self._needed_columns[TARGET_HOST_FIRST_SEEN] = TypeId.BOOL8
             self._needed_columns[TARGET_HOST_KEY] = TypeId.STRING
 
-        # Mark this stage to log timestamps if requested
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc5-novelty"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @property
     def tracked_principals(self) -> int:
         """Principals currently holding an activity window."""
         return self._activity.tracked_entities
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [self._principal_column, self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the volume count, the cumulative increments, and the windowed ASN count.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming authentication records.
-
-        Returns
-        -------
-        The input message, with the TC-5 novelty columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the principal or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        principals = to_host_list(df, self._principal_column)
+        # Guarded once, before any history is shown a time: a refused time reads below as a record without one.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
+        row_count = len(principals)
 
-        if (meta is None or meta.count == 0):
-            return message
+        present_locations = [name for name in self._location_columns if name in df.columns]
+        location_parts = [to_host_list(df, name) for name in present_locations]
 
-        with meta.mutable_dataframe() as df:
-            required = [self._principal_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        def optional(column: str) -> list:
+            return to_host_list(df, column) if column in df.columns else [None] * row_count
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC5NoveltyStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+        apps = optional(self._app_column)
+        devices = optional(self._device_column)
+        asns = optional(self._asn_column)
+        targets = optional(self._target_host_column) if self._target_host_column is not None else None
+        target_first_seen: list = []
+        target_keys: list = []
 
-            principals = to_host_list(df, self._principal_column)
-            raw_times = to_host_list(df, self._time_column)
-            row_count = len(principals)
+        locations: list = []
+        logcount: list = []
+        logcount_saturated: list = []
+        asn_counts: list = []
+        asn_saturated: list = []
+        increments: dict[str, list] = {field: [] for field in CUMULATIVE_FIELDS}
+        first_seen: dict[str, list] = {field: [] for field in CUMULATIVE_FIELDS}
+        keyless = 0
+        unordered = 0
 
-            present_locations = [name for name in self._location_columns if name in df.columns]
-            location_parts = [to_host_list(df, name) for name in present_locations]
+        for (position, raw_principal) in enumerate(principals):
+            principal = normalize_text(raw_principal)
+            location = compose_key([part[position] for part in location_parts]) if location_parts else None
+            locations.append(location)
 
-            def optional(column: str) -> list:
-                return to_host_list(df, column) if column in df.columns else [None] * row_count
+            event_time_ns = times[position]
 
-            apps = optional(self._app_column)
-            devices = optional(self._device_column)
-            asns = optional(self._asn_column)
-            targets = optional(self._target_host_column) if self._target_host_column is not None else None
-            target_first_seen: list = []
-            target_keys: list = []
-
-            locations: list = []
-            logcount: list = []
-            logcount_saturated: list = []
-            asn_counts: list = []
-            asn_saturated: list = []
-            increments: dict[str, list] = {field: [] for field in CUMULATIVE_FIELDS}
-            first_seen: dict[str, list] = {field: [] for field in CUMULATIVE_FIELDS}
-            keyless = 0
-            unordered = 0
-
-            for (position, raw_principal) in enumerate(principals):
-                principal = normalize_text(raw_principal)
-                location = compose_key([part[position] for part in location_parts]) if location_parts else None
-                locations.append(location)
-
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
-
-                if (principal is None or event_time_ns is None):
-                    # Pooling records under a fabricated principal would make every unattributed authentication in
-                    # the estate look like one extraordinarily busy account.
-                    logcount.append(None)
-                    logcount_saturated.append(False)
-                    asn_counts.append(None)
-                    asn_saturated.append(False)
-
-                    for field in CUMULATIVE_FIELDS:
-                        increments[field].append(None)
-                        first_seen[field].append(None)
-
-                    target_first_seen.append(None)
-                    target_keys.append(None if targets is None else normalize_hostname(targets[position]))
-                    keyless += 1
-                    continue
-
-                activity = self._activity.observe(principal, event_time_ns, ACTIVITY_VALUE)
-                logcount.append(activity.total)
-                logcount_saturated.append(activity.saturated)
-                unordered += int(activity.out_of_order)
-
-                asn = normalize_text(asns[position])
-
-                if (asn is None):
-                    asn_counts.append(None)
-                    asn_saturated.append(False)
-                else:
-                    seen_asn = self._asns.observe(principal, event_time_ns, asn)
-                    asn_counts.append(seen_asn.distinct)
-                    asn_saturated.append(seen_asn.saturated)
-
-                values = {
-                    LOCATION: location,
-                    APP: normalize_text(apps[position]),
-                    DEVICE: normalize_text(devices[position]),
-                }
+            if (principal is None or event_time_ns is None):
+                # Pooling records under a fabricated principal would make every unattributed authentication in
+                # the estate look like one extraordinarily busy account.
+                logcount.append(None)
+                logcount_saturated.append(False)
+                asn_counts.append(None)
+                asn_saturated.append(False)
 
                 for field in CUMULATIVE_FIELDS:
-                    value = values[field]
+                    increments[field].append(None)
+                    first_seen[field].append(None)
 
-                    if (value is None):
-                        # An omission, not a value the principal used. Observing it would raise the increment the
-                        # first time a collector dropped the field and leave it raised.
-                        increments[field].append(None)
-                        first_seen[field].append(None)
-                        continue
+                target_first_seen.append(None)
+                target_keys.append(None if targets is None else normalize_hostname(targets[position]))
+                keyless += int(not refused[position])
+                continue
 
-                    result = self._novelty[field].observe(principal, event_time_ns, {field: value})
+            activity = self._activity.observe(principal, event_time_ns, ACTIVITY_VALUE)
+            logcount.append(activity.total)
+            logcount_saturated.append(activity.saturated)
+            unordered += int(activity.out_of_order)
 
-                    if (result.out_of_order):
-                        increments[field].append(None)
-                        first_seen[field].append(None)
-                        continue
+            asn = normalize_text(asns[position])
 
-                    increments[field].append(result.distinct_counts[field])
-                    first_seen[field].append(result.first_seen[field])
+            if (asn is None):
+                asn_counts.append(None)
+                asn_saturated.append(False)
+            else:
+                seen_asn = self._asns.observe(principal, event_time_ns, asn)
+                asn_counts.append(seen_asn.distinct)
+                asn_saturated.append(seen_asn.saturated)
 
-                # Normalized, because a host named in one log as WS-12 and in another as ws-12. is one host.
-                target = None if targets is None else normalize_hostname(targets[position])
-                target_keys.append(target)
-
-                if (target is None):
-                    target_first_seen.append(None)
-                else:
-                    result = self._target_hosts.observe(principal, event_time_ns, {TARGET_HOST_FIRST_SEEN: target})
-                    target_first_seen.append(None if result.out_of_order else result.first_seen[TARGET_HOST_FIRST_SEEN])
-
-            assign_str_column(df, "user_location", locations)
-            assign_nullable_int_column(df, "logcount", logcount)
-            df["logcount_saturated"] = logcount_saturated
-            assign_nullable_int_column(df, "asns_in_window", asn_counts)
-            df["asns_in_window_saturated"] = asn_saturated
+            values = {
+                LOCATION: location,
+                APP: normalize_text(apps[position]),
+                DEVICE: normalize_text(devices[position]),
+            }
 
             for field in CUMULATIVE_FIELDS:
-                assign_nullable_int_column(df, INCREMENT_COLUMNS[field], increments[field])
-                assign_nullable_bool_column(df, f"{field}_first_seen", first_seen[field])
+                value = values[field]
 
-            if (targets is not None):
-                assign_nullable_bool_column(df, TARGET_HOST_FIRST_SEEN, target_first_seen)
-                assign_str_column(df, TARGET_HOST_KEY, target_keys)
+                if (value is None):
+                    # An omission, not a value the principal used. Observing it would raise the increment the
+                    # first time a collector dropped the field and leave it raised.
+                    increments[field].append(None)
+                    first_seen[field].append(None)
+                    continue
+
+                result = self._novelty[field].observe(principal, event_time_ns, {field: value})
+
+                if (result.out_of_order):
+                    increments[field].append(None)
+                    first_seen[field].append(None)
+                    continue
+
+                increments[field].append(result.distinct_counts[field])
+                first_seen[field].append(result.first_seen[field])
+
+            # Normalized, because a host named in one log as WS-12 and in another as ws-12. is one host.
+            target = None if targets is None else normalize_hostname(targets[position])
+            target_keys.append(target)
+
+            if (target is None):
+                target_first_seen.append(None)
+            else:
+                result = self._target_hosts.observe(principal, event_time_ns, {TARGET_HOST_FIRST_SEEN: target})
+                target_first_seen.append(None if result.out_of_order else result.first_seen[TARGET_HOST_FIRST_SEEN])
+
+        assign_str_column(df, "user_location", locations)
+        assign_nullable_int_column(df, "logcount", logcount)
+        df["logcount_saturated"] = logcount_saturated
+        assign_nullable_int_column(df, "asns_in_window", asn_counts)
+        df["asns_in_window_saturated"] = asn_saturated
+
+        for field in CUMULATIVE_FIELDS:
+            assign_nullable_int_column(df, INCREMENT_COLUMNS[field], increments[field])
+            assign_nullable_bool_column(df, f"{field}_first_seen", first_seen[field])
+
+        if (targets is not None):
+            assign_nullable_bool_column(df, TARGET_HOST_FIRST_SEEN, target_first_seen)
+            assign_str_column(df, TARGET_HOST_KEY, target_keys)
+
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="authentications",
+                     outcome="they carry no novelty or windowed counts and moved no window.")
 
         if (keyless > 0):
             logger.warning(
@@ -415,11 +386,3 @@ class TC5NoveltyStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                 "Preserve per-principal ordering upstream with TotalOrderStage.",
                 unordered,
                 len(principals))
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

@@ -17,24 +17,17 @@ import ipaddress
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
-from morpheus.utils.binding_table import to_epoch_ns
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.column_assign import assign_nullable_float_column
 from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.determinism import DEFAULT_FLOAT_DECIMALS
+from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.geo_velocity import NS_PER_SECOND
 from morpheus.utils.geo_velocity import GeoVelocityTracker
@@ -60,7 +53,7 @@ DEFAULT_REFRESH_VALUES = ("refresh", "refresh_token", "renew")
 
 
 @register_stage("tc5-travel", ignore_args=["locations"])
-class TC5TravelStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5TravelStage(CheckpointMixin, TelemetryStage):
     """
     Write the implied travel speed between a principal's consecutive successful authentications.
 
@@ -147,9 +140,14 @@ class TC5TravelStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
         Place name to `(latitude, longitude)`, the estate's own record of where its sites are. Required with
         `location_column` and meaningless without it. A place it does not name reads as `no_coordinate`, which is
         the honest answer for a port the estate has not located.
+    max_clock_skew_seconds : int, default = 604800
+        How far ahead of the stream's own progress a record's event time may be before it is refused. The anchor is each
+        principal's last eligible sighting, so one record from a clock wrong by years would become the anchor every
+        later login is measured from, and read as out of order against it. A refused record carries no features from
+        this stage, sets `clock_refused`, and moves no state. See `morpheus.utils.event_clock`.
     """
 
-    _checkpoint_attributes = ("_tracker", )
+    _checkpoint_attributes = ("_tracker", "_clock")
 
     def __init__(self,
                  c: Config,
@@ -169,8 +167,9 @@ class TC5TravelStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                  decimals: int = DEFAULT_FLOAT_DECIMALS,
                  column_prefix: str = "travel",
                  location_column: str = None,
-                 locations: typing.Optional[typing.Mapping[str, tuple]] = None):
-        super().__init__(c)
+                 locations: typing.Optional[typing.Mapping[str, tuple]] = None,
+                 max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if ((location_column is None) != (locations is None)):
             raise ValueError("location_column and locations go together: one names the place, the other says where it "
@@ -222,9 +221,6 @@ class TC5TravelStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
         self._needed_columns[f"{column_prefix}_kmh"] = TypeId.FLOAT64
         self._needed_columns[f"{column_prefix}_elapsed_floored"] = TypeId.BOOL8
 
-        # Mark this stage to log timestamps if requested
-        self._should_log_timestamps = True
-
     @staticmethod
     def _place_key(name: typing.Any) -> typing.Optional[str]:
         normalized = normalize_text(name)
@@ -235,21 +231,6 @@ class TC5TravelStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
     def name(self) -> str:
         """Stage name."""
         return "tc5-travel"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @property
     def tracked_principals(self) -> int:
@@ -275,134 +256,124 @@ class TC5TravelStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
 
         return any(address in network for network in self._excluded_networks)
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [self._principal_column, self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the travel status and, where a journey was measured, its distance, elapsed time and speed.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming authentication records.
-
-        Returns
-        -------
-        The input message, with the travel columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the principal or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        principals = to_host_list(df, self._principal_column)
+        # Guarded once, before any history is shown a time: a refused time reads below as a record without one.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
+        row_count = len(principals)
 
-        if (meta is None or meta.count == 0):
-            return message
+        def optional(column: str) -> list:
+            return to_host_list(df, column) if column in df.columns else [None] * row_count
 
-        with meta.mutable_dataframe() as df:
-            required = [self._principal_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        if (self._location_column is None):
+            latitudes = optional(self._latitude_column)
+            longitudes = optional(self._longitude_column)
+        else:
+            places = [
+                self._locations.get(self._place_key(name), (None, None)) for name in optional(self._location_column)
+            ]
+            latitudes = [place[0] for place in places]
+            longitudes = [place[1] for place in places]
+        results = optional(self._result_column)
+        refreshes = optional(self._refresh_column)
+        addresses = optional(self._source_ip_column)
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC5TravelStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+        has_result_column = self._result_column in df.columns
 
-            principals = to_host_list(df, self._principal_column)
-            raw_times = to_host_list(df, self._time_column)
-            row_count = len(principals)
+        status: list = []
+        distance: list = []
+        elapsed: list = []
+        speed: list = []
+        floored: list = []
+        unparseable_addresses = 0
+        bad_coordinates = 0
 
-            def optional(column: str) -> list:
-                return to_host_list(df, column) if column in df.columns else [None] * row_count
+        for (position, raw_principal) in enumerate(principals):
+            principal = normalize_text(raw_principal)
 
-            if (self._location_column is None):
-                latitudes = optional(self._latitude_column)
-                longitudes = optional(self._longitude_column)
+            event_time_ns = times[position]
+
+            result = normalize_text(results[position])
+            refresh = normalize_text(refreshes[position])
+            excluded = self._is_excluded_address(addresses[position])
+
+            unparseable_addresses += int(excluded is None and addresses[position] is not None)
+
+            latitude = latitudes[position]
+            longitude = longitudes[position]
+            usable_coordinate = validate_coordinate(latitude, longitude)
+
+            bad_coordinates += int(not usable_coordinate and latitude is not None and longitude is not None)
+
+            if (principal is None):
+                reason = NO_PRINCIPAL
+            elif (event_time_ns is None):
+                reason = NO_TIME
+            elif (has_result_column and (result is None or result.lower() not in self._success_values)):
+                # A failed authentication is evidence that somebody tried, not that anybody was there. Where
+                # the column is absent entirely the source does not report results and every record is taken
+                # at face value, which over-measures rather than measuring nothing.
+                reason = NOT_SUCCESSFUL
+            elif (refresh is not None and refresh.lower() in self._refresh_values):
+                reason = TOKEN_REFRESH
+            elif (excluded is True):
+                reason = VPN_EGRESS
+            elif (not usable_coordinate):
+                reason = NO_COORDINATE
             else:
-                places = [
-                    self._locations.get(self._place_key(name), (None, None)) for name in optional(self._location_column)
-                ]
-                latitudes = [place[0] for place in places]
-                longitudes = [place[1] for place in places]
-            results = optional(self._result_column)
-            refreshes = optional(self._refresh_column)
-            addresses = optional(self._source_ip_column)
+                reason = None
 
-            has_result_column = self._result_column in df.columns
+            if (reason is not None):
+                # Not measured, and deliberately not recorded either: an ineligible record that updated the
+                # anchor would erase the journey the next eligible one is supposed to reveal.
+                status.append(reason)
+                distance.append(None)
+                elapsed.append(None)
+                speed.append(None)
+                floored.append(False)
+                continue
 
-            status: list = []
-            distance: list = []
-            elapsed: list = []
-            speed: list = []
-            floored: list = []
-            unparseable_addresses = 0
-            bad_coordinates = 0
+            measurement = self._tracker.observe(principal, event_time_ns, latitude, longitude)
 
-            for (position, raw_principal) in enumerate(principals):
-                principal = normalize_text(raw_principal)
+            if (measurement.out_of_order):
+                status.append(OUT_OF_ORDER)
+            elif (measurement.first_for_entity):
+                status.append(FIRST)
+            else:
+                status.append(MEASURED)
 
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+            distance.append(measurement.distance_km)
+            elapsed.append(measurement.elapsed_ns)
+            speed.append(measurement.implied_kmh)
+            floored.append(measurement.elapsed_floored)
 
-                result = normalize_text(results[position])
-                refresh = normalize_text(refreshes[position])
-                excluded = self._is_excluded_address(addresses[position])
+        assign_str_column(df, f"{self._column_prefix}_status", status)
+        assign_nullable_float_column(df, f"{self._column_prefix}_distance_km", distance)
+        assign_nullable_int_column(df, f"{self._column_prefix}_elapsed_ns", elapsed)
+        assign_nullable_float_column(df, f"{self._column_prefix}_kmh", speed)
+        df[f"{self._column_prefix}_elapsed_floored"] = floored
 
-                unparseable_addresses += int(excluded is None and addresses[position] is not None)
-
-                latitude = latitudes[position]
-                longitude = longitudes[position]
-                usable_coordinate = validate_coordinate(latitude, longitude)
-
-                bad_coordinates += int(not usable_coordinate and latitude is not None and longitude is not None)
-
-                if (principal is None):
-                    reason = NO_PRINCIPAL
-                elif (event_time_ns is None):
-                    reason = NO_TIME
-                elif (has_result_column and (result is None or result.lower() not in self._success_values)):
-                    # A failed authentication is evidence that somebody tried, not that anybody was there. Where
-                    # the column is absent entirely the source does not report results and every record is taken
-                    # at face value, which over-measures rather than measuring nothing.
-                    reason = NOT_SUCCESSFUL
-                elif (refresh is not None and refresh.lower() in self._refresh_values):
-                    reason = TOKEN_REFRESH
-                elif (excluded is True):
-                    reason = VPN_EGRESS
-                elif (not usable_coordinate):
-                    reason = NO_COORDINATE
-                else:
-                    reason = None
-
-                if (reason is not None):
-                    # Not measured, and deliberately not recorded either: an ineligible record that updated the
-                    # anchor would erase the journey the next eligible one is supposed to reveal.
-                    status.append(reason)
-                    distance.append(None)
-                    elapsed.append(None)
-                    speed.append(None)
-                    floored.append(False)
-                    continue
-
-                measurement = self._tracker.observe(principal, event_time_ns, latitude, longitude)
-
-                if (measurement.out_of_order):
-                    status.append(OUT_OF_ORDER)
-                elif (measurement.first_for_entity):
-                    status.append(FIRST)
-                else:
-                    status.append(MEASURED)
-
-                distance.append(measurement.distance_km)
-                elapsed.append(measurement.elapsed_ns)
-                speed.append(measurement.implied_kmh)
-                floored.append(measurement.elapsed_floored)
-
-            assign_str_column(df, f"{self._column_prefix}_status", status)
-            assign_nullable_float_column(df, f"{self._column_prefix}_distance_km", distance)
-            assign_nullable_int_column(df, f"{self._column_prefix}_elapsed_ns", elapsed)
-            assign_nullable_float_column(df, f"{self._column_prefix}_kmh", speed)
-            df[f"{self._column_prefix}_elapsed_floored"] = floored
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="authentications",
+                     outcome="they carry no travel measurement and moved no anchor.")
 
         if (unparseable_addresses > 0):
             logger.warning(
@@ -420,11 +391,3 @@ class TC5TravelStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SingleP
                 "alert about a geolocation database rather than about a principal.",
                 bad_coordinates,
                 len(principals))
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

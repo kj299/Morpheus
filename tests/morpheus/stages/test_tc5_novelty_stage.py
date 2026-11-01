@@ -93,8 +93,12 @@ def test_logcount_decays_out_of_the_window(config: Config):
 def test_the_increments_are_cumulative_and_do_not_decay(config: Config):
     # The guide is explicit that this is intended: R-B-L5-002 is scored against a per-user loss scaler, and a
     # decaying count would re-fire on the same relocation every window.
+    # Ten days apart, which is past the clock's default week; the guard is widened so the second login is measured.
     times = [0, 10 * 24 * 3600 * NS_PER_SECOND]
-    meta = run(config, frame(2, countries=["gb", "fr"], cities=["london", "paris"], times=times), window_seconds=3600)
+    meta = run(config,
+               frame(2, countries=["gb", "fr"], cities=["london", "paris"], times=times),
+               window_seconds=3600,
+               max_clock_skew_seconds=30 * 24 * 3600)
 
     assert _as_list(meta, "locincrement") == [1, 2]
 

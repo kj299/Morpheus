@@ -16,18 +16,11 @@
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.binding_table import to_epoch_ns
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_float_column
@@ -78,7 +71,7 @@ stops being the longest session ever seen; see `morpheus.utils.transfer_envelope
 
 
 @register_stage("tc5-session")
-class TC5SessionStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC5SessionStage(CheckpointMixin, TelemetryStage):
     """
     Pair a session's start record with its end record, write how long it lasted, and measure that against the
     principal's own history of sessions.
@@ -249,28 +242,10 @@ class TC5SessionStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         self._needed_columns["session_duration_ratio"] = TypeId.FLOAT64
         self._needed_columns["session_duration_mature"] = TypeId.BOOL8
 
-        # Mark this stage to log timestamps if requested
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc5-session"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @property
     def open_sessions(self) -> int:
@@ -318,168 +293,154 @@ class TC5SessionStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
         except ValueError:
             return None
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [self._session_column, self._action_column, self._time_column]
+
+        return required
+
+    def _process(self, df):
         """
         Write the session key, the duration, and the pairing flags.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming session lifecycle records.
-
-        Returns
-        -------
-        The input message, with the session columns populated.
-
-        Raises
-        ------
-        KeyError
-            If the session, action, or time column is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        sessions = to_host_list(df, self._session_column)
+        actions = to_host_list(df, self._action_column)
+        raw_times = to_host_list(df, self._time_column)
 
-        if (meta is None or meta.count == 0):
-            return message
+        has_principal = self._principal_column in df.columns
+        principals = to_host_list(df, self._principal_column) if has_principal else [None] * len(sessions)
 
-        with meta.mutable_dataframe() as df:
-            required = [self._session_column, self._action_column, self._time_column]
-            missing = [column for column in required if column not in df.columns]
+        # A single-record session carries both bounds. Either column may be absent, in which case no row is one.
+        single = self._start_column in df.columns and self._end_column in df.columns
+        bounds_start = to_host_list(df, self._start_column) if single else [None] * len(sessions)
+        bounds_end = to_host_list(df, self._end_column) if single else [None] * len(sessions)
+        lifecycles: list = []
+        baselines: list = []
+        ratios: list = []
+        mature: list = []
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC5SessionStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+        session_keys: list = []
+        duration_ns: list = []
+        duration_s: list = []
+        starts: list = []
+        unpaired: list = []
+        out_of_order: list = []
+        keyless = 0
+        unclassified = 0
+        abandoned = 0
+        implausible = 0
+        abandoned_rows = [0] * len(sessions)
+        unclassified_rows = [False] * len(sessions)
+        refused = [False] * len(sessions)
 
-            sessions = to_host_list(df, self._session_column)
-            actions = to_host_list(df, self._action_column)
-            raw_times = to_host_list(df, self._time_column)
+        for (position, raw_session) in enumerate(sessions):
+            session_id = normalize_text(raw_session)
+            principal = normalize_text(principals[position])
+            session_key = compose_key((principal, session_id))
+            session_keys.append(session_key)
 
-            has_principal = self._principal_column in df.columns
-            principals = to_host_list(df, self._principal_column) if has_principal else [None] * len(sessions)
+            lifecycle = self._lifecycle(actions[position])
+            lifecycles.append(lifecycle)
+            baselines.append(None)
+            ratios.append(None)
+            mature.append(None)
 
-            # A single-record session carries both bounds. Either column may be absent, in which case no row is one.
-            single = self._start_column in df.columns and self._end_column in df.columns
-            bounds_start = to_host_list(df, self._start_column) if single else [None] * len(sessions)
-            bounds_end = to_host_list(df, self._end_column) if single else [None] * len(sessions)
-            lifecycles: list = []
-            baselines: list = []
-            ratios: list = []
-            mature: list = []
+            try:
+                event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
+            except ValueError:
+                event_time_ns = None
 
-            session_keys: list = []
-            duration_ns: list = []
-            duration_s: list = []
-            starts: list = []
-            unpaired: list = []
-            out_of_order: list = []
-            keyless = 0
-            unclassified = 0
-            abandoned = 0
-            implausible = 0
-            abandoned_rows = [0] * len(sessions)
-            unclassified_rows = [False] * len(sessions)
-            refused = [False] * len(sessions)
+            session_start_ns = None if bounds_start[position] is None else self._bound(bounds_start[position])
+            session_end_ns = None if bounds_end[position] is None else self._bound(bounds_end[position])
 
-            for (position, raw_session) in enumerate(sessions):
-                session_id = normalize_text(raw_session)
-                principal = normalize_text(principals[position])
-                session_key = compose_key((principal, session_id))
-                session_keys.append(session_key)
+            if (session_start_ns is not None and session_end_ns is not None and event_time_ns is not None
+                    and self._clock.accept(event_time_ns)):
+                # One record, both ends: a subtraction, and none of the pairing state is touched. An end before
+                # its start is a defect in the record rather than a negative duration.
+                inverted = session_end_ns < session_start_ns
+                elapsed_ns = None if inverted else session_end_ns - session_start_ns
 
-                lifecycle = self._lifecycle(actions[position])
-                lifecycles.append(lifecycle)
-                baselines.append(None)
-                ratios.append(None)
-                mature.append(None)
+                duration_ns.append(elapsed_ns)
+                duration_s.append(None if elapsed_ns is None else elapsed_ns // NS_PER_SECOND)
+                starts.append(None)
+                unpaired.append(False)
+                out_of_order.append(inverted)
+                (baselines[-1], ratios[-1], mature[-1]) = self._measure(principal, event_time_ns, elapsed_ns)
+                continue
 
-                try:
-                    event_time_ns = to_epoch_ns(raw_times[position], time_unit=self._time_unit)
-                except ValueError:
-                    event_time_ns = None
+            if (session_id is None or lifecycle is None or event_time_ns is None):
+                # Nothing to pair, or nothing to pair it on. Pooling records under a fabricated identifier would
+                # let one principal's logoff close another's session.
+                duration_ns.append(None)
+                duration_s.append(None)
+                starts.append(None)
+                unpaired.append(None)
+                out_of_order.append(False)
 
-                session_start_ns = None if bounds_start[position] is None else self._bound(bounds_start[position])
-                session_end_ns = None if bounds_end[position] is None else self._bound(bounds_end[position])
+                keyless += int(session_id is None or event_time_ns is None)
+                unclassified += int(session_id is not None and lifecycle is None)
+                unclassified_rows[position] = session_id is not None and lifecycle is None
+                continue
 
-                if (session_start_ns is not None and session_end_ns is not None and event_time_ns is not None
-                        and self._clock.accept(event_time_ns)):
-                    # One record, both ends: a subtraction, and none of the pairing state is touched. An end before
-                    # its start is a defect in the record rather than a negative duration.
-                    inverted = session_end_ns < session_start_ns
-                    elapsed_ns = None if inverted else session_end_ns - session_start_ns
+            # Expiry is driven by the stream's own clock, so a replay abandons the same sessions a live run
+            # did. A source whose clock is wrong by years would otherwise abandon every open session at once.
+            if (not self._clock.accept(event_time_ns)):
+                duration_ns.append(None)
+                duration_s.append(None)
+                starts.append(None)
+                unpaired.append(None)
+                out_of_order.append(False)
+                implausible += 1
+                refused[position] = True
+                continue
 
-                    duration_ns.append(elapsed_ns)
-                    duration_s.append(None if elapsed_ns is None else elapsed_ns // NS_PER_SECOND)
-                    starts.append(None)
-                    unpaired.append(False)
-                    out_of_order.append(inverted)
-                    (baselines[-1], ratios[-1], mature[-1]) = self._measure(principal, event_time_ns, elapsed_ns)
-                    continue
+            expired = len(self._timer.expire(event_time_ns))
+            abandoned += expired
+            abandoned_rows[position] = expired
 
-                if (session_id is None or lifecycle is None or event_time_ns is None):
-                    # Nothing to pair, or nothing to pair it on. Pooling records under a fabricated identifier would
-                    # let one principal's logoff close another's session.
-                    duration_ns.append(None)
-                    duration_s.append(None)
-                    starts.append(None)
-                    unpaired.append(None)
-                    out_of_order.append(False)
+            # The identifier alone is what a start and its stop share. Keying on the principal too would fail to
+            # pair the two whenever one of the records carries the principal and the other does not, which is
+            # the normal shape of a Windows logoff record.
+            if (lifecycle == "start"):
+                self._timer.begin(session_id, event_time_ns)
+                duration_ns.append(None)
+                duration_s.append(None)
+                starts.append(None)
+                unpaired.append(None)
+                out_of_order.append(False)
+                continue
 
-                    keyless += int(session_id is None or event_time_ns is None)
-                    unclassified += int(session_id is not None and lifecycle is None)
-                    unclassified_rows[position] = session_id is not None and lifecycle is None
-                    continue
+            timing = self._timer.complete(session_id, event_time_ns)
 
-                # Expiry is driven by the stream's own clock, so a replay abandons the same sessions a live run
-                # did. A source whose clock is wrong by years would otherwise abandon every open session at once.
-                if (not self._clock.accept(event_time_ns)):
-                    duration_ns.append(None)
-                    duration_s.append(None)
-                    starts.append(None)
-                    unpaired.append(None)
-                    out_of_order.append(False)
-                    implausible += 1
-                    refused[position] = True
-                    continue
+            duration_ns.append(timing.elapsed_ns)
+            # A floor rather than a rounding. The exact figure is the nanosecond column beside it, which is what
+            # anything doing arithmetic should read; the seconds are for a rule's threshold to be legible.
+            duration_s.append(None if timing.elapsed_ns is None else timing.elapsed_ns // NS_PER_SECOND)
+            starts.append(timing.attempts if timing.attempts > 0 else None)
+            unpaired.append(timing.unpaired)
+            out_of_order.append(timing.out_of_order)
+            (baselines[-1], ratios[-1], mature[-1]) = self._measure(principal, event_time_ns, timing.elapsed_ns)
 
-                expired = len(self._timer.expire(event_time_ns))
-                abandoned += expired
-                abandoned_rows[position] = expired
-
-                # The identifier alone is what a start and its stop share. Keying on the principal too would fail to
-                # pair the two whenever one of the records carries the principal and the other does not, which is
-                # the normal shape of a Windows logoff record.
-                if (lifecycle == "start"):
-                    self._timer.begin(session_id, event_time_ns)
-                    duration_ns.append(None)
-                    duration_s.append(None)
-                    starts.append(None)
-                    unpaired.append(None)
-                    out_of_order.append(False)
-                    continue
-
-                timing = self._timer.complete(session_id, event_time_ns)
-
-                duration_ns.append(timing.elapsed_ns)
-                # A floor rather than a rounding. The exact figure is the nanosecond column beside it, which is what
-                # anything doing arithmetic should read; the seconds are for a rule's threshold to be legible.
-                duration_s.append(None if timing.elapsed_ns is None else timing.elapsed_ns // NS_PER_SECOND)
-                starts.append(timing.attempts if timing.attempts > 0 else None)
-                unpaired.append(timing.unpaired)
-                out_of_order.append(timing.out_of_order)
-                (baselines[-1], ratios[-1], mature[-1]) = self._measure(principal, event_time_ns, timing.elapsed_ns)
-
-            assign_str_column(df, "session_key", session_keys)
-            assign_nullable_int_column(df, "session_duration_ns", duration_ns)
-            assign_nullable_int_column(df, "session_duration_s", duration_s)
-            assign_nullable_int_column(df, "session_starts", starts)
-            assign_nullable_bool_column(df, "session_unpaired", unpaired)
-            df["session_out_of_order"] = out_of_order
-            assign_str_column(df, "session_lifecycle", lifecycles)
-            assign_nullable_float_column(df, "session_duration_baseline", baselines)
-            assign_nullable_float_column(df, "session_duration_ratio", ratios)
-            assign_nullable_bool_column(df, "session_duration_mature", mature)
-            assign_nullable_int_column(df, "session_abandoned", abandoned_rows)
-            assign_nullable_bool_column(df, "session_unclassified", unclassified_rows)
-            mark_refused(df, refused)
+        assign_str_column(df, "session_key", session_keys)
+        assign_nullable_int_column(df, "session_duration_ns", duration_ns)
+        assign_nullable_int_column(df, "session_duration_s", duration_s)
+        assign_nullable_int_column(df, "session_starts", starts)
+        assign_nullable_bool_column(df, "session_unpaired", unpaired)
+        df["session_out_of_order"] = out_of_order
+        assign_str_column(df, "session_lifecycle", lifecycles)
+        assign_nullable_float_column(df, "session_duration_baseline", baselines)
+        assign_nullable_float_column(df, "session_duration_ratio", ratios)
+        assign_nullable_bool_column(df, "session_duration_mature", mature)
+        assign_nullable_int_column(df, "session_abandoned", abandoned_rows)
+        assign_nullable_bool_column(df, "session_unclassified", unclassified_rows)
+        mark_refused(df, refused)
 
         if (keyless > 0):
             logger.warning(
@@ -510,11 +471,3 @@ class TC5SessionStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Single
                 "never closes is a lost stop record rather than a very long session, and its stop, if it ever "
                 "arrives, will read as unpaired.",
                 abandoned)
-
-        return message
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node

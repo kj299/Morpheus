@@ -63,18 +63,11 @@ system the same machine's `User-Agent` claims.
 import logging
 import typing
 
-import mrc
-from mrc.core import operators as ops
-
 from morpheus.cli.register_stage import register_stage
 from morpheus.common import TypeId
 from morpheus.config import Config
-from morpheus.messages import ControlMessage
-from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
-from morpheus.pipeline.execution_mode_mixins import GpuAndCpuMixin
-from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
-from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.stages.telemetry.telemetry_base import TelemetryStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.column_assign import assign_nullable_bool_column
 from morpheus.utils.column_assign import assign_nullable_float_column
@@ -82,12 +75,7 @@ from morpheus.utils.column_assign import assign_nullable_int_column
 from morpheus.utils.column_assign import assign_str_column
 from morpheus.utils.column_assign import to_host_list
 from morpheus.utils.entity_key import normalize_text
-from morpheus.utils.event_clock import CLOCK_REFUSED_COLUMN
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
-from morpheus.utils.event_clock import clock_for_skew_seconds
-from morpheus.utils.event_clock import event_times_ns
-from morpheus.utils.event_clock import guard_times
-from morpheus.utils.event_clock import refuse_rows
 from morpheus.utils.lineage import window_id_from_timestamp
 from morpheus.utils.stack_fingerprint import stack_family
 from morpheus.utils.stack_fingerprint import stack_fingerprint
@@ -144,7 +132,7 @@ will drift.
 
 
 @register_stage("tc4-flow")
-class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
+class TC4FlowStage(CheckpointMixin, TelemetryStage):
     """
     Roll each record into its flow's time bin and write the running transport features.
 
@@ -212,7 +200,7 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
                  window_column: str = "tcp_window_initial",
                  max_hosts: int = 100_000,
                  max_clock_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS):
-        super().__init__(c)
+        super().__init__(c, max_clock_skew_seconds=max_clock_skew_seconds)
 
         if (bin_seconds <= 0):
             raise ValueError(f"bin_seconds must be positive, received {bin_seconds}")
@@ -254,30 +242,10 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
         self._needed_columns[STACK_OS_FAMILY] = TypeId.STRING
         self._needed_columns[STACK_FINGERPRINT_FIRST_SEEN] = TypeId.BOOL8
 
-        self._clock = clock_for_skew_seconds(max_clock_skew_seconds)
-        self._needed_columns[CLOCK_REFUSED_COLUMN] = TypeId.BOOL8
-
-        self._should_log_timestamps = True
-
     @property
     def name(self) -> str:
         """Stage name."""
         return "tc4-flow"
-
-    def accepted_types(self) -> tuple:
-        """
-        Accepted input types for this stage.
-
-        Returns
-        -------
-        tuple
-            Accepted input types.
-        """
-        return (ControlMessage, MessageMeta)
-
-    def supports_cpp_node(self) -> bool:
-        """Whether this stage supports a C++ node."""
-        return False
 
     @staticmethod
     def _whole(value: typing.Any) -> typing.Optional[int]:
@@ -312,85 +280,91 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
         return bits
 
-    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]):
+    def _required_columns(self, df) -> list:
+        """The columns this stage reads and cannot run without."""
+        del df
+
+        required = [
+            self._src_ip_column, self._src_port_column, self._dst_ip_column, self._dst_port_column, self._time_column
+        ]
+
+        return required
+
+    def _process(self, df):
         """
         Write the flow identifier, its bin, and the running features for that bin.
 
         Parameters
         ----------
-        message : `morpheus.messages.ControlMessage` or `morpheus.messages.MessageMeta`
-            Incoming transport records.
-
-        Returns
-        -------
-        The input message, with the transport columns populated.
-
-        Raises
-        ------
-        KeyError
-            If an address, a port, the time column, or any source of flags is absent.
+        df : `pandas.DataFrame` or `cudf.DataFrame`
+            The incoming frame, written in place.
         """
-        meta = message.payload() if isinstance(message, ControlMessage) else message
+        has_byte = self._flags_column in df.columns
+        flag_columns = {name: to_host_list(df, name) for name in FLAG_NAMES if name in df.columns}
 
-        if (meta is None or meta.count == 0):
-            return message
+        if (not has_byte and len(flag_columns) != len(FLAG_NAMES)):
+            raise KeyError(f"TC4FlowStage needs either a {self._flags_column!r} byte or all of "
+                           f"{list(FLAG_NAMES)}; the frame carries neither. A record whose flags cannot be "
+                           f"read contributes nothing to any of the thirteen features.")
 
-        with meta.mutable_dataframe() as df:
-            required = [
-                self._src_ip_column,
-                self._src_port_column,
-                self._dst_ip_column,
-                self._dst_port_column,
-                self._time_column
-            ]
-            missing = [column for column in required if column not in df.columns]
+        byte_values = to_host_list(df, self._flags_column) if has_byte else None
 
-            if (len(missing) > 0):
-                raise KeyError(f"TC4FlowStage requires columns {missing} which are not present in the "
-                               f"DataFrame. Available columns: {sorted(df.columns)}")
+        src_ips = to_host_list(df, self._src_ip_column)
+        src_ports = to_host_list(df, self._src_port_column)
+        dst_ips = to_host_list(df, self._dst_ip_column)
+        dst_ports = to_host_list(df, self._dst_port_column)
 
-            has_byte = self._flags_column in df.columns
-            flag_columns = {name: to_host_list(df, name) for name in FLAG_NAMES if name in df.columns}
+        rows = len(src_ips)
+        payloads = (to_host_list(df, self._data_len_column) if self._data_len_column in df.columns else [None] * rows)
+        # Guarded once, before any bin or stack history is shown a time: a refused time becomes `None`, which
+        # the rows below already treat as a record with nothing to aggregate.
+        (times, refused) = self._guarded_times(df, self._time_column, self._time_unit)
 
-            if (not has_byte and len(flag_columns) != len(FLAG_NAMES)):
-                raise KeyError(f"TC4FlowStage needs either a {self._flags_column!r} byte or all of "
-                               f"{list(FLAG_NAMES)}; the frame carries neither. A record whose flags cannot be "
-                               f"read contributes nothing to any of the thirteen features.")
+        flow_ids: list = []
+        bins: list = []
+        counts: dict[str, list] = {column: [] for column in COUNTS}
+        ppm: list = []
+        data_len: list = []
+        all_flags: list = []
+        bpp: list = []
+        ratios: dict[str, list] = {column: [] for column in RATIOS}
+        unusable = 0
+        unordered = 0
 
-            byte_values = to_host_list(df, self._flags_column) if has_byte else None
+        for position in range(rows):
+            flow_id = self._flow_id(src_ips[position], src_ports[position], dst_ips[position], dst_ports[position])
+            event_time_ns = times[position]
+            bits = self._flags_for(position, byte_values, flag_columns)
+            flow_ids.append(flow_id)
 
-            src_ips = to_host_list(df, self._src_ip_column)
-            src_ports = to_host_list(df, self._src_port_column)
-            dst_ips = to_host_list(df, self._dst_ip_column)
-            dst_ports = to_host_list(df, self._dst_port_column)
+            if (flow_id is None or event_time_ns is None or bits is None):
+                unusable += int(not refused[position])
+                bins.append(None)
 
-            rows = len(src_ips)
-            payloads = (to_host_list(df, self._data_len_column) if self._data_len_column in df.columns else [None] *
-                        rows)
-            # Guarded once, before any bin or stack history is shown a time: a refused time becomes `None`, which
-            # the rows below already treat as a record with nothing to aggregate.
-            (times, refused) = guard_times(self._clock, event_times_ns(df, self._time_column, self._time_unit))
+                for column in COUNTS:
+                    counts[column].append(None)
 
-            flow_ids: list = []
-            bins: list = []
-            counts: dict[str, list] = {column: [] for column in COUNTS}
-            ppm: list = []
-            data_len: list = []
-            all_flags: list = []
-            bpp: list = []
-            ratios: dict[str, list] = {column: [] for column in RATIOS}
-            unusable = 0
-            unordered = 0
+                ppm.append(None)
+                data_len.append(None)
+                all_flags.append(None)
+                bpp.append(None)
 
-            for position in range(rows):
-                flow_id = self._flow_id(src_ips[position], src_ports[position], dst_ips[position], dst_ports[position])
-                event_time_ns = times[position]
-                bits = self._flags_for(position, byte_values, flag_columns)
-                flow_ids.append(flow_id)
+                for column in RATIOS:
+                    ratios[column].append(None)
 
-                if (flow_id is None or event_time_ns is None or bits is None):
-                    unusable += int(not refused[position])
-                    bins.append(None)
+                continue
+
+            # Floored and half-open, anchored on the epoch, exactly as every other window in this fork is.
+            ordinal = window_id_from_timestamp(event_time_ns, self._bin_ns)
+            state = self._open.get(flow_id)
+
+            if (state is None or state["bin"] != ordinal):
+                if (state is not None and state["bin"] > ordinal):
+                    # A record for a bin this flow has already moved past. Reopening it would produce a
+                    # second partial aggregate for a bin that was already reported complete.
+                    unordered += 1
+                    # Nanoseconds like every other row's: the bin is still known, only the counts are not.
+                    bins.append(ordinal * self._bin_ns)
 
                     for column in COUNTS:
                         counts[column].append(None)
@@ -405,110 +379,82 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
 
                     continue
 
-                # Floored and half-open, anchored on the epoch, exactly as every other window in this fork is.
-                ordinal = window_id_from_timestamp(event_time_ns, self._bin_ns)
-                state = self._open.get(flow_id)
+                state = {"bin": ordinal, "ppm": 0, "data_len": 0}
+                state.update({name: 0 for name in FLAG_NAMES})
 
-                if (state is None or state["bin"] != ordinal):
-                    if (state is not None and state["bin"] > ordinal):
-                        # A record for a bin this flow has already moved past. Reopening it would produce a
-                        # second partial aggregate for a bin that was already reported complete.
-                        unordered += 1
-                        # Nanoseconds like every other row's: the bin is still known, only the counts are not.
-                        bins.append(ordinal * self._bin_ns)
+            # Removed and reinserted on every record the flow aggregates, so that the mapping's order is recency
+            # and its first key is the flow least recently seen. Assigning to a key that is already present
+            # keeps its original position, which would instead evict the flow that was opened first however
+            # busy it still is. A plain dict rather than an OrderedDict, so that a checkpoint written before
+            # this change restores to a type that still supports the reinsertion.
+            self._open.pop(flow_id, None)
+            self._open[flow_id] = state
 
-                        for column in COUNTS:
-                            counts[column].append(None)
+            while (len(self._open) > self._max_flows):
+                self._open.pop(next(iter(self._open)))
 
-                        ppm.append(None)
-                        data_len.append(None)
-                        all_flags.append(None)
-                        bpp.append(None)
+            for name in FLAG_NAMES:
+                state[name] += bits[name]
 
-                        for column in RATIOS:
-                            ratios[column].append(None)
+            state["ppm"] += 1
+            payload = self._whole(payloads[position])
+            state["data_len"] += payload if payload is not None else 0
 
-                        continue
+            total = sum(state[name] for name in FLAG_NAMES)
 
-                    state = {"bin": ordinal, "ppm": 0, "data_len": 0}
-                    state.update({name: 0 for name in FLAG_NAMES})
+            bins.append(ordinal * self._bin_ns)
 
-                # Removed and reinserted on every record the flow aggregates, so that the mapping's order is recency
-                # and its first key is the flow least recently seen. Assigning to a key that is already present
-                # keeps its original position, which would instead evict the flow that was opened first however
-                # busy it still is. A plain dict rather than an OrderedDict, so that a checkpoint written before
-                # this change restores to a type that still supports the reinsertion.
-                self._open.pop(flow_id, None)
-                self._open[flow_id] = state
+            for (column, name) in zip(COUNTS, FLAG_NAMES):
+                counts[column].append(state[name])
 
-                while (len(self._open) > self._max_flows):
-                    self._open.pop(next(iter(self._open)))
+            ppm.append(state["ppm"])
+            data_len.append(state["data_len"])
+            all_flags.append(total)
+            bpp.append(state["data_len"] / state["ppm"])
 
-                for name in FLAG_NAMES:
-                    state[name] += bits[name]
+            # A bin with no flags set at all has no denominator, and a ratio of zero would claim the flow
+            # had flags and none of them were RST rather than that it had none.
+            ratios[ACKPUSH_RATIO].append(None if total == 0 else (state["ack"] + state["psh"]) / total)
+            ratios[RST_RATIO].append(None if total == 0 else state["rst"] / total)
+            ratios[SYN_RATIO].append(None if total == 0 else state["syn"] / total)
+            ratios[FIN_RATIO].append(None if total == 0 else state["fin"] / total)
 
-                state["ppm"] += 1
-                payload = self._whole(payloads[position])
-                state["data_len"] += payload if payload is not None else 0
+        assign_str_column(df, FLOW_ID, flow_ids)
+        assign_nullable_int_column(df, ROLLUP_TIME, bins)
 
-                total = sum(state[name] for name in FLAG_NAMES)
+        for column in COUNTS:
+            assign_nullable_int_column(df, column, counts[column])
 
-                bins.append(ordinal * self._bin_ns)
+        assign_nullable_int_column(df, PPM, ppm)
+        assign_nullable_int_column(df, DATA_LEN, data_len)
+        assign_nullable_int_column(df, ALL_FLAGS, all_flags)
+        assign_nullable_float_column(df, BPP, bpp)
 
-                for (column, name) in zip(COUNTS, FLAG_NAMES):
-                    counts[column].append(state[name])
+        for column in RATIOS:
+            assign_nullable_float_column(df, column, ratios[column])
 
-                ppm.append(state["ppm"])
-                data_len.append(state["data_len"])
-                all_flags.append(total)
-                bpp.append(state["data_len"] / state["ppm"])
+        self._write_stacks(df, src_ips, times)
 
-                # A bin with no flags set at all has no denominator, and a ratio of zero would claim the flow
-                # had flags and none of them were RST rather than that it had none.
-                ratios[ACKPUSH_RATIO].append(None if total == 0 else (state["ack"] + state["psh"]) / total)
-                ratios[RST_RATIO].append(None if total == 0 else state["rst"] / total)
-                ratios[SYN_RATIO].append(None if total == 0 else state["syn"] / total)
-                ratios[FIN_RATIO].append(None if total == 0 else state["fin"] / total)
+        self._refuse(df,
+                     refused,
+                     logger=logger,
+                     what="records",
+                     outcome="they joined no bin, set clock_refused and closed nothing.")
 
-            assign_str_column(df, FLOW_ID, flow_ids)
-            assign_nullable_int_column(df, ROLLUP_TIME, bins)
+        if (unusable > 0):
+            logger.warning(
+                "TC4FlowStage left %d of %d records out of their flow's bin for want of an identifier, a "
+                "usable event time, or readable flags.",
+                unusable,
+                rows)
 
-            for column in COUNTS:
-                assign_nullable_int_column(df, column, counts[column])
-
-            assign_nullable_int_column(df, PPM, ppm)
-            assign_nullable_int_column(df, DATA_LEN, data_len)
-            assign_nullable_int_column(df, ALL_FLAGS, all_flags)
-            assign_nullable_float_column(df, BPP, bpp)
-
-            for column in RATIOS:
-                assign_nullable_float_column(df, column, ratios[column])
-
-            self._write_stacks(df, src_ips, times)
-
-            refuse_rows(df,
-                        refused,
-                        logger=logger,
-                        stage="TC4FlowStage",
-                        what="records",
-                        outcome="they joined no bin, set clock_refused and closed nothing.")
-
-            if (unusable > 0):
-                logger.warning(
-                    "TC4FlowStage left %d of %d records out of their flow's bin for want of an identifier, a "
-                    "usable event time, or readable flags.",
-                    unusable,
-                    rows)
-
-            if (unordered > 0):
-                logger.warning(
-                    "TC4FlowStage saw %d of %d records arrive for a bin their flow had already passed; they "
-                    "were not aggregated. Reopening a closed bin produces a second partial figure for a bin "
-                    "already reported complete, which is a number that depends on how the stream was chunked.",
-                    unordered,
-                    rows)
-
-        return message
+        if (unordered > 0):
+            logger.warning(
+                "TC4FlowStage saw %d of %d records arrive for a bin their flow had already passed; they "
+                "were not aggregated. Reopening a closed bin produces a second partial figure for a bin "
+                "already reported complete, which is a number that depends on how the stream was chunked.",
+                unordered,
+                rows)
 
     def _write_stacks(self, df, src_ips: list, times: list) -> None:
         """Each SYN's stack fingerprint, its family, and whether its source has presented it before.
@@ -558,9 +504,3 @@ class TC4FlowStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, SinglePor
             return None
 
         return f"{parts[0]}:{parts[1]}={parts[2]}:{parts[3]}"
-
-    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.on_data))
-        builder.make_edge(input_node, node)
-
-        return node
