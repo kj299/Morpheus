@@ -742,6 +742,36 @@ def test_a_request_and_a_connection_carry_the_application_that_answered(result: 
     assert not _true(service[service["dst_ip"] == ap_.NEW_SERVER], "ctx_application_found").any()
 
 
+# --- R-B-L7-003: sensitive data in transit, on the SID model ---------------------------------------------------
+
+
+@pytest.mark.cpu_mode
+def test_the_leaker_is_the_only_client_whose_bodies_carry_something(result: pd.DataFrame):
+    # Each leaked body carries one kind of value the model has a label for, and the model names exactly that kind.
+    # The ordinary client posts to the same endpoint and is read and found clean; a request with no body has nothing
+    # to read, which is a null rather than an empty finding.
+    http = _http(result)
+    bodied = http[http[ap_.BODY_COLUMN].notna()]
+    found = bodied[bodied["sid_labels"].fillna("") != ""]
+
+    assert set(found["src_ip"]) == {ap_.LEAKER}
+    assert dict(zip(found[ap_.BODY_COLUMN], found["sid_labels"])) == dict(
+        zip(ap_.LEAKED_BODIES, ("govt_id", "password", "secret_keys")))
+    assert set(bodied[bodied["src_ip"] == ap_.FORM_CLIENT]["sid_labels"]) == {""}
+    assert http[http[ap_.BODY_COLUMN].isna()]["sid_labels"].isna().all()
+    assert set(bodied["sid_model_version"]) == {"sid-minibert-20230424:d12f31d6dcebd03d"}
+
+
+@pytest.mark.cpu_mode
+def test_the_sensitive_data_rule_never_copies_the_body_into_the_risk_record():
+    # The rule reads what the model found, not what the body said; a risk record that carried the body would copy
+    # the very value the rule exists to find into a second index.
+    search = _search("R-B-L7-003 - Sensitive data in transit").split("search =", 1)[1]
+
+    assert ap_.BODY_COLUMN not in search
+    assert "sid_labels" in search and "sid_model_version" in search
+
+
 # --- Minimization: the sensitive columns neither rule needs at the wire -----------------------------------------
 
 SAVEDSEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),

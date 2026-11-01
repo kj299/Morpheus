@@ -384,7 +384,7 @@ calls an optional addition. Both are recorded so the decision is visible.
 | G45 | major | narrowed → narrowed | nodes | Layer 3 is per-IP with no subnet/asset-group roll-up and no TC-0 join for infrastructure nodes | #60 |
 | G46 | major | narrowed → closed | all | Sourcetype `required_columns` are narrower than the columns the shipped searches read, group and join on | #53 |
 | G47 | major | stands → closed | nodes, all | R-P-L3-005 and Chain assembly depend on Splunk-side state (`behavior_summary`, risk) the validation package never produces | #57 |
-| G48 | major | stands → holds → narrowed | applications | Model-dependent rules R-B-L7-003 and R-B-L4-001 have no inference path or scorer stub; both models score on the CPU from the model inventory since 2026-10-25 (audit ruling D2), and no saved search reads either score yet | not scheduled |
+| G48 | major | stands → holds → narrowed | applications | Model-dependent rules R-B-L7-003 and R-B-L4-001 have no inference path or scorer stub; both models score on the CPU from the model inventory since 2026-10-25 (audit ruling D2), and no saved search reads either score yet; under plan section 4.1 R-B-L7-003 ships over the HTTP class's request bodies, and R-B-L4-001 stays a score because the booster puts every corpus flow above its threshold | not scheduled |
 | G49 | major | stands → narrowed | applications | User-agent novelty, DGA/NXDOMAIN and 5xx ratio TC-7 features have no producer | #64 |
 | G50 | major | stands → closed | applications | DNS and HTTP clients have no per-entity baseline; R-B-L7-001 is fixed thresholds | #64 |
 | G51 | major | stands → closed | applications | TC-0 has no application-to-server or service-account-to-team kind | #64 |

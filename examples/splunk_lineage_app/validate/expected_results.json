@@ -917,6 +917,26 @@
         }
       ]
     },
+    "R-B-L7-003 - Sensitive data in transit": {
+      "expected_rows": 3,
+      "expected_empty": false,
+      "contributing_rows": 3,
+      "why": "Three notables, all for 10.0.0.48, one per request body the SID model found something in: a government identifier, a password and a cloud key, each posted to /api/submit on the event day. 10.0.0.49 posts three ordinary forms to the same endpoint -- a search and two orders -- and the model reads each and finds nothing, so its sid_labels is empty rather than absent. Every other HTTP request carries no body and no sid_labels at all. The risk record names what was found and never the body, which would copy the value the rule exists to find into a second index.",
+      "key_values": [
+        {
+          "src_ip": "10.0.0.48",
+          "sid_labels": "govt_id"
+        },
+        {
+          "src_ip": "10.0.0.48",
+          "sid_labels": "password"
+        },
+        {
+          "src_ip": "10.0.0.48",
+          "sid_labels": "secret_keys"
+        }
+      ]
+    },
     "R-P-L7-006 - Access breadth trajectory": {
       "expected_rows": 2,
       "expected_empty": false,

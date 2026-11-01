@@ -8,7 +8,7 @@
     "context:identity": 23,
     "context:network": 20,
     "morpheus:edge": 2768,
-    "morpheus:health": 1099,
+    "morpheus:health": 1100,
     "morpheus:late": 1,
     "morpheus:quarantine": 3,
     "morpheus:score:host": 1568,
@@ -18,6 +18,6 @@
     "morpheus:score:l4": 1011,
     "morpheus:score:l5": 661,
     "morpheus:score:l6": 649,
-    "morpheus:score:l7": 9219
+    "morpheus:score:l7": 9225
   }
 }
