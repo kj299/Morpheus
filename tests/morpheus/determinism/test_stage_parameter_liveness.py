@@ -1231,6 +1231,7 @@ def wire() -> dict:
         "determinism_tier": ["D1", "D1"],
         "pipeline_fingerprint": ["f1", "f1"],
         "config_hash": ["c1", "c1"],
+        "reference_data": ["public_suffix_list:5f0e3c1a9b7d2486", "public_suffix_list:5f0e3c1a9b7d2486"],
         "resumed_from_state": ["cold-start", "cold-start"],
         "port_key": ["hq:sw1:Gi1/0/1"] * 2,
         "macs_per_port": [1, 2],
