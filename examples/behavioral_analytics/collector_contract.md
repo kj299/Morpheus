@@ -391,7 +391,7 @@ One record per `request` a proxy or sensor saw. Read by `TC7HttpStage`, which me
 | `url_path` | string | -- | yes | http.log `uri`, without the query string | -- |
 | `status_code` | integer | -- | yes | http.log `status_code` | -- |
 | `user_agent` | string | -- | yes | http.log `user_agent` | -- |
-| `request_body` | string | -- | no | A content-inspecting proxy's record of the request body (Zeek `http.log` carries none) | Null on a request with no body. Read by `TC7SidScoreStage` for R-B-L7-003; sensitive content by definition, so an estate that does not run the rule leaves it out. |
+| `request_body` | string | -- | yes | A content-inspecting proxy's record of the request body (Zeek `http.log` carries none) | Null on a request with no body, and on every request from a proxy that does not inspect content. Read by `TC7SidScoreStage` for R-B-L7-003; sensitive content by definition, so the risk record never carries it. |
 
 ## SaaS audit operation (TC-7)
 

@@ -118,7 +118,12 @@ DNS_CLASS = "tc7_dns"
 HTTP_CLASS = "tc7_http"
 BODY_COLUMN = "request_body"
 """The HTTP column the SID model reads: the request body a content-inspecting proxy records."""
-MODEL_INVENTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "models", "inventory",
+MODEL_INVENTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "..",
+                               "..",
+                               "..",
+                               "models",
+                               "inventory",
                                "inventory.json")
 """The repository's model inventory, which pins the SID model's bytes."""
 SERVICE_CLASS = "tc7_service"

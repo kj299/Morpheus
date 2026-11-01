@@ -755,8 +755,8 @@ def test_the_leaker_is_the_only_client_whose_bodies_carry_something(result: pd.D
     found = bodied[bodied["sid_labels"].fillna("") != ""]
 
     assert set(found["src_ip"]) == {ap_.LEAKER}
-    assert dict(zip(found[ap_.BODY_COLUMN], found["sid_labels"])) == dict(
-        zip(ap_.LEAKED_BODIES, ("govt_id", "password", "secret_keys")))
+    assert dict(zip(found[ap_.BODY_COLUMN],
+                    found["sid_labels"])) == dict(zip(ap_.LEAKED_BODIES, ("govt_id", "password", "secret_keys")))
     assert set(bodied[bodied["src_ip"] == ap_.FORM_CLIENT]["sid_labels"]) == {""}
     assert http[http[ap_.BODY_COLUMN].isna()]["sid_labels"].isna().all()
     assert set(bodied["sid_model_version"]) == {"sid-minibert-20230424:d12f31d6dcebd03d"}

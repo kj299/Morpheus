@@ -1750,9 +1750,9 @@
           "name": "request_body",
           "type": "string",
           "unit": "",
-          "required": false,
+          "required": true,
           "source": "A content-inspecting proxy's record of the request body (Zeek `http.log` carries none)",
-          "notes": "Null on a request with no body. Read by `TC7SidScoreStage` for R-B-L7-003; sensitive content by definition, so an estate that does not run the rule leaves it out."
+          "notes": "Null on a request with no body, and on every request from a proxy that does not inspect content. Read by `TC7SidScoreStage` for R-B-L7-003; sensitive content by definition, so the risk record never carries it."
         }
       ]
     },

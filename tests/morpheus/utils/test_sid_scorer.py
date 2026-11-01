@@ -132,3 +132,14 @@ def test_text_with_no_tokens_is_not_scored(scorer: SidScorer):
 
     assert result[:3] == [None, None, None]
     assert result[3][scorer.labels.index("secret_keys")] > scorer.threshold
+
+
+def test_a_copied_stage_shares_the_scorer_rather_than_copying_the_runtime(scorer: SidScorer):
+    # A composition that copies its stages before wiring them -- the resumable pipelines do -- must not try to
+    # pickle the model runtime, and has no need to: the loaded model never changes.
+    import copy  # pylint: disable=import-outside-toplevel
+
+    holder = {"scorer": scorer}
+
+    assert copy.deepcopy(scorer) is scorer
+    assert copy.deepcopy(holder)["scorer"] is scorer

@@ -1841,6 +1841,7 @@ NUMBER_WORDS = {
     "eighty-four": 84,
     "eighty-five": 85,
     "eighty-six": 86,
+    "eighty-seven": 87,
 }
 """Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
 which is the right failure: the document said something nobody here anticipated."""

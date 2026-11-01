@@ -653,11 +653,11 @@
     "Chain assembly - cross-layer risk": {
       "expected_rows": 1,
       "expected_empty": false,
-      "distinct_lineage_ids": 3772,
+      "distinct_lineage_ids": 3774,
       "maximum_layer_span": 3,
       "two_layer_chains": 24,
       "three_layer_chains": 15,
-      "chains_with_a_method": 1485,
+      "chains_with_a_method": 1487,
       "three_layer_chain_methods": [
         "soft:directory",
         "soft:dot1x",

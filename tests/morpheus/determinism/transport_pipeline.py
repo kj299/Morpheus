@@ -94,7 +94,12 @@ CORPUS_SEED = 20260921
 PERIOD_SECONDS = 3600
 LATENESS_SECONDS = 900
 BIN_SECONDS = 60
-MODEL_INVENTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "models", "inventory",
+MODEL_INVENTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "..",
+                               "..",
+                               "..",
+                               "models",
+                               "inventory",
                                "inventory.json")
 """The repository's model inventory, which pins the ABP booster's bytes."""
 CORPUS_HOURS = 2
