@@ -91,7 +91,7 @@ def _expected(segment: str) -> dict[str, list[str]]:
     """The in-memory composition's rows and its two branches, rendered through the same wire, per sourcetype."""
     import importlib  # pylint: disable=import-outside-toplevel
 
-    module = importlib.import_module(segment_runner.SEGMENTS[segment]["module"])
+    module = importlib.import_module(f"{segment_runner.SEGMENTS[segment]['module']}_pipeline")
     config = module.build_pipeline_config()
     result = module.run_pipeline(config, module.build_corpus())
     lines: dict[str, list[str]] = {}
@@ -139,6 +139,10 @@ lease at layer 3 and through the EDR inventory at layer 7."""
 def test_a_segment_naming_its_hops_writes_the_edges_the_harness_emits(tmp_path, monkeypatch):
     import network_pipeline  # pylint: disable=import-outside-toplevel
 
+    from morpheus.compositions import network  # pylint: disable=import-outside-toplevel
+
+    # The runner reads the composition in the package; the harness reads it through the corpus's namespace.
+    monkeypatch.setattr(network, "EDGE_HOPS", NETWORK_HOPS, raising=False)
     monkeypatch.setattr(network_pipeline, "EDGE_HOPS", NETWORK_HOPS, raising=False)
     written = segment_runner.run("network", EXAMPLE / "samples" / "network", output_dir=tmp_path / "out")
     on_disk = sorted((tmp_path / "out" / "morpheus_edge.jsonlines").read_text(encoding="utf-8").splitlines())

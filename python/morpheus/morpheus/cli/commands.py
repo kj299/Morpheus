@@ -571,6 +571,7 @@ add_command("partition-merge", "morpheus.stages.lineage.partition_merge_stage.Pa
 add_command("pipeline-health", "morpheus.stages.lineage.pipeline_health_stage.PipelineHealthStage", modes=ALL)
 add_command("serialize", "morpheus.stages.postprocess.serialize_stage.SerializeStage", modes=ALL)
 add_command("siem-wire", "morpheus.stages.output.siem_wire_stage.SiemWireStage", modes=ALL)
+add_command("shard-split", "morpheus.stages.lineage.shard_split_stage.ShardSplitStage", modes=ALL)
 add_command("tc0-application", "morpheus.stages.telemetry.tc0_application_stage.TC0ApplicationStage", modes=ALL)
 add_command("tc0-asset", "morpheus.stages.telemetry.tc0_asset_stage.TC0AssetStage", modes=ALL)
 add_command("tc0-enrich", "morpheus.stages.telemetry.tc0_enrich_stage.TC0EnrichStage", modes=ALL)

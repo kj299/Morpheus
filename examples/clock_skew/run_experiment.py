@@ -60,7 +60,8 @@ import os
 import sys
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-HARNESS = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism")
+HARNESS = os.path.join(REPO_ROOT, "examples", "behavioral_analytics")
+"""Where the corpora the experiment runs the compositions over live."""
 
 MILLISECOND_NS = 1_000_000
 SECOND_NS = 1000 * MILLISECOND_NS
@@ -481,19 +482,18 @@ def main() -> int:
     sys.path.insert(0, HARNESS)
 
     # pylint: disable=import-outside-toplevel
-    import application_pipeline
-    import campaign_pipeline
-    import endpoint_pipeline
-    import estate_pipeline
-    import host_score_pipeline
-    import network_pipeline
-    import presentation_pipeline
-    import saas_pipeline
-    import session_pipeline
-    import telemetry_pipeline
-    import transport_pipeline
-
-    # pylint: enable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+    application_pipeline = merged("application")
+    campaign_pipeline = merged("campaign")
+    endpoint_pipeline = merged("endpoint")
+    estate_pipeline = merged("estate")
+    host_score_pipeline = merged("host_score")
+    network_pipeline = merged("network")
+    presentation_pipeline = merged("presentation")
+    saas_pipeline = merged("saas")
+    session_pipeline = merged("session")
+    telemetry_pipeline = merged("telemetry")
+    transport_pipeline = merged("transport")
 
     single_host = telemetry_pipeline.SINGLE_HOST_PORTS
 

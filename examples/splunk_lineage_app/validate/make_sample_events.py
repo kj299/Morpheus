@@ -35,7 +35,7 @@ HERE = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = HERE.parents[2]
 EVENTS = HERE / "sample_events"
 
-sys.path.insert(0, str(REPO_ROOT / "tests" / "morpheus" / "determinism"))
+sys.path.insert(0, str(REPO_ROOT / "examples" / "behavioral_analytics"))
 
 # The class of each estate row, and the sourcetype a deployment would send it on.
 CLASS_SOURCETYPES = {
@@ -134,11 +134,9 @@ def _scored(by_sourcetype: dict, frame, sourcetype: str):
 
 def _health(by_sourcetype: dict, module, result):
     """The health records a deployment's health branch would write for one corpus's sealed output."""
-    import envelope  # pylint: disable=import-outside-toplevel
-
+    from morpheus.compositions import envelope  # pylint: disable=import-outside-toplevel
     from morpheus.stages.lineage.pipeline_health_stage import (  # pylint: disable=import-outside-toplevel
-        DEFAULT_MIN_BUCKETS,
-    )
+        DEFAULT_MIN_BUCKETS, )
 
     records = envelope.health(module.build_pipeline_config(), result, module.PERIOD_SECONDS, DEFAULT_MIN_BUCKETS)
 
@@ -149,19 +147,20 @@ def _health(by_sourcetype: dict, module, result):
 def main() -> int:
     # Imported here rather than at module scope, like everything else this file takes from morpheus: the path
     # setup above has to run before the package is reachable.
-    import application_pipeline  # pylint: disable=import-outside-toplevel
-    import campaign_pipeline  # pylint: disable=import-outside-toplevel
-    import context_pipeline  # pylint: disable=import-outside-toplevel
-    import endpoint_pipeline  # pylint: disable=import-outside-toplevel
-    import estate_pipeline as ep  # pylint: disable=import-outside-toplevel
-    import host_score_pipeline  # pylint: disable=import-outside-toplevel
-    import network_pipeline  # pylint: disable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+    application_pipeline = merged("application")
+    campaign_pipeline = merged("campaign")
+    context_pipeline = merged("context")
+    endpoint_pipeline = merged("endpoint")
+    ep = merged("estate")
+    host_score_pipeline = merged("host_score")
+    network_pipeline = merged("network")
     import pandas as pd  # pylint: disable=import-outside-toplevel
-    import presentation_pipeline  # pylint: disable=import-outside-toplevel
-    import saas_pipeline  # pylint: disable=import-outside-toplevel
-    import session_pipeline as sp  # pylint: disable=import-outside-toplevel
-    import telemetry_pipeline as tp  # pylint: disable=import-outside-toplevel
-    import transport_pipeline  # pylint: disable=import-outside-toplevel
+    presentation_pipeline = merged("presentation")
+    saas_pipeline = merged("saas")
+    sp = merged("session")
+    tp = merged("telemetry")
+    transport_pipeline = merged("transport")
 
     from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS  # pylint: disable=import-outside-toplevel
 

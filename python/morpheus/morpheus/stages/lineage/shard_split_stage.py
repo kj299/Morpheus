@@ -1,11 +1,10 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-# http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -31,6 +30,7 @@ import mrc
 import numpy as np
 from mrc.core import operators as ops
 
+from morpheus.cli.register_stage import register_stage
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
@@ -62,6 +62,7 @@ def _keys_of(meta: MessageMeta, column: str) -> list:
     return frame[column].tolist()
 
 
+@register_stage("shard-split")
 class ShardSplitStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
     """
     Cut each frame into one message per shard present in it, rows in their original order.
@@ -121,8 +122,12 @@ class ShardSplitStage(GpuAndCpuMixin, PassThruTypeMixin, SinglePortStage):
 
         return out
 
+    def on_data(self, message: typing.Union[ControlMessage, MessageMeta]) -> list:
+        """The message cut into one message per shard; see `split`."""
+        return self.split(message)
+
     def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
-        node = builder.make_node(self.unique_name, ops.map(self.split), ops.flatten())
+        node = builder.make_node(self.unique_name, ops.map(self.on_data), ops.flatten())
         builder.make_edge(input_node, node)
 
         return node

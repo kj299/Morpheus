@@ -57,10 +57,8 @@ import typing
 
 HERE = pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = HERE.parents[1]
-COMPOSITIONS = REPO_ROOT / "tests" / "morpheus" / "determinism"
 
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(COMPOSITIONS))
 
 L1 = "morpheus:score:l1"
 L2 = "morpheus:score:l2"
@@ -71,7 +69,7 @@ QUARANTINE_CLASS = "quarantine"
 
 SEGMENTS: dict[str, dict] = {
     "telemetry": {
-        "module": "telemetry_pipeline",
+        "module": "telemetry",
         "sourcetypes": {
             "tc1": L1,
             "tc1_device": L1,
@@ -84,43 +82,43 @@ SEGMENTS: dict[str, dict] = {
         },
     },
     "network": {
-        "module": "network_pipeline", "sourcetypes": {
+        "module": "network", "sourcetypes": {
             "tc3": "morpheus:score:l3"
         }
     },
     "transport": {
-        "module": "transport_pipeline", "sourcetypes": {
+        "module": "transport", "sourcetypes": {
             "tc4": "morpheus:score:l4"
         }
     },
     "session": {
-        "module": "session_pipeline",
+        "module": "session",
         "sourcetypes": {
             "tc5_auth": "morpheus:score:l5", "tc5_session": "morpheus:score:l5"
         },
     },
     "presentation": {
-        "module": "presentation_pipeline", "sourcetypes": {
+        "module": "presentation", "sourcetypes": {
             "tc6": "morpheus:score:l6"
         }
     },
     "application": {
-        "module": "application_pipeline", "sourcetypes": {
+        "module": "application", "sourcetypes": {
             "tc7_dns": L7, "tc7_http": L7, "tc7_service": L7
         }
     },
     "saas": {
-        "module": "saas_pipeline", "sourcetypes": {
+        "module": "saas", "sourcetypes": {
             "tc7_saas": L7
         }
     },
     "endpoint": {
-        "module": "endpoint_pipeline", "sourcetypes": {
+        "module": "endpoint", "sourcetypes": {
             "tc7_endpoint": L7
         }
     },
     "context": {
-        "module": "context_pipeline",
+        "module": "context",
         "sourcetypes": {
             "tc0_identity": "context:identity",
             "tc0_asset": "context:asset",
@@ -128,7 +126,7 @@ SEGMENTS: dict[str, dict] = {
         },
     },
     "host_score": {
-        "module": "host_score_pipeline", "sourcetypes": {
+        "module": "host_score", "sourcetypes": {
             "host_score": "morpheus:score:host"
         }
     },
@@ -291,7 +289,7 @@ def _branch(state_dir: typing.Optional[pathlib.Path], final: bool, produce: typi
     if (state_dir is None):
         return produce()
 
-    import resumable  # pylint: disable=import-outside-toplevel
+    from morpheus.compositions import resumable  # pylint: disable=import-outside-toplevel
 
     with resumable.persisted(str(state_dir), final=final):
         return produce()
@@ -312,8 +310,7 @@ def health(module,
     and `MinimizationStage` refuses a mixed frame. A module that names no period seals nothing (the context segment)
     and has no health.
     """
-    import envelope  # pylint: disable=import-outside-toplevel
-
+    from morpheus.compositions import envelope  # pylint: disable=import-outside-toplevel
     from morpheus.utils.bucket_peak import DEFAULT_MIN_BUCKETS  # pylint: disable=import-outside-toplevel
 
     period_seconds = getattr(module, "PERIOD_SECONDS", None)
@@ -354,7 +351,7 @@ def edges(module,
     The stage's memory is checkpointed under `state_dir / "edges"`. A module that names no hops has no edges, and the
     runner writes no edge file for it.
     """
-    import edge_stream  # pylint: disable=import-outside-toplevel
+    from morpheus.compositions import edge_stream  # pylint: disable=import-outside-toplevel
 
     hops = getattr(module, "EDGE_HOPS", None)
 
@@ -459,7 +456,7 @@ def run(segment: str,
     """
     import importlib  # pylint: disable=import-outside-toplevel
 
-    import resumable  # pylint: disable=import-outside-toplevel
+    from morpheus.compositions import resumable  # pylint: disable=import-outside-toplevel
 
     if (segment not in SEGMENTS):
         raise ValueError(f"unknown segment {segment!r}; one of {sorted(SEGMENTS)}")
@@ -475,7 +472,7 @@ def run(segment: str,
             raise FileExistsError(f"{output_dir} already holds records and this is a cold start; a resumed run "
                                   f"appends, a new one needs an empty directory")
 
-    module = importlib.import_module(SEGMENTS[segment]["module"])
+    module = importlib.import_module(f"morpheus.compositions.{SEGMENTS[segment]['module']}")
     policy = load_policy(policy_path)
     corpus = read_inputs(input_dir)
     config = module.build_pipeline_config()

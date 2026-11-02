@@ -61,9 +61,10 @@ EVAL_BATCH_SIZE = 64
 
 def training_frames() -> tuple:
     """The fortnight's features per principal, from a pipeline run that needs no model to produce them."""
-    sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "examples", "behavioral_analytics"))
 
-    import session_pipeline  # pylint: disable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+    session_pipeline = merged("session")
     from morpheus.utils.model_manifest import ModelManifest  # pylint: disable=import-outside-toplevel
 
     # The features are what the stages emit and do not depend on any score, so the frozen arithmetic stands in
@@ -81,9 +82,10 @@ def training_frames() -> tuple:
 
 def host_training_frames() -> tuple:
     """The fortnight's hourly host frames per peer group and for the population, from a run that scores nothing."""
-    sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "examples", "behavioral_analytics"))
 
-    import host_score_pipeline  # pylint: disable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+    host_score_pipeline = merged("host_score")
 
     (scorer, manifest) = host_score_pipeline.unscored()
     result = host_score_pipeline.run_pipeline(host_score_pipeline.build_pipeline_config(),

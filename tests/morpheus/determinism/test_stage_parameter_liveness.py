@@ -62,6 +62,7 @@ from morpheus.stages.lineage.envelope_validate_stage import EnvelopeValidateStag
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.minimization_stage import MinimizationStage
 from morpheus.stages.lineage.partition_merge_stage import PartitionMergeStage
+from morpheus.stages.lineage.shard_split_stage import ShardSplitStage
 from morpheus.stages.lineage.pipeline_health_stage import PipelineHealthStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
@@ -1217,6 +1218,11 @@ def sealed_windows() -> dict:
         "sample_out_of_order": [False] * (count - 1) + [True],
         "model_fallback_used": [True] * count,
     }
+
+
+def sharded() -> dict:
+    """Rows of six entities, which two and three shards cut differently."""
+    return {"entity_key": ["a", "b", "c", "d", "e", "f"], "value": [1, 2, 3, 4, 5, 6]}
 
 
 def partitioned() -> dict:
@@ -2743,6 +2749,16 @@ REGISTRY: dict = {
                 Knob("time_column", INPUT_COLUMN, benign="event_time"),
                 # Read as seconds, the nanosecond times overflow and every row is timeless, released at once.
                 Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+            ),
+        ),
+    "ShardSplitStage":
+        Scenario(
+            stage=ShardSplitStage,
+            frame=sharded,
+            base={"key_column": "entity_key", "shards": 2},
+            knobs=(
+                Knob("key_column", INPUT_COLUMN, benign="entity_key"),
+                Knob("shards", DIFFERS, benign=2, extreme=3),
             ),
         ),
     "SiemWireSinkStage":

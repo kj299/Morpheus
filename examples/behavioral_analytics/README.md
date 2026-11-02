@@ -21,8 +21,9 @@ python examples/behavioral_analytics/run_network.py --output out/network --state
 
 Every runner also writes `morpheus:late` for a row that arrived after its window sealed and
 `morpheus:quarantine` for a record whose clock could not be trusted. Each reads a directory holding one JSON lines
-file per class, `samples/<segment>/` by default, with `FileSourceStage`, runs the segment's composition -- the one
-its corpus module under `tests/morpheus/determinism/` holds to a golden file -- and ends in `MinimizationStage`,
+file per class, `samples/<segment>/` by default, with `FileSourceStage`, runs the segment's composition from
+`morpheus.compositions` -- the one the tests hold to a golden file over the segment's corpus in `corpora/` -- and ends
+in `MinimizationStage`,
 `SiemWireStage` and `SiemWireSinkStage`, one file per sourcetype or, with `--kafka`, one topic per sourcetype.
 `SiemWireSinkStage` leaves null fields out, which the generic file and Kafka writers do not.
 
