@@ -287,7 +287,12 @@ NUMBER_WORDS = {
     "thirty-seven": 37,
     "thirty-eight": 38,
     "thirty-nine": 39,
-    "forty": 40
+    "forty": 40,
+    "forty-one": 41,
+    "forty-two": 42,
+    "forty-three": 43,
+    "forty-four": 44,
+    "forty-five": 45,
 }
 
 

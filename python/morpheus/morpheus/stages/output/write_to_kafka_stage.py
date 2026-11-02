@@ -89,17 +89,16 @@ class WriteToKafkaStage(PassThruTypeMixin, GpuAndCpuMixin, SinglePortStage):
             def on_next(x: MessageMeta):
                 nonlocal outstanding_requests
 
-                def callback(_, msg):
-                    if msg is not None and msg.value() is not None:
-                        pass
-                    else:
-                        # fut.set_exception(err or msg.error())
+                def callback(err, msg):
+                    # The delivery report gives the error as its first argument; the message can be None, and a
+                    # failed delivery is an error to raise rather than a value to read.
+                    if err is not None:
                         logger.error(("Error occurred in `to-kafka` stage with broker '%s' "
                                       "while committing message:\n%s\nError:\n%s"),
                                      self._kafka_conf["bootstrap.servers"],
-                                     msg.value(),
-                                     msg.error())
-                        sub.on_error(msg.error())
+                                     None if msg is None else msg.value(),
+                                     err)
+                        sub.on_error(ck.KafkaException(err))
 
                 records = serializers.df_to_json(x.df, strip_newlines=True)
                 for mess in records:
@@ -113,11 +112,12 @@ class WriteToKafkaStage(PassThruTypeMixin, GpuAndCpuMixin, SinglePortStage):
                         except BufferError:
                             time.sleep(self._poll_time)
                         except Exception:
+                            # Raised rather than logged and skipped: a record the producer refused is a record lost.
                             logger.exception(("Error occurred in `to-kafka` stage with broker '%s' "
                                               "while committing message:\n%s"),
                                              self._kafka_conf["bootstrap.servers"],
                                              mess)
-                            break
+                            raise
                         finally:
                             # Try and process some
                             producer.poll(0)

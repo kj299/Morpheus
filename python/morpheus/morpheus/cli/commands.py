@@ -567,6 +567,7 @@ add_command("lineage-stamp", "morpheus.stages.lineage.lineage_stamp_stage.Lineag
 add_command("minimize", "morpheus.stages.lineage.minimization_stage.MinimizationStage", modes=ALL)
 add_command("mlflow-drift", "morpheus.stages.postprocess.ml_flow_drift_stage.MLFlowDriftStage", modes=ALL)
 add_command("monitor", "morpheus.stages.general.monitor_stage.MonitorStage", modes=ALL)
+add_command("partition-merge", "morpheus.stages.lineage.partition_merge_stage.PartitionMergeStage", modes=ALL)
 add_command("pipeline-health", "morpheus.stages.lineage.pipeline_health_stage.PipelineHealthStage", modes=ALL)
 add_command("serialize", "morpheus.stages.postprocess.serialize_stage.SerializeStage", modes=ALL)
 add_command("siem-wire", "morpheus.stages.output.siem_wire_stage.SiemWireStage", modes=ALL)

@@ -169,7 +169,6 @@ def read_class(path: pathlib.Path):
     -------
     `pandas.DataFrame`
     """
-    import make_input_samples  # pylint: disable=import-outside-toplevel
     import pandas as pd  # pylint: disable=import-outside-toplevel
 
     from morpheus.common import FileTypes  # pylint: disable=import-outside-toplevel
@@ -190,7 +189,20 @@ def read_class(path: pathlib.Path):
 
     frames = [message.copy_dataframe() for message in sink.get_messages()]
     frame = pd.concat(frames, ignore_index=True) if len(frames) > 0 else pd.DataFrame()
-    types = make_input_samples.column_types(make_input_samples.contract_class(path.stem))
+
+    return typed(frame, path.stem)
+
+
+def typed(frame, class_name: str):
+    """
+    A class's records as its contract types them: an integer column with a gap held as a nullable integer.
+
+    JSON has one number type and pandas reads an integer column with a null as float, which would render `12` as
+    `12.0` downstream. Applied to whatever read the records -- a file here, a Kafka topic in a deployment.
+    """
+    import make_input_samples  # pylint: disable=import-outside-toplevel
+
+    types = make_input_samples.column_types(make_input_samples.contract_class(class_name))
 
     for column in frame.columns:
         if (types.get(column) == "integer" and frame[column].isna().any()):

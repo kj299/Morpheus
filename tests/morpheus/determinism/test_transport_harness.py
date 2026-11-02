@@ -524,3 +524,93 @@ def test_every_packet_to_a_mapped_port_carries_its_application(result: pd.DataFr
     assert named[443] == {"file-shares-web"}
     assert not _truth(to_files[to_files["dst_port"].astype(int) == 22], "ctx_application_found").any()
     assert set(packets[packets["dst_ip"] == tp_.BACKUP_SERVER]["ctx_application_service_account"]) == {"svc-backup"}
+
+
+# --- Replayed from a two-partition topic ------------------------------------------------------------------------------
+#
+# Guide 13's plan item 4: the transport harness replays a two-partition topic in two orders and gets one output. The
+# packets are the segment's own input sample -- the lines a collector would produce -- keyed by source address onto
+# two partitions, each in event-time order, as a producer keying on the entity leaves them. They are read back by
+# `KafkaSourceStage` with provenance, merged by `PartitionMergeStage`, typed by the class contract as the file runner
+# types them, and run through the unchanged composition, which carries each packet's topic, partition and offset to
+# its scored row.
+
+SAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "examples", "behavioral_analytics")
+
+KAFKA_COLUMNS = ["kafka_topic", "kafka_partition", "kafka_offset"]
+
+
+def _replayed(config: Config, interleaving) -> pd.DataFrame:
+    sys.path.insert(0, os.path.abspath(SAMPLES))
+
+    try:
+        import kafka_replay  # pylint: disable=import-outside-toplevel
+        import segment_runner  # pylint: disable=import-outside-toplevel,import-error
+    finally:
+        sys.path.remove(os.path.abspath(SAMPLES))
+
+    sample = os.path.join(SAMPLES, "samples", "transport")
+    inputs = segment_runner.read_inputs(segment_runner.pathlib.Path(sample))
+
+    with open(os.path.join(sample, "tc4.jsonlines"), encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if line]
+
+    partitions = kafka_replay.partition_lines(lines, key="src_ip")
+    consumer = kafka_replay.RecordedConsumer(partitions, interleaving(partitions))
+    released = kafka_replay.replay(config, consumer, parser_kwargs=segment_runner.FILE_PARSER_KWARGS)
+
+    assert consumer.closed
+    assert sorted(consumer.committed) == sorted(
+        (number, offset) for (number, values) in partitions.items() for offset in range(len(values)))
+
+    batches = {name: [frame] for (name, frame) in inputs.items()}
+    batches[tp_.TELEMETRY_CLASS] = [segment_runner.typed(frame, tp_.TELEMETRY_CLASS) for frame in released]
+
+    return tp_.run_pipeline(config, inputs, batches=batches)
+
+
+@pytest.mark.cpu_mode
+def test_a_two_partition_topic_replayed_in_two_orders_gives_one_output(pipeline_config: Config):
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import kafka_replay  # pylint: disable=import-outside-toplevel
+
+    alternating = _replayed(pipeline_config, kafka_replay.round_robin)
+    one_then_other = _replayed(pipeline_config, kafka_replay.one_after_another)
+
+    # One output, provenance included.
+    assert tp_.render(alternating) == tp_.render(one_then_other)
+
+    # Every scored row says where its packet was read from.
+    assert alternating[KAFKA_COLUMNS].notna().all().all()
+    assert set(alternating["kafka_partition"]) == {0, 1}
+
+    # And apart from that, it is the output the composition gives the same packets from a file.
+    with open(GOLDEN_PATH, encoding="utf-8") as handle:
+        assert tp_.render(alternating.drop(columns=KAFKA_COLUMNS)) == handle.read()
+
+
+@pytest.mark.cpu_mode
+def test_the_replay_check_has_teeth(pipeline_config: Config):
+    # Without the merge, which rows share a batch is the interleaving. Read the two orders straight into the
+    # composition, one source message per partition run, and the outputs differ.
+    sys.path.insert(0, os.path.abspath(SAMPLES))
+
+    try:
+        import kafka_replay  # pylint: disable=import-outside-toplevel
+        import segment_runner  # pylint: disable=import-outside-toplevel,import-error
+    finally:
+        sys.path.remove(os.path.abspath(SAMPLES))
+
+    sample = os.path.join(SAMPLES, "samples", "transport")
+    inputs = segment_runner.read_inputs(segment_runner.pathlib.Path(sample))
+    packets = inputs[tp_.TELEMETRY_CLASS]
+    first = packets[packets["src_ip"].map(lambda ip: kafka_replay.zlib.crc32(ip.encode("utf-8")) % 2 == 0)]
+    second = packets.drop(index=first.index)
+
+    def unmerged(frames: list) -> str:
+        batches = {name: [frame] for (name, frame) in inputs.items()}
+        batches[tp_.TELEMETRY_CLASS] = [frame.sort_values("event_time", kind="mergesort") for frame in frames]
+
+        return tp_.render(tp_.run_pipeline(pipeline_config, inputs, batches=batches))
+
+    assert unmerged([first, second]) != unmerged([second, first])

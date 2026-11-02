@@ -61,6 +61,7 @@ from morpheus.stages.lineage.envelope_validate_stage import DEFAULT_REQUIRED_COL
 from morpheus.stages.lineage.envelope_validate_stage import EnvelopeValidateStage
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.minimization_stage import MinimizationStage
+from morpheus.stages.lineage.partition_merge_stage import PartitionMergeStage
 from morpheus.stages.lineage.pipeline_health_stage import PipelineHealthStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
@@ -1215,6 +1216,20 @@ def sealed_windows() -> dict:
         "session_unclassified": [False, True] + [False] * (count - 2),
         "sample_out_of_order": [False] * (count - 1) + [True],
         "model_fallback_used": [True] * count,
+    }
+
+
+def partitioned() -> dict:
+    """Three rows from two partitions of one topic, as `KafkaSourceStage` reads them with provenance."""
+    start = 1788114300123456789
+
+    return {
+        "kafka_topic": ["collector.tc4"] * 3,
+        "shard": ["x", "y", "z"],
+        "kafka_partition": [0, 1, 0],
+        "kafka_offset": [0, 0, 1],
+        "event_time": [start, start + 10 * SECOND, start + 20 * SECOND],
+        "label": ["a", "b", "c"],
     }
 
 
@@ -2712,6 +2727,24 @@ REGISTRY: dict = {
                 Knob("time_unit", DIFFERS, benign="ns", extreme="us"),
             ),
         ),
+    "PartitionMergeStage":
+        Scenario(
+            stage=PartitionMergeStage,
+            frame=partitioned,
+            base={"expected_partitions": 2},
+            knobs=(
+                # Two partitions have spoken, so two expected releases the first row at once; three holds everything
+                # for the end of the stream, which the emitted messages show as one release rather than two.
+                Knob("expected_partitions", DIFFERS, benign=2, extreme=3),
+                # Read as the topic, a column with a value per row makes three sources of the two partitions.
+                Knob("topic_column", DIFFERS, benign="kafka_topic", extreme="shard"),
+                Knob("partition_column", INPUT_COLUMN, benign="kafka_partition"),
+                Knob("offset_column", INPUT_COLUMN, benign="kafka_offset"),
+                Knob("time_column", INPUT_COLUMN, benign="event_time"),
+                # Read as seconds, the nanosecond times overflow and every row is timeless, released at once.
+                Knob("time_unit", DIFFERS, benign="ns", extreme="s"),
+            ),
+        ),
     "SiemWireSinkStage":
         Scenario(
             stage=SiemWireSinkStage,
@@ -2734,6 +2767,16 @@ REGISTRY: dict = {
                      INERT,
                      reason="read only when producing to Kafka, which needs a broker; the stage's own tests stand a "
                      "recorder in for the producer and assert the brokers it was built with"),
+                Knob("key_column",
+                     INERT,
+                     reason="read only when producing to Kafka, where it keys each message; the stage's own tests "
+                     "assert every message carries its record's entity_key as its key"),
+                Knob("max_retries", RAISES, benign=3, extreme=-1),
+                Knob("quarantine_topic",
+                     INERT,
+                     reason="read only when a Kafka produce fails; the stage's own tests stand in a broker that "
+                     "refuses and assert the records land on the quarantine topic, and that without one it raises"),
+                Knob("flush_timeout_seconds", RAISES, benign=30.0, extreme=0),
             ),
         ),
 }
