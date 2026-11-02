@@ -146,11 +146,11 @@ def quiet():
 
 def session_features():
     """The session corpus's authentications, as the ten features the fork's models are trained on."""
-    sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "examples", "behavioral_analytics"))
 
     import pandas as pd  # pylint: disable=import-outside-toplevel
-
-    import session_pipeline as sp  # pylint: disable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+    sp = merged("session")
 
     result = sp.run_pipeline(sp.build_pipeline_config(), sp.build_corpus())
     auth = result[result["telemetry_class"] == "tc5_auth"]
@@ -256,13 +256,15 @@ class DfpPath:
         self.config.ae.timestamp_column_name = "timestamp"
 
     def _split(self, frame, generic: bool):
-        from morpheus_dfp.stages.dfp_split_users_stage import DFPSplitUsersStage  # pylint: disable=import-outside-toplevel
+        from morpheus_dfp.stages.dfp_split_users_stage import (  # pylint: disable=import-outside-toplevel
+            DFPSplitUsersStage, )
 
         return DFPSplitUsersStage(self.config, include_generic=generic,
                                   include_individual=True).extract_users(frame.drop(columns=["event_time"]))
 
     def window(self, name: str, settings: dict):
-        from morpheus_dfp.stages.dfp_rolling_window_stage import DFPRollingWindowStage  # pylint: disable=import-outside-toplevel
+        from morpheus_dfp.stages.dfp_rolling_window_stage import (  # pylint: disable=import-outside-toplevel
+            DFPRollingWindowStage, )
 
         return DFPRollingWindowStage(self.config, cache_dir=os.path.join(self.workdir, name), **settings)
 
@@ -272,7 +274,8 @@ class DfpPath:
         return DFPTraining(self.config, model_kwargs=dict(TRAINING_KWARGS), epochs=TRAINING_EPOCHS)
 
     def writer(self):
-        from morpheus_dfp.stages.dfp_mlflow_model_writer import DFPMLFlowModelWriterStage  # pylint: disable=import-outside-toplevel
+        from morpheus_dfp.stages.dfp_mlflow_model_writer import (  # pylint: disable=import-outside-toplevel
+            DFPMLFlowModelWriterStage, )
 
         return DFPMLFlowModelWriterStage(self.config)
 
@@ -318,7 +321,8 @@ class DfpPath:
         """
         import pandas as pd  # pylint: disable=import-outside-toplevel
 
-        from morpheus_dfp.stages.dfp_postprocessing_stage import DFPPostprocessingStage  # pylint: disable=import-outside-toplevel
+        from morpheus_dfp.stages.dfp_postprocessing_stage import (  # pylint: disable=import-outside-toplevel
+            DFPPostprocessingStage, )
 
         stage = stage if stage is not None else self.inference()
         window = window if window is not None else self.window(f"infer-{id(stage)}-{len(batches)}", INFERENCE_WINDOW)
@@ -429,7 +433,8 @@ def _cpu_pipeline(fortnight) -> dict:
     from morpheus.config import ConfigAutoEncoder  # pylint: disable=import-outside-toplevel
     from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
     from morpheus.pipeline import LinearPipeline  # pylint: disable=import-outside-toplevel
-    from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage  # pylint: disable=import-outside-toplevel
+    from morpheus.stages.input.in_memory_source_stage import (  # pylint: disable=import-outside-toplevel
+        InMemorySourceStage, )
     from morpheus_dfp.stages.dfp_split_users_stage import DFPSplitUsersStage  # pylint: disable=import-outside-toplevel
 
     config = Config()
@@ -704,9 +709,10 @@ def measure_sources(lfs_dir: str) -> dict:
     """Read each sample through its stage's own methods and map the result onto the fork's TC-5 inputs."""
     import pandas as pd  # pylint: disable=import-outside-toplevel
 
-    from morpheus.stages.input.azure_source_stage import AzureSourceStage  # pylint: disable=import-outside-toplevel
-    from morpheus.stages.input.cloud_trail_source_stage import CloudTrailSourceStage  # pylint: disable=import-outside-toplevel
     from morpheus.common import FileTypes  # pylint: disable=import-outside-toplevel
+    from morpheus.stages.input.azure_source_stage import AzureSourceStage  # pylint: disable=import-outside-toplevel
+    from morpheus.stages.input.cloud_trail_source_stage import (  # pylint: disable=import-outside-toplevel
+        CloudTrailSourceStage, )
     from morpheus.stages.input.duo_source_stage import DuoSourceStage  # pylint: disable=import-outside-toplevel
 
     found = {}
@@ -825,7 +831,8 @@ def measure_drift(sp, workdir: str) -> dict:
     from morpheus.messages import ControlMessage  # pylint: disable=import-outside-toplevel
     from morpheus.messages import MessageMeta  # pylint: disable=import-outside-toplevel
     from morpheus.messages.memory.tensor_memory import TensorMemory  # pylint: disable=import-outside-toplevel
-    from morpheus.stages.postprocess.ml_flow_drift_stage import MLFlowDriftStage  # pylint: disable=import-outside-toplevel
+    from morpheus.stages.postprocess.ml_flow_drift_stage import (  # pylint: disable=import-outside-toplevel
+        MLFlowDriftStage, )
 
     os.makedirs(workdir, exist_ok=True)
     os.chdir(workdir)
@@ -885,9 +892,10 @@ def measure_timeseries(workdir: str) -> dict:
     """TimeSeriesStage over the failing optic's hour: as shipped, scaled to the hour, and with its values flattened."""
     import pandas as pd  # pylint: disable=import-outside-toplevel
 
-    sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "examples", "behavioral_analytics"))
 
-    import telemetry_pipeline as tp  # pylint: disable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+    tp = merged("telemetry")
 
     from morpheus.messages import ControlMessage  # pylint: disable=import-outside-toplevel
     from morpheus.messages import MessageMeta  # pylint: disable=import-outside-toplevel

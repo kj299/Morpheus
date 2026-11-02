@@ -45,19 +45,19 @@ SAMPLES = HERE / "samples"
 CONTRACTS = HERE / "input_contracts.json"
 CONTRACT_DOCUMENT = HERE / "collector_contract.md"
 
-sys.path.insert(0, str(REPO_ROOT / "tests" / "morpheus" / "determinism"))
+sys.path.insert(0, str(HERE))
 
 SEGMENTS = {
-    "telemetry": "telemetry_pipeline",
-    "network": "network_pipeline",
-    "transport": "transport_pipeline",
-    "session": "session_pipeline",
-    "presentation": "presentation_pipeline",
-    "application": "application_pipeline",
-    "saas": "saas_pipeline",
-    "endpoint": "endpoint_pipeline",
-    "context": "context_pipeline",
-    "host_score": "host_score_pipeline",
+    "telemetry": "telemetry",
+    "network": "network",
+    "transport": "transport",
+    "session": "session",
+    "presentation": "presentation",
+    "application": "application",
+    "saas": "saas",
+    "endpoint": "endpoint",
+    "context": "context",
+    "host_score": "host_score",
 }
 """Each segment a deployment runs, and the corpus module whose builder holds its input. The estate and campaign
 corpora are compositions of these segments over one estate, not segments of their own; the host segment is one,
@@ -142,9 +142,9 @@ def render_frame(frame, class_name: typing.Optional[str] = None) -> str:
 
 def segment_corpus(segment: str) -> dict:
     """The frames a segment's corpus module builds."""
-    import importlib  # pylint: disable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
 
-    return importlib.import_module(SEGMENTS[segment]).build_corpus()
+    return merged(SEGMENTS[segment]).build_corpus()
 
 
 def render_samples() -> dict[pathlib.Path, str]:

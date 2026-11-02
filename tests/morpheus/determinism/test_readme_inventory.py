@@ -355,6 +355,7 @@ def test_the_summary_names_every_telemetry_class_that_has_a_stage():
 
 
 CORPORA = os.path.dirname(os.path.abspath(__file__))
+COMPOSITIONS = os.path.join(REPO_ROOT, "python", "morpheus", "morpheus", "compositions")
 
 
 def composed_pipelines() -> list:
@@ -377,7 +378,11 @@ def test_every_composed_pipeline_places_the_determinism_stamp():
     unstamped = []
 
     for name in names:
-        with open(os.path.join(CORPORA, name), encoding="utf-8") as handle:
+        # The name beside this file is the tests' view; the composition it stands for is in the package (plan
+        # section 4.5), and that is where the stage has to be placed.
+        composition = os.path.join(COMPOSITIONS, name.replace("_pipeline.py", ".py"))
+
+        with open(composition, encoding="utf-8") as handle:
             text = handle.read()
 
         if ("DeterminismStampStage(config" not in text or "stamping.envelope_for(" not in text):

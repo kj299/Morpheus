@@ -119,9 +119,10 @@ def prepare_environment(seed: int) -> None:
 
 def build_features():
     """The layer 5 corpus's training fortnight, through the seven TC-5 stages, as one frame per principal."""
-    sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
+    sys.path.insert(0, os.path.join(REPO_ROOT, "examples", "behavioral_analytics"))
 
-    import session_pipeline  # pylint: disable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+    session_pipeline = merged("session")
 
     if (list(session_pipeline.SCORED_FEATURES) != FEATURE_COLUMNS):
         raise RuntimeError("the runner's features and the pipeline's scored features disagree")
@@ -141,8 +142,8 @@ def pipeline_checks(frames: dict, seed: int, epochs: int, eval_batch_size: int) 
     same batch-split sweep the harness runs against the reference scorer. Returns what the artifact records.
     """
     import pandas as pd  # pylint: disable=import-outside-toplevel
-
-    import session_pipeline  # pylint: disable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+    session_pipeline = merged("session")
     from morpheus.utils.determinism import diff_frames  # pylint: disable=import-outside-toplevel
     from morpheus.utils.dfencoder_scorer import load_models  # pylint: disable=import-outside-toplevel
     from morpheus.utils.dfencoder_scorer import train_dfencoder_models  # pylint: disable=import-outside-toplevel
@@ -203,11 +204,11 @@ def pipeline_checks(frames: dict, seed: int, epochs: int, eval_batch_size: int) 
 
 def train_and_score(frames: dict, seed: int, epochs: int, eval_batch_size: int) -> dict:
     """One full cycle: seed, train a model per principal, score its own rows, return the scores."""
+    import torch  # pylint: disable=import-outside-toplevel
+
     from morpheus.models.dfencoder import AutoEncoder  # pylint: disable=import-outside-toplevel
     from morpheus.utils.determinism import quantize_value  # pylint: disable=import-outside-toplevel
     from morpheus.utils.seed import manual_seed  # pylint: disable=import-outside-toplevel
-
-    import torch  # pylint: disable=import-outside-toplevel
 
     scores = {}
 
