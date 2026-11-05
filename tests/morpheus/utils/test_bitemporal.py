@@ -291,3 +291,36 @@ def test_unparsable_instants_are_refused_rather_than_raised():
     assert refused == {bitemporal.NO_RECORDED_AT: 1}
     assert columns[bitemporal.VALID_FROM][0] is not None
     assert columns[bitemporal.CONTEXT_UID] == [None]
+
+
+def test_to_records_is_the_inverse_of_from_records():
+    store = BitemporalStore("identity",
+                            [
+                                profile("alice", "finance", 0, 0, valid_to=5 * DAY),
+                                profile("alice", "legal", 5 * DAY, 5 * DAY),
+                                member("alice", "finance-approvers", 0, DAY),
+                                member("alice", "finance-approvers", 3 * DAY, 4 * DAY, change=RETRACT),
+                                profile("bob", None, 0, 0),
+                            ])
+
+    records = store.to_records()
+    rebuilt = BitemporalStore.from_records("identity", records)
+
+    assert rebuilt.versions() == store.versions()
+    assert rebuilt.to_records() == records
+
+
+def test_to_records_survives_json():
+    import json  # pylint: disable=import-outside-toplevel
+
+    store = BitemporalStore("identity", [profile("alice", "finance", 0, 0), member("alice", "ops", DAY, DAY)])
+    records = [json.loads(json.dumps(record)) for record in store.to_records()]
+
+    assert BitemporalStore.from_records("identity", records).versions() == store.versions()
+
+
+def test_to_records_lists_two_equal_stores_alike():
+    versions = [profile("alice", "finance", 0, 0), profile("bob", "legal", 0, 0), member("alice", "ops", DAY, DAY)]
+
+    assert (BitemporalStore("identity", versions).to_records() == BitemporalStore("identity",
+                                                                                  reversed(versions)).to_records())

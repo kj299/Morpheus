@@ -80,6 +80,7 @@ from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -99,11 +100,8 @@ from morpheus.stages.telemetry.tc6_cipher_stage import TC6CipherStage
 from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
 from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
 from morpheus.utils.binding_table import BindingTable
-from morpheus.utils.bitemporal import BitemporalStore
-from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
-from morpheus.utils.entity_key import normalize_hostname
 
 PERIOD_SECONDS = 3600
 LATENESS_SECONDS = 900
@@ -127,49 +125,9 @@ SETTINGS = {
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
 RULES = ("R-B-L6-001", "R-D-L6-002", "R-D-L6-003", "R-B-L6-004", "R-D-L6-005", "R-P-L6-006")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
-# Hosts.
-MANAGED = "10.0.0.20"
-VARIED = "10.0.0.21"
-LEGACY_CLIENT = "10.0.0.22"
-CREEPER = "10.0.0.24"
-"""A managed workstation that presents one more client stack every day of the week: R-P-L6-006's trajectory."""
-UPDATED = "10.0.0.25"
-"""A managed workstation that acquires a stack on each of two days and then stops: a rise too short to watchlist."""
-INVENTORY = {
-    MANAGED: ("workstation", "medium", "alice@example.com"),
-    VARIED: ("workstation", "medium", "bob@example.com"),
-    LEGACY_CLIENT: ("server", "high", "it-ops@example.com"),
-    CREEPER: ("workstation", "medium", "carol@example.com"),
-    UPDATED: ("workstation", "low", "dave@example.com"),
-}
-"""The managed hosts, as the asset inventory has them: role, criticality and owner. The personal device is absent."""
-# Issuers.
-CORP_CA = "CN=Corp Issuing CA, O=Example, C=GB"
 
 
-def asset_versions() -> list:
-    """The inventory's record of every managed host, recorded before the corpus begins, keyed by host name."""
-    return [
-        make_version("asset",
-                     normalize_hostname(host_identity.hostname_for(address)),
-                     0,
-                     None,
-                     0,
-                     values={
-                         "device_role": role, "criticality": criticality, "owner": owner
-                     }) for (address, (role, criticality, owner)) in sorted(INVENTORY.items())
-    ]
-
-
-def build_store() -> BitemporalStore:
-    """The asset store the source enrichment reads."""
-    return BitemporalStore("asset", asset_versions())
-
-
-def build_stages(config: Config,
-                 store: typing.Optional[BitemporalStore] = None,
-                 hosts: typing.Optional[tuple] = None,
-                 applications: typing.Optional[BitemporalStore] = None) -> list:
+def build_stages(config: Config, hosts: typing.Optional[tuple] = None, *, context: EstateContext = None) -> list:
     """The TC-6 stages, in the order a deployment would compose them, then the source's machine and its context, and
     the application the destination's port belongs to.
 
@@ -177,10 +135,10 @@ def build_stages(config: Config,
     order the rules are numbered, which is the order a reader will look for them in. The source address is then
     resolved to its machine through the leases and the EDR inventory in `hosts`, and the machine is what the asset
     inventory is looked up on: an address names a host only for as long as its lease does, and a host name for as
-    long as the host does. `applications` is the CMDB's store, defaulting to the estate's.
+    long as the host does. Both the asset inventory and the CMDB's store come from `context`, which must hold them.
     """
     (leases, inventory) = host_identity.tables(config, {}) if hosts is None else hosts
-    applications = application_context.store(config) if applications is None else applications
+    (store, applications) = (context or EstateContext()).require("the presentation composition", "asset", "application")
 
     return [
         TC6FingerprintStage(config),
@@ -189,7 +147,7 @@ def build_stages(config: Config,
         TC6ContentStage(config),
         *host_identity.resolver_stages(config, leases, inventory, fallback_anchor="src_ip"),
         TC0EnrichStage(config,
-                       store=build_store() if store is None else store,
+                       store=store,
                        entity_column=host_identity.HOST_KEY_COLUMN,
                        entity_normalization="hostname"),
         application_context.enrich_stage(config, applications),
@@ -200,9 +158,10 @@ def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
                  impose_order: bool = True,
-                 store: typing.Optional[BitemporalStore] = None,
                  hosts: typing.Optional[tuple] = None,
-                 sessions: typing.Optional[BindingTable] = None) -> pd.DataFrame:
+                 sessions: typing.Optional[BindingTable] = None,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Run the TC-6 class through its composed pipeline and return one canonicalized frame.
 
@@ -216,9 +175,6 @@ def run_pipeline(config: Config,
         How the corpus is split across source frames. Defaults to one frame.
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages.
-    store : `morpheus.utils.bitemporal.BitemporalStore`, optional
-        The asset inventory the sources are enriched from. Defaults to this corpus's; another corpus running its
-        handshakes through this pipeline supplies its own.
     hosts : tuple, optional
         The lease and inventory tables the source addresses resolve through, from `host_identity.tables`. Defaults
         to the ones this corpus's own DHCP and inventory records close into; a corpus composing this pipeline over
@@ -227,6 +183,10 @@ def run_pipeline(config: Config,
         Which principal's session held each address, from `host_identity.session_table`. Given, each handshake
         carries the `session_key` of the session that held its source address; this corpus has no sessions of its
         own.
+
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; the asset inventory, which the sources are enriched from, and the CMDB's application
+        store are required.
 
     Returns
     -------
@@ -254,7 +214,7 @@ def run_pipeline(config: Config,
 
     # The handshake stages, the source address to its interface and its machine with the chain rooted on the
     # machine where there is one, and the machine's context.
-    for stage in build_stages(config, store, (leases, inventory)):
+    for stage in build_stages(config, (leases, inventory), context=context):
         pipe.add_stage(stage)
 
     if (sessions is not None):

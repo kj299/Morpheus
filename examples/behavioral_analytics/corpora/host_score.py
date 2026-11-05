@@ -29,16 +29,20 @@ from morpheus.compositions import envelope
 host_identity = merged('host_identity')
 import pandas as pd
 
-from morpheus.compositions.host_score import CORPUS_DAYS
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.host_score import DAY_S
+from morpheus.compositions.host_score import EPOCH_S
 from morpheus.compositions.host_score import FLOW_CLASS
 from morpheus.compositions.host_score import HANDSHAKE_CLASS
-from morpheus.compositions.host_score import HOSTS
+from morpheus.compositions.host_score import HOUR_S
+from morpheus.compositions.host_score import MANIFEST_WINDOW
+from morpheus.compositions.host_score import POPULATION
 from morpheus.compositions.host_score import PROCESS_CLASS
 from morpheus.compositions.host_score import TRAINING_DAYS
-from morpheus.compositions.host_score import at
-from morpheus.compositions.host_score import host_key
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
+from morpheus.utils.model_manifest import ModelManifest
 
 CORPUS_SEED = 20261021
 WORK_HOURS = tuple(range(9, 17))
@@ -162,6 +166,39 @@ def browser_update_day(index: int) -> int:
     return TRAINING_DAYS // 2 + 1 + index % 5
 
 
+SCORED_DAYS = 7
+
+CORPUS_DAYS = TRAINING_DAYS + SCORED_DAYS
+
+FINANCE = "finance-workstations"
+
+ENGINEERING = "engineering-workstations"
+
+HOSTS = {
+    "10.0.1.11": FINANCE,
+    "10.0.1.12": FINANCE,
+    "10.0.1.13": FINANCE,
+    "10.0.1.14": FINANCE,
+    "10.0.2.21": ENGINEERING,
+    "10.0.2.22": ENGINEERING,
+    "10.0.2.23": ENGINEERING,
+    "10.0.2.24": ENGINEERING,
+    "10.0.1.15": FINANCE,
+    "10.0.3.31": None,
+}
+"""Each workstation's address, which its DHCP lease fixes for the corpus, and its peer group in the inventory."""
+
+
+def at(day: int, hour: int, minute: int = 0, second: int = 0) -> int:
+    """An instant in the corpus, in epoch nanoseconds, `day` counted from the first day of the fortnight."""
+    return (EPOCH_S + day * DAY_S + hour * HOUR_S + minute * 60 + second) * NS_PER_SECOND
+
+
+def host_key(address: str) -> str:
+    """The machine an address is leased to, as `host_key` names it."""
+    return host_identity.hostname_for(address).lower()
+
+
 def _hour(rng: random.Random,
           flows: list,
           handshakes: list,
@@ -232,3 +269,51 @@ def build_corpus() -> dict[str, pd.DataFrame]:
         host_identity.LEASE_CLASS: workstations[host_identity.LEASE_CLASS],
         host_identity.INVENTORY_CLASS: workstations[host_identity.INVENTORY_CLASS],
     })
+
+
+def asset_versions() -> list:
+    """The inventory: every workstation, with its peer group where it has one, recorded before the corpus starts."""
+    return [
+        make_version("asset",
+                     host_key(address),
+                     0,
+                     None,
+                     at(0, 0),
+                     values={
+                         "owner": "it-ops@example.com",
+                         "peer_group": group,
+                         "device_role": "kiosk" if group is None else "workstation",
+                         "os_family": "windows",
+                         "criticality": "low" if group is None else "medium",
+                     }) for (address, group) in sorted(HOSTS.items())
+    ]
+
+
+def build_store() -> BitemporalStore:
+    """The asset store every class is enriched from."""
+    return BitemporalStore("asset", asset_versions())
+
+
+class _Unscored:
+    """The scorer of a run whose manifest scores nothing: asked anything, it is a wiring mistake."""
+
+    def score(self, model_version: str, features: list) -> list:
+        raise AssertionError(f"asked to score {len(features)} rows against {model_version}; nothing is scored here")
+
+
+def unscored() -> tuple[_Unscored, ModelManifest]:
+    """
+    A scorer and manifest that score nothing, for the run the training frames are taken from.
+
+    The features are what the stages emit and do not depend on any score, so the frames exist before the models do.
+    """
+    return (_Unscored(),
+            ModelManifest(window_id=MANIFEST_WINDOW,
+                          models={},
+                          fallback=f"{POPULATION}:untrained",
+                          scores_from_ns=at(CORPUS_DAYS + 1, 0)))
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the asset inventory of every workstation, with its peer group."""
+    return EstateContext(asset=build_store())

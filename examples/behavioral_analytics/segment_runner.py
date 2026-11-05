@@ -17,8 +17,8 @@
 Run one segment from collector files to SIEM-ready records, restoring its stages' memory on start.
 
 A segment is the set of input classes one deployment unit carries -- the network segment is the flows and the DHCP
-server and EDR inventory they resolve through -- and its composition is the one its corpus module under
-`tests/morpheus/determinism/` holds to a golden file. This adds the two ends a deployment needs around it:
+server and EDR inventory they resolve through -- and its composition is the one `morpheus.compositions` holds and
+the tests hold to a golden file over its corpus in `corpora/`. This adds the two ends a deployment needs around it:
 
     files ──► FileSourceStage ──► (the segment's composition: LineageStamp, TotalOrder, the class stages,
                                   TC0Enrich where it applies, EnvelopeStamp, WindowSeal, DeterminismStamp)
@@ -44,8 +44,16 @@ row carries the digest of the checkpoint it resumed from as `resumed_from_state`
 `MinimizationStage` immediately before the wire, after every feature has been computed. The key is read from the
 environment variable the policy names and never from the file.
 
-The compositions themselves still live beside their corpora, because each is held to its golden there; this runner
-imports them rather than holding a second copy that could drift.
+**Context.** A composition that enriches with the estate's identity, asset or application context, or reads another
+input of the estate's (the telemetry segment's router redundancy addresses), takes it as an `EstateContext` and has
+no default: the runner reads it with `EstateContext.from_directory` from `--context`, or from the input directory's
+`context/` subdirectory, which holds the context segment's `context_identity.jsonlines`, `context_asset.jsonlines`
+and `context_application.jsonlines` and an `extras.json`. A segment run without the context its composition reads
+stops before it delivers a record or writes a checkpoint, naming the files it needed, rather than writing every row
+with its context empty.
+
+The compositions live in `morpheus.compositions` and the synthetic estate their samples come from in `corpora/`;
+this runner imports the compositions rather than holding a second copy that could drift.
 """
 
 import argparse
@@ -142,6 +150,9 @@ EDGE_SOURCETYPE = "morpheus:edge"
 EDGE_CLASS = "edge"
 """The group name the edges are delivered under; an edge is a record of no telemetry class."""
 
+CONTEXT_DIR = "context"
+"""The subdirectory of a segment's input directory the runner reads its context from when `--context` is not given."""
+
 FILE_PARSER_KWARGS = {"convert_dates": False, "dtype": False, "precise_float": True}
 """How `FileSourceStage` parses a sample: JSON's own types, no date guessing on `*_time` columns, and floats read
 exactly. pandas' defaults turn an AS number sent as a string into a number and parse `event_time` as a date."""
@@ -212,6 +223,31 @@ def typed(frame, class_name: str):
 def read_inputs(input_dir: pathlib.Path) -> dict:
     """Every class file in a segment's input directory, by class name."""
     return {path.stem: read_class(path) for path in sorted(input_dir.glob("*.jsonlines"))}
+
+
+def read_context(context_dir: typing.Optional[pathlib.Path]):
+    """
+    The estate context in `context_dir`, or an empty one when there is none to read.
+
+    An empty context is not a default: a composition that reads a store or an extra refuses to run without it.
+
+    Returns
+    -------
+    `morpheus.compositions.estate_context.EstateContext`
+    """
+    from morpheus.compositions.estate_context import EstateContext  # pylint: disable=import-outside-toplevel
+
+    if (context_dir is None or not context_dir.is_dir()):
+        return EstateContext()
+
+    return EstateContext.from_directory(str(context_dir))
+
+
+def takes_context(module) -> bool:
+    """Whether a segment's composition enriches with estate context; the context segment builds it instead."""
+    import inspect  # pylint: disable=import-outside-toplevel
+
+    return "context" in inspect.signature(module.run_pipeline).parameters
 
 
 def load_policy(path: typing.Optional[pathlib.Path]) -> typing.Optional[dict]:
@@ -426,7 +462,8 @@ def run(segment: str,
         state_dir: typing.Optional[pathlib.Path] = None,
         final: bool = True,
         policy_path: typing.Optional[pathlib.Path] = None,
-        kafka_bootstrap_servers: typing.Optional[str] = None) -> dict[str, int]:
+        kafka_bootstrap_servers: typing.Optional[str] = None,
+        context_dir: typing.Optional[pathlib.Path] = None) -> dict[str, int]:
     """
     Run one segment over the class files in `input_dir` and deliver its records.
 
@@ -448,11 +485,21 @@ def run(segment: str,
         A minimization policy.
     kafka_bootstrap_servers : str, optional
         Produce to Kafka, one topic per sourcetype, instead of writing files.
+    context_dir : pathlib.Path, optional
+        The estate context, as `EstateContext.from_directory` reads it. Defaults to `input_dir / "context"`.
 
     Returns
     -------
     dict
         Records written per sourcetype.
+
+    Raises
+    ------
+    FileNotFoundError
+        If `context_dir` is given and is not a directory.
+    morpheus.compositions.estate_context.MissingContext
+        If the segment's composition reads context the directory does not hold. Raised before any record is
+        delivered or a checkpoint written.
     """
     import importlib  # pylint: disable=import-outside-toplevel
 
@@ -472,16 +519,24 @@ def run(segment: str,
             raise FileExistsError(f"{output_dir} already holds records and this is a cold start; a resumed run "
                                   f"appends, a new one needs an empty directory")
 
+    if (context_dir is not None and not context_dir.is_dir()):
+        raise FileNotFoundError(f"no context directory at {context_dir}")
+
     module = importlib.import_module(f"morpheus.compositions.{SEGMENTS[segment]['module']}")
     policy = load_policy(policy_path)
+    options = {}
+
+    if (takes_context(module)):
+        options["context"] = read_context(input_dir / CONTEXT_DIR if context_dir is None else context_dir)
+
     corpus = read_inputs(input_dir)
     config = module.build_pipeline_config()
 
     if (state_dir is None):
-        result = module.run_pipeline(config, corpus)
+        result = module.run_pipeline(config, corpus, **options)
     else:
         with resumable.persisted(str(state_dir), final=final):
-            result = module.run_pipeline(config, corpus)
+            result = module.run_pipeline(config, corpus, **options)
 
     # The two branches restore and checkpoint beside the composition, so a resumed run's health history and edge
     # memory continue from where the last run stopped, as the stages behind them do.
@@ -505,6 +560,10 @@ def main(argv: typing.Optional[list] = None, segment: typing.Optional[str] = Non
                         dest="final",
                         action="store_false",
                         help="Keep open windows and bindings for the next run instead of flushing them.")
+    parser.add_argument("--context",
+                        dest="context_dir",
+                        type=pathlib.Path,
+                        help="The estate's context records and extras. Defaults to the input's context/ directory.")
     parser.add_argument("--policy", type=pathlib.Path, help="Minimization policy YAML.")
     parser.add_argument("--kafka", dest="kafka_bootstrap_servers", help="Produce to Kafka at these brokers.")
     arguments = parser.parse_args(argv)
@@ -517,7 +576,8 @@ def main(argv: typing.Optional[list] = None, segment: typing.Optional[str] = Non
                   state_dir=arguments.state,
                   final=arguments.final,
                   policy_path=arguments.policy,
-                  kafka_bootstrap_servers=arguments.kafka_bootstrap_servers)
+                  kafka_bootstrap_servers=arguments.kafka_bootstrap_servers,
+                  context_dir=arguments.context_dir)
 
     for (sourcetype, count) in sorted(written.items()):
         print(f"{sourcetype:<28} {count:>6} records")

@@ -114,6 +114,7 @@ from morpheus.compositions import transport as transport_pipeline
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -140,15 +141,11 @@ from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
-from morpheus.utils.bitemporal import BitemporalStore
-from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
-from morpheus.utils.entity_key import normalize_hostname
 
 PERIOD_SECONDS = 3600
 LATENESS_SECONDS = 900
-DAY_SECONDS = 86400
 ID_COLUMNS = ["collector_id", "schema_version", "origin_hash", "collector_seq"]
 KEY_COLUMNS = ["telemetry_class", "row_key"]
 IGNORE_COLUMNS: list[str] = []
@@ -169,200 +166,16 @@ RULES = ("R-C-001", "R-C-002", "R-C-003", "R-C-004", "R-C-005")
 # The rule's own figures, stated once so the corpus is built around them deliberately.
 CHAIN_WINDOW_SECONDS = 30 * 60
 JOIN_TOLERANCE_SECONDS = 120
-LAST_DAY = 8
-"""The day the campaign happens. The eight before it are the history every step is novel against."""
-SERVER_GROUP = "servers"
-
-
-class Actor(typing.NamedTuple):
-    """One source, the principal who logs in from it, and the server they reach, with what each step does."""
-
-    source: str
-    principal: str
-    home: str
-    """The server the principal logs into every day."""
-    target: str
-    """The server the campaign's login reaches. The home server for the known-host control."""
-    login_source: str
-    """Where the login comes from. The fan-out source except in the other-source control."""
-    rising: bool
-    fanout_minute: float
-    login_minute: float
-    process_minute: typing.Optional[float]
-    """When the novel process runs on the target, or None when it only runs its routine."""
-
-
-ATTACKER = "dana@example.com"
-WRONG_ORDER = "eli@example.com"
-TOO_SLOW = "fay@example.com"
-KNOWN_HOST = "gus@example.com"
-OTHER_SOURCE = "hal@example.com"
-FLAT_FANOUT = "ivan@example.com"
-NO_NEW_PROCESS = "judy@example.com"
-WORKSTATION_TARGET = "wes@example.com"
-ACTORS = {
-    ATTACKER: Actor("10.20.0.5", ATTACKER, "srv-dana", "SRV-DB-02", "10.20.0.5", True, 5, 12, 20),
-    WRONG_ORDER: Actor("10.20.0.6", WRONG_ORDER, "srv-eli", "srv-app-03", "10.20.0.6", True, 5, 14, 8),
-    TOO_SLOW: Actor("10.20.0.7", TOO_SLOW, "srv-fay", "srv-fs-04", "10.20.0.7", True, 5, 20, 40),
-    KNOWN_HOST: Actor("10.20.0.8", KNOWN_HOST, "srv-gus", "srv-gus", "10.20.0.8", True, 5, 12, 20),
-    OTHER_SOURCE: Actor("10.20.0.9", OTHER_SOURCE, "srv-hal", "srv-web-05", "10.20.0.99", True, 5, 12, 20),
-    FLAT_FANOUT: Actor("10.20.0.10", FLAT_FANOUT, "srv-ivan", "srv-mq-06", "10.20.0.10", False, 5, 12, 20),
-    NO_NEW_PROCESS: Actor("10.20.0.11", NO_NEW_PROCESS, "srv-judy", "srv-ci-07", "10.20.0.11", True, 5, 12, None),
-    WORKSTATION_TARGET: Actor("10.20.0.12", WORKSTATION_TARGET, "srv-wes", "WS-FIN-08", "10.20.0.12", True, 5, 12, 20),
-}
-WORKSTATIONS = ("ws-fin-08", )
-"""The hosts the inventory records as workstations. Every other host here is a server."""
-
-
-def at(day: float, hour: float = 0, minute: float = 0, second: float = 0) -> int:
-    """An instant in the corpus, in nanoseconds since the epoch."""
-    return int((day * DAY_SECONDS + hour * 3600 + minute * 60 + second) * NS_PER_SECOND)
-
 
 EXFIL_WINDOW_SECONDS = 2 * 3600
 RECORD_MULTIPLE = 5.0
-PORTAL_ISSUER = presentation_pipeline.CORP_CA
 
-
-class Exfiltrator(typing.NamedTuple):
-    """A principal, the address their session holds, and when each of R-C-004's steps happens on the last day."""
-
-    principal: str
-    address: str
-    """The address the principal's sessions come from."""
-    breach_address: str
-    """Where the breach and the handshake come from. Another principal's address for the someone-else control."""
-    session_end_minute: typing.Optional[float]
-    """When the last day's session ends, minutes after the campaign hour starts; None for the evening, as usual."""
-    export_minute: float
-    breach_minute: float
-    handshake_minute: float
-    issuer: str
-
-
-KIM = "kim@example.com"
-LEE = "lee@example.com"
-MAX = "max@example.com"
-NIA = "nia@example.com"
-OTO = "oto@example.com"
-PIA = "pia@example.com"
-
-
-def relay_issuer(principal: str) -> str:
-    """An authority nobody in the estate has seen, distinct per actor so one's first sighting never covers another's."""
-    return f"CN={principal.split('@')[0].title()} Relay CA, O=Unknown"
-
-
-EXFILTRATORS = {
-    KIM: Exfiltrator(KIM, "10.20.1.5", "10.20.1.5", None, 5, 30, 50, relay_issuer(KIM)),
-    LEE: Exfiltrator(LEE, "10.20.1.6", "10.20.1.7", None, 5, 30, 50, relay_issuer(LEE)),
-    NIA: Exfiltrator(NIA, "10.20.1.8", "10.20.1.8", 10, 5, 30, 50, relay_issuer(NIA)),
-    OTO: Exfiltrator(OTO, "10.20.1.10", "10.20.1.10", None, 5, 30, 50, PORTAL_ISSUER),
-    PIA: Exfiltrator(PIA, "10.20.1.9", "10.20.1.9", None, 30, 5, 15, relay_issuer(PIA)),
-}
-SESSION_HOLDERS = {**{actor.principal: actor.address for actor in EXFILTRATORS.values()}, MAX: "10.20.1.7"}
-"""Every principal with a daily session and the address it comes from. Max exports nothing; Lee's breach comes from
-Max's address."""
 C2_WINDOW_SECONDS = 3600
-SETTLED_HANDSHAKES = 24
-"""Past the twenty R-B-L6-001's floor asks for."""
-UNSETTLED_HANDSHAKES = 5
-
-
-class Beaconer(typing.NamedTuple):
-    """A host, how settled its TLS history is, and when and where its new fingerprint and its beacon happen."""
-
-    host: str
-    history: int
-    fingerprint_destination: str
-    fingerprint_minute: float
-    beacon_destination: str
-    beacon_start_minute: float
-    """Minutes after the campaign hour starts; negative for the hour before."""
-
-
-C2_ATTACKER = "10.20.2.5"
-BEACON_FIRST = "10.20.2.6"
-OTHER_DESTINATION = "10.20.2.7"
-C2_TOO_SLOW = "10.20.2.8"
-UNSETTLED = "10.20.2.9"
-BEACONERS = {
-    C2_ATTACKER: Beaconer(C2_ATTACKER, SETTLED_HANDSHAKES, "203.0.113.100", 0, "203.0.113.100", 2),
-    BEACON_FIRST: Beaconer(BEACON_FIRST, SETTLED_HANDSHAKES, "203.0.113.101", 0, "203.0.113.101", -60),
-    OTHER_DESTINATION: Beaconer(OTHER_DESTINATION, SETTLED_HANDSHAKES, "203.0.113.102", 0, "203.0.113.112", 2),
-    C2_TOO_SLOW: Beaconer(C2_TOO_SLOW, SETTLED_HANDSHAKES, "203.0.113.103", 0, "203.0.113.103", 55),
-    UNSETTLED: Beaconer(UNSETTLED, UNSETTLED_HANDSHAKES, "203.0.113.104", 0, "203.0.113.104", 2),
-}
-
-
-def hosts() -> list:
-    """Every host a principal logs into or a campaign reaches, as the shared host rule renders it."""
-    names = set()
-
-    for actor in ACTORS.values():
-        names.update((normalize_hostname(actor.home), normalize_hostname(actor.target)))
-
-    return sorted(names)
-
-
-def asset_versions() -> list:
-    """The inventory: every server in one peer group, and the finance workstation in its own."""
-    versions = []
-
-    for host in hosts():
-        workstation = host in WORKSTATIONS
-        versions.append(
-            make_version("asset",
-                         host,
-                         0,
-                         None,
-                         0,
-                         values={
-                             "owner": "finance@example.com" if workstation else "it-ops@example.com",
-                             "owning_team": "finance" if workstation else "platform",
-                             "criticality": "medium" if workstation else "high",
-                             "data_classification": "confidential" if workstation else "internal",
-                             "peer_group": "finance-workstations" if workstation else SERVER_GROUP,
-                             "device_role": "workstation" if workstation else "server",
-                             "os_family": "windows",
-                             "os_version": "10.0.19045" if workstation else "10.0.20348",
-                         }))
-
-    return versions
-
-
-def build_address_store() -> BitemporalStore:
-    """The inventory the handshake enrichment reads: every address that holds a session or beacons is a managed
-    workstation, keyed on the host name its address resolves to, as the layer 6 pipeline looks it up."""
-    addresses = sorted(set(SESSION_HOLDERS.values()) | set(BEACONERS))
-
-    return BitemporalStore(
-        "asset",
-        [
-            make_version("asset",
-                         normalize_hostname(host_identity.hostname_for(address)),
-                         0,
-                         None,
-                         0,
-                         values={
-                             "device_role": "workstation", "criticality": "medium", "owner": "it-ops@example.com"
-                         }) for address in addresses
-        ])
-
-
-def build_store() -> BitemporalStore:
-    """The inventory the process enrichment reads."""
-    return BitemporalStore("asset", asset_versions())
-
 
 MAC_CLASS = "tc2_mac"
 """The two sites' MAC table snapshots. Closed into bindings and resolved through, not emitted as events."""
 REPLAY_KMH = 900
 """R-C-005's speed, the guide's and R-D-L5-003's: above any commercial aircraft."""
-HQ = "hq"
-EDINBURGH = "edinburgh"
-SITE_LOCATIONS = {HQ: (51.5074, -0.1278), EDINBURGH: (55.9533, -3.1883)}
-"""The estate's own record of where its sites are, which a deployment supplies as it supplies the directory."""
 LEASE_CLASS = "tc3_dhcp"
 """The estate's DHCP server: an acknowledgement per desk, which is what says which workstation held an address, and
 the daily renewals of the workstations the other campaigns run from."""
@@ -424,9 +237,6 @@ PORT_CLASS = "tc1"
 """The headquarters access switch's SNMP polls of the desk ports R-C-003's actors plug into."""
 PHYSICAL_WINDOW_SECONDS = 4 * 3600
 """R-C-003's window, the guide's: the port event, the new vendor and the management flow inside four hours."""
-MANAGEMENT_PREFIXES = ("10.99.0.0/24", )
-"""The estate's management network, where its switches', routers' and controllers' own interfaces live. A
-deployment supplies it as it supplies the directory, and records it against VLAN 99 in `vlan_designations`."""
 LEASE_METHOD_COLUMN = "login_lease_resolution"
 PORT_METHOD_COLUMN = "login_port_resolution"
 LEASE_UID_COLUMN = "login_lease_uid"
@@ -435,9 +245,9 @@ PORT_UID_COLUMN = "login_port_uid"
 """The MAC binding the workstation was resolved to a switch port through."""
 
 
-def _login_ladder(config: Config, mac_table: BindingTable, lease_table: BindingTable) -> list:
+def _login_ladder(config: Config, mac_table: BindingTable, lease_table: BindingTable, site_locations: dict) -> list:
     """A sign-in's source address to a workstation through the leases, to a port and site through the MAC bindings,
-    and the journey between the sites of a principal's consecutive sign-ins."""
+    and the journey between the sites of a principal's consecutive sign-ins, located by the estate's `site_locations`."""
     return [
         BindingResolverStage(config,
                              binding_table=lease_table,
@@ -453,7 +263,7 @@ def _login_ladder(config: Config, mac_table: BindingTable, lease_table: BindingT
                              },
                              method_column=PORT_METHOD_COLUMN,
                              uid_column=PORT_UID_COLUMN),
-        TC5TravelStage(config, column_prefix="site_travel", location_column="login_site_id", locations=SITE_LOCATIONS),
+        TC5TravelStage(config, column_prefix="site_travel", location_column="login_site_id", locations=site_locations),
     ]
 
 
@@ -461,8 +271,11 @@ def _stages(config: Config,
             telemetry_class: str,
             mac_table: typing.Optional[BindingTable] = None,
             lease_table: typing.Optional[BindingTable] = None,
-            inventory_table: typing.Optional[BindingTable] = None) -> tuple:
-    """Each layer's own stages, its OSI layer and the entity it is sealed on."""
+            inventory_table: typing.Optional[BindingTable] = None,
+            *,
+            context: EstateContext = None) -> tuple:
+    """Each layer's own stages, its OSI layer and the entity it is sealed on, enriched from the estate's `context`."""
+    context = context or EstateContext()
     if (telemetry_class == FLOW_CLASS):
         # The source address to its interface and its machine, and the chain rooted on the machine where there is one,
         # as the network corpus does.
@@ -473,14 +286,20 @@ def _stages(config: Config,
             [
                 CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"),
                 TC3CardinalityStage(config, window_seconds=PERIOD_SECONDS),
-                TC3ReachStage(config, window_seconds=PERIOD_SECONDS, management_prefixes=list(MANAGEMENT_PREFIXES)),
+                TC3ReachStage(config,
+                              window_seconds=PERIOD_SECONDS,
+                              management_prefixes=list(
+                                  context.require_extra("the campaign composition", "management_prefixes")[0])),
                 TC3BaselineStage(config, bucket_seconds=PERIOD_SECONDS),
                 TC3BeaconStage(config, window_seconds=2 * PERIOD_SECONDS),
                 TC3TtlStage(config, window_seconds=2 * PERIOD_SECONDS),
                 # The same layer 3 composition as the network corpus, so the flows meet the sourcetype's one contract.
                 # There is no fortnight of history here, so every baseline is immature and none of the host-baseline
                 # rules can fire on this corpus; the destination's context comes from the address inventory.
-                TC0EnrichStage(config, store=build_address_store(), entity_column="dst_ip", prefix="dst_ctx_"),
+                TC0EnrichStage(config,
+                               store=context.require_extra("the campaign composition", "handshake_asset")[0],
+                               entity_column="dst_ip",
+                               prefix="dst_ctx_"),
                 *resolvers,
             ],
             3,
@@ -498,12 +317,16 @@ def _stages(config: Config,
         return (telemetry_pipeline.mac_table_stages(config), 2, ["mac_address"])
 
     if (telemetry_class == AUTH_CLASS):
-        ladder = [] if mac_table is None else _login_ladder(config, mac_table, lease_table)
+        ladder = [] if mac_table is None else _login_ladder(
+            config, mac_table, lease_table, context.require_extra("the campaign composition", "site_locations")[0])
 
         return ([TC5NoveltyStage(config, target_host_column="target_host")] + ladder, 5, ["user_principal"])
 
     return ([
-        TC0EnrichStage(config, store=build_store(), entity_column="hostname", entity_normalization="hostname"),
+        TC0EnrichStage(config,
+                       store=context.require("the campaign composition", "asset")[0],
+                       entity_column="hostname",
+                       entity_normalization="hostname"),
         TC7EndpointStage(config)
     ],
             7, ["hostname"])
@@ -535,9 +358,16 @@ def run_class(config: Config,
               impose_order: bool = True,
               mac_table: typing.Optional[BindingTable] = None,
               lease_table: typing.Optional[BindingTable] = None,
-              inventory_table: typing.Optional[BindingTable] = None) -> pd.DataFrame:
+              inventory_table: typing.Optional[BindingTable] = None,
+              *,
+              context: EstateContext = None) -> pd.DataFrame:
     """Source, stamp, total order, the layer's stages, determinism stamp, envelope, hourly seal, sink: one collector."""
-    (stages, osi_layer, entity_columns) = _stages(config, telemetry_class, mac_table, lease_table, inventory_table)
+    (stages, osi_layer, entity_columns) = _stages(config,
+                                                  telemetry_class,
+                                                  mac_table,
+                                                  lease_table,
+                                                  inventory_table,
+                                                  context=context)
     # A flow's chain is rooted on the machine it came from where its address resolved to one.
     anchored = telemetry_class == FLOW_CLASS and inventory_table is not None
 
@@ -581,7 +411,9 @@ def run_class(config: Config,
 def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                 impose_order: bool = True) -> pd.DataFrame:
+                 impose_order: bool = True,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Each collector through its own layer's pipeline, and every collector's output as one canonical frame.
 
@@ -595,6 +427,8 @@ def run_pipeline(config: Config,
         How each collector's frame is split across source frames. Defaults to one frame each.
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context: the host inventory, the CMDB and the SaaS directory, and in `extras` the inventory the handshakes are enriched from (`handshake_asset`), the SaaS objects' (`saas_asset`), the sites' coordinates (`site_locations`), the management prefixes (`management_prefixes`) and where a session that never closed ends (`session_end_ns`).
 
     Returns
     -------
@@ -602,6 +436,8 @@ def run_pipeline(config: Config,
         Every collector's output, plus any records quarantined at validation as the `quarantine` class, tagged
         with `telemetry_class`, keyed by `row_key`, canonicalized.
     """
+    context = context or EstateContext()
+
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
@@ -627,8 +463,24 @@ def run_pipeline(config: Config,
     # sessions collector every record of which was quarantined leaves nothing to resolve through.
     sessions = host_identity.session_table(pd.DataFrame(), 0)
 
-    # The handshakes' sources are enriched from this estate's inventory, not from the layer 6 corpus's.
-    stores = {HANDSHAKE_CLASS: {"store": build_address_store(), **resolved}, TRANSFER_CLASS: resolved, SAAS_CLASS: {}}
+    # Each delegated class is enriched from this estate's context: the handshakes' sources from the inventory of the
+    # addresses that hold sessions or beacon, the transfers' and handshakes' destinations from the CMDB, and the
+    # exports from the SaaS directory and the inventory of what they touch.
+    (handshake_asset, saas_asset, session_end_ns) = context.require_extra("the campaign composition",
+                                                                          "handshake_asset",
+                                                                          "saas_asset",
+                                                                          "session_end_ns")
+    stores = {
+        HANDSHAKE_CLASS: {
+            "context": EstateContext(asset=handshake_asset, application=context.application), **resolved
+        },
+        TRANSFER_CLASS: {
+            "context": EstateContext(application=context.application), **resolved
+        },
+        SAAS_CLASS: {
+            "context": EstateContext(identity=context.identity, asset=saas_asset)
+        },
+    }
 
     for name in CLASSES:
         # A collector every record of which was quarantined delivered nothing for its class to run over.
@@ -651,16 +503,17 @@ def run_pipeline(config: Config,
                           impose_order=impose_order,
                           mac_table=mac_table,
                           lease_table=lease_table,
-                          inventory_table=inventory_table))
+                          inventory_table=inventory_table,
+                          context=context))
 
             if (name == SESSION_CLASS and len(frames[-1]) > 0):
-                sessions = host_identity.session_table(session_intervals(frames[-1]), at(LAST_DAY + 1))
+                sessions = host_identity.session_table(session_intervals(frames[-1]), session_end_ns)
 
     # R-C-003's port polls and table walks, emitted as the telemetry corpus emits its own. The walks are also what
     # the MAC bindings above were closed from.
     for name in (PORT_CLASS, MAC_CLASS):
         if (len(batches.get(name, [])) > 0):
-            frames.append(run_class(config, name, batches[name], impose_order=impose_order))
+            frames.append(run_class(config, name, batches[name], impose_order=impose_order, context=context))
 
     # Every collector whose records the classes emit can be held at once.
     combined = pd.concat(frames, ignore_index=True) if len(frames) > 0 else pd.DataFrame()

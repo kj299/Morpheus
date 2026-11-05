@@ -26,17 +26,12 @@ import random
 import pandas as pd
 
 from morpheus.compositions import envelope as universal_envelope
-from morpheus.compositions.telemetry import CORPUS_SECONDS
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.telemetry import DEVICE_CLASS
-from morpheus.compositions.telemetry import IDENTITIES
-from morpheus.compositions.telemetry import MAC_A
 from morpheus.compositions.telemetry import MAC_ACTION_COLUMN
-from morpheus.compositions.telemetry import MAC_B
-from morpheus.compositions.telemetry import MAC_C
 from morpheus.compositions.telemetry import NETWORK_CONTEXT_CLASS
 from morpheus.compositions.telemetry import OPTIC_TYPE
 from morpheus.compositions.telemetry import PERIOD_SECONDS
-from morpheus.compositions.telemetry import VRRP_IP
 from morpheus.stages.telemetry.tc0_network_stage import DEVICE as DEVICE_KIND
 from morpheus.stages.telemetry.tc0_network_stage import PORT as PORT_KIND
 from morpheus.stages.telemetry.tc0_network_stage import VLAN as VLAN_KIND
@@ -93,6 +88,32 @@ GUEST_LEAVES_AT_SECONDS = 1560
 """A guest laptop, whose departure the switch reports itself: a MAC notification saying the address was removed."""
 SINGLE_HOST_PORTS = {f"{SITE}:{SWITCH}:{port}" for port in PORTS}
 """The corpus's own port designations, standing in for the inventory-supplied list R-D-L2-001 reads."""
+MAC_A = "aa:bb:cc:00:00:01"
+
+MAC_B = "aa:bb:cc:00:00:02"
+
+MAC_C = "aa:bb:cc:00:00:03"
+
+IDENTITIES = {
+    MAC_A: "alice-ws",
+    MAC_B: "bob-ws",
+    MAC_C: "carol-ws",
+    "aa:bb:cc:00:00:05": "phone-4021",
+    "aa:bb:cc:00:00:06": "desk-4021",
+    "de:ad:be:ef:01:01": "unknown-supplicant",
+    "de:ad:be:ef:01:02": "unknown-supplicant",
+}
+"""The identity a supplicant presented, where it presented one. A device doing MAC authentication bypass has no
+identity to present, which is what makes `unknown-supplicant` the honest value rather than a blank.
+
+The three workstations present one because the ladder's next rung needs somewhere to stand. An 802.1X identity is
+the only thing in this corpus a directory could bind a person to: a MAC is an asset, and asset assignment is a
+different fact with a different lifetime. Falling back to the MAC left `dot1x_identity` carrying an address on
+most exchanges, which is what the fallback is for and not what an estate with 802.1X deployed actually reports.
+Nothing keys on it -- `TC2AuthStage` prefers `mac_address` when both are present, so the exchange key, the port
+key and every window are untouched.
+"""
+
 HOST_IPS = {MAC_A: "10.0.0.11", MAC_B: "10.0.0.12", MAC_C: "10.0.0.13"}
 HUB_PORT = "Gi1/0/3"
 HUB_FROM_SECONDS = 1800
@@ -450,6 +471,9 @@ def _octets_per_minute(extra: random.Random, bits_per_second: float) -> int:
     return int(bits_per_second * 60 / 8 * extra.uniform(0.9, 1.1))
 
 
+CORPUS_SECONDS = 3600
+
+
 def _build_layer_1(rng: random.Random, extra: random.Random) -> pd.DataFrame:
     """Per-port SNMP polls at one-minute cadence, with a reboot, a tap, a failing optic, an unpolled flap, two optic
     swaps, a flapping link, a failing cable, a re-patch, an inline insertion, a surge and a silence.
@@ -768,6 +792,9 @@ def _build_mac_snapshots(rng: random.Random, extra: random.Random) -> pd.DataFra
     return pd.DataFrame(rows)
 
 
+VRRP_IP = "10.0.0.254"
+
+
 def _build_arp(rng: random.Random) -> pd.DataFrame:
     """ARP at one-second resolution: hosts asking for the gateway, the gateway announcing itself, and one flood."""
     events: list[tuple[int, str, str, str, str]] = []
@@ -888,3 +915,8 @@ def _build_auth(rng: random.Random, extra: random.Random) -> pd.DataFrame:
         })
 
     return pd.DataFrame(rows)
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the gateway address its routers share."""
+    return EstateContext(extras={"vrrp_addresses": [VRRP_IP]})

@@ -74,6 +74,7 @@ from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.repository import repository_path
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
@@ -123,18 +124,18 @@ SUBDOMAIN_THRESHOLD = 100
 PATH_THRESHOLD = 200
 
 
-def build_stages(config: Config, telemetry_class: str, applications=None) -> list:
+def build_stages(config: Config, telemetry_class: str, *, context: EstateContext = None) -> list:
     """
     The stages for one layer 7 class.
 
     A request and a connection reach a server's port, and which application answered is read from the CMDB through
     `TC0EnrichStage`; a query reaches the resolver, which is not the application the client wanted, so DNS is not
-    enriched. `applications` is the store, defaulting to the estate's.
+    enriched. The CMDB's store comes from `context`, which must hold it for the other two classes.
     """
     if (telemetry_class == DNS_CLASS):
         return [TC7DnsStage(config)]
 
-    store = application_context.store(config) if applications is None else applications
+    (store, ) = (context or EstateContext()).require("the application composition", "application")
 
     if (telemetry_class == HTTP_CLASS):
         return [
@@ -154,7 +155,8 @@ def _run_class(config: Config,
                dataframes: list[pd.DataFrame],
                impose_order: bool,
                hosts: tuple = None,
-               applications=None) -> pd.DataFrame:
+               *,
+               context: EstateContext = None) -> pd.DataFrame:
     """Source, stamp, total order, the class's stage, determinism stamp, envelope, window seal, sink."""
     pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
@@ -165,7 +167,7 @@ def _run_class(config: Config,
 
     pipe.add_stage(CollectorSequenceStage(config))
 
-    for stage in build_stages(config, telemetry_class, applications):
+    for stage in build_stages(config, telemetry_class, context=context):
         pipe.add_stage(stage)
 
     # The source address to its interface and its machine, and the chain rooted on the machine where there is one.
@@ -235,7 +237,9 @@ def _run_class(config: Config,
 def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                 impose_order: bool = True) -> pd.DataFrame:
+                 impose_order: bool = True,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Run the three layer 7 classes and return one canonicalized frame.
 
@@ -249,6 +253,8 @@ def run_pipeline(config: Config,
         Per class, how the corpus is split across source frames. Defaults to one frame per class.
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; the CMDB's application store is required.
 
     Returns
     -------
@@ -262,12 +268,11 @@ def run_pipeline(config: Config,
     # taken out of the stream and kept.
     (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
     hosts = host_identity.tables(config, batches, impose_order)
-    applications = application_context.store(config)
 
     frames = []
 
     for name in TELEMETRY_CLASSES:
-        frame = _run_class(config, name, batches[name], impose_order, hosts, applications)
+        frame = _run_class(config, name, batches[name], impose_order, hosts, context=context)
 
         # A class every record of which was quarantined produced nothing, and is absent rather than an empty frame.
         if (len(frame) == 0):

@@ -75,6 +75,7 @@ from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -93,8 +94,6 @@ from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
 from morpheus.stages.telemetry.tc3_cardinality_stage import TC3CardinalityStage
 from morpheus.stages.telemetry.tc3_reach_stage import TC3ReachStage
 from morpheus.stages.telemetry.tc3_ttl_stage import TC3TtlStage
-from morpheus.utils.bitemporal import BitemporalStore
-from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 
@@ -129,68 +128,38 @@ RULES = ("R-B-L3-001", "R-B-L3-002", "R-D-L3-003", "R-B-L3-004", "R-P-L3-005", "
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 LATE_DELIVERY_CLASS = "tc3_late_delivery"
 """The frame the late flow arrives in, after everything else. Its records are TC-3 flows like any other."""
-SCANNER = "10.0.0.50"
-UPLOADER = "10.0.0.120"
-FILE_SERVER = "10.0.1.200"
-SWEPT_SERVER = "10.0.1.240"
-DHCP_SERVER = "10.0.1.67"
-DNS_SERVER = "10.0.1.53"
-APP_SERVER = "10.0.1.230"
-REACHED_WORKSTATION = "10.0.2.15"
-"""A finance workstation, which in the scored hours is reached by fourteen internal sources where its fortnight held
-one: its owner's jump host. R-B-L3-006's case."""
-DEVICE_ROLES = {
-    DHCP_SERVER: "server",
-    DNS_SERVER: "server",
-    APP_SERVER: "server",
-    FILE_SERVER: "server",
-    SWEPT_SERVER: "server",
-    REACHED_WORKSTATION: "workstation",
-    SCANNER: "workstation",
-    UPLOADER: "workstation",
-}
-"""What the asset inventory says each address is. R-B-L3-006 reads the destination's role."""
 CONTEXT_PREFIX = "dst_ctx_"
 """The destination's context, as `TC0EnrichStage` attaches it. Prefixed, because the row's subject is the source and
 a `ctx_device_role` on a flow would read as the source's."""
 
 
-def asset_versions() -> list:
-    """The inventory's word on what each address is, recorded before the corpus begins."""
-    return [
-        make_version("asset", address, 0, None, 0, values={"device_role": role})
-        for (address, role) in sorted(DEVICE_ROLES.items())
-    ]
-
-
-def build_store() -> BitemporalStore:
-    """The asset store the destination enrichment reads."""
-    return BitemporalStore("asset", asset_versions())
-
-
-def build_stages(config: Config, min_denominator: int = 5) -> list:
+def build_stages(config: Config, min_denominator: int = 5, *, context: EstateContext = None) -> list:
     """The TC-3 stages, in the order a deployment would compose them.
 
     Cardinality first because it needs nothing from the others, then reach, which classifies the destination the
     counts were taken over, then the baseline, which measures two of the counts and reach's asymmetry against each
     host's fortnight, then the rhythm and the reference, which are per-pair and per-source rather than per-window
     and are independent of the rest. The destination's context comes last of the feature stages; nothing before it
-    reads it.
+    reads it, and it is the estate's asset inventory, from `context`.
     """
+    (asset, ) = (context or EstateContext()).require("the network composition", "asset")
+
     return [
         TC3CardinalityStage(config, window_seconds=PERIOD_SECONDS),
         TC3ReachStage(config, window_seconds=PERIOD_SECONDS, min_denominator=min_denominator),
         TC3BaselineStage(config, bucket_seconds=PERIOD_SECONDS, min_buckets=BASELINE_MIN_BUCKETS),
         TC3BeaconStage(config, window_seconds=CORPUS_SECONDS, min_intervals=12),
         TC3TtlStage(config, window_seconds=CORPUS_SECONDS, min_samples=5),
-        TC0EnrichStage(config, store=build_store(), entity_column="dst_ip", prefix=CONTEXT_PREFIX),
+        TC0EnrichStage(config, store=asset, entity_column="dst_ip", prefix=CONTEXT_PREFIX),
     ]
 
 
 def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                 impose_order: bool = True) -> pd.DataFrame:
+                 impose_order: bool = True,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Run the TC-3 class through its composed pipeline and return one canonicalized frame.
 
@@ -206,6 +175,8 @@ def run_pipeline(config: Config,
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages. The permutation check's negative control turns it
         off, and every stage here is cumulative, so the difference is visible.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; the asset inventory is required, for the destination's role.
 
     Returns
     -------
@@ -235,7 +206,7 @@ def run_pipeline(config: Config,
     # equality rather than by a time window. Stateless, so its place relative to the order makes no difference.
     pipe.add_stage(CommunityIdStage(config, dst_ip_column="dst_ip", dst_port_column="dst_port"))
 
-    for stage in build_stages(config):
+    for stage in build_stages(config, context=context):
         pipe.add_stage(stage)
 
     # The source address to its interface and its machine, and the chain rooted on the machine where there is one.

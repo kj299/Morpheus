@@ -24,9 +24,17 @@ evaluation read them. Nothing in the package imports this directory.
 `merged(name)` is the corpus and its composition as one namespace -- the shape the tests and the tools have always
 used, `tp_.build_corpus()` beside `tp_.run_pipeline(...)` -- read-only: a name is looked up in the corpus first and
 the composition second, and assigning to the namespace changes neither module.
+
+**The corpus's estate is the default context there.** A composition takes the estate's context as an input and refuses
+to run without it (`morpheus.compositions.estate_context`); a corpus that has an estate says so with `context()`. In
+the merged namespace every composition function that takes `context` defaults it to the corpus's, so a harness that
+runs a corpus through its composition need not pass it, while the composition itself, imported from the package, still
+has no default to fall back on.
 """
 
+import functools
 import importlib
+import inspect
 import types
 
 _MERGED: dict = {}
@@ -42,8 +50,27 @@ def merged(name: str) -> types.ModuleType:
         for module in (composition, corpus):
             namespace.__dict__.update({key: value for (key, value) in vars(module).items() if not key.startswith("__")})
 
+        if (callable(getattr(corpus, "context", None))):
+            for (key, value) in vars(composition).items():
+                if (inspect.isfunction(value) and value.__module__ == composition.__name__
+                        and "context" in inspect.signature(value).parameters):
+                    namespace.__dict__[key] = _with_context(value, corpus.context)
+
         namespace.__composition__ = composition
         namespace.__corpus__ = corpus
         _MERGED[name] = namespace
 
     return _MERGED[name]
+
+
+def _with_context(function, context):
+    """`function`, with its keyword-only `context` defaulting to the corpus's estate when the caller gives none."""
+
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        if (kwargs.get("context") is None):
+            kwargs["context"] = context()
+
+        return function(*args, **kwargs)
+
+    return wrapper

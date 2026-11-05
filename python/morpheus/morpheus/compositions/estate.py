@@ -56,12 +56,12 @@ import pandas as pd
 
 from morpheus.compositions import edge_stream
 from morpheus.compositions import envelope
-from morpheus.compositions import session as sp
 from morpheus.compositions import stamping
 from morpheus.compositions import telemetry as tp
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -78,14 +78,12 @@ from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
 from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
-from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 
 PERIOD_SECONDS = tp.PERIOD_SECONDS
 LATENESS_SECONDS = tp.LATENESS_SECONDS
-CORPUS_SECONDS = tp.CORPUS_SECONDS
 ID_COLUMNS = tp.ID_COLUMNS
 KEY_COLUMNS = ["telemetry_class", "row_key"]
 IGNORE_COLUMNS: list[str] = []
@@ -95,17 +93,6 @@ SETTINGS = {"period_seconds": PERIOD_SECONDS, "lateness_seconds": LATENESS_SECON
 """The settings that decide the sign-in class's output here; the telemetry classes carry the telemetry corpus's own."""
 RULES = ("R-D-L5-004", )
 """The shipped rule that reads what this corpus's own stages write onto the sign-ins (TC5RiskStage's factor runs)."""
-DIRECTORY = {
-    sp.ALICE: tp.IDENTITIES[tp.MAC_A],
-    sp.BOB: tp.IDENTITIES[tp.MAC_B],
-    sp.CAROL: tp.IDENTITIES[tp.MAC_C],
-}
-"""The identity provider's own record of which 802.1X identity each person presents.
-
-Read from the telemetry corpus rather than restated, so the two cannot drift apart: if the supplicant on a port
-is renamed, this follows it, and a test asserting the ladder cannot pass against a directory that has quietly
-stopped describing the estate.
-"""
 DIRECTORY_METHOD_COLUMN = "directory_resolution"
 SUPPLICANT_METHOD_COLUMN = "supplicant_resolution"
 DESK_IDENTITY_COLUMN = "desk_identity"
@@ -114,33 +101,6 @@ DIRECTORY_UID_COLUMN = "desk_identity_uid"
 """The directory entry a sign-in's principal was resolved to an 802.1X identity through."""
 SUPPLICANT_UID_COLUMN = "desk_binding_uid"
 """The supplicant binding the identity was resolved to a port through, as `TC2BindingStage` closed it."""
-
-
-def build_directory_table(principals: typing.Optional[dict] = None) -> BindingTable:
-    """
-    The supplied half of the ladder: which 802.1X identity each principal presents, and for how long.
-
-    Bounded across the whole corpus rather than left open, because an unbounded binding is the one shape a
-    resolver cannot be wrong about and therefore the one that proves nothing. A directory export is a statement
-    about an interval; treating it as eternal is how stale attribution outlives the person it described.
-    """
-    principals = DIRECTORY if principals is None else principals
-    rows = []
-
-    for (principal, identity) in sorted(principals.items()):
-        rows.append({
-            "user_principal": principal,
-            "dot1x_identity": identity,
-            "bind_start": 0,
-            "bind_end": CORPUS_SECONDS * NS_PER_SECOND,
-        })
-
-    return BindingTable.from_dataframe(pd.DataFrame(rows),
-                                       name="directory",
-                                       key_column="user_principal",
-                                       value_columns=["dot1x_identity"],
-                                       start_column="bind_start",
-                                       end_column="bind_end")
 
 
 def build_supplicant_table(bindings: pd.DataFrame) -> BindingTable:
@@ -245,7 +205,9 @@ def _seal_chains(config: Config, outputs: dict[str, pd.DataFrame], parts: int = 
 def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                 impose_order: bool = True) -> pd.DataFrame:
+                 impose_order: bool = True,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Run the estate: layers 1 and 2 as the telemetry harness runs them, layer 5 resolved down to a port.
 
@@ -260,12 +222,16 @@ def run_pipeline(config: Config,
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages. The permutation check's negative control turns it
         off.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; the 802.1X directory, which joins each sign-in to its principal's desk, is required.
 
     Returns
     -------
     `pandas.DataFrame`
         Every class's output, tagged with `telemetry_class`, keyed by `row_key`, canonicalized.
     """
+    (directory, ) = (context or EstateContext()).require("the estate composition", "directory")
+
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
@@ -273,7 +239,8 @@ def run_pipeline(config: Config,
     telemetry = tp.run_classes(config, {name: corpus[name]
                                         for name in corpus if name != AUTH_CLASS},
                                batches=telemetry_batches,
-                               impose_order=impose_order)
+                               impose_order=impose_order,
+                               context=context)
 
     # Every telemetry class, not only the chained ones: the binding classes carry no chain and are not sealed,
     # but they are what the `binding:l1` and `binding:l2` sourcetypes are made of, and a harness that dropped
@@ -301,7 +268,7 @@ def run_pipeline(config: Config,
             TC5NoveltyStage(config),
             TC5RiskStage(config, min_denominator=1),
             BindingResolverStage(config,
-                                 binding_table=build_directory_table(),
+                                 binding_table=directory,
                                  key_column="user_principal",
                                  output_columns={"dot1x_identity": DESK_IDENTITY_COLUMN},
                                  method_column=DIRECTORY_METHOD_COLUMN,

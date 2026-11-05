@@ -16,9 +16,10 @@
 """
 Write each segment's input as the files a collector would send, and the contract those files are held to.
 
-The corpus builders under `tests/morpheus/determinism/` are where every input class's shape has lived: a frame per
-class, built in memory and handed to a pipeline. A collector author cannot diff their output against a function.
-This writes the same records out as JSON lines, one directory per segment and one file per class, and renders
+The corpus builders in `corpora/` are where every input class's shape has lived: a frame per class, built in
+memory and handed to a pipeline. A collector author cannot diff their output against a function. This writes the
+same records out as JSON lines, one directory per segment and one file per class, with the estate context the
+segment's runner enriches with under `context/`, and renders
 `collector_contract.md` from `input_contracts.json`, which says per class and per column what the type, the unit and
 the collector-side source are.
 
@@ -44,6 +45,8 @@ REPO_ROOT = HERE.parents[1]
 SAMPLES = HERE / "samples"
 CONTRACTS = HERE / "input_contracts.json"
 CONTRACT_DOCUMENT = HERE / "collector_contract.md"
+CONTEXT_DIR = "context"
+"""The subdirectory of a segment's sample that holds the estate context its runner enriches with."""
 
 sys.path.insert(0, str(HERE))
 
@@ -147,6 +150,22 @@ def segment_corpus(segment: str) -> dict:
     return merged(SEGMENTS[segment]).build_corpus()
 
 
+def segment_context(segment: str) -> dict[str, str]:
+    """
+    The estate context a segment's runner enriches with, as the files `EstateContext.from_directory` reads: the
+    context segment's `context:identity`, `context:asset` and `context:application` records, and the extras the
+    composition reads. Empty for a segment whose composition reads none.
+    """
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+
+    module = merged(SEGMENTS[segment])
+
+    if (not hasattr(module, "context")):
+        return {}
+
+    return module.context().render()
+
+
 def render_samples() -> dict[pathlib.Path, str]:
     """Every sample file, by path."""
     rendered = {}
@@ -154,6 +173,9 @@ def render_samples() -> dict[pathlib.Path, str]:
     for segment in SEGMENTS:
         for (name, frame) in segment_corpus(segment).items():
             rendered[SAMPLES / segment / f"{name}.jsonlines"] = render_frame(frame, contract_class(name))
+
+        for (name, text) in segment_context(segment).items():
+            rendered[SAMPLES / segment / CONTEXT_DIR / name] = text
 
     return rendered
 

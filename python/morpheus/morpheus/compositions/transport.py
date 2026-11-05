@@ -61,6 +61,7 @@ from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.repository import repository_path
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
@@ -105,14 +106,14 @@ RULES = ("R-D-L4-002", "R-D-L4-003", "R-B-L4-005", "R-B-L4-004")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 
-def build_stages(config: Config, applications=None) -> list:
+def build_stages(config: Config, *, context: EstateContext = None) -> list:
     """The TC-4 stages, in the order a deployment would compose them.
 
     The flow rollup first, because the envelope reads the magnitudes it produces; `community_id` beside them,
     computed from the five-tuple the records already carry; and the application the destination port belongs to, from
-    the CMDB. `applications` is the store, defaulting to the estate's.
+    the CMDB, which `context` must hold.
     """
-    store = application_context.store(config) if applications is None else applications
+    (store, ) = (context or EstateContext()).require("the transport composition", "application")
 
     return [
         TC4FlowStage(config, bin_seconds=BIN_SECONDS),
@@ -131,7 +132,9 @@ def run_pipeline(config: Config,
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
                  impose_order: bool = True,
                  hosts: typing.Optional[tuple] = None,
-                 sessions: typing.Optional[BindingTable] = None) -> pd.DataFrame:
+                 sessions: typing.Optional[BindingTable] = None,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Run the TC-4 class through its composed pipeline and return one canonicalized frame.
 
@@ -152,6 +155,8 @@ def run_pipeline(config: Config,
     sessions : `morpheus.utils.binding_table.BindingTable`, optional
         Which principal's session held each address, from `host_identity.session_table`. Given, each packet carries
         the `session_key` of the session that held its source address; this corpus has no sessions of its own.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; the CMDB's application store is required.
 
     Returns
     -------
@@ -175,7 +180,7 @@ def run_pipeline(config: Config,
 
     pipe.add_stage(CollectorSequenceStage(config))
 
-    for stage in build_stages(config):
+    for stage in build_stages(config, context=context):
         pipe.add_stage(stage)
 
     # The source address to its interface and its machine, and the chain rooted on the machine where there is one.

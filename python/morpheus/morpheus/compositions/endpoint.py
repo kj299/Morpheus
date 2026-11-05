@@ -65,6 +65,7 @@ from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -80,9 +81,6 @@ from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc7_endpoint_stage import HOST_KEY
 from morpheus.stages.telemetry.tc7_endpoint_stage import PAIR
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
-from morpheus.utils.binding_table import NS_PER_SECOND
-from morpheus.utils.bitemporal import BitemporalStore
-from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 
@@ -108,59 +106,14 @@ SETTINGS = {
 """The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
 RULES = ("R-B-L7-004", "R-P-L7-011")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
-CONTEXT_RECORDED_DAY = 0
-FINANCE_GROUP = "finance-workstations"
-BUILD_GROUP = "build-servers"
-FINANCE_HOSTS = {"fin-01": "alice", "fin-02": "bob", "fin-03": "carol"}
-BUILD_HOSTS = ("build-01", "build-02")
-KIOSK = "kiosk-01"
-DEVICE_ROLES = {"finance": "workstation", "build": "server", "kiosk": "kiosk"}
-CRITICALITY = {"finance": "medium", "build": "high", "kiosk": "low"}
-OS_VERSIONS = {"finance": "10.0.19045", "build": "10.0.20348", "kiosk": "10.0.19044"}
-
-
-def at(day: float, hour: float = 0, minute: float = 0, second: float = 0) -> int:
-    """An instant in the corpus, in nanoseconds since the epoch."""
-    return int((day * DAY_SECONDS + hour * 3600 + minute * 60 + second) * NS_PER_SECOND)
-
-
-def asset_versions() -> list:
-    """The inventory: the finance and build groups, and the kiosk with no group. The lab machine is not in it."""
-    versions = []
-    owners = dict(FINANCE_HOSTS)
-
-    for host in sorted(set(FINANCE_HOSTS) | set(BUILD_HOSTS) | {KIOSK}):
-        group = FINANCE_GROUP if host in FINANCE_HOSTS else (BUILD_GROUP if host in BUILD_HOSTS else None)
-        kind = "finance" if host in FINANCE_HOSTS else ("build" if host in BUILD_HOSTS else "kiosk")
-        versions.append(
-            make_version("asset",
-                         host,
-                         0,
-                         None,
-                         at(CONTEXT_RECORDED_DAY),
-                         values={
-                             "owner": f"{owners[host]}@example.com" if host in owners else "it-ops@example.com",
-                             "owning_team": "finance" if host in FINANCE_HOSTS else "platform",
-                             "criticality": CRITICALITY[kind],
-                             "data_classification": "confidential" if host in FINANCE_HOSTS else "internal",
-                             "peer_group": group,
-                             "device_role": DEVICE_ROLES[kind],
-                             "os_family": "windows",
-                             "os_version": OS_VERSIONS[kind],
-                         }))
-
-    return versions
-
-
-def build_store() -> BitemporalStore:
-    """The asset store the enrichment reads."""
-    return BitemporalStore("asset", asset_versions())
 
 
 def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                 impose_order: bool = True) -> pd.DataFrame:
+                 impose_order: bool = True,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Source, stamp, total order, enrich with the host's asset record, judge, envelope, seal hourly, sink.
 
@@ -174,12 +127,16 @@ def run_pipeline(config: Config,
         How the corpus is split across source frames. Defaults to one frame.
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; the asset inventory, which every host is enriched from, is required.
 
     Returns
     -------
     `pandas.DataFrame`
         The class's output, tagged with `telemetry_class`, keyed by `row_key`, canonicalized.
     """
+    (asset, ) = (context or EstateContext()).require("the endpoint composition", "asset")
+
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
@@ -196,8 +153,7 @@ def run_pipeline(config: Config,
 
     pipe.add_stage(CollectorSequenceStage(config))
 
-    pipe.add_stage(
-        TC0EnrichStage(config, store=build_store(), entity_column="hostname", entity_normalization="hostname"))
+    pipe.add_stage(TC0EnrichStage(config, store=asset, entity_column="hostname", entity_normalization="hostname"))
     pipe.add_stage(TC7EndpointStage(config, window_days=WINDOW_DAYS, warmup_days=WARMUP_DAYS))
     pipe.add_stage(DeterminismStampStage(config, envelope=stamping.envelope_for(ENDPOINT_CLASS, SETTINGS, rules=RULES)))
     pipe.add_stage(EnvelopeStampStage(config, osi_layer=OSI_LAYER, entity_columns=ENTITY_COLUMNS))

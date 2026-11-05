@@ -169,7 +169,7 @@ def test_every_class_has_a_sample_in_its_home_segment():
 
 def test_the_samples_are_what_the_builders_build():
     rendered = samples.render_samples()
-    committed = set(samples.SAMPLES.glob("*/*.jsonlines"))
+    committed = set(samples.SAMPLES.glob("*/*.jsonlines")) | set(samples.SAMPLES.glob(f"*/{samples.CONTEXT_DIR}/*"))
 
     assert committed == set(rendered), "regenerate with make_input_samples.py"
 
