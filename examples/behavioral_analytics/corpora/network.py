@@ -26,25 +26,21 @@ import typing
 from corpora import merged  # noqa: F401
 
 from morpheus.compositions import envelope
+from morpheus.compositions.estate_context import EstateContext
 
 host_identity = merged('host_identity')
+
 import pandas as pd
 
-from morpheus.compositions.network import APP_SERVER
 from morpheus.compositions.network import CORPUS_HOURS
 from morpheus.compositions.network import CORPUS_SECONDS
-from morpheus.compositions.network import DHCP_SERVER
-from morpheus.compositions.network import DNS_SERVER
-from morpheus.compositions.network import FILE_SERVER
 from morpheus.compositions.network import HISTORY_DAYS
 from morpheus.compositions.network import LATE_DELIVERY_CLASS
 from morpheus.compositions.network import PERIOD_SECONDS
-from morpheus.compositions.network import REACHED_WORKSTATION
-from morpheus.compositions.network import SCANNER
-from morpheus.compositions.network import SWEPT_SERVER
 from morpheus.compositions.network import TELEMETRY_CLASS
-from morpheus.compositions.network import UPLOADER
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
 
 CORPUS_SEED = 20260921
 DAY_SECONDS = 24 * PERIOD_SECONDS
@@ -73,6 +69,50 @@ QUIET_SERVER = "10.0.1.220"
 MEDIA_RELAY = "93.184.216.90"
 RESERVED_DESTINATION = "240.0.0.1"
 JUMP_HOST = "10.0.1.5"
+SCANNER = "10.0.0.50"
+
+UPLOADER = "10.0.0.120"
+
+FILE_SERVER = "10.0.1.200"
+
+SWEPT_SERVER = "10.0.1.240"
+
+DHCP_SERVER = "10.0.1.67"
+
+DNS_SERVER = "10.0.1.53"
+
+APP_SERVER = "10.0.1.230"
+
+REACHED_WORKSTATION = "10.0.2.15"
+"""A finance workstation, which in the scored hours is reached by fourteen internal sources where its fortnight held
+one: its owner's jump host. R-B-L3-006's case."""
+
+DEVICE_ROLES = {
+    DHCP_SERVER: "server",
+    DNS_SERVER: "server",
+    APP_SERVER: "server",
+    FILE_SERVER: "server",
+    SWEPT_SERVER: "server",
+    REACHED_WORKSTATION: "workstation",
+    SCANNER: "workstation",
+    UPLOADER: "workstation",
+}
+"""What the asset inventory says each address is. R-B-L3-006 reads the destination's role."""
+
+
+def asset_versions() -> list:
+    """The inventory's word on what each address is, recorded before the corpus begins."""
+    return [
+        make_version("asset", address, 0, None, 0, values={"device_role": role})
+        for (address, role) in sorted(DEVICE_ROLES.items())
+    ]
+
+
+def build_store() -> BitemporalStore:
+    """The asset store the destination enrichment reads."""
+    return BitemporalStore("asset", asset_versions())
+
+
 SCANNER_SERVERS = (FILE_SERVER, "10.0.1.201", "10.0.1.202")
 """The three servers the scanning workstation reaches in its ordinary hours, so its fortnight's peak is three."""
 SCAN_PER_HOUR = (5, 20, 45, 80)
@@ -436,3 +476,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     hosts = host_identity.build(frame["src_ip"], int(frame["event_time"].min()), int(frame["event_time"].max()))
 
     return envelope.attach_all({TELEMETRY_CLASS: frame, LATE_DELIVERY_CLASS: pd.DataFrame([late]), **hosts})
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the asset inventory's word on each address."""
+    return EstateContext(asset=build_store())

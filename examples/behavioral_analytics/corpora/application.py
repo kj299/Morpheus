@@ -23,9 +23,12 @@ composition module's docstring describes what this corpus plants and why.
 import base64
 import random
 
+from corpora import application_context as estate_cmdb
 from corpora import merged  # noqa: F401
 
 from morpheus.compositions import envelope
+from morpheus.compositions.corpus_pipeline import build_pipeline_config as _config
+from morpheus.compositions.estate_context import EstateContext
 
 host_identity = merged('host_identity')
 import pandas as pd
@@ -513,3 +516,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     hosts = host_identity.build(every["src_ip"], int(every["event_time"].min()), int(every["event_time"].max()))
 
     return envelope.attach_all({DNS_CLASS: dns, HTTP_CLASS: http, SERVICE_CLASS: services, **hosts})
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the CMDB's application store."""
+    return EstateContext(application=estate_cmdb.store(_config()))

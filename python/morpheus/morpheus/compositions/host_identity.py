@@ -64,11 +64,6 @@ SESSION_UID_COLUMN = "session_binding_uid"
 ID_COLUMNS = ["collector_id", "schema_version", "origin_hash", "collector_seq"]
 
 
-def hostname_for(address: str) -> str:
-    """The machine a client's interface belongs to, as its EDR agent names it."""
-    return "WS-" + "-".join(address.split(".")[2:]).upper()
-
-
 def _close(config: Config, dataframes: list, stage: TC2BindingStage, impose_order: bool) -> pd.DataFrame:
     from morpheus.compositions.host_frame import to_host_frame  # pylint: disable=import-outside-toplevel
 

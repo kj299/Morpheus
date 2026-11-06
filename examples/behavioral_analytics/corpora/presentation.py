@@ -22,23 +22,23 @@ composition module's docstring describes what this corpus plants and why.
 
 import hashlib
 
+from corpora import application_context as estate_cmdb
 from corpora import merged  # noqa: F401
 
 from morpheus.compositions import envelope
+from morpheus.compositions.corpus_pipeline import build_pipeline_config as _config
+from morpheus.compositions.estate_context import EstateContext
 
 host_identity = merged('host_identity')
 import pandas as pd
 
-from morpheus.compositions.presentation import CORP_CA
-from morpheus.compositions.presentation import CREEPER
 from morpheus.compositions.presentation import DAY_SECONDS
-from morpheus.compositions.presentation import LEGACY_CLIENT
-from morpheus.compositions.presentation import MANAGED
 from morpheus.compositions.presentation import PERIOD_SECONDS
 from morpheus.compositions.presentation import TELEMETRY_CLASS
-from morpheus.compositions.presentation import UPDATED
-from morpheus.compositions.presentation import VARIED
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
+from morpheus.utils.entity_key import normalize_hostname
 
 CORPUS_HOURS = 3
 CORPUS_SECONDS = CORPUS_HOURS * PERIOD_SECONDS
@@ -140,6 +140,52 @@ def _fingerprint_of(destination: str, issuer: str) -> str:
     digest = hashlib.sha256(f"{destination}|{issuer}".encode("utf-8")).hexdigest()
 
     return f"sha256:{digest[:32]}"
+
+
+# Hosts.
+MANAGED = "10.0.0.20"
+
+VARIED = "10.0.0.21"
+
+LEGACY_CLIENT = "10.0.0.22"
+
+CREEPER = "10.0.0.24"
+"""A managed workstation that presents one more client stack every day of the week: R-P-L6-006's trajectory."""
+
+UPDATED = "10.0.0.25"
+"""A managed workstation that acquires a stack on each of two days and then stops: a rise too short to watchlist."""
+
+INVENTORY = {
+    MANAGED: ("workstation", "medium", "alice@example.com"),
+    VARIED: ("workstation", "medium", "bob@example.com"),
+    LEGACY_CLIENT: ("server", "high", "it-ops@example.com"),
+    CREEPER: ("workstation", "medium", "carol@example.com"),
+    UPDATED: ("workstation", "low", "dave@example.com"),
+}
+"""The managed hosts, as the asset inventory has them: role, criticality and owner. The personal device is absent."""
+
+
+def asset_versions() -> list:
+    """The inventory's record of every managed host, recorded before the corpus begins, keyed by host name."""
+    return [
+        make_version("asset",
+                     normalize_hostname(host_identity.hostname_for(address)),
+                     0,
+                     None,
+                     0,
+                     values={
+                         "device_role": role, "criticality": criticality, "owner": owner
+                     }) for (address, (role, criticality, owner)) in sorted(INVENTORY.items())
+    ]
+
+
+def build_store() -> BitemporalStore:
+    """The asset store the source enrichment reads."""
+    return BitemporalStore("asset", asset_versions())
+
+
+# Issuers.
+CORP_CA = "CN=Corp Issuing CA, O=Example, C=GB"
 
 
 def build_corpus() -> dict[str, pd.DataFrame]:
@@ -284,3 +330,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
                                 unmanaged=(PERSONAL_DEVICE, ))
 
     return envelope.attach_all({TELEMETRY_CLASS: frame, **hosts})
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the asset inventory and the CMDB's application store."""
+    return EstateContext(asset=build_store(), application=estate_cmdb.store(_config()))

@@ -26,7 +26,6 @@ import pandas as pd
 
 from morpheus.compositions.host_identity import INVENTORY_CLASS
 from morpheus.compositions.host_identity import LEASE_CLASS
-from morpheus.compositions.host_identity import hostname_for
 
 NS_PER_SECOND = 10**9
 DAY_NS = 86400 * NS_PER_SECOND
@@ -59,6 +58,11 @@ def _envelope(rows: list, collector: str, schema: str, origin: str, when: int) -
         "collector_seq": len(rows),
         "event_time": when,
     }
+
+
+def hostname_for(address: str) -> str:
+    """The machine a client's interface belongs to, as its EDR agent names it."""
+    return "WS-" + "-".join(address.split(".")[2:]).upper()
 
 
 def build(addresses: typing.Iterable[str],

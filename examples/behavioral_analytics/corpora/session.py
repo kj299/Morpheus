@@ -26,18 +26,17 @@ import typing
 import pandas as pd
 
 from morpheus.compositions import envelope as universal_envelope
-from morpheus.compositions.session import ALICE
-from morpheus.compositions.session import BATCH
-from morpheus.compositions.session import BOB
-from morpheus.compositions.session import CAROL
-from morpheus.compositions.session import DAVE
-from morpheus.compositions.session import ERIN
-from morpheus.compositions.session import FLIGHT_DAY
-from morpheus.compositions.session import GRACE
-from morpheus.compositions.session import JOINER_DAY
+from morpheus.compositions.estate_context import EstateContext
+from morpheus.compositions.session import CORPUS_EPOCH_S
+from morpheus.compositions.session import DAY_S
+from morpheus.compositions.session import HOUR_S
 from morpheus.compositions.session import TRAINING_DAYS
-from morpheus.compositions.session import at
+from morpheus.stages.telemetry.tc0_identity_stage import GROUP_ATTRIBUTE
+from morpheus.stages.telemetry.tc0_identity_stage import PROFILE
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.bitemporal import MEMBERSHIP
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
 
 CORPUS_SEED = 20260906
 CORPUS_DAYS = 7
@@ -52,6 +51,8 @@ NEW_YORK_PLACE = ("us", "ny", "new-york")
 FRANKFURT_PLACE = ("de", "hesse", "frankfurt")
 DUBLIN_PLACE = ("ie", "leinster", "dublin")
 AMSTERDAM_PLACE = ("nl", "north-holland", "amsterdam")
+VPN_EGRESS_NETWORK = "198.51.100.0/24"
+"""The network the estate's VPN egresses from, which impossible travel does not measure from."""
 VPN_EGRESS_IP = "198.51.100.7"
 """The concentrator's egress range, standing in for the list an estate supplies. Without it R-D-L5-003 fires on
 every VPN user every day, which is the same shape as R-D-L2-003's exclusion list and the same reason: this
@@ -98,6 +99,100 @@ FUMBLE_DAY = 2
 FUMBLE_HOUR = 14
 """Two failed passwords and then a success. Failure-then-success with none of the denial volume R-D-L5-004
 requires, which is what most of an estate does on a Monday morning."""
+ALICE = "alice@example.com"
+
+BOB = "bob@example.com"
+
+CAROL = "carol@example.com"
+
+DAVE = "dave@example.com"
+
+BATCH = "svc-batch@example.com"
+
+ERIN = "erin@example.com"
+
+GRACE = "grace@example.com"
+
+FLIGHT_DAY = 3
+
+JOINER_DAY = 0
+"""Grace's first day, the Monday of the scored week. She is in no training window and has no model."""
+
+LEAVER_DAY = 5
+
+LEAVER_RECORDED_DAY = 6
+"""Dave leaves on the Saturday; the directory hears on the Sunday. His Saturday sign-ins carry `active` as known at
+their time, which is what a detection could have known, and his Sunday ones carry `terminated`."""
+
+GROUP_CHANGE_GROUPS = ("london-office", "newyork-office")
+"""Bob's office group, changed on the day he flies, recorded the same day."""
+
+
+def _profile(principal: str,
+             department: str,
+             status: str,
+             valid_from_s: int,
+             recorded_s: int,
+             account_type: str = "human",
+             privilege: str = "standard"):
+    return make_version(PROFILE,
+                        principal,
+                        valid_from_s * NS_PER_SECOND,
+                        None,
+                        recorded_s * NS_PER_SECOND,
+                        values={
+                            "department": department,
+                            "employment_status": status,
+                            "account_type": account_type,
+                            "privilege_level": privilege,
+                        })
+
+
+def _member(principal: str, group: str, valid_from_s: int, recorded_s: int, change: str = "assert"):
+    return make_version(MEMBERSHIP,
+                        principal,
+                        valid_from_s * NS_PER_SECOND,
+                        None,
+                        recorded_s * NS_PER_SECOND,
+                        change, {GROUP_ATTRIBUTE: group}, (group, ))
+
+
+def identity_versions() -> list:
+    """The identity store the layer 5 classes are enriched from: what the directory recorded, and when."""
+    start = at(-TRAINING_DAYS, 0) - DAY_S
+    (london, newyork) = GROUP_CHANGE_GROUPS
+
+    return [
+        _profile(ALICE, "Finance", "active", start, start, privilege="elevated"),
+        _profile(BOB, "Engineering", "active", start, start),
+        _profile(CAROL, "Sales", "active", start, start),
+        _profile(DAVE, "Finance", "active", start, start),
+        _profile(BATCH, "Engineering", "active", start, start, account_type="service", privilege="elevated"),
+        _member(ALICE, "finance-users", start, start),
+        _member(BOB, london, start, start),
+        _member(CAROL, "sales-users", start, start),
+        _member(DAVE, "finance-users", start, start),
+        _member(BATCH, "batch-jobs", start, start),
+        _profile(ERIN, "Finance", "active", start, start),
+        _member(ERIN, "finance-users", start, start),
+        _profile(GRACE, "Sales", "active", at(JOINER_DAY, 0), at(JOINER_DAY, 0)),
+        _member(GRACE, "sales-users", at(JOINER_DAY, 0), at(JOINER_DAY, 0)),
+        _member(BOB, london, at(FLIGHT_DAY, 0), at(FLIGHT_DAY, 0), "retract"),
+        _member(BOB, newyork, at(FLIGHT_DAY, 0), at(FLIGHT_DAY, 0)),
+        _profile(DAVE, "Finance", "terminated", at(LEAVER_DAY, 0), at(LEAVER_RECORDED_DAY, 0)),
+    ]
+
+
+def build_identity_store() -> BitemporalStore:
+    """The store, rebuilt per run so no state leaks between the runs control 13 compares."""
+    return BitemporalStore("identity", identity_versions())
+
+
+def at(day: int, hour: int, second: int = 0) -> int:
+    """Epoch seconds for an hour on a corpus day, counted from the corpus's Monday midnight."""
+    return CORPUS_EPOCH_S + day * DAY_S + hour * HOUR_S + second
+
+
 DEVICES = {
     ALICE: "laptop-alice",
     BOB: "laptop-bob",
@@ -409,3 +504,9 @@ def _build_sessions(rng: random.Random) -> pd.DataFrame:
     frame["session_end"] = frame["session_end"].astype("Int64")
 
     return frame.reset_index(drop=True)
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the identity directory, with the joiner, the leaver and the group
+    change, and the network its VPN egresses from."""
+    return EstateContext(identity=build_identity_store(), extras={"vpn_egress_networks": [VPN_EGRESS_NETWORK]})

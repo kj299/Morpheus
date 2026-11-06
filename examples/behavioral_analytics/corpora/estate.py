@@ -29,9 +29,12 @@ from morpheus.compositions import envelope
 
 sp = merged('session')
 tp = merged('telemetry')
+import typing
+
 from morpheus.compositions.estate import AUTH_CLASS
-from morpheus.compositions.estate import CORPUS_SECONDS
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.binding_table import BindingTable
 
 CORPUS_SEED = 20260920
 UNCHAINED_CLASSES = ("tc1_binding", "tc2_binding")
@@ -95,6 +98,9 @@ def _auth_row(principal: str, time_s: int, app: str) -> dict:
     }
 
 
+CORPUS_SECONDS = tp.CORPUS_SECONDS
+
+
 def _build_desk_auth(rng: random.Random) -> pd.DataFrame:
     """The hour's sign-ins: three people at their desks and one working from home."""
     principals = list(DESKS) + [REMOTE]
@@ -113,3 +119,48 @@ def _build_desk_auth(rng: random.Random) -> pd.DataFrame:
         rows.append({**event, **tp._envelope(rng, "idp", "TC-5/1.0.0", seq)})  # pylint: disable=protected-access
 
     return pd.DataFrame(rows)
+
+
+DIRECTORY = {
+    sp.ALICE: tp.IDENTITIES[tp.MAC_A],
+    sp.BOB: tp.IDENTITIES[tp.MAC_B],
+    sp.CAROL: tp.IDENTITIES[tp.MAC_C],
+}
+"""The identity provider's own record of which 802.1X identity each person presents.
+
+Read from the telemetry corpus rather than restated, so the two cannot drift apart: if the supplicant on a port
+is renamed, this follows it, and a test asserting the ladder cannot pass against a directory that has quietly
+stopped describing the estate.
+"""
+
+
+def build_directory_table(principals: typing.Optional[dict] = None) -> BindingTable:
+    """
+    The supplied half of the ladder: which 802.1X identity each principal presents, and for how long.
+
+    Bounded across the whole corpus rather than left open, because an unbounded binding is the one shape a
+    resolver cannot be wrong about and therefore the one that proves nothing. A directory export is a statement
+    about an interval; treating it as eternal is how stale attribution outlives the person it described.
+    """
+    principals = DIRECTORY if principals is None else principals
+    rows = []
+
+    for (principal, identity) in sorted(principals.items()):
+        rows.append({
+            "user_principal": principal,
+            "dot1x_identity": identity,
+            "bind_start": 0,
+            "bind_end": CORPUS_SECONDS * NS_PER_SECOND,
+        })
+
+    return BindingTable.from_dataframe(pd.DataFrame(rows),
+                                       name="directory",
+                                       key_column="user_principal",
+                                       value_columns=["dot1x_identity"],
+                                       start_column="bind_start",
+                                       end_column="bind_end")
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the identity provider's 802.1X directory for the three people the chains follow, and the telemetry corpus's gateway."""
+    return EstateContext(directory=build_directory_table(), extras=tp.context().extras)

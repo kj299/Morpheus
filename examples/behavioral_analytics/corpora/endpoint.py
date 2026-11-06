@@ -26,12 +26,14 @@ import typing
 import pandas as pd
 
 from morpheus.compositions import envelope
-from morpheus.compositions.endpoint import BUILD_HOSTS
+from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
+    build_pipeline_config, )
+from morpheus.compositions.endpoint import DAY_SECONDS
 from morpheus.compositions.endpoint import ENDPOINT_CLASS
-from morpheus.compositions.endpoint import FINANCE_HOSTS
-from morpheus.compositions.endpoint import KIOSK
-from morpheus.compositions.endpoint import at
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
 
 # The rule's own weights, stated once so the corpus is built to exercise each deliberately.
 SEVERITY = {"system": 70, "high": 55, "medium": 40, "low": 25}
@@ -82,6 +84,63 @@ NOVEL_HIGH = "fin-01"
 """Word starts PowerShell. Fires at high."""
 STALE = "fin-02"
 """A remote-access tool last run thirty-eight days ago. Fires at system."""
+CONTEXT_RECORDED_DAY = 0
+
+FINANCE_GROUP = "finance-workstations"
+
+BUILD_GROUP = "build-servers"
+
+FINANCE_HOSTS = {"fin-01": "alice", "fin-02": "bob", "fin-03": "carol"}
+
+BUILD_HOSTS = ("build-01", "build-02")
+
+KIOSK = "kiosk-01"
+
+DEVICE_ROLES = {"finance": "workstation", "build": "server", "kiosk": "kiosk"}
+
+CRITICALITY = {"finance": "medium", "build": "high", "kiosk": "low"}
+
+OS_VERSIONS = {"finance": "10.0.19045", "build": "10.0.20348", "kiosk": "10.0.19044"}
+
+
+def at(day: float, hour: float = 0, minute: float = 0, second: float = 0) -> int:
+    """An instant in the corpus, in nanoseconds since the epoch."""
+    return int((day * DAY_SECONDS + hour * 3600 + minute * 60 + second) * NS_PER_SECOND)
+
+
+def asset_versions() -> list:
+    """The inventory: the finance and build groups, and the kiosk with no group. The lab machine is not in it."""
+    versions = []
+    owners = dict(FINANCE_HOSTS)
+
+    for host in sorted(set(FINANCE_HOSTS) | set(BUILD_HOSTS) | {KIOSK}):
+        group = FINANCE_GROUP if host in FINANCE_HOSTS else (BUILD_GROUP if host in BUILD_HOSTS else None)
+        kind = "finance" if host in FINANCE_HOSTS else ("build" if host in BUILD_HOSTS else "kiosk")
+        versions.append(
+            make_version("asset",
+                         host,
+                         0,
+                         None,
+                         at(CONTEXT_RECORDED_DAY),
+                         values={
+                             "owner": f"{owners[host]}@example.com" if host in owners else "it-ops@example.com",
+                             "owning_team": "finance" if host in FINANCE_HOSTS else "platform",
+                             "criticality": CRITICALITY[kind],
+                             "data_classification": "confidential" if host in FINANCE_HOSTS else "internal",
+                             "peer_group": group,
+                             "device_role": DEVICE_ROLES[kind],
+                             "os_family": "windows",
+                             "os_version": OS_VERSIONS[kind],
+                         }))
+
+    return versions
+
+
+def build_store() -> BitemporalStore:
+    """The asset store the enrichment reads."""
+    return BitemporalStore("asset", asset_versions())
+
+
 HOST_ONLY_NOVEL = KIOSK
 """`mshta.exe` on the ungrouped kiosk. Fires on its own history, flagged."""
 UNWEIGHTED = "build-02"
@@ -205,3 +264,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     frame["collector_seq"] = range(len(frame))
 
     return envelope.attach_all({ENDPOINT_CLASS: frame})
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the asset inventory's record of every host, with its peer group."""
+    return EstateContext(asset=build_store())

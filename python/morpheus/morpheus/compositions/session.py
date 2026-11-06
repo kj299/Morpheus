@@ -83,6 +83,7 @@ from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.repository import repository_path
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
@@ -99,8 +100,6 @@ from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.telemetry.tc0_enrich_stage import TC0EnrichStage
-from morpheus.stages.telemetry.tc0_identity_stage import GROUP_ATTRIBUTE
-from morpheus.stages.telemetry.tc0_identity_stage import PROFILE
 from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
 from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
@@ -109,10 +108,6 @@ from morpheus.stages.telemetry.tc5_score_stage import Scorer
 from morpheus.stages.telemetry.tc5_score_stage import TC5ScoreStage
 from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
-from morpheus.utils.binding_table import NS_PER_SECOND
-from morpheus.utils.bitemporal import MEMBERSHIP
-from morpheus.utils.bitemporal import BitemporalStore
-from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.dfencoder_scorer import DfencoderScorer
@@ -147,17 +142,6 @@ that the service account, which authenticates once a night, is mature by the las
 that it could never serve as the negative control it exists to be. The number is here rather than in the stage
 because it is a property of the corpus.
 """
-VPN_EGRESS_NETWORK = "198.51.100.0/24"
-ALICE = "alice@example.com"
-BOB = "bob@example.com"
-CAROL = "carol@example.com"
-DAVE = "dave@example.com"
-BATCH = "svc-batch@example.com"
-ERIN = "erin@example.com"
-GRACE = "grace@example.com"
-FLIGHT_DAY = 3
-JOINER_DAY = 0
-"""Grace's first day, the Monday of the scored week. She is in no training window and has no model."""
 SESSION_BASELINE_MIN_SAMPLES = 4
 """Prior sessions before a principal's duration baseline is published, for this corpus.
 
@@ -165,81 +149,9 @@ Below the stage's own floor of a hundred, deliberately, for the reason `CADENCE_
 working days, and a floor nobody reaches would make the baseline assert nothing. By nearest rank a 99th percentile
 of four sessions is the longest of them, which is what this corpus's long session is measured against.
 """
-LEAVER_DAY = 5
-LEAVER_RECORDED_DAY = 6
-"""Dave leaves on the Saturday; the directory hears on the Sunday. His Saturday sign-ins carry `active` as known at
-their time, which is what a detection could have known, and his Sunday ones carry `terminated`."""
-GROUP_CHANGE_GROUPS = ("london-office", "newyork-office")
-"""Bob's office group, changed on the day he flies, recorded the same day."""
 SESSION_TIMEOUT_SECONDS = 12 * HOUR_S
 """Shorter than the stage's own default, because this corpus is a week and a session abandoned after a day and a
 half would never be abandoned inside it."""
-
-
-def _profile(principal: str,
-             department: str,
-             status: str,
-             valid_from_s: int,
-             recorded_s: int,
-             account_type: str = "human",
-             privilege: str = "standard"):
-    return make_version(PROFILE,
-                        principal,
-                        valid_from_s * NS_PER_SECOND,
-                        None,
-                        recorded_s * NS_PER_SECOND,
-                        values={
-                            "department": department,
-                            "employment_status": status,
-                            "account_type": account_type,
-                            "privilege_level": privilege,
-                        })
-
-
-def _member(principal: str, group: str, valid_from_s: int, recorded_s: int, change: str = "assert"):
-    return make_version(MEMBERSHIP,
-                        principal,
-                        valid_from_s * NS_PER_SECOND,
-                        None,
-                        recorded_s * NS_PER_SECOND,
-                        change, {GROUP_ATTRIBUTE: group}, (group, ))
-
-
-def identity_versions() -> list:
-    """The identity store the layer 5 classes are enriched from: what the directory recorded, and when."""
-    start = at(-TRAINING_DAYS, 0) - DAY_S
-    (london, newyork) = GROUP_CHANGE_GROUPS
-
-    return [
-        _profile(ALICE, "Finance", "active", start, start, privilege="elevated"),
-        _profile(BOB, "Engineering", "active", start, start),
-        _profile(CAROL, "Sales", "active", start, start),
-        _profile(DAVE, "Finance", "active", start, start),
-        _profile(BATCH, "Engineering", "active", start, start, account_type="service", privilege="elevated"),
-        _member(ALICE, "finance-users", start, start),
-        _member(BOB, london, start, start),
-        _member(CAROL, "sales-users", start, start),
-        _member(DAVE, "finance-users", start, start),
-        _member(BATCH, "batch-jobs", start, start),
-        _profile(ERIN, "Finance", "active", start, start),
-        _member(ERIN, "finance-users", start, start),
-        _profile(GRACE, "Sales", "active", at(JOINER_DAY, 0), at(JOINER_DAY, 0)),
-        _member(GRACE, "sales-users", at(JOINER_DAY, 0), at(JOINER_DAY, 0)),
-        _member(BOB, london, at(FLIGHT_DAY, 0), at(FLIGHT_DAY, 0), "retract"),
-        _member(BOB, newyork, at(FLIGHT_DAY, 0), at(FLIGHT_DAY, 0)),
-        _profile(DAVE, "Finance", "terminated", at(LEAVER_DAY, 0), at(LEAVER_RECORDED_DAY, 0)),
-    ]
-
-
-def build_identity_store() -> BitemporalStore:
-    """The store, rebuilt per run so no state leaks between the runs control 13 compares."""
-    return BitemporalStore("identity", identity_versions())
-
-
-def at(day: int, hour: int, second: int = 0) -> int:
-    """Epoch seconds for an hour on a corpus day, counted from the corpus's Monday midnight."""
-    return CORPUS_EPOCH_S + day * DAY_S + hour * HOUR_S + second
-
 
 CHAIN_ANCHORS = {
     "tc5_auth": "user_principal",
@@ -270,11 +182,11 @@ SETTINGS = {
     "cadence_min_samples": CADENCE_MIN_SAMPLES,
     "session_timeout_seconds": SESSION_TIMEOUT_SECONDS,
     "session_baseline_min_samples": SESSION_BASELINE_MIN_SAMPLES,
-    "excluded_source_networks": [VPN_EGRESS_NETWORK],
     "training_days": TRAINING_DAYS,
     "scores_from_ns": SCORES_FROM_NS,
 }
-"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`."""
+"""The settings that decide this corpus's output, digested into `config_hash` by `stamping.envelope_for`, beside the
+estate's own: the VPN egress networks impossible travel does not measure from (`settings_for`)."""
 RULES = ("R-D-L5-003",
          "R-D-L5-004",
          "R-D-L5-007",
@@ -287,6 +199,11 @@ RULES = ("R-D-L5-003",
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 
 
+def settings_for(vpn_egress_networks: typing.Sequence[str]) -> dict:
+    """`SETTINGS` with the estate's VPN egress networks, which decide the travel stage's output as the others do."""
+    return {**SETTINGS, "excluded_source_networks": list(vpn_egress_networks)}
+
+
 def _run_class(config: Config,
                dataframes: list[pd.DataFrame],
                stages: typing.Callable[[], list],
@@ -297,7 +214,8 @@ def _run_class(config: Config,
                telemetry_class: str = None,
                manifest: ModelManifest = None,
                shards: int = None,
-               shard_column: str = "user_principal") -> pd.DataFrame:
+               shard_column: str = "user_principal",
+               settings: dict = None) -> pd.DataFrame:
     """Source → stamp → (total order) → the class's stages → determinism stamp → (envelope) → window seal →
     (daily seal → daily stages) → sink, as one frame.
 
@@ -323,7 +241,9 @@ def _run_class(config: Config,
         built = list(stages())
         built.append(
             DeterminismStampStage(config,
-                                  envelope=stamping.envelope_for(telemetry_class, SETTINGS, rules=RULES),
+                                  envelope=stamping.envelope_for(telemetry_class,
+                                                                 SETTINGS if settings is None else settings,
+                                                                 rules=RULES),
                                   manifest=manifest,
                                   entity_column="user_principal"))
 
@@ -576,7 +496,9 @@ def run_pipeline(config: Config,
                  scorer: typing.Optional[Scorer] = None,
                  manifest: typing.Optional[ModelManifest] = None,
                  shards: typing.Optional[int] = None,
-                 shard_column: str = "user_principal") -> pd.DataFrame:
+                 shard_column: str = "user_principal",
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Run every layer 5 telemetry class through its pipeline and return one canonicalized frame.
 
@@ -606,12 +528,21 @@ def run_pipeline(config: Config,
         The entity key the shards are decided on. Both classes are keyed on the principal, so a principal's
         authentications and sessions share a branch. The harness's negative control shards on a column that
         splits a principal and shows the output change.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; the identity directory, which every sign-in and session is enriched from, is required,
+        and `extras` must name the networks the estate's VPN egresses from (`vpn_egress_networks`), which impossible
+        travel does not measure from.
 
     Returns
     -------
     `pandas.DataFrame`
         Both classes' output, tagged with `telemetry_class`, keyed by `row_key`, canonicalized.
     """
+    context = context or EstateContext()
+    (identity, ) = context.require("the session composition", "identity")
+    (vpn_egress_networks, ) = context.require_extra("the session composition", "vpn_egress_networks")
+    settings = settings_for(vpn_egress_networks)
+
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
@@ -631,10 +562,10 @@ def run_pipeline(config: Config,
     outputs["tc5_auth"] = _run_class(
         config,
         batches["tc5_auth"], lambda: [
-            TC0EnrichStage(config, store=build_identity_store(), entity_column="user_principal"),
+            TC0EnrichStage(config, store=identity, entity_column="user_principal"),
             TC5NoveltyStage(config),
             TC5CadenceStage(config, min_samples=CADENCE_MIN_SAMPLES),
-            TC5TravelStage(config, excluded_source_networks=(VPN_EGRESS_NETWORK, )),
+            TC5TravelStage(config, excluded_source_networks=tuple(vpn_egress_networks)),
             TC5RiskStage(config, min_denominator=1),
             TC5ScoreStage(config, scorer=scorer, manifest=manifest, feature_columns=SCORED_FEATURES), ],
         impose_order,
@@ -644,20 +575,21 @@ def run_pipeline(config: Config,
         telemetry_class="tc5_auth",
         manifest=manifest,
         shards=shards,
-        shard_column=shard_column)
+        shard_column=shard_column,
+        settings=settings)
 
-    outputs["tc5_session"] = _run_class(
-        config,
-        batches["tc5_session"], lambda: [
-            TC0EnrichStage(config, store=build_identity_store(), entity_column="user_principal"),
-            TC5SessionStage(config, timeout_seconds=SESSION_TIMEOUT_SECONDS, baseline_min_samples=
-                            SESSION_BASELINE_MIN_SAMPLES), ],
-        impose_order,
-        anchor=CHAIN_ANCHORS["tc5_session"],
-        envelope=CLASS_ENVELOPE["tc5_session"],
-        telemetry_class="tc5_session",
-        shards=shards,
-        shard_column=shard_column)
+    outputs["tc5_session"] = _run_class(config,
+                                        batches["tc5_session"], lambda: [
+                                            TC0EnrichStage(config, store=identity, entity_column="user_principal"),
+                                            TC5SessionStage(config, timeout_seconds=SESSION_TIMEOUT_SECONDS,
+                                                            baseline_min_samples=SESSION_BASELINE_MIN_SAMPLES), ],
+                                        impose_order,
+                                        anchor=CHAIN_ANCHORS["tc5_session"],
+                                        envelope=CLASS_ENVELOPE["tc5_session"],
+                                        telemetry_class="tc5_session",
+                                        shards=shards,
+                                        shard_column=shard_column,
+                                        settings=settings)
 
     frames = []
 

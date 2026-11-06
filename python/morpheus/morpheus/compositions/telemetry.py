@@ -95,6 +95,7 @@ from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -135,14 +136,9 @@ from morpheus.utils.lineage import event_uid
 
 PERIOD_SECONDS = 300
 LATENESS_SECONDS = 900
-CORPUS_SECONDS = 3600
 ID_COLUMNS = ["collector_id", "schema_version", "origin_hash", "collector_seq"]
 KEY_COLUMNS = ["telemetry_class", "row_key"]
 IGNORE_COLUMNS: list[str] = []
-MAC_A = "aa:bb:cc:00:00:01"
-MAC_B = "aa:bb:cc:00:00:02"
-MAC_C = "aa:bb:cc:00:00:03"
-VRRP_IP = "10.0.0.254"
 MAC_ACTION_COLUMN = "mac_action"
 """What a MAC table row says happened: null on a snapshot row, `removed` on the switch's own notification."""
 BASELINE_MIN_BUCKETS = 6
@@ -164,25 +160,6 @@ the hardware rather than about any poll, so it is not carried on the event.
 AUTH_BASELINE_MIN_SAMPLES = 20
 """Prior exchanges a port needs before its distribution is published. Twenty, inside an hour; the stage's default is
 a hundred, and below a hundred the 99th percentile is the slowest exchange the port has had."""
-IDENTITIES = {
-    MAC_A: "alice-ws",
-    MAC_B: "bob-ws",
-    MAC_C: "carol-ws",
-    "aa:bb:cc:00:00:05": "phone-4021",
-    "aa:bb:cc:00:00:06": "desk-4021",
-    "de:ad:be:ef:01:01": "unknown-supplicant",
-    "de:ad:be:ef:01:02": "unknown-supplicant",
-}
-"""The identity a supplicant presented, where it presented one. A device doing MAC authentication bypass has no
-identity to present, which is what makes `unknown-supplicant` the honest value rather than a blank.
-
-The three workstations present one because the ladder's next rung needs somewhere to stand. An 802.1X identity is
-the only thing in this corpus a directory could bind a person to: a MAC is an asset, and asset assignment is a
-different fact with a different lifetime. Falling back to the MAC left `dot1x_identity` carrying an address on
-most exchanges, which is what the fallback is for and not what an estate with 802.1X deployed actually reports.
-Nothing keys on it -- `TC2AuthStage` prefers `mac_address` when both are present, so the exchange key, the port
-key and every window are untouched.
-"""
 DEVICE_CLASS = "tc1_device"
 CHANGE_WINDOW = ["00:00", "00:10"]
 """The estate's change window, in UTC. The corpus starts at midnight, so its first ten minutes are inside it."""
@@ -520,7 +497,9 @@ def mac_table_stages(config: Config, network: typing.Optional[dict] = None) -> l
 def run_classes(config: Config,
                 corpus: dict[str, pd.DataFrame],
                 batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                impose_order: bool = True) -> dict[str, pd.DataFrame]:
+                impose_order: bool = True,
+                *,
+                context: EstateContext = None) -> dict[str, pd.DataFrame]:
     """
     Run every telemetry class through its own pipeline, unsealed, and return the outputs per class.
 
@@ -540,6 +519,8 @@ def run_classes(config: Config,
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages. The permutation check's negative control turns it off
         to reproduce the removed-sort defect and prove the harness catches it.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; `extras` must name the gateway addresses its routers share (`vrrp_addresses`), whose ARP replies are the protocol rather than a spoof.
 
     Returns
     -------
@@ -547,6 +528,8 @@ def run_classes(config: Config,
         Class name to its output frame, with `row_key` already set on the classes whose key is not `event_uid`.
         None of them carry window columns yet.
     """
+    (vrrp_addresses, ) = (context or EstateContext()).require_extra("the telemetry composition", "vrrp_addresses")
+
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
@@ -643,7 +626,7 @@ def run_classes(config: Config,
         config,
         batches["tc2_arp"],
         [
-            TC2ArpStage(config, excluded_sender_ips=[VRRP_IP]),
+            TC2ArpStage(config, excluded_sender_ips=list(vrrp_addresses)),
             BindingResolverStage(config,
                                  binding_table=build_binding_table(bindings),
                                  key_column="arp_sender_mac",
@@ -673,7 +656,9 @@ def run_classes(config: Config,
 def run_pipeline(config: Config,
                  corpus: dict[str, pd.DataFrame],
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
-                 impose_order: bool = True) -> pd.DataFrame:
+                 impose_order: bool = True,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Run every telemetry class, seal the chained ones together, and return one canonicalized frame.
 
@@ -689,6 +674,8 @@ def run_pipeline(config: Config,
     impose_order : bool, default = True
         Place `TotalOrderStage` ahead of the stateful stages. The permutation check's negative control turns it off
         to reproduce the removed-sort defect and prove the harness catches it.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context, passed to `run_classes`.
 
     Returns
     -------
@@ -698,7 +685,7 @@ def run_pipeline(config: Config,
     if (batches is None):
         batches = {name: [frame.copy()] for (name, frame) in corpus.items()}
 
-    outputs = run_classes(config, corpus, batches, impose_order)
+    outputs = run_classes(config, corpus, batches, impose_order, context=context)
 
     # The chained classes are sealed together, in as many contiguous pieces as the widest per-class split, so
     # control 5 sweeps this pass too.

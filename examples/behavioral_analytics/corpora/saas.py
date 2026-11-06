@@ -23,23 +23,12 @@ composition module's docstring describes what this corpus plants and why.
 import pandas as pd
 
 from morpheus.compositions import envelope
-from morpheus.compositions.saas import BREADTH
-from morpheus.compositions.saas import CONFIDENTIAL_OBJECT
-from morpheus.compositions.saas import EXFILTRATOR
-from morpheus.compositions.saas import FAILED_EXPORTER
-from morpheus.compositions.saas import FIRST_MONDAY_DAY
-from morpheus.compositions.saas import NEAR_EXPORTER
-from morpheus.compositions.saas import NEWCOMER
-from morpheus.compositions.saas import PUBLIC_EXPORTER
-from morpheus.compositions.saas import PUBLIC_OBJECT
-from morpheus.compositions.saas import RESTRICTED_OBJECT
-from morpheus.compositions.saas import ROUTINE_EXPORTER
-from morpheus.compositions.saas import ROUTINE_OBJECT
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.saas import SAAS_CLASS
-from morpheus.compositions.saas import UNKNOWN_EXPORTER
-from morpheus.compositions.saas import at
-from morpheus.compositions.saas import week_start
+from morpheus.utils import bitemporal
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
 
 # The rules' own thresholds, stated once so the corpus is built to clear them deliberately.
 RECORD_MULTIPLE = 5.0
@@ -66,6 +55,160 @@ SYNC_HOURS = (2, 14)
 """The sync runs at these hours every day, each run in its own hourly window."""
 SYNC_EXPORTS = 2
 """Exports a sync run makes: one per shard of the dataset, a minute apart."""
+FIRST_MONDAY_DAY = 4
+"""1970-01-05, the Monday weeks are counted from. The corpus starts on it so week 0 is a whole week."""
+
+CONTEXT_RECORDED_DAY = 1
+"""The context store's first snapshot, recorded before the first operation so every operation can see it."""
+
+# Bulk exporters.
+EXFILTRATOR = "nate@example.com"
+
+PUBLIC_EXPORTER = "olga@example.com"
+
+UNKNOWN_EXPORTER = "pat@example.com"
+
+ROUTINE_EXPORTER = "quin@example.com"
+
+NEAR_EXPORTER = "sam@example.com"
+
+NEWCOMER = "rosa@example.com"
+
+FAILED_EXPORTER = "tom@example.com"
+
+# Breadth.
+CREEPER = "ivy@example.com"
+
+ROLE_CHANGER = "jack@example.com"
+
+LATE_ROLE_CHANGER = "kate@example.com"
+
+SHORT_RISE = "leo@example.com"
+
+EVERYTHING = "mia@example.com"
+
+# Target objects and their classification in the inventory.
+RESTRICTED_OBJECT = "crm-accounts"
+
+PUBLIC_OBJECT = "price-list"
+
+CONFIDENTIAL_OBJECT = "hr-records"
+
+ROUTINE_OBJECT = "weekly-reports"
+
+OBJECT_CLASSIFICATION = {
+    RESTRICTED_OBJECT: "restricted",
+    PUBLIC_OBJECT: "public",
+    CONFIDENTIAL_OBJECT: "confidential",
+    ROUTINE_OBJECT: "internal",
+}
+
+# Distinct object types each breadth principal reaches in each of weeks 0 to 7.
+BREADTH = {
+    CREEPER: [2, 2, 2, 2, 3, 4, 5, 6],
+    ROLE_CHANGER: [2, 2, 2, 2, 3, 4, 5, 6],
+    LATE_ROLE_CHANGER: [2, 2, 2, 2, 3, 4, 5, 6],
+    SHORT_RISE: [2, 2, 2, 2, 2, 3, 4, 3],
+    EVERYTHING: [8, 8, 8, 8, 8, 8, 8, 8],
+}
+
+ROLE_CHANGE_WEEK = 5
+"""Jack's and Kate's roles change at the start of week 5, in the middle of their rise."""
+
+LATE_RECORDING_WEEK = 9
+"""Kate's change reaches the directory after the corpus ends."""
+
+DAY_SECONDS = 86400
+
+
+def at(day: float, hour: float = 0) -> int:
+    """An instant `day` days and `hour` hours into the corpus, in nanoseconds since the epoch."""
+    return int((day * DAY_SECONDS + hour * 3600) * NS_PER_SECOND)
+
+
+def week_start(week: int) -> int:
+    """Monday 00:00 UTC of week `week`, counted from the corpus's first Monday."""
+    return at(FIRST_MONDAY_DAY + 7 * week)
+
+
+def _groups(principal: str) -> list:
+    return [
+        make_version(bitemporal.MEMBERSHIP,
+                     principal,
+                     0,
+                     None,
+                     at(CONTEXT_RECORDED_DAY),
+                     values={"group_name": "sales-users"},
+                     key_parts=("sales-users", ))
+    ]
+
+
+def identity_versions() -> list:
+    """Every principal in sales-users from the start; Jack and Kate move to sales-managers in week 5."""
+    principals = sorted(
+        set(BREADTH)
+        | {EXFILTRATOR, PUBLIC_EXPORTER, UNKNOWN_EXPORTER, ROUTINE_EXPORTER, NEAR_EXPORTER, NEWCOMER, FAILED_EXPORTER})
+    versions = []
+
+    for principal in principals:
+        versions.append(
+            make_version("profile",
+                         principal,
+                         0,
+                         None,
+                         at(CONTEXT_RECORDED_DAY),
+                         values={
+                             "department": "Sales", "manager": "heidi@example.com", "employment_status": "active"
+                         }))
+        versions += _groups(principal)
+
+    for (principal, recorded) in ((ROLE_CHANGER, week_start(ROLE_CHANGE_WEEK)), (LATE_ROLE_CHANGER,
+                                                                                 week_start(LATE_RECORDING_WEEK))):
+        change = week_start(ROLE_CHANGE_WEEK)
+        versions.append(
+            make_version(bitemporal.MEMBERSHIP,
+                         principal,
+                         change,
+                         None,
+                         recorded,
+                         bitemporal.RETRACT,
+                         values={"group_name": "sales-users"},
+                         key_parts=("sales-users", )))
+        versions.append(
+            make_version(bitemporal.MEMBERSHIP,
+                         principal,
+                         change,
+                         None,
+                         recorded,
+                         values={"group_name": "sales-managers"},
+                         key_parts=("sales-managers", )))
+
+    return versions
+
+
+def asset_versions() -> list:
+    """The inventory's classification of every SaaS object but the one it has never heard of."""
+    return [
+        make_version("asset",
+                     name,
+                     0,
+                     None,
+                     at(CONTEXT_RECORDED_DAY),
+                     values={
+                         "owner": "frank@example.com",
+                         "owning_team": "sales-ops",
+                         "criticality": "high" if classification in ("restricted", "confidential") else "low",
+                         "data_classification": classification,
+                         "peer_group": None,
+                     }) for (name, classification) in sorted(OBJECT_CLASSIFICATION.items())
+    ]
+
+
+def build_stores() -> tuple:
+    """The identity and asset stores the enrichment reads."""
+    return (BitemporalStore("identity", identity_versions()), BitemporalStore("asset", asset_versions()))
+
+
 SYNC_DAYS = (FIRST_MONDAY_DAY + 1, 56)
 """The days the sync runs on, first included and last excluded: the whole corpus but its edges."""
 DOUBLING_DAY = 54
@@ -193,3 +336,8 @@ def build_corpus() -> dict[str, pd.DataFrame]:
     frame["collector_seq"] = range(len(frame))
 
     return envelope.attach_all({SAAS_CLASS: frame})
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the identity directory with its role changes, and the asset inventory of the SaaS objects."""
+    return EstateContext(identity=build_stores()[0], asset=build_stores()[1])

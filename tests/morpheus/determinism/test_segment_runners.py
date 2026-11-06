@@ -215,13 +215,26 @@ def _without_resume_marker(lines: dict[str, list[str]]) -> dict[str, list[str]]:
 def test_a_restarted_runner_writes_what_one_run_writes(segment: str, tmp_path):
     (first, second) = _split_inputs(segment, tmp_path / "inputs")
     state = tmp_path / "state"
+    # The estate's context is not cut: it is what the directory says about its machines and people, whichever half
+    # of the traffic a run reads.
+    context = EXAMPLE / "samples" / segment / segment_runner.CONTEXT_DIR
 
-    segment_runner.run(segment, first, output_dir=tmp_path / "restarted", state_dir=state, final=False)
+    segment_runner.run(segment,
+                       first,
+                       output_dir=tmp_path / "restarted",
+                       state_dir=state,
+                       final=False,
+                       context_dir=context)
     checkpoint = sorted(state.glob("checkpoint-*.json"))
 
     assert len(checkpoint) == 1
 
-    segment_runner.run(segment, second, output_dir=tmp_path / "restarted", state_dir=state, final=True)
+    segment_runner.run(segment,
+                       second,
+                       output_dir=tmp_path / "restarted",
+                       state_dir=state,
+                       final=True,
+                       context_dir=context)
     segment_runner.run(segment, EXAMPLE / "samples" / segment, output_dir=tmp_path / "once")
 
     restarted = _files(tmp_path / "restarted")
@@ -293,3 +306,48 @@ def test_every_segment_has_a_runner_and_a_sample():
     for segment in SEGMENTS:
         assert (EXAMPLE / f"run_{segment}.py").is_file(), segment
         assert any((EXAMPLE / "samples" / segment).glob("*.jsonlines")), segment
+
+
+def _enriching_segments() -> list[str]:
+    import importlib  # pylint: disable=import-outside-toplevel
+
+    return [
+        segment for (segment, spec) in sorted(segment_runner.SEGMENTS.items())
+        if segment_runner.takes_context(importlib.import_module(f"morpheus.compositions.{spec['module']}"))
+    ]
+
+
+def test_every_segment_that_enriches_has_its_context_beside_its_sample():
+    segments = _enriching_segments()
+
+    assert "context" not in segments
+    assert len(segments) == len(segment_runner.SEGMENTS) - 1
+
+    for segment in segments:
+        assert any((EXAMPLE / "samples" / segment / segment_runner.CONTEXT_DIR).iterdir()), segment
+
+
+@pytest.mark.cpu_mode
+@pytest.mark.parametrize("segment", ["network", "telemetry"])
+def test_a_segment_without_its_context_refuses_before_it_writes(segment: str, tmp_path):
+    from morpheus.compositions.estate_context import MissingContext  # pylint: disable=import-outside-toplevel
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+
+    for path in (EXAMPLE / "samples" / segment).glob("*.jsonlines"):
+        (inputs / path.name).write_bytes(path.read_bytes())
+
+    with pytest.raises(MissingContext, match="context"):
+        segment_runner.run(segment, inputs, output_dir=tmp_path / "out", state_dir=tmp_path / "state", final=False)
+
+    assert not any((tmp_path / "out").glob("*.jsonlines"))
+    assert not any((tmp_path / "state").glob("checkpoint-*.json"))
+
+
+def test_a_context_directory_that_is_not_there_is_refused(tmp_path):
+    with pytest.raises(FileNotFoundError, match="context"):
+        segment_runner.run("network",
+                           EXAMPLE / "samples" / "network",
+                           output_dir=tmp_path / "out",
+                           context_dir=tmp_path / "absent")

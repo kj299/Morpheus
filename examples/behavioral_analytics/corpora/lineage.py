@@ -25,10 +25,36 @@ import random
 import pandas as pd
 
 from morpheus.compositions import envelope
-from morpheus.compositions.lineage import _ENTITIES
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.binding_table import BindingTable
 
 CORPUS_SEED = 20260830
+
+_ENTITIES = [
+    ("10.0.1.10", "aa:bb:cc:00:00:10", "Gi1/0/10"),
+    ("10.0.1.11", "aa:bb:cc:00:00:11", "Gi1/0/11"),
+    ("10.0.1.12", "aa:bb:cc:00:00:12", "Gi1/0/12"),
+]
+
+
+def build_binding_table() -> BindingTable:
+    """The lease table the corpus resolves against; one address is deliberately never covered."""
+    hour_ns = 3600 * NS_PER_SECOND
+    rows = pd.DataFrame({
+        "ip": [ip for (ip, _, _) in _ENTITIES],
+        "mac": [mac for (_, mac, _) in _ENTITIES],
+        "port_id": [port for (_, _, port) in _ENTITIES],
+        "bind_start": [0] * len(_ENTITIES),
+        "bind_end": [24 * hour_ns] * len(_ENTITIES),
+    })
+
+    return BindingTable.from_dataframe(rows,
+                                       name="dhcp_lease",
+                                       key_column="ip",
+                                       value_columns=["mac", "port_id"],
+                                       start_column="bind_start",
+                                       end_column="bind_end")
 
 
 def build_corpus() -> pd.DataFrame:
@@ -87,3 +113,8 @@ def build_corpus() -> pd.DataFrame:
     df = envelope.attach(df)
 
     return df
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the lease table its sources resolve against, one address deliberately uncovered."""
+    return EstateContext(extras={"bindings": build_binding_table()})

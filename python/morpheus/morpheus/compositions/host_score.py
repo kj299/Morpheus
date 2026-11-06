@@ -69,6 +69,7 @@ from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.repository import repository_path
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
@@ -91,7 +92,6 @@ from morpheus.stages.telemetry.tc6_fingerprint_stage import TC6FingerprintStage
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.bitemporal import BitemporalStore
-from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 from morpheus.utils.dfencoder_scorer import DfencoderScorer
@@ -103,8 +103,6 @@ DAY_S = 24 * HOUR_S
 PERIOD_SECONDS = HOUR_S
 LATENESS_SECONDS = 900
 TRAINING_DAYS = 14
-SCORED_DAYS = 7
-CORPUS_DAYS = TRAINING_DAYS + SCORED_DAYS
 EPOCH_S = 39 * DAY_S
 """1970-02-09T00:00:00Z, a Monday: the first day of the training fortnight.
 
@@ -124,23 +122,8 @@ PROCESS_CLASS = "tc7_endpoint"
 FEATURE_CLASSES = (FLOW_CLASS, HANDSHAKE_CLASS, PROCESS_CLASS)
 HOST_CLASS = "host_score"
 """The class of the host segment's rows, and the only class this corpus emits."""
-FINANCE = "finance-workstations"
-ENGINEERING = "engineering-workstations"
 POPULATION = "all-hosts"
 """The key of the model fitted on every host's fortnight, which is the fallback."""
-HOSTS = {
-    "10.0.1.11": FINANCE,
-    "10.0.1.12": FINANCE,
-    "10.0.1.13": FINANCE,
-    "10.0.1.14": FINANCE,
-    "10.0.2.21": ENGINEERING,
-    "10.0.2.22": ENGINEERING,
-    "10.0.2.23": ENGINEERING,
-    "10.0.2.24": ENGINEERING,
-    "10.0.1.15": FINANCE,
-    "10.0.3.31": None,
-}
-"""Each workstation's address, which its DHCP lease fixes for the corpus, and its peer group in the inventory."""
 REACH_MIN_DENOMINATOR = 3
 ENDPOINT_WINDOW_DAYS = 30
 ENDPOINT_WARMUP_DAYS = 7
@@ -181,44 +164,11 @@ MODELS_PATH = repository_path("examples", "layer5_model", "models", "host_models
 """The committed per-peer-group models, trained on the fortnight by `train_models.py --hosts`."""
 
 
-def at(day: int, hour: int, minute: int = 0, second: int = 0) -> int:
-    """An instant in the corpus, in epoch nanoseconds, `day` counted from the first day of the fortnight."""
-    return (EPOCH_S + day * DAY_S + hour * HOUR_S + minute * 60 + second) * NS_PER_SECOND
-
-
-def host_key(address: str) -> str:
-    """The machine an address is leased to, as `host_key` names it."""
-    return host_identity.hostname_for(address).lower()
-
-
-def asset_versions() -> list:
-    """The inventory: every workstation, with its peer group where it has one, recorded before the corpus starts."""
-    return [
-        make_version("asset",
-                     host_key(address),
-                     0,
-                     None,
-                     at(0, 0),
-                     values={
-                         "owner": "it-ops@example.com",
-                         "peer_group": group,
-                         "device_role": "kiosk" if group is None else "workstation",
-                         "os_family": "windows",
-                         "criticality": "low" if group is None else "medium",
-                     }) for (address, group) in sorted(HOSTS.items())
-    ]
-
-
-def build_store() -> BitemporalStore:
-    """The asset store every class is enriched from."""
-    return BitemporalStore("asset", asset_versions())
-
-
-def class_stages(config: Config, telemetry_class: str, leases, inventory) -> list:
-    """Each class's own layer stages, resolved to the machine and enriched from the inventory."""
+def class_stages(config: Config, telemetry_class: str, leases, inventory, asset: BitemporalStore) -> list:
+    """Each class's own layer stages, resolved to the machine and enriched from the inventory, `asset`."""
 
     def enrich() -> TC0EnrichStage:
-        return TC0EnrichStage(config, store=build_store(), entity_column="host_key", entity_normalization="hostname")
+        return TC0EnrichStage(config, store=asset, entity_column="host_key", entity_normalization="hostname")
 
     if (telemetry_class == FLOW_CLASS):
         return [
@@ -240,7 +190,7 @@ def class_stages(config: Config, telemetry_class: str, leases, inventory) -> lis
         ]
 
     return [
-        TC0EnrichStage(config, store=build_store(), entity_column="hostname", entity_normalization="hostname"),
+        TC0EnrichStage(config, store=asset, entity_column="hostname", entity_normalization="hostname"),
         TC7EndpointStage(config, window_days=ENDPOINT_WINDOW_DAYS, warmup_days=ENDPOINT_WARMUP_DAYS),
     ]
 
@@ -250,8 +200,11 @@ def run_class(config: Config,
               dataframes: list[pd.DataFrame],
               leases,
               inventory,
-              impose_order: bool = True) -> pd.DataFrame:
+              impose_order: bool = True,
+              *,
+              context: EstateContext = None) -> pd.DataFrame:
     """Source, stamp, total order, sequence, the class's stages, sink: what the host segment reads from one class."""
+    (asset, ) = (context or EstateContext()).require("the host score composition", "asset")
     pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=dataframes))
     pipe.add_stage(LineageStampStage(config, id_columns=ID_COLUMNS))
@@ -261,7 +214,7 @@ def run_class(config: Config,
 
     pipe.add_stage(CollectorSequenceStage(config))
 
-    for stage in class_stages(config, telemetry_class, leases, inventory):
+    for stage in class_stages(config, telemetry_class, leases, inventory, asset):
         pipe.add_stage(stage)
 
     sink = pipe.add_stage(InMemorySinkStage(config))
@@ -329,7 +282,20 @@ def host_stages(config: Config, scorer, manifest: ModelManifest) -> list:
     ]
 
 
-def build_scoring(models: dict) -> tuple[DfencoderScorer, ModelManifest]:
+def peer_groups(asset: BitemporalStore) -> dict[str, str]:
+    """Each inventoried host's peer group, from the asset inventory's `peer_group`; a host with none is left out."""
+    groups = {}
+
+    for version in asset.versions():
+        group = dict(version.values).get("peer_group")
+
+        if (version.kind == "asset" and version.asserted and group):
+            groups[version.entity] = group
+
+    return dict(sorted(groups.items()))
+
+
+def build_scoring(models: dict, asset: BitemporalStore) -> tuple[DfencoderScorer, ModelManifest]:
     """
     The scorer and the host manifest for a set of peer-group models, built together.
 
@@ -337,6 +303,8 @@ def build_scoring(models: dict) -> tuple[DfencoderScorer, ModelManifest]:
     ----------
     models : dict
         Peer group (or `POPULATION`) to `(pinned version, fitted model)`.
+    asset : `morpheus.utils.bitemporal.BitemporalStore`
+        The estate's asset inventory, whose `peer_group` says which model each host is pinned to.
 
     Every inventoried host whose peer group has a model is pinned to that model; the population model is the
     declared fallback, so a host with no group, or a group with no model, is scored against the estate and says so.
@@ -346,10 +314,7 @@ def build_scoring(models: dict) -> tuple[DfencoderScorer, ModelManifest]:
     if (POPULATION not in models):
         raise ValueError(f"the host models have no {POPULATION!r} model; it is the fallback the manifest declares")
 
-    pinned = {
-        host_key(address): models[group][0]
-        for (address, group) in sorted(HOSTS.items()) if group is not None and group in models
-    }
+    pinned = {host: models[group][0] for (host, group) in peer_groups(asset).items() if group in models}
     scorer = DfencoderScorer(dict(models.values()), SCORED_FEATURES)
     manifest = ModelManifest(window_id=MANIFEST_WINDOW,
                              models=pinned,
@@ -360,29 +325,16 @@ def build_scoring(models: dict) -> tuple[DfencoderScorer, ModelManifest]:
 
 
 @functools.lru_cache(maxsize=1)
-def committed_scoring() -> tuple[DfencoderScorer, ModelManifest]:
+def committed_models() -> dict:
     """The committed host models, read and checked against their recorded versions once per process."""
-    return build_scoring(load_models(MODELS_PATH))
+    return load_models(MODELS_PATH)
 
 
-class _Unscored:
-    """The scorer of a run whose manifest scores nothing: asked anything, it is a wiring mistake."""
+def committed_scoring(*, context: EstateContext = None) -> tuple[DfencoderScorer, ModelManifest]:
+    """The committed host models, pinned to the hosts the estate's asset inventory puts in each peer group."""
+    (asset, ) = (context or EstateContext()).require("the host score composition", "asset")
 
-    def score(self, model_version: str, features: list) -> list:
-        raise AssertionError(f"asked to score {len(features)} rows against {model_version}; nothing is scored here")
-
-
-def unscored() -> tuple[_Unscored, ModelManifest]:
-    """
-    A scorer and manifest that score nothing, for the run the training frames are taken from.
-
-    The features are what the stages emit and do not depend on any score, so the frames exist before the models do.
-    """
-    return (_Unscored(),
-            ModelManifest(window_id=MANIFEST_WINDOW,
-                          models={},
-                          fallback=f"{POPULATION}:untrained",
-                          scores_from_ns=at(CORPUS_DAYS + 1, 0)))
+    return build_scoring(committed_models(), asset)
 
 
 def run_pipeline(config: Config,
@@ -391,7 +343,9 @@ def run_pipeline(config: Config,
                  impose_order: bool = True,
                  scorer=None,
                  manifest: typing.Optional[ModelManifest] = None,
-                 host_batches: int = 1) -> pd.DataFrame:
+                 host_batches: int = 1,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Each class through its own stages, then the host segment over all three, and its frame rows as one frame.
 
@@ -410,6 +364,8 @@ def run_pipeline(config: Config,
         together or not at all.
     host_batches : int, default = 1
         How many source frames the merged stream is cut into for the host segment, by event order.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; the asset inventory, which every host is enriched from and pinned to its peer group's model through, is required.
 
     Returns
     -------
@@ -425,12 +381,12 @@ def run_pipeline(config: Config,
         raise ValueError("scorer and manifest are passed together or not at all")
 
     if (scorer is None):
-        (scorer, manifest) = committed_scoring()
+        (scorer, manifest) = committed_scoring(context=context)
 
     (leases, inventory) = host_identity.tables(config, batches, impose_order=impose_order)
     frames = [
-        run_class(config, name, batches[name], leases, inventory, impose_order=impose_order) for name in FEATURE_CLASSES
-        if len(batches.get(name, [])) > 0
+        run_class(config, name, batches[name], leases, inventory, impose_order=impose_order, context=context)
+        for name in FEATURE_CLASSES if len(batches.get(name, [])) > 0
     ]
     merged = merge_classes(frames)
 

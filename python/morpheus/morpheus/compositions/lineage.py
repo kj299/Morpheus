@@ -32,6 +32,7 @@ from morpheus.compositions import envelope
 from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
@@ -43,8 +44,6 @@ from morpheus.stages.lineage.envelope_validate_stage import EnvelopeValidateStag
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
-from morpheus.utils.binding_table import NS_PER_SECOND
-from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 
@@ -59,35 +58,13 @@ ENVELOPE = stamping.envelope_for(TELEMETRY_CLASS, SETTINGS)
 # The canonical row key and the columns two runs may legitimately differ in (none, for this pipeline).
 KEY_COLUMNS = ["event_uid", "is_late"]
 IGNORE_COLUMNS: list[str] = []
-_ENTITIES = [
-    ("10.0.1.10", "aa:bb:cc:00:00:10", "Gi1/0/10"),
-    ("10.0.1.11", "aa:bb:cc:00:00:11", "Gi1/0/11"),
-    ("10.0.1.12", "aa:bb:cc:00:00:12", "Gi1/0/12"),
-]
-
-
-def build_binding_table() -> BindingTable:
-    """The lease table the corpus resolves against; one address is deliberately never covered."""
-    hour_ns = 3600 * NS_PER_SECOND
-    rows = pd.DataFrame({
-        "ip": [ip for (ip, _, _) in _ENTITIES],
-        "mac": [mac for (_, mac, _) in _ENTITIES],
-        "port_id": [port for (_, _, port) in _ENTITIES],
-        "bind_start": [0] * len(_ENTITIES),
-        "bind_end": [24 * hour_ns] * len(_ENTITIES),
-    })
-
-    return BindingTable.from_dataframe(rows,
-                                       name="dhcp_lease",
-                                       key_column="ip",
-                                       value_columns=["mac", "port_id"],
-                                       start_column="bind_start",
-                                       end_column="bind_end")
 
 
 def run_pipeline(config: Config,
                  dataframes: list[pd.DataFrame],
-                 order_columns: typing.Optional[list[str]] = None) -> pd.DataFrame:
+                 order_columns: typing.Optional[list[str]] = None,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Run the reference lineage pipeline over the given source frames and return the canonicalized output.
 
@@ -101,12 +78,16 @@ def run_pipeline(config: Config,
         Passed through to `WindowSealStage`. Defaults to the guide's total row order. The permutation check's
         negative control passes an explicit `[]` to reproduce the removed-sort defect and prove the harness
         catches it.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; `extras` must hold the lease table the sources resolve against (`bindings`).
 
     Returns
     -------
     `pandas.DataFrame`
         The concatenated, canonicalized output of every emitted window.
     """
+    (bindings, ) = (context or EstateContext()).require_extra("the lineage composition", "bindings")
+
     if (order_columns is None):
         order_columns = list(DEFAULT_ORDER_COLUMNS)
 
@@ -118,7 +99,7 @@ def run_pipeline(config: Config,
     # and the stage would keep any such record in the stream, marked.
     pipe.add_stage(EnvelopeValidateStage(config, ingest_clock=envelope.replay_ingest_clock))
     pipe.add_stage(CommunityIdStage(config))
-    pipe.add_stage(BindingResolverStage(config, binding_table=build_binding_table(), key_column="src_ip"))
+    pipe.add_stage(BindingResolverStage(config, binding_table=bindings, key_column="src_ip"))
     pipe.add_stage(DeterminismStampStage(config, envelope=ENVELOPE))
     pipe.add_stage(
         WindowSealStage(config,

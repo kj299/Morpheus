@@ -64,6 +64,7 @@ from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
     build_pipeline_config, )
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -79,11 +80,7 @@ from morpheus.stages.telemetry.tc5_drift_stage import TC5DriftStage
 from morpheus.stages.telemetry.tc7_saas_stage import DEFAULT_WEEK_EPOCH
 from morpheus.stages.telemetry.tc7_saas_stage import WEEK_SECONDS
 from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage
-from morpheus.utils import bitemporal
-from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
-from morpheus.utils.bitemporal import BitemporalStore
-from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 
@@ -101,136 +98,6 @@ RULES = ("R-B-L7-002", "R-P-L7-006")
 """The shipped rules that read this corpus's columns; their thresholds are folded into `pipeline_fingerprint`."""
 WEEK_PREFIX = "week_"
 """Prefix of the weekly seal's columns, so they sit beside the hourly seal's rather than over them."""
-DAY_SECONDS = 86400
-FIRST_MONDAY_DAY = 4
-"""1970-01-05, the Monday weeks are counted from. The corpus starts on it so week 0 is a whole week."""
-CONTEXT_RECORDED_DAY = 1
-"""The context store's first snapshot, recorded before the first operation so every operation can see it."""
-# Bulk exporters.
-EXFILTRATOR = "nate@example.com"
-PUBLIC_EXPORTER = "olga@example.com"
-UNKNOWN_EXPORTER = "pat@example.com"
-ROUTINE_EXPORTER = "quin@example.com"
-NEAR_EXPORTER = "sam@example.com"
-NEWCOMER = "rosa@example.com"
-FAILED_EXPORTER = "tom@example.com"
-# Breadth.
-CREEPER = "ivy@example.com"
-ROLE_CHANGER = "jack@example.com"
-LATE_ROLE_CHANGER = "kate@example.com"
-SHORT_RISE = "leo@example.com"
-EVERYTHING = "mia@example.com"
-# Target objects and their classification in the inventory.
-RESTRICTED_OBJECT = "crm-accounts"
-PUBLIC_OBJECT = "price-list"
-CONFIDENTIAL_OBJECT = "hr-records"
-ROUTINE_OBJECT = "weekly-reports"
-OBJECT_CLASSIFICATION = {
-    RESTRICTED_OBJECT: "restricted",
-    PUBLIC_OBJECT: "public",
-    CONFIDENTIAL_OBJECT: "confidential",
-    ROUTINE_OBJECT: "internal",
-}
-# Distinct object types each breadth principal reaches in each of weeks 0 to 7.
-BREADTH = {
-    CREEPER: [2, 2, 2, 2, 3, 4, 5, 6],
-    ROLE_CHANGER: [2, 2, 2, 2, 3, 4, 5, 6],
-    LATE_ROLE_CHANGER: [2, 2, 2, 2, 3, 4, 5, 6],
-    SHORT_RISE: [2, 2, 2, 2, 2, 3, 4, 3],
-    EVERYTHING: [8, 8, 8, 8, 8, 8, 8, 8],
-}
-ROLE_CHANGE_WEEK = 5
-"""Jack's and Kate's roles change at the start of week 5, in the middle of their rise."""
-LATE_RECORDING_WEEK = 9
-"""Kate's change reaches the directory after the corpus ends."""
-
-
-def at(day: float, hour: float = 0) -> int:
-    """An instant `day` days and `hour` hours into the corpus, in nanoseconds since the epoch."""
-    return int((day * DAY_SECONDS + hour * 3600) * NS_PER_SECOND)
-
-
-def week_start(week: int) -> int:
-    """Monday 00:00 UTC of week `week`, counted from the corpus's first Monday."""
-    return at(FIRST_MONDAY_DAY + 7 * week)
-
-
-def _groups(principal: str) -> list:
-    return [
-        make_version(bitemporal.MEMBERSHIP,
-                     principal,
-                     0,
-                     None,
-                     at(CONTEXT_RECORDED_DAY),
-                     values={"group_name": "sales-users"},
-                     key_parts=("sales-users", ))
-    ]
-
-
-def identity_versions() -> list:
-    """Every principal in sales-users from the start; Jack and Kate move to sales-managers in week 5."""
-    principals = sorted(
-        set(BREADTH)
-        | {EXFILTRATOR, PUBLIC_EXPORTER, UNKNOWN_EXPORTER, ROUTINE_EXPORTER, NEAR_EXPORTER, NEWCOMER, FAILED_EXPORTER})
-    versions = []
-
-    for principal in principals:
-        versions.append(
-            make_version("profile",
-                         principal,
-                         0,
-                         None,
-                         at(CONTEXT_RECORDED_DAY),
-                         values={
-                             "department": "Sales", "manager": "heidi@example.com", "employment_status": "active"
-                         }))
-        versions += _groups(principal)
-
-    for (principal, recorded) in ((ROLE_CHANGER, week_start(ROLE_CHANGE_WEEK)), (LATE_ROLE_CHANGER,
-                                                                                 week_start(LATE_RECORDING_WEEK))):
-        change = week_start(ROLE_CHANGE_WEEK)
-        versions.append(
-            make_version(bitemporal.MEMBERSHIP,
-                         principal,
-                         change,
-                         None,
-                         recorded,
-                         bitemporal.RETRACT,
-                         values={"group_name": "sales-users"},
-                         key_parts=("sales-users", )))
-        versions.append(
-            make_version(bitemporal.MEMBERSHIP,
-                         principal,
-                         change,
-                         None,
-                         recorded,
-                         values={"group_name": "sales-managers"},
-                         key_parts=("sales-managers", )))
-
-    return versions
-
-
-def asset_versions() -> list:
-    """The inventory's classification of every SaaS object but the one it has never heard of."""
-    return [
-        make_version("asset",
-                     name,
-                     0,
-                     None,
-                     at(CONTEXT_RECORDED_DAY),
-                     values={
-                         "owner": "frank@example.com",
-                         "owning_team": "sales-ops",
-                         "criticality": "high" if classification in ("restricted", "confidential") else "low",
-                         "data_classification": classification,
-                         "peer_group": None,
-                     }) for (name, classification) in sorted(OBJECT_CLASSIFICATION.items())
-    ]
-
-
-def build_stores() -> tuple:
-    """The identity and asset stores the enrichment reads."""
-    return (BitemporalStore("identity", identity_versions()), BitemporalStore("asset", asset_versions()))
 
 
 def run_pipeline(config: Config,
@@ -238,7 +105,9 @@ def run_pipeline(config: Config,
                  batches: typing.Optional[dict[str, list[pd.DataFrame]]] = None,
                  impose_order: bool = True,
                  knowledge: str = "event",
-                 sessions: typing.Optional[BindingTable] = None) -> pd.DataFrame:
+                 sessions: typing.Optional[BindingTable] = None,
+                 *,
+                 context: EstateContext = None) -> pd.DataFrame:
     """
     Source, stamp, total order, enrich twice, measure, envelope, seal hourly, seal weekly, trajectory, sink.
 
@@ -258,6 +127,8 @@ def run_pipeline(config: Config,
         Which principal's session held each address, from `host_identity.session_table`. Given, each operation
         carries the `session_key` of the session that held the address it came from, its `source_ip`; this corpus
         records no address and has no sessions.
+    context : `morpheus.compositions.estate_context.EstateContext`
+        The estate's context; the identity directory and the asset inventory are both required.
 
     Returns
     -------
@@ -271,7 +142,7 @@ def run_pipeline(config: Config,
     # taken out of the stream and kept.
     (batches, quarantined) = envelope.validate(config, batches, ID_COLUMNS)
 
-    (identity, asset) = build_stores()
+    (identity, asset) = (context or EstateContext()).require("the SaaS composition", "identity", "asset")
 
     pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=batches[SAAS_CLASS]))

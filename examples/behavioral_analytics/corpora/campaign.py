@@ -33,33 +33,26 @@ presentation_pipeline = merged('presentation')
 saas_pipeline = merged('saas')
 telemetry_pipeline = merged('telemetry')
 transport_pipeline = merged('transport')
-from morpheus.compositions.campaign import ACTORS
+from corpora import application_context as estate_cmdb
+
 from morpheus.compositions.campaign import AUTH_CLASS
-from morpheus.compositions.campaign import BEACONERS
-from morpheus.compositions.campaign import C2_ATTACKER
 from morpheus.compositions.campaign import CLASSES
-from morpheus.compositions.campaign import DAY_SECONDS
-from morpheus.compositions.campaign import EDINBURGH
-from morpheus.compositions.campaign import EXFILTRATORS
 from morpheus.compositions.campaign import FLOW_CLASS
 from morpheus.compositions.campaign import HANDSHAKE_CLASS
-from morpheus.compositions.campaign import HQ
 from morpheus.compositions.campaign import INVENTORY_CLASS
-from morpheus.compositions.campaign import KIM
-from morpheus.compositions.campaign import LAST_DAY
 from morpheus.compositions.campaign import LEASE_CLASS
 from morpheus.compositions.campaign import MAC_CLASS
 from morpheus.compositions.campaign import PORT_CLASS
-from morpheus.compositions.campaign import PORTAL_ISSUER
 from morpheus.compositions.campaign import PROCESS_CLASS
 from morpheus.compositions.campaign import SAAS_CLASS
 from morpheus.compositions.campaign import SESSION_CLASS
-from morpheus.compositions.campaign import SESSION_HOLDERS
 from morpheus.compositions.campaign import TRANSFER_CLASS
-from morpheus.compositions.campaign import Actor
-from morpheus.compositions.campaign import at
-from morpheus.compositions.campaign import hosts
+from morpheus.compositions.corpus_pipeline import build_pipeline_config as _config
+from morpheus.compositions.estate_context import EstateContext
 from morpheus.utils.binding_table import NS_PER_SECOND
+from morpheus.utils.bitemporal import BitemporalStore
+from morpheus.utils.bitemporal import make_version
+from morpheus.utils.entity_key import normalize_hostname
 
 SEVERITY = 80
 FANOUT_THRESHOLD = 50
@@ -91,6 +84,153 @@ PRIOR_EXPORTS = 110
 PRIOR_TRANSFERS = 110
 SYNC_SERVER = "198.51.100.10"
 PORTAL = "198.51.100.20"
+LAST_DAY = 8
+"""The day the campaign happens. The eight before it are the history every step is novel against."""
+
+SERVER_GROUP = "servers"
+
+
+class Actor(typing.NamedTuple):
+    """One source, the principal who logs in from it, and the server they reach, with what each step does."""
+
+    source: str
+    principal: str
+    home: str
+    """The server the principal logs into every day."""
+    target: str
+    """The server the campaign's login reaches. The home server for the known-host control."""
+    login_source: str
+    """Where the login comes from. The fan-out source except in the other-source control."""
+    rising: bool
+    fanout_minute: float
+    login_minute: float
+    process_minute: typing.Optional[float]
+    """When the novel process runs on the target, or None when it only runs its routine."""
+
+
+ATTACKER = "dana@example.com"
+
+WRONG_ORDER = "eli@example.com"
+
+TOO_SLOW = "fay@example.com"
+
+KNOWN_HOST = "gus@example.com"
+
+OTHER_SOURCE = "hal@example.com"
+
+FLAT_FANOUT = "ivan@example.com"
+
+NO_NEW_PROCESS = "judy@example.com"
+
+WORKSTATION_TARGET = "wes@example.com"
+
+ACTORS = {
+    ATTACKER: Actor("10.20.0.5", ATTACKER, "srv-dana", "SRV-DB-02", "10.20.0.5", True, 5, 12, 20),
+    WRONG_ORDER: Actor("10.20.0.6", WRONG_ORDER, "srv-eli", "srv-app-03", "10.20.0.6", True, 5, 14, 8),
+    TOO_SLOW: Actor("10.20.0.7", TOO_SLOW, "srv-fay", "srv-fs-04", "10.20.0.7", True, 5, 20, 40),
+    KNOWN_HOST: Actor("10.20.0.8", KNOWN_HOST, "srv-gus", "srv-gus", "10.20.0.8", True, 5, 12, 20),
+    OTHER_SOURCE: Actor("10.20.0.9", OTHER_SOURCE, "srv-hal", "srv-web-05", "10.20.0.99", True, 5, 12, 20),
+    FLAT_FANOUT: Actor("10.20.0.10", FLAT_FANOUT, "srv-ivan", "srv-mq-06", "10.20.0.10", False, 5, 12, 20),
+    NO_NEW_PROCESS: Actor("10.20.0.11", NO_NEW_PROCESS, "srv-judy", "srv-ci-07", "10.20.0.11", True, 5, 12, None),
+    WORKSTATION_TARGET: Actor("10.20.0.12", WORKSTATION_TARGET, "srv-wes", "WS-FIN-08", "10.20.0.12", True, 5, 12, 20),
+}
+
+WORKSTATIONS = ("ws-fin-08", )
+"""The hosts the inventory records as workstations. Every other host here is a server."""
+
+DAY_SECONDS = 86400
+
+
+def at(day: float, hour: float = 0, minute: float = 0, second: float = 0) -> int:
+    """An instant in the corpus, in nanoseconds since the epoch."""
+    return int((day * DAY_SECONDS + hour * 3600 + minute * 60 + second) * NS_PER_SECOND)
+
+
+PORTAL_ISSUER = presentation_pipeline.CORP_CA
+
+
+class Exfiltrator(typing.NamedTuple):
+    """A principal, the address their session holds, and when each of R-C-004's steps happens on the last day."""
+
+    principal: str
+    address: str
+    """The address the principal's sessions come from."""
+    breach_address: str
+    """Where the breach and the handshake come from. Another principal's address for the someone-else control."""
+    session_end_minute: typing.Optional[float]
+    """When the last day's session ends, minutes after the campaign hour starts; None for the evening, as usual."""
+    export_minute: float
+    breach_minute: float
+    handshake_minute: float
+    issuer: str
+
+
+KIM = "kim@example.com"
+
+LEE = "lee@example.com"
+
+MAX = "max@example.com"
+
+NIA = "nia@example.com"
+
+OTO = "oto@example.com"
+
+PIA = "pia@example.com"
+
+
+def relay_issuer(principal: str) -> str:
+    """An authority nobody in the estate has seen, distinct per actor so one's first sighting never covers another's."""
+    return f"CN={principal.split('@')[0].title()} Relay CA, O=Unknown"
+
+
+EXFILTRATORS = {
+    KIM: Exfiltrator(KIM, "10.20.1.5", "10.20.1.5", None, 5, 30, 50, relay_issuer(KIM)),
+    LEE: Exfiltrator(LEE, "10.20.1.6", "10.20.1.7", None, 5, 30, 50, relay_issuer(LEE)),
+    NIA: Exfiltrator(NIA, "10.20.1.8", "10.20.1.8", 10, 5, 30, 50, relay_issuer(NIA)),
+    OTO: Exfiltrator(OTO, "10.20.1.10", "10.20.1.10", None, 5, 30, 50, PORTAL_ISSUER),
+    PIA: Exfiltrator(PIA, "10.20.1.9", "10.20.1.9", None, 30, 5, 15, relay_issuer(PIA)),
+}
+
+SESSION_HOLDERS = {**{actor.principal: actor.address for actor in EXFILTRATORS.values()}, MAX: "10.20.1.7"}
+"""Every principal with a daily session and the address it comes from. Max exports nothing; Lee's breach comes from
+Max's address."""
+
+SETTLED_HANDSHAKES = 24
+"""Past the twenty R-B-L6-001's floor asks for."""
+
+UNSETTLED_HANDSHAKES = 5
+
+
+class Beaconer(typing.NamedTuple):
+    """A host, how settled its TLS history is, and when and where its new fingerprint and its beacon happen."""
+
+    host: str
+    history: int
+    fingerprint_destination: str
+    fingerprint_minute: float
+    beacon_destination: str
+    beacon_start_minute: float
+    """Minutes after the campaign hour starts; negative for the hour before."""
+
+
+C2_ATTACKER = "10.20.2.5"
+
+BEACON_FIRST = "10.20.2.6"
+
+OTHER_DESTINATION = "10.20.2.7"
+
+C2_TOO_SLOW = "10.20.2.8"
+
+UNSETTLED = "10.20.2.9"
+
+BEACONERS = {
+    C2_ATTACKER: Beaconer(C2_ATTACKER, SETTLED_HANDSHAKES, "203.0.113.100", 0, "203.0.113.100", 2),
+    BEACON_FIRST: Beaconer(BEACON_FIRST, SETTLED_HANDSHAKES, "203.0.113.101", 0, "203.0.113.101", -60),
+    OTHER_DESTINATION: Beaconer(OTHER_DESTINATION, SETTLED_HANDSHAKES, "203.0.113.102", 0, "203.0.113.112", 2),
+    C2_TOO_SLOW: Beaconer(C2_TOO_SLOW, SETTLED_HANDSHAKES, "203.0.113.103", 0, "203.0.113.103", 55),
+    UNSETTLED: Beaconer(UNSETTLED, UNSETTLED_HANDSHAKES, "203.0.113.104", 0, "203.0.113.104", 2),
+}
+
 LOGON_COLLECTOR_PRINCIPALS = frozenset({KIM})
 """Principals whose sessions come from a collector that says `logon` and `logoff` rather than `start` and `end`.
 
@@ -362,6 +502,79 @@ def _build_command_and_control(flows: list, handshakes: list):
 
 REPLAY_SEVERITY = 90
 REPLAY_HOUR = 14
+
+
+def hosts() -> list:
+    """Every host a principal logs into or a campaign reaches, as the shared host rule renders it."""
+    names = set()
+
+    for actor in ACTORS.values():
+        names.update((normalize_hostname(actor.home), normalize_hostname(actor.target)))
+
+    return sorted(names)
+
+
+def asset_versions() -> list:
+    """The inventory: every server in one peer group, and the finance workstation in its own."""
+    versions = []
+
+    for host in hosts():
+        workstation = host in WORKSTATIONS
+        versions.append(
+            make_version("asset",
+                         host,
+                         0,
+                         None,
+                         0,
+                         values={
+                             "owner": "finance@example.com" if workstation else "it-ops@example.com",
+                             "owning_team": "finance" if workstation else "platform",
+                             "criticality": "medium" if workstation else "high",
+                             "data_classification": "confidential" if workstation else "internal",
+                             "peer_group": "finance-workstations" if workstation else SERVER_GROUP,
+                             "device_role": "workstation" if workstation else "server",
+                             "os_family": "windows",
+                             "os_version": "10.0.19045" if workstation else "10.0.20348",
+                         }))
+
+    return versions
+
+
+def build_address_store() -> BitemporalStore:
+    """The inventory the handshake enrichment reads: every address that holds a session or beacons is a managed
+    workstation, keyed on the host name its address resolves to, as the layer 6 pipeline looks it up."""
+    addresses = sorted(set(SESSION_HOLDERS.values()) | set(BEACONERS))
+
+    return BitemporalStore(
+        "asset",
+        [
+            make_version("asset",
+                         normalize_hostname(host_identity.hostname_for(address)),
+                         0,
+                         None,
+                         0,
+                         values={
+                             "device_role": "workstation", "criticality": "medium", "owner": "it-ops@example.com"
+                         }) for address in addresses
+        ])
+
+
+def build_store() -> BitemporalStore:
+    """The inventory the process enrichment reads."""
+    return BitemporalStore("asset", asset_versions())
+
+
+HQ = "hq"
+
+EDINBURGH = "edinburgh"
+
+SITE_LOCATIONS = {HQ: (51.5074, -0.1278), EDINBURGH: (55.9533, -3.1883)}
+"""The estate's own record of where its sites are, which a deployment supplies as it supplies the directory."""
+
+MANAGEMENT_PREFIXES = ("10.99.0.0/24", )
+"""The estate's management network, where its switches', routers' and controllers' own interfaces live. A
+deployment supplies it as it supplies the directory, and records it against VLAN 99 in `vlan_designations`."""
+
 SITE_SWITCHES = {HQ: "hq-sw1", EDINBURGH: "edi-sw1"}
 QUIN = "quin@example.com"
 RHEA = "rhea@example.com"
@@ -755,3 +968,17 @@ def build_corpus() -> dict[str, pd.DataFrame]:
         LEASE_CLASS: frame(leases + workstations[LEASE_CLASS].to_dict("records")),
         INVENTORY_CLASS: frame(workstations[INVENTORY_CLASS].to_dict("records")),
     })
+
+
+def context() -> EstateContext:
+    """The estate's context this corpus is run under: the hosts' inventory, the CMDB and the SaaS directory, and the campaign's own extras."""
+    return EstateContext(asset=build_store(),
+                         application=estate_cmdb.store(_config()),
+                         identity=saas_pipeline.build_stores()[0],
+                         extras={
+                             "handshake_asset": build_address_store(),
+                             "saas_asset": saas_pipeline.build_stores()[1],
+                             "site_locations": SITE_LOCATIONS,
+                             "management_prefixes": MANAGEMENT_PREFIXES,
+                             "session_end_ns": at(LAST_DAY + 1),
+                         })

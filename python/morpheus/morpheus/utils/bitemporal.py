@@ -323,6 +323,38 @@ class BitemporalStore:
         """Number of distinct facts."""
         return len(self._by_key)
 
+    def versions(self) -> list[Version]:
+        """Every version held, ordered by key and then by identifier, so two equal stores list them alike."""
+        return sorted((version for history in self._by_key.values() for version in history),
+                      key=lambda version: (version.key, version.uid))
+
+    def to_records(self) -> list[dict]:
+        """
+        The store as the rows a context producer emits, which `from_records` rebuilds it from.
+
+        The inverse of `from_records`, so a store built in code can be written where a deployment reads its context
+        from -- a file of `context:*` records, or a topic -- and read back to the same versions, identifiers included.
+        """
+        records = []
+
+        for version in self.versions():
+            attributes = dict(version.values)
+            record = {
+                CONTEXT_KIND: version.kind,
+                CONTEXT_ENTITY: version.entity,
+                CONTEXT_KEY: version.key,
+                CONTEXT_ATTRIBUTES: ATTRIBUTE_SEPARATOR.join(sorted(attributes)),
+                CONTEXT_UID: version.uid,
+                VALID_FROM: version.valid_from_ns,
+                VALID_TO: version.valid_to_ns,
+                RECORDED_AT: version.recorded_ns,
+                CHANGE: version.change,
+            }
+            record.update(attributes)
+            records.append(record)
+
+        return records
+
     def kinds(self) -> list[str]:
         """Every kind the store holds, sorted."""
         return sorted(self._attributes_by_kind)
