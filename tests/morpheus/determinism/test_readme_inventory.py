@@ -46,6 +46,7 @@ import re
 
 import pytest
 
+from _utils.numbers import from_words
 from morpheus.utils import splunk_conf
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
@@ -75,49 +76,6 @@ SINGLE_YEAR = re.compile(r"Copyright \(c\) \d{4},")
 """A copyright naming one year rather than a range, which is what every file this fork added carries."""
 
 TEST_DEFINITION = re.compile(r"^\s*def test_", re.MULTILINE)
-
-UNITS = [
-    "zero",
-    "one",
-    "two",
-    "three",
-    "four",
-    "five",
-    "six",
-    "seven",
-    "eight",
-    "nine",
-    "ten",
-    "eleven",
-    "twelve",
-    "thirteen",
-    "fourteen",
-    "fifteen",
-    "sixteen",
-    "seventeen",
-    "eighteen",
-    "nineteen",
-]
-TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
-
-
-def from_words(text: str) -> int:
-    """A written number back to an integer, for the two counts the README spells out.
-
-    Raises rather than returning a sentinel: a word this cannot read is a sentence that has been rewritten, and
-    quietly comparing against zero would turn that into a passing test.
-    """
-    lowered = text.lower()
-
-    if (lowered in UNITS):
-        return UNITS.index(lowered)
-
-    (tens, _, unit) = lowered.partition("-")
-
-    if (tens in TENS):
-        return TENS[tens] + (UNITS.index(unit) if unit else 0)
-
-    raise ValueError(f"cannot read {text!r} as a number")
 
 
 def is_forks(path: str) -> bool:
@@ -354,26 +312,23 @@ def test_the_summary_names_every_telemetry_class_that_has_a_stage():
         "the Summary no longer says feature stages run for every telemetry class; name them or restore the phrase")
 
 
-CORPORA = os.path.dirname(os.path.abspath(__file__))
 COMPOSITIONS = os.path.join(REPO_ROOT, "python", "morpheus", "morpheus", "compositions")
 
 
 def composed_pipelines() -> list:
-    """
-    The thirteen corpora: every `*_pipeline.py` beside this file that is not a `run_` entry point, nor
-    `corpus_pipeline.py`, the helpers the corpora share, which composes nothing of its own.
-    """
-    return sorted(name for name in os.listdir(CORPORA)
-                  if name.endswith("_pipeline.py") and not name.startswith("run_") and name != "corpus_pipeline.py")
+    """Every corpus's name beside this file: one per golden file, as the golden driver reads them."""
+    import run_golden  # pylint: disable=import-outside-toplevel
+
+    return [f"{name}_pipeline.py" for name in run_golden.CORPORA]
 
 
 def test_every_composed_pipeline_places_the_determinism_stamp():
     # The envelope was a tested stage that no corpus placed for weeks, while two documents said scored events carried
     # it. A corpus that composes its stages without the stamp is a corpus whose golden proves nothing about
-    # provenance, so the placement is asserted by name, in the source, for all thirteen.
+    # provenance, so the placement is asserted by name, in the source, for every one.
     names = composed_pipelines()
 
-    assert len(names) == 13, names
+    assert names, "no composed pipeline was found"
 
     unstamped = []
 

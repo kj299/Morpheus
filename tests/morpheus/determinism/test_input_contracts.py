@@ -30,6 +30,8 @@ import sys
 
 import pytest
 
+from _utils.numbers import from_words
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXAMPLE = os.path.join(HERE, "..", "..", "..", "examples", "behavioral_analytics")
 
@@ -38,21 +40,13 @@ sys.path.insert(0, EXAMPLE)
 
 # pylint: disable=wrong-import-position
 import make_input_samples as samples  # noqa: E402
+import run_golden  # noqa: E402
 
-CORPORA = ("application",
-           "campaign",
-           "context",
-           "endpoint",
-           "estate",
-           "host_score",
-           "network",
-           "presentation",
-           "saas",
-           "session",
-           "telemetry",
-           "transport")
-"""Every corpus with per-class input frames. The lineage corpus is one frame of its own reference shape and has no
-class."""
+SINGLE_FRAME = {"lineage": "one frame of its own reference shape, with no class"}
+"""The corpora without per-class input frames, each with the reason."""
+
+CORPORA = tuple(name for name in run_golden.CORPORA if name not in SINGLE_FRAME)
+"""Every corpus with per-class input frames: every corpus with a golden file, less those above."""
 
 JSON_TYPES = {"integer": (int, ), "float": (int, float), "string": (str, ), "boolean": (bool, )}
 
@@ -187,7 +181,6 @@ def test_the_documents_count_the_classes_the_contract_holds():
     # behind when this was written.
     import re  # pylint: disable=import-outside-toplevel
 
-    words = {"nineteen": 19, "twenty": 20, "twenty-one": 21, "twenty-two": 22}
     root = os.path.join(HERE, "..", "..", "..")
     documents = [
         os.path.join(root, "docs", "source", "developer_guide", "guides", "11_predictive_behavioral_analytics_osi.md"),
@@ -199,4 +192,4 @@ def test_the_documents_count_the_classes_the_contract_holds():
             stated = re.findall(r"all ([a-z-]+) input classes", handle.read())
 
         assert stated, path
-        assert {words.get(word) for word in stated} == {len(CONTRACTS["classes"])}, (path, stated)
+        assert {from_words(word) for word in stated} == {len(CONTRACTS["classes"])}, (path, stated)

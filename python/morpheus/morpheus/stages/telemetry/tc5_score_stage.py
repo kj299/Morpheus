@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Scores layer 5 rows against the model pinned for their entity, and emits the columns four rules read.
+Scores layer 5 rows against the model pinned for their entity, and emits the columns the layer 5 model rules read.
 
 `mean_abs_z` and `max_abs_z` have had no producer in this fork, so R-B-L5-001, R-B-L5-002, R-B-L5-005 and
 R-P-L5-006 have fired on nothing and the drift trajectory has read a column of nulls. This is the stage that

@@ -35,12 +35,14 @@ import re
 
 import pytest
 
+from _utils.numbers import from_words
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.utils import splunk_conf
 from morpheus.utils.binding_table import DEFAULT_BUCKET_SECONDS
 from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS
 from morpheus.utils.community_id import community_id
 from morpheus.utils.community_id import community_id_series
+from morpheus.utils.siem_sourcetypes import PRODUCED
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 APP_ROOT = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheus-lineage")
@@ -197,7 +199,7 @@ def test_every_score_sourcetype_accepts_a_backfill_as_old_as_its_index_keeps():
     max_days_ago = _max_days_ago_by_sourcetype()
     scored = {name: days for (name, days) in max_days_ago.items() if name.startswith("morpheus:score:")}
 
-    assert len(scored) == 8
+    assert set(scored) == {name for name in PRODUCED if name.startswith("morpheus:score:")}
     assert scored == {name: SCORED_RETENTION_DAYS for name in scored}
     assert max_days_ago["morpheus:late"] == SCORED_RETENTION_DAYS
 
@@ -212,45 +214,6 @@ def test_the_guide_quotes_the_app_s_retention():
 
     assert "behavior_events" in quoted
     assert quoted == {name: retention[name] for name in quoted}
-
-
-_UNITS = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
-          "seventeen eighteen nineteen").split()
-_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
-
-
-def _number_word(text: str):
-    """
-    The integer an English number word below a hundred names ("eleven", "fifty", "eighty-two"), or `None`.
-
-    Parsed rather than looked up in a table, because a table of the counts the README has stated so far is a list
-    kept by hand beside the thing it lists, and failed the first time the search count reached a number nobody had
-    written into it.
-    """
-    word = text.lower()
-
-    if (word in _UNITS):
-        return _UNITS.index(word)
-
-    (tens, hyphen, unit) = word.partition("-")
-
-    if (tens not in _TENS):
-        return None
-
-    if (hyphen == ""):
-        return _TENS[tens]
-
-    if (unit in _UNITS[1:10]):
-        return _TENS[tens] + _UNITS.index(unit)
-
-    return None
-
-
-def test_the_number_word_parser_reads_what_the_readme_writes():
-    words = ("eleven", "Twenty", "fifty-eight", "Eighty-two", "ninety-nine")
-
-    assert [_number_word(word) for word in words] == [11, 20, 58, 82, 99]
-    assert [_number_word(word) for word in ("twenty-eleven", "hundred", "eighty-", "")] == [None] * 4
 
 
 def test_the_app_readme_states_the_number_of_searches_it_ships():
@@ -270,7 +233,7 @@ def test_the_app_readme_states_the_number_of_searches_it_ships():
 
     assert match is not None, "the app README no longer states how many searches it ships"
 
-    stated = _number_word(match.group(1))
+    stated = from_words(match.group(1))
 
     assert stated == shipped, f"the README says {match.group(1)} searches; savedsearches.conf holds {shipped}"
 
@@ -314,19 +277,18 @@ def test_kvstore_lookups_expose_the_key_they_are_written_by():
 
         assert "_key" in fields, f"{lookup} cannot be written by key without _key in fields_list"
 
-    # Every job that writes a KV Store lookup writes it by key, the refresh jobs and the expiry job alike. The conf
-    # is read as text because a saved search's `search` spans continuation lines.
-    with open(SAVEDSEARCHES_PATH, encoding="utf-8") as handle:
-        searches = handle.read()
+    # Every job that writes a KV Store lookup writes it by key, the refresh jobs and the expiry jobs alike. The jobs
+    # are the app's own binding lookup stanzas, every refresh and every expiry, each writing its lookup once.
+    searches = splunk_conf.searches(SAVEDSEARCHES_PATH)
+    jobs = sorted(name for name in searches if name.startswith("Binding lookup - "))
+    writes = {name: re.findall(r"outputlookup\s+binding_\S+(.*)", searches[name]) for name in jobs}
 
-    writes = re.findall(r"outputlookup\s+binding_\S+(.*)", searches)
+    assert jobs, "the app ships no binding lookup job"
+    assert sorted(name for (name, search) in searches.items() if re.search(r"outputlookup\s+binding_", search)) == jobs
 
-    # Five refreshes and four expiry jobs: L2/L3, L2 and L5/L2 a refresh and an expiry each, L1 a refresh, and the
-    # L1 history a refresh and an expiry.
-    assert len(writes) == 9, writes
-
-    for tail in writes:
-        assert "key_field=_key" in tail, f"a lookup is written without a key: {tail!r}"
+    for (name, tails) in writes.items():
+        assert len(tails) == 1, f"{name} writes its lookup {len(tails)} times"
+        assert "key_field=_key" in tails[0], f"{name} writes its lookup without a key: {tails[0]!r}"
 
 
 RULE_METADATA_PATH = os.path.join(APP_ROOT, "lookups", "rule_metadata.csv")

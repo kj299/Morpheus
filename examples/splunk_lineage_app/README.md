@@ -331,8 +331,8 @@ Three levels, strongest last:
    expected).
 2. **Live load.** The app was installed into a fresh Splunk Enterprise 10.2 instance: `btool check`
    reports no errors, all five indexes are created, all seven scheduled searches that existed at the
-   time register, and every one of them executes without a parse error against empty indexes. The app
-   ships eighty-seven searches now; the eighty added since have not been through this step.
+   time register, and every one of them executes without a parse error against empty indexes. Every
+   search added since has not been through this step.
 3. **Functional.** With synthetic JSON telemetry seeded into the indexes and bindings written to the
    KV Store: timestamps anchor to `event_time` as the props intend, the identifier ladder resolves an
    IP through both lookups to a physical port and site, the chain assembly search emits the seeded
@@ -360,7 +360,7 @@ plants both a simultaneous and a cross-switch spoof for, alongside a legitimate 
 the stanzas parse on a search head. Run `btool savedsearches list` after installing.
 
 The run that would settle that is packaged: `validate/run_search_head.sh` starts the validation container, indexes
-the sample events, dispatches all eighty-seven searches in the order `validate/VALIDATION.md` prescribes, and writes
+the sample events, dispatches every search the app ships in the order `validate/VALIDATION.md` prescribes, and writes
 `validate/search_head_results.json`, which `tests/morpheus/determinism/test_search_head_run.py` compares with
 `expected_results.json` while it is committed; when a change supersedes a run, the run moves to
 `validate/search_head_runs/` with a test of exactly how it differs from what is now written. It needs Docker and nothing else. It was first run on 2026-10-05, on Splunk 10.2.8:

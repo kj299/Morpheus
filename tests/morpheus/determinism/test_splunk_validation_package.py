@@ -38,6 +38,7 @@ import typing
 import pandas as pd
 import pytest
 
+from _utils.numbers import from_words
 from morpheus.stages.telemetry.tc7_endpoint_stage import normalize_image_path
 from morpheus.utils import splunk_conf
 
@@ -1733,79 +1734,8 @@ def test_the_validation_document_says_the_same_thing_the_expectation_file_does(e
     stated_empty = re.search(r"\*\*(\w+) of the ([\w-]+) should return nothing\.\*\*", document)
 
     assert stated_empty is not None, "VALIDATION.md no longer states how many searches return nothing"
-    assert NUMBER_WORDS[stated_empty.group(1).lower()] == empty
-    assert NUMBER_WORDS[stated_empty.group(2).lower()] == len(expected["searches"])
-
-
-NUMBER_WORDS = {
-    "one": 1,
-    "two": 2,
-    "three": 3,
-    "four": 4,
-    "five": 5,
-    "six": 6,
-    "seven": 7,
-    "eight": 8,
-    "nine": 9,
-    "ten": 10,
-    "twenty-one": 21,
-    "twenty-two": 22,
-    "twenty-three": 23,
-    "twenty-four": 24,
-    "twenty-five": 25,
-    "twenty-six": 26,
-    "twenty-seven": 27,
-    "twenty-eight": 28,
-    "twenty-nine": 29,
-    "thirty": 30,
-    "thirty-one": 31,
-    "thirty-two": 32,
-    "thirty-three": 33,
-    "thirty-four": 34,
-    "thirty-five": 35,
-    "thirty-six": 36,
-    "thirty-seven": 37,
-    "thirty-eight": 38,
-    "thirty-nine": 39,
-    "forty": 40,
-    "forty-one": 41,
-    "forty-two": 42,
-    "forty-three": 43,
-    "forty-four": 44,
-    "forty-five": 45,
-    "forty-six": 46,
-    "forty-seven": 47,
-    "forty-eight": 48,
-    "forty-nine": 49,
-    "fifty": 50,
-    "fifty-one": 51,
-    "fifty-two": 52,
-    "fifty-three": 53,
-    "fifty-four": 54,
-    "fifty-five": 55,
-    "fifty-six": 56,
-    "fifty-seven": 57,
-    "fifty-eight": 58,
-    "fifty-nine": 59,
-    "sixty": 60,
-    "sixty-one": 61,
-    "sixty-two": 62,
-    "sixty-six": 66,
-    "seventy-two": 72,
-    "seventy-five": 75,
-    "seventy-eight": 78,
-    "seventy-nine": 79,
-    "eighty": 80,
-    "eighty-one": 81,
-    "eighty-two": 82,
-    "eighty-three": 83,
-    "eighty-four": 84,
-    "eighty-five": 85,
-    "eighty-six": 86,
-    "eighty-seven": 87,
-}
-"""Only the range these two counts can plausibly take. A word outside it fails with a `KeyError` naming the word,
-which is the right failure: the document said something nobody here anticipated."""
+    assert from_words(stated_empty.group(1)) == empty
+    assert from_words(stated_empty.group(2)) == len(expected["searches"])
 
 
 def test_every_expected_empty_search_says_why(expected: dict):

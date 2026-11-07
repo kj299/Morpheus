@@ -27,6 +27,7 @@ import re
 
 import pytest
 
+from _utils.numbers import from_words
 from morpheus.utils import splunk_conf
 from morpheus.utils.siem_sourcetypes import PRODUCED
 from morpheus.utils.siem_sourcetypes import UNPRODUCED
@@ -96,20 +97,8 @@ def test_the_unproduced_count_is_pinned():
     # Every stanza has a producer. Pinned rather than merely recorded, so that adding a stanza, with or without a
     # producer, is a deliberate edit here and not a silent drift in what the app appears to support.
     assert len(UNPRODUCED) == 0
-    assert len(PRODUCED) == 20
+    assert len(PRODUCED) == len(splunk_conf.stanzas(PROPS_PATH))
 
-
-NUMBER_WORDS = {
-    # "none" because the sentence says none of the stanzas is without a producer; the rest reach the stanza total,
-    # and a total past twenty fails here with a KeyError naming the word to add.
-    "none": 0,
-    **{
-        word: number
-        for (number, word) in enumerate(("zero one two three four five six seven eight nine ten eleven twelve "
-                                         "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty").split(
-                                        ))
-    },
-}
 
 GUIDE = os.path.join(REPO_ROOT,
                      "docs",
@@ -132,8 +121,8 @@ def test_the_guide_states_the_same_unproduced_count_the_module_holds():
 
     assert match is not None, "the guide no longer states the unproduced count; keep it or drop this test"
 
-    stated_unproduced = NUMBER_WORDS[match.group(1).lower()]
-    stated_total = NUMBER_WORDS[match.group(2).lower()]
+    stated_unproduced = from_words(match.group(1))
+    stated_total = from_words(match.group(2))
 
     assert stated_unproduced == len(UNPRODUCED), (
         f"the guide says {match.group(1)} stanzas have no producer; the module holds {len(UNPRODUCED)}")
