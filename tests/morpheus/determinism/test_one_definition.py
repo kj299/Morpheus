@@ -41,6 +41,8 @@ import pytest
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 MANIFEST = os.path.join(REPO_ROOT, "ci", "artifacts", "repository_audit_manifest.csv")
 CONF_READER = "python/morpheus/morpheus/utils/splunk_conf.py"
+SELF = os.path.relpath(os.path.abspath(__file__), REPO_ROOT)
+"""This file, which names what it looks for."""
 BUILTINS = frozenset(dir(builtins))
 
 
@@ -224,7 +226,7 @@ def test_a_copy_calling_its_own_module_s_function_follows_it():
 def test_only_splunk_conf_parses_a_conf_file():
     readers = [
         path for (path, source) in _sources().items()
-        if path != CONF_READER and ("configparser" in source or r'r"\\\s*\r?\n\s*"' in source)
+        if path not in (CONF_READER, SELF) and ("configparser" in source or r'r"\\\s*\r?\n\s*"' in source)
     ]
 
     assert readers == []
