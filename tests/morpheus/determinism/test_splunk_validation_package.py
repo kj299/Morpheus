@@ -38,7 +38,7 @@ import typing
 import pandas as pd
 import pytest
 
-from _utils.numbers import from_words
+from _utils.number_words import from_words
 from morpheus.stages.telemetry.tc7_endpoint_stage import normalize_image_path
 from morpheus.utils import splunk_conf
 

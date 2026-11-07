@@ -24,7 +24,7 @@ These hold the tests to it:
 
 - no test spells out a whole collection a glob finds -- every corpus, every segment, every composition, every
   sourcetype, index, saved search or input class -- or all of one but one;
-- no test keeps a table of number words: a count a document spells out is read with `_utils.numbers.from_words`.
+- no test keeps a table of number words: a count a document spells out is read with `_utils.number_words.from_words`.
 """
 
 import ast
@@ -34,14 +34,16 @@ import sys
 
 import pytest
 
-from _utils.numbers import from_words
+from _utils.number_words import from_words
 from morpheus.utils import splunk_conf
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 APP = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheus-lineage", "default")
 SAMPLES = os.path.join(REPO_ROOT, "examples", "behavioral_analytics", "samples")
-NUMBERS = "tests/_utils/numbers.py"
+NUMBERS = "tests/_utils/number_words.py"
+SELF = os.path.relpath(os.path.abspath(__file__), REPO_ROOT)
+"""This file, whose negative controls are the tables it looks for."""
 
 sys.path.insert(0, HERE)
 
@@ -122,7 +124,7 @@ def _test_sources() -> dict[str, str]:
     found = {}
 
     for path in fork_python_files():
-        if (path.startswith("tests/") and path != NUMBERS):
+        if (path.startswith("tests/") and path not in (NUMBERS, SELF)):
             with open(os.path.join(REPO_ROOT, path), encoding="utf-8") as handle:
                 found[path] = handle.read()
 

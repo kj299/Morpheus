@@ -35,7 +35,7 @@ import re
 
 import pytest
 
-from _utils.numbers import from_words
+from _utils.number_words import from_words
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
 from morpheus.utils import splunk_conf
 from morpheus.utils.binding_table import DEFAULT_BUCKET_SECONDS

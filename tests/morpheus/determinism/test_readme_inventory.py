@@ -46,7 +46,7 @@ import re
 
 import pytest
 
-from _utils.numbers import from_words
+from _utils.number_words import from_words
 from morpheus.utils import splunk_conf
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))

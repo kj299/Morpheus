@@ -30,7 +30,7 @@ import sys
 
 import pytest
 
-from _utils.numbers import from_words
+from _utils.number_words import from_words
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXAMPLE = os.path.join(HERE, "..", "..", "..", "examples", "behavioral_analytics")

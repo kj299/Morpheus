@@ -27,7 +27,7 @@ import re
 
 import pytest
 
-from _utils.numbers import from_words
+from _utils.number_words import from_words
 from morpheus.utils import splunk_conf
 from morpheus.utils.siem_sourcetypes import PRODUCED
 from morpheus.utils.siem_sourcetypes import UNPRODUCED

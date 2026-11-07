@@ -46,6 +46,7 @@ import typing
 import pandas as pd
 import pytest
 
+from _utils.number_words import from_words
 from _utils.samples import arp_observations
 from _utils.samples import host_asset_store
 from morpheus.config import Config
@@ -2889,8 +2890,6 @@ def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships()
     with open(os.path.join(repo_root, "README.md"), encoding="utf-8") as handle:
         readme = re.sub(r"\s+", " ", handle.read())
 
-    words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
-
     # Every class with a producer. TC-3 was not in this loop when its stages landed, and its row went on saying
     # "Schema only" through a whole increment -- the same drift this test exists to catch, in the one class the
     # loop did not name. A list of classes is as capable of being incomplete as a count is.
@@ -2901,7 +2900,7 @@ def test_the_readme_states_the_stage_count_each_telemetry_class_actually_ships()
         row = re.search(rf"\{label[:6]}\*\* [^|]*\|[^|]*\|[^|]*\| (\w+) stages ship", readme)
 
         assert row is not None, f"the README's collection table no longer states a stage count for TC-{prefix[-1]}"
-        assert words[row.group(1).lower()] == shipped, (
+        assert from_words(row.group(1)) == shipped, (
             f"the README says {row.group(1)} stages ship for TC-{prefix[-1]}; {shipped} are on disk")
 
 
