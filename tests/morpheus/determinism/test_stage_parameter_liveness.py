@@ -46,6 +46,8 @@ import typing
 import pandas as pd
 import pytest
 
+from _utils.samples import arp_observations
+from _utils.samples import host_asset_store
 from morpheus.config import Config
 from morpheus.config import CppConfig
 from morpheus.config import ExecutionMode
@@ -62,8 +64,8 @@ from morpheus.stages.lineage.envelope_validate_stage import EnvelopeValidateStag
 from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
 from morpheus.stages.lineage.minimization_stage import MinimizationStage
 from morpheus.stages.lineage.partition_merge_stage import PartitionMergeStage
-from morpheus.stages.lineage.shard_split_stage import ShardSplitStage
 from morpheus.stages.lineage.pipeline_health_stage import PipelineHealthStage
+from morpheus.stages.lineage.shard_split_stage import ShardSplitStage
 from morpheus.stages.lineage.total_order_stage import TotalOrderStage
 from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 from morpheus.stages.output.siem_wire_sink_stage import SiemWireSinkStage
@@ -747,10 +749,6 @@ def context_probes() -> dict:
     return {"user_principal": ["carol", "carol", "mallory"], "event_time": [5 * DAY, 25 * DAY, 5 * DAY]}
 
 
-def _host_store() -> BitemporalStore:
-    return BitemporalStore("asset", [make_version("asset", "fin-01", 0, None, 0, values={"criticality": "medium"})])
-
-
 def host_probes() -> dict:
     """An EDR's spelling of a host the inventory records in lower case."""
     return {"hostname": ["FIN-01", "fin-01."], "event_time": [DAY, DAY]}
@@ -931,18 +929,6 @@ def paired_flows() -> dict:
         "dst_ip": [row[2] for row in rows],
         "bytes_out": [row[3] for row in rows],
         "event_time": [row[0] for row in rows],
-    }
-
-
-def resolved_and_unresolved() -> dict:
-    """Two ARP observations the ladder placed on a port and one it could not, each with its own address.
-
-    The candidates disagree on every row where both have a value, so preferring one over the other is visible
-    in the output -- which is what makes the order a parameter rather than a set.
-    """
-    return {
-        "resolved_port_key": ["hq:sw1:Gi1/0/1", None, "hq:sw1:Gi1/0/2"],
-        "arp_sender_ip": ["10.0.0.1", "10.0.0.2", "10.0.0.3"],
     }
 
 
@@ -2079,7 +2065,7 @@ REGISTRY: dict = {
                      extreme="hostname",
                      frame=host_probes,
                      also={
-                         "store": _host_store(), "entity_column": "hostname"
+                         "store": host_asset_store(), "entity_column": "hostname"
                      }),
                 Knob("entity_columns",
                      DIFFERS,
@@ -2641,7 +2627,7 @@ REGISTRY: dict = {
     "ChainAnchorStage":
         Scenario(
             stage=ChainAnchorStage,
-            frame=resolved_and_unresolved,
+            frame=arp_observations,
             base={
                 "candidates": ["resolved_port_key", "arp_sender_ip"],
             },
@@ -2755,7 +2741,9 @@ REGISTRY: dict = {
         Scenario(
             stage=ShardSplitStage,
             frame=sharded,
-            base={"key_column": "entity_key", "shards": 2},
+            base={
+                "key_column": "entity_key", "shards": 2
+            },
             knobs=(
                 Knob("key_column", INPUT_COLUMN, benign="entity_key"),
                 Knob("shards", DIFFERS, benign=2, extreme=3),

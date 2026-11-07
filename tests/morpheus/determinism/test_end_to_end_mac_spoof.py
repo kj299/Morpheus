@@ -35,6 +35,8 @@ import sys
 
 import pytest
 
+from morpheus.utils import splunk_conf
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 EXAMPLE = os.path.join(REPO_ROOT, "examples", "behavioral_analytics")
 RUNNER = os.path.join(EXAMPLE, "run_mac_spoof.py")
@@ -49,19 +51,6 @@ GAP_THRESHOLD_NS = 60 * 10**9
 NS_PER_SECOND = 10**9
 
 
-def _conf(path: str) -> dict:
-    """A Splunk `.conf` as a dict of dicts, with its backslash continuations folded first."""
-    import configparser
-
-    with open(path, encoding="utf-8") as handle:
-        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.read_string(folded)
-
-    return {name: dict(parser[name]) for name in parser.sections()}
-
-
 def _splunk_time(line: str) -> datetime.datetime:
     """
     Stamp one raw line the way Splunk would: its stanza's own prefix regex, its own format, no shortcuts.
@@ -70,7 +59,7 @@ def _splunk_time(line: str) -> datetime.datetime:
     anchored on a quote, and the whole failure this guards against is a value that parses perfectly as JSON and
     matches nothing as a timestamp.
     """
-    settings = _conf(PROPS)[SOURCETYPE]
+    settings = splunk_conf.read(PROPS)[SOURCETYPE]
     match = re.search(settings["time_prefix"], line)
 
     assert match is not None, f"TIME_PREFIX for {SOURCETYPE} matched nothing in: {line[:160]}"
@@ -165,7 +154,7 @@ def test_a_device_that_merely_moved_is_not_a_notable(notables: list):
 
 def test_the_predicate_matches_the_shipped_saved_search():
     # The predicate above is a restatement, and a restatement drifts. This pins it to the search's own text.
-    search = _conf(SAVEDSEARCHES)[f"{RULE} - MAC in two places at once"]["search"]
+    search = splunk_conf.read(SAVEDSEARCHES)[f"{RULE} - MAC in two places at once"]["search"]
 
     assert f"sourcetype={SOURCETYPE}" in search
     assert "bind_end_reason=conflict" in search and "bind_end_reason=displaced" in search
@@ -176,7 +165,7 @@ def test_the_predicate_matches_the_shipped_saved_search():
 def test_every_record_carries_what_the_alert_shows(notables: list):
     # The `| table` clause names the fields an analyst reads. A blank column on a notable is the defect the field
     # linter exists for, checked here against records that actually reached a file.
-    search = _conf(SAVEDSEARCHES)[f"{RULE} - MAC in two places at once"]["search"]
+    search = splunk_conf.read(SAVEDSEARCHES)[f"{RULE} - MAC in two places at once"]["search"]
     tabled = re.search(r"\|\s*table\s+([^|]*)", search).group(1).split()
     evaluated = {"_time", "rule_id", "risk_score", "osi_layer", "entity_key", "gap_seconds"}
 

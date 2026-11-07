@@ -59,8 +59,8 @@ from morpheus.compositions import envelope
 from morpheus.compositions import stamping
 from morpheus.compositions import telemetry as tp
 from morpheus.compositions.corpus_pipeline import _collect
-from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
-    build_pipeline_config, )
+from morpheus.compositions.corpus_pipeline import build_pipeline_config  # noqa: F401 pylint: disable=unused-import
+from morpheus.compositions.corpus_pipeline import render  # noqa: F401 pylint: disable=unused-import
 from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
@@ -321,8 +321,3 @@ who is who, not an observation at any layer, so its end of the edge has none."""
 def build_edges(config: Config, result: pd.DataFrame) -> pd.DataFrame:
     """The estate's `morpheus:edge` records: one per hop a record was resolved through."""
     return edge_stream.emit(config, result, **EDGE_HOPS)
-
-
-def render(result: pd.DataFrame) -> str:
-    """The byte-exact rendering compared across restarts and against the golden file."""
-    return tp.render(result)

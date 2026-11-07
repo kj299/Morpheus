@@ -32,7 +32,6 @@ stack half here, and the join in `test_splunk_validation_package.py`, over the e
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -42,16 +41,14 @@ from morpheus.config import Config
 from morpheus.stages.telemetry.tc4_flow_stage import MODEL_FEATURES
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
-from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import golden  # noqa: E402
 import transport_pipeline as tp_  # noqa: E402
 
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_transport_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_transport_pipeline.py")
 
 SYN_RATIO_THRESHOLD = 0.9
 """R-D-L4-002's own figure, repeated so these tests evaluate the rule rather than something near it."""
@@ -115,25 +112,6 @@ def _bins(result: pd.DataFrame) -> pd.DataFrame:
     bins["rst_ratio"] = bins["rst"] / bins["total"]
 
     return bins
-
-
-def _split(frame: pd.DataFrame, parts: int) -> list:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _windows(frame: pd.DataFrame) -> list:
-    period_ns = tp_.PERIOD_SECONDS * tp_.NS_PER_SECOND
-
-    return [window_id_from_timestamp(int(stamp), period_ns) for stamp in frame["event_time"]]
-
-
-def _permuted(corpus: dict, seed: int) -> dict:
-    return {
-        name: permute_within_contiguous_groups(frame, _windows(frame), seed=seed)
-        for (name, frame) in corpus.items()
-    }
 
 
 def _truth(result: pd.DataFrame, column: str) -> pd.Series:
@@ -200,41 +178,20 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("transport", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = tp_.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO  # pylint: disable=import-outside-toplevel
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is "
-                    f"intended, regenerate the golden with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("transport", tp_.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, tp_.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, tp_.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
@@ -246,7 +203,7 @@ def test_a_bin_split_across_messages_still_ends_on_the_right_number(pipeline_con
     # within the message it was handed, so a sixty-second bin arriving in two messages is aggregated twice and
     # the model sees two partial bins as though each were whole. The check above says the whole frame does not
     # drift; this one says the figure a detection reads is the same number no matter how the stream was chunked.
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     whole = _bins(tp_.run_pipeline(pipeline_config, corpus))
     chunked = _bins(tp_.run_pipeline(pipeline_config, corpus, batches=by_row))
@@ -260,7 +217,7 @@ def test_a_bin_split_across_messages_still_ends_on_the_right_number(pipeline_con
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2, 3):
-        shuffled = tp_.run_pipeline(pipeline_config, _permuted(corpus, seed))
+        shuffled = tp_.run_pipeline(pipeline_config, golden.permuted(corpus, seed, tp_.PERIOD_SECONDS))
 
         assert diff_frames(result, shuffled) is None, seed
 
@@ -271,7 +228,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     # quantile are each functions of what came before -- so removing the imposed order has to change the answer,
     # or the check is passing over a pipeline that never needed it.
     ordered = tp_.run_pipeline(pipeline_config, corpus, impose_order=False)
-    shuffled = tp_.run_pipeline(pipeline_config, _permuted(corpus, 5), impose_order=False)
+    shuffled = tp_.run_pipeline(pipeline_config, golden.permuted(corpus, 5, tp_.PERIOD_SECONDS), impose_order=False)
 
     assert diff_frames(ordered, shuffled) is not None
 

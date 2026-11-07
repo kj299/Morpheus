@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.samples import arp_observations
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
@@ -27,14 +28,6 @@ from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.utils.type_utils import get_df_class
 
 CANDIDATES = ["resolved_port_key", "arp_sender_ip"]
-
-
-def observations() -> dict:
-    """Three ARP observations: two the ladder resolved to a port, one it could not."""
-    return {
-        "resolved_port_key": ["hq:sw1:Gi1/0/1", None, "hq:sw1:Gi1/0/2"],
-        "arp_sender_ip": ["10.0.0.1", "10.0.0.2", "10.0.0.3"],
-    }
 
 
 def run(config: Config, payload: dict, **kwargs) -> pd.DataFrame:
@@ -50,7 +43,7 @@ def run(config: Config, payload: dict, **kwargs) -> pd.DataFrame:
 def test_a_resolved_row_roots_on_the_port_and_an_unresolved_one_on_itself(config: Config):
     # The reason the stage exists. Before it, an ARP observation was anchored on the address being claimed and
     # nothing else, so it could never share a chain with the layer 1 samples of the port it came from.
-    result = run(config, observations())
+    result = run(config, arp_observations())
 
     assert list(result["chain_anchor"]) == ["hq:sw1:Gi1/0/1", "10.0.0.2", "hq:sw1:Gi1/0/2"]
     assert list(result["chain_anchor_source"]) == ["resolved_port_key", "arp_sender_ip", "resolved_port_key"]
@@ -61,7 +54,7 @@ def test_the_source_tells_a_soft_join_from_a_direct_observation(config: Config):
     # A chain reached through the binding table is weaker evidence than one that was not, and an analyst reading
     # `lineage_id` later has to be able to tell which. The source column is that record, the way `join_method`
     # is on an edge.
-    result = run(config, observations())
+    result = run(config, arp_observations())
 
     resolved = result[result["chain_anchor_source"] == "resolved_port_key"]
     fallback = result[result["chain_anchor_source"] == "arp_sender_ip"]
@@ -75,7 +68,7 @@ def test_the_source_tells_a_soft_join_from_a_direct_observation(config: Config):
 def test_a_row_with_no_candidate_value_carries_no_root(config: Config):
     # No root rather than a fabricated one. A default would pool every rootless row in the estate under one
     # invented chain, which is exactly what the null-key rule exists to prevent.
-    payload = observations()
+    payload = arp_observations()
     payload["arp_sender_ip"][1] = None
 
     result = run(config, payload)
@@ -89,7 +82,7 @@ def test_a_row_with_no_candidate_value_carries_no_root(config: Config):
 def test_whitespace_and_empty_strings_are_not_values(config: Config):
     # `normalize_text` decides what counts as present, so a padded or empty resolution does not win over a real
     # fallback. The same rule the entity keys use, applied to the same kind of decision.
-    payload = observations()
+    payload = arp_observations()
     payload["resolved_port_key"] = ["   ", "", "hq:sw1:Gi1/0/2"]
 
     result = run(config, payload)
@@ -102,7 +95,7 @@ def test_whitespace_and_empty_strings_are_not_values(config: Config):
 def test_candidate_order_is_preference_order(config: Config):
     # Reversing the list reverses the decision on every row where both have a value. If it did not, the
     # parameter would be a set and the "most preferred first" contract would be decoration.
-    result = run(config, observations(), candidates=list(reversed(CANDIDATES)))
+    result = run(config, arp_observations(), candidates=list(reversed(CANDIDATES)))
 
     assert list(result["chain_anchor"]) == ["10.0.0.1", "10.0.0.2", "10.0.0.3"]
     assert list(result["chain_anchor_source"]) == ["arp_sender_ip"] * 3
@@ -121,7 +114,7 @@ def test_a_single_candidate_is_the_old_per_class_anchor(config: Config):
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_output_columns_are_configurable(config: Config):
-    result = run(config, observations(), anchor_column="root", source_column="root_from")
+    result = run(config, arp_observations(), anchor_column="root", source_column="root_from")
 
     assert list(result["root"]) == ["hq:sw1:Gi1/0/1", "10.0.0.2", "hq:sw1:Gi1/0/2"]
     assert list(result["root_from"]) == ["resolved_port_key", "arp_sender_ip", "resolved_port_key"]
@@ -147,7 +140,7 @@ def test_an_empty_frame_passes_through(config: Config):
 @pytest.mark.gpu_and_cpu_mode
 def test_a_control_message_is_handled_the_same_way(config: Config):
     message = ControlMessage()
-    message.payload(MessageMeta(get_df_class(config.execution_mode)(observations())))
+    message.payload(MessageMeta(get_df_class(config.execution_mode)(arp_observations())))
 
     ChainAnchorStage(config, candidates=CANDIDATES).on_data(message)
     df = message.payload().copy_dataframe()
@@ -175,7 +168,7 @@ def test_colliding_output_columns_are_refused(config: Config):
 def test_the_stage_runs_in_a_pipeline(config: Config):
     # The needed columns are declared, so a pipeline preallocates them; the decision is still made on the value,
     # not on the column's presence, or a preallocated empty column would read as "already anchored".
-    frame = get_df_class(config.execution_mode)(observations())
+    frame = get_df_class(config.execution_mode)(arp_observations())
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=[frame]))
     pipe.add_stage(ChainAnchorStage(config, candidates=CANDIDATES))

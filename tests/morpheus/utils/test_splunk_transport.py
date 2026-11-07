@@ -22,7 +22,6 @@ names, the index each search reads a sourcetype from, the stanzas `props.conf` p
 `indexes.conf` defines.
 """
 
-import configparser
 import importlib.util
 import json
 import os
@@ -31,6 +30,7 @@ import sys
 
 import pytest
 
+from morpheus.utils import splunk_conf
 from morpheus.utils.siem_sourcetypes import INDEX_BY_PREFIX
 from morpheus.utils.siem_sourcetypes import PRODUCED
 from morpheus.utils.siem_sourcetypes import index_for
@@ -60,13 +60,6 @@ SEARCH_PAIR = re.compile(r"index=(behavior_\w+)\s+sourcetype=([a-z0-9:]+\*?)")
 def _read(path: str) -> str:
     with open(path, encoding="utf-8") as handle:
         return handle.read()
-
-
-def _conf(path: str) -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.read(path)
-
-    return parser
 
 
 def _connector() -> dict:
@@ -129,7 +122,7 @@ def test_the_connector_posts_raw_records_separated_by_newlines_with_acknowledgem
 def test_the_props_stanzas_break_on_newlines_and_do_not_merge_lines():
     # The connector's line breaker is a newline, and a stanza that merged lines or broke elsewhere would make one
     # event of a batch.
-    props = _conf(os.path.join(DEFAULT, "props.conf"))
+    props = splunk_conf.read(os.path.join(DEFAULT, "props.conf"))
 
     for name in sorted(PRODUCED):
         assert props.has_section(name), name
@@ -138,7 +131,7 @@ def test_the_props_stanzas_break_on_newlines_and_do_not_merge_lines():
 
 
 def test_the_forwarder_monitors_every_runner_file_onto_its_sourcetype_and_index():
-    inputs = _conf(os.path.join(TRANSPORT, "inputs.conf"))
+    inputs = splunk_conf.read(os.path.join(TRANSPORT, "inputs.conf"))
     monitors = {section for section in inputs.sections() if section.startswith("monitor://")}
 
     assert monitors == {f"monitor://{make_transport.SPOOL}/*/{filename_for(name)}" for name in PRODUCED}
@@ -152,7 +145,7 @@ def test_the_forwarder_monitors_every_runner_file_onto_its_sourcetype_and_index(
 
 
 def test_the_token_allows_exactly_the_indexes_the_sourcetypes_use():
-    inputs = _conf(os.path.join(TRANSPORT, "inputs.conf"))
+    inputs = splunk_conf.read(os.path.join(TRANSPORT, "inputs.conf"))
     section = f"http://{make_transport.HEC_TOKEN_NAME}"
 
     assert inputs.get(section, "indexes").split(",") == sorted({index_for(name) for name in PRODUCED})
@@ -162,7 +155,7 @@ def test_the_token_allows_exactly_the_indexes_the_sourcetypes_use():
 
 
 def test_every_index_named_exists_in_the_app():
-    indexes = _conf(os.path.join(DEFAULT, "indexes.conf"))
+    indexes = splunk_conf.read(os.path.join(DEFAULT, "indexes.conf"))
     named = {index_for(name) for name in PRODUCED} | set(_connector()["splunk.indexes"].split(","))
 
     assert all(indexes.has_section(index) for index in named), sorted(named - set(indexes.sections()))

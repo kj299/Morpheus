@@ -19,7 +19,6 @@ digest every risk record carries (gap G60).
 """
 
 import collections
-import configparser
 import csv
 import json
 import os
@@ -28,6 +27,7 @@ import sys
 
 import pytest
 
+from morpheus.utils import splunk_conf
 from morpheus.utils.rule_thresholds import DIRECTIONS
 from morpheus.utils.rule_thresholds import KINDS
 from morpheus.utils.rule_thresholds import OPERATORS
@@ -47,14 +47,10 @@ LOOKUP = "| lookup rule_metadata rule_id OUTPUT thresholds_hash | collect index=
 
 
 def _detections() -> dict:
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.optionxform = str
-    parser.read_string(text)
-
-    return {name.split(" - ")[0]: parser[name]["search"] for name in parser.sections() if name.startswith("R-")}
+    return {
+        name.split(" - ")[0]: search
+        for (name, search) in splunk_conf.searches(SAVEDSEARCHES).items() if name.startswith("R-")
+    }
 
 
 def _registry() -> list[dict]:

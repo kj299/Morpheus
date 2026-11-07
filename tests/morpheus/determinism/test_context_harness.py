@@ -29,7 +29,6 @@ change its answer when the same versions arrive in a different order.
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -46,9 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import context_pipeline as cp  # noqa: E402
-
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_context_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_context_pipeline.py")
+import golden  # noqa: E402
 
 
 @pytest.fixture(name="corpus", scope="module")
@@ -96,12 +93,6 @@ def _pair(result: pd.DataFrame, probe_id: str, column: str) -> tuple:
 
 def _producer(result: pd.DataFrame, name: str) -> pd.DataFrame:
     return result[result["telemetry_class"] == name]
-
-
-def _split(frame: pd.DataFrame, parts: int) -> list:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
 
 
 def _permuted(corpus: dict, seed: int) -> dict:
@@ -164,41 +155,20 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("context", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = cp.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO  # pylint: disable=import-outside-toplevel
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is "
-                    f"intended, regenerate the golden with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("context", cp.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, cp.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, cp.run_pipeline(pipeline_config, corpus, batches=by_row)) is None

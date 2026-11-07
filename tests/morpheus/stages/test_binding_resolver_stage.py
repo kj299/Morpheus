@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -64,15 +65,6 @@ def obs_df_fixture(config: Config):
     yield get_df_class(config.execution_mode)(OBSERVATIONS)
 
 
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return series.tolist()
-
-
 def test_execution_modes(config: Config, table: BindingTable):
     assert issubclass(BindingResolverStage, GpuAndCpuMixin)
 
@@ -104,8 +96,8 @@ def test_binding_resolver_stage_pipe(config: Config, table: BindingTable, obs_df
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "mac") == ["aa:bb:cc:00:00:01", "aa:bb:cc:00:00:02", None, None]
-    assert _as_list(messages[0], "port_id") == ["Gi1/0/1", "Gi1/0/2", None, None]
+    assert column_values(messages[0], "mac", nulls=False) == ["aa:bb:cc:00:00:01", "aa:bb:cc:00:00:02", None, None]
+    assert column_values(messages[0], "port_id", nulls=False) == ["Gi1/0/1", "Gi1/0/2", None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -115,7 +107,8 @@ def test_method_column_marks_every_row(config: Config, table: BindingTable, obs_
     BindingResolverStage(config, binding_table=table, key_column="src_ip").on_data(meta)
 
     # An unresolved row must be distinguishable from a resolved one, which is the whole point of the field.
-    assert _as_list(meta, "resolution_method") == ["soft:dhcp_lease", "soft:dhcp_lease", UNRESOLVED, UNRESOLVED]
+    assert column_values(meta, "resolution_method",
+                         nulls=False) == ["soft:dhcp_lease", "soft:dhcp_lease", UNRESOLVED, UNRESOLVED]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -135,9 +128,10 @@ def test_every_rung_of_a_ladder_appends_to_one_methods_field(config: Config, tab
     BindingResolverStage(config, binding_table=table, key_column="src_ip", method_column="lease_method").on_data(meta)
     BindingResolverStage(config, binding_table=switch, key_column="mac", method_column="port_method").on_data(meta)
 
-    assert _as_list(meta, "lease_method") == ["soft:dhcp_lease", "soft:dhcp_lease", UNRESOLVED, UNRESOLVED]
-    assert _as_list(meta, "port_method") == ["soft:mac_table", UNRESOLVED, UNRESOLVED, UNRESOLVED]
-    assert _as_list(meta, "resolution_methods") == [
+    assert column_values(meta, "lease_method",
+                         nulls=False) == ["soft:dhcp_lease", "soft:dhcp_lease", UNRESOLVED, UNRESOLVED]
+    assert column_values(meta, "port_method", nulls=False) == ["soft:mac_table", UNRESOLVED, UNRESOLVED, UNRESOLVED]
+    assert column_values(meta, "resolution_methods", nulls=False) == [
         "soft:dhcp_lease;soft:mac_table",
         "soft:dhcp_lease;unresolved:mac_table",
         "unresolved:dhcp_lease;unresolved:mac_table",
@@ -152,7 +146,7 @@ def test_on_data_accepts_control_message(config: Config, table: BindingTable, ob
 
     BindingResolverStage(config, binding_table=table, key_column="src_ip").on_data(message)
 
-    assert _as_list(message.payload(), "mac")[0] == "aa:bb:cc:00:00:01"
+    assert column_values(message.payload(), "mac", nulls=False)[0] == "aa:bb:cc:00:00:01"
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -174,7 +168,7 @@ def test_resolution_is_repeatable(config: Config, table: BindingTable, obs_df):
     stage.on_data(first)
     stage.on_data(second)
 
-    assert _as_list(first, "binding_uid") == _as_list(second, "binding_uid")
+    assert column_values(first, "binding_uid", nulls=False) == column_values(second, "binding_uid", nulls=False)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -183,7 +177,7 @@ def test_uid_column_ties_back_to_the_binding(config: Config, table: BindingTable
 
     BindingResolverStage(config, binding_table=table, key_column="src_ip", uid_column="binding_uid").on_data(meta)
 
-    uids = _as_list(meta, "binding_uid")
+    uids = column_values(meta, "binding_uid", nulls=False)
 
     assert uids[0] == table.resolve("10.0.0.5", HOUR_NS // 2).uid
     assert uids[2] is None
@@ -199,7 +193,7 @@ def test_output_columns_can_be_renamed_and_subset(config: Config, table: Binding
                                  output_columns={"port_id": "switch_port"})
     stage.on_data(meta)
 
-    assert _as_list(meta, "switch_port")[0] == "Gi1/0/1"
+    assert column_values(meta, "switch_port", nulls=False)[0] == "Gi1/0/1"
     assert "mac" not in meta.get_column_names()
 
 
@@ -210,7 +204,7 @@ def test_second_resolution_event_times(config: Config, table: BindingTable):
 
     BindingResolverStage(config, binding_table=table, key_column="src_ip", time_unit="s").on_data(meta)
 
-    assert _as_list(meta, "mac") == ["aa:bb:cc:00:00:01"]
+    assert column_values(meta, "mac", nulls=False) == ["aa:bb:cc:00:00:01"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -220,7 +214,7 @@ def test_datetime_event_times(config: Config, table: BindingTable):
 
     BindingResolverStage(config, binding_table=table, key_column="src_ip").on_data(meta)
 
-    assert _as_list(meta, "mac") == ["aa:bb:cc:00:00:01"]
+    assert column_values(meta, "mac", nulls=False) == ["aa:bb:cc:00:00:01"]
 
 
 @pytest.mark.gpu_and_cpu_mode

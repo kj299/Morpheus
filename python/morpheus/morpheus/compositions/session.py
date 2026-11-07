@@ -81,8 +81,8 @@ import pandas as pd
 from morpheus.compositions import envelope as universal_envelope
 from morpheus.compositions import stamping
 from morpheus.compositions.corpus_pipeline import _collect
-from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
-    build_pipeline_config, )
+from morpheus.compositions.corpus_pipeline import build_pipeline_config  # noqa: F401 pylint: disable=unused-import
+from morpheus.compositions.corpus_pipeline import render  # noqa: F401 pylint: disable=unused-import
 from morpheus.compositions.estate_context import EstateContext
 from morpheus.compositions.repository import repository_path
 from morpheus.compositions.resumable import ResumableLinearPipeline
@@ -608,8 +608,3 @@ def run_pipeline(config: Config,
     return canonicalize(universal_envelope.with_quarantine(combined, quarantined),
                         key_columns=KEY_COLUMNS,
                         ignore_columns=IGNORE_COLUMNS)
-
-
-def render(result: pd.DataFrame) -> str:
-    """The byte-exact rendering compared across restarts and against the golden file."""
-    return result.to_csv(index=False, lineterminator="\n")

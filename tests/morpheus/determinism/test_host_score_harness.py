@@ -25,7 +25,6 @@ the scores show.
 
 import json
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -34,17 +33,13 @@ import pytest
 from morpheus.config import Config
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
-from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import golden  # noqa: E402
 import host_identity  # noqa: E402
 import host_score_pipeline as hs_  # noqa: E402
-
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_host_score_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_host_score_pipeline.py")
 
 RISING_WINDOWS = 4
 RISE_SIGMAS = 1.5
@@ -75,24 +70,6 @@ def result_fixture(pipeline_config: Config, corpus: dict[str, pd.DataFrame]) -> 
         _RESULTS[mode] = hs_.run_pipeline(pipeline_config, corpus)
 
     yield _RESULTS[mode]
-
-
-def _split(frame: pd.DataFrame, parts: int) -> list:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _permuted(corpus: dict, seed: int) -> dict:
-    period_ns = hs_.PERIOD_SECONDS * hs_.NS_PER_SECOND
-
-    return {
-        name:
-            permute_within_contiguous_groups(frame,
-                                             [window_id_from_timestamp(int(t), period_ns) for t in frame["event_time"]],
-                                             seed=seed)
-        for (name, frame) in corpus.items()
-    }
 
 
 def _day(result: pd.DataFrame) -> pd.Series:
@@ -163,40 +140,19 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("host_score", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = hs_.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO  # pylint: disable=import-outside-toplevel
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is "
-                    f"intended, regenerate the golden with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("host_score", hs_.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
 
     # The classes in thirds, and the merged stream into the host segment a day at a time.
     assert diff_frames(result, hs_.run_pipeline(pipeline_config, corpus, batches=thirds,
@@ -206,7 +162,7 @@ def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFra
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2):
-        assert diff_frames(result, hs_.run_pipeline(pipeline_config, _permuted(corpus, seed))) is None, seed
+        assert diff_frames(result, hs_.run_pipeline(pipeline_config, golden.permuted(corpus, seed, hs_.PERIOD_SECONDS))) is None, seed
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -214,7 +170,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     # The negative control for the check above. Without the imposed order, a flow from later in the hour can arrive
     # first, and the fan-out and reach the hour's frame is built from are counted in another order.
     ordered = hs_.run_pipeline(pipeline_config, corpus, impose_order=False)
-    shuffled = hs_.run_pipeline(pipeline_config, _permuted(corpus, 5), impose_order=False)
+    shuffled = hs_.run_pipeline(pipeline_config, golden.permuted(corpus, 5, hs_.PERIOD_SECONDS), impose_order=False)
 
     assert diff_frames(ordered, shuffled) is not None
 

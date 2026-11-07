@@ -112,9 +112,10 @@ from morpheus.compositions import stamping
 from morpheus.compositions import telemetry as telemetry_pipeline
 from morpheus.compositions import transport as transport_pipeline
 from morpheus.compositions.corpus_pipeline import _collect
-from morpheus.compositions.corpus_pipeline import (  # noqa: F401 pylint: disable=unused-import  # re-exported for callers
-    build_pipeline_config, )
+from morpheus.compositions.corpus_pipeline import build_pipeline_config  # noqa: F401 pylint: disable=unused-import
+from morpheus.compositions.corpus_pipeline import render  # noqa: F401 pylint: disable=unused-import
 from morpheus.compositions.estate_context import EstateContext
+from morpheus.compositions.host_frame import truthy
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -548,15 +549,6 @@ def build_edges(config: Config, result: pd.DataFrame) -> pd.DataFrame:
     return edge_stream.emit(config, result, join_column="community_id", **EDGE_HOPS)
 
 
-def render(result: pd.DataFrame) -> str:
-    """The canonical CSV rendering the golden file holds."""
-    return result.to_csv(index=False, lineterminator="\n")
-
-
-def _truthy(value) -> bool:
-    return False if pd.isna(value) else bool(value)
-
-
 def fanout_rises(result: pd.DataFrame) -> pd.DataFrame:
     """Step 1: the first flow per source and hour whose fan-out exceeds the source's peak in the hour before.
 
@@ -603,12 +595,12 @@ def lateral_movement(result: pd.DataFrame,
     logins = result[(result["telemetry_class"] == AUTH_CLASS) & (result["auth_result"] == "success")]
 
     if (new_host):
-        logins = logins[logins["target_host_first_seen"].map(_truthy)]
+        logins = logins[logins["target_host_first_seen"].map(truthy)]
 
     processes = result[result["telemetry_class"] == PROCESS_CLASS]
 
     if (novel_process):
-        processes = processes[processes["endpoint_pair_novel"].map(_truthy)]
+        processes = processes[processes["endpoint_pair_novel"].map(truthy)]
 
     if (server_only):
         processes = processes[(processes["ctx_device_role"] == "server").fillna(False)]
@@ -716,15 +708,15 @@ def exfiltration_chains(result: pd.DataFrame,
     window_ns = None if window_seconds is None else window_seconds * NS_PER_SECOND
 
     exports = result[(result["telemetry_class"] == SAAS_CLASS)
-                     & result["saas_baseline_mature"].map(_truthy)
+                     & result["saas_baseline_mature"].map(truthy)
                      & (result["saas_record_ratio"].astype("Float64") > RECORD_MULTIPLE).fillna(False)]
     breaches = result[(result["telemetry_class"] == TRANSFER_CLASS)
-                      & (result["flow_data_len_envelope_breached"].map(_truthy)
-                         | result["flow_bpp_envelope_breached"].map(_truthy))]
+                      & (result["flow_data_len_envelope_breached"].map(truthy)
+                         | result["flow_bpp_envelope_breached"].map(truthy))]
     handshakes = result[result["telemetry_class"] == HANDSHAKE_CLASS]
 
     if (new_issuer):
-        handshakes = handshakes[handshakes["cert_issuer_new_to_estate"].map(_truthy)]
+        handshakes = handshakes[handshakes["cert_issuer_new_to_estate"].map(truthy)]
 
     sessions = session_intervals(result)
     fired: dict = {}
@@ -807,12 +799,12 @@ def c2_chains(result: pd.DataFrame,
     joined on its own addresses, `value:src_ip,dst_ip`, as the rule always did.
     """
     tolerance_ns = tolerance_seconds * NS_PER_SECOND
-    fingerprints = result[(result["telemetry_class"] == HANDSHAKE_CLASS) & result["ja4_client_first_seen"].map(_truthy)]
+    fingerprints = result[(result["telemetry_class"] == HANDSHAKE_CLASS) & result["ja4_client_first_seen"].map(truthy)]
 
     if (settled):
         fingerprints = fingerprints[fingerprints["ja4_client_observations"].astype("Int64").fillna(0) >= 20]
 
-    flows = result[(result["telemetry_class"] == FLOW_CLASS) & result["flow_regularity_mature"].map(_truthy)]
+    flows = result[(result["telemetry_class"] == FLOW_CLASS) & result["flow_regularity_mature"].map(truthy)]
     flows = flows[(flows["flow_interval_cv"].astype(float) < 0.15) & (flows["flow_size_cv"].astype(float) < 0.15)]
     beacons = flows.groupby(["src_ip", "dst_ip"])["event_time"].min().astype("int64")
     carried = result[(result["telemetry_class"] == FLOW_CLASS) & result["community_id"].notna()]
@@ -885,18 +877,18 @@ def physical_compromises(result: pd.DataFrame,
     polls = result[result["telemetry_class"] == PORT_CLASS]
 
     if (port_event):
-        polls = polls[polls["transceiver_serial_changed"].map(_truthy)
+        polls = polls[polls["transceiver_serial_changed"].map(truthy)
                       | (polls["link_flaps"].astype("Int64").fillna(0) > 0)]
 
     walks = result[(result["telemetry_class"] == MAC_CLASS) & result["port_key"].notna()]
 
     if (new_vendor):
-        walks = walks[walks["oui_first_seen_on_port"].map(_truthy)]
+        walks = walks[walks["oui_first_seen_on_port"].map(truthy)]
 
     flows = result[(result["telemetry_class"] == FLOW_CLASS) & result["mac_address"].notna()]
 
     if (management):
-        flows = flows[flows["dst_is_management"].map(_truthy)]
+        flows = flows[flows["dst_is_management"].map(truthy)]
 
     fired: dict = {}
 

@@ -26,7 +26,6 @@ sink must use because it leaves null fields out, then apply that stanza's own `T
 every line and check the parsed time against the nanoseconds the pipeline started with, truncated to microseconds.
 """
 
-import configparser
 import datetime
 import os
 import re
@@ -39,6 +38,7 @@ from morpheus.config import Config
 from morpheus.io import serializers
 from morpheus.messages import MessageMeta
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
+from morpheus.utils import splunk_conf
 from morpheus.utils.siem_sourcetypes import PRODUCED
 from morpheus.utils.siem_wire import to_wire_lines
 
@@ -50,6 +50,7 @@ import campaign_pipeline  # noqa: E402
 import context_pipeline  # noqa: E402
 import endpoint_pipeline  # noqa: E402
 import envelope  # noqa: E402
+import golden  # noqa: E402
 import host_score_pipeline  # noqa: E402
 import network_pipeline  # noqa: E402
 import presentation_pipeline  # noqa: E402
@@ -75,13 +76,6 @@ TELEMETRY_CLASSES = {
 SESSION_CLASSES = ("tc5_auth", "tc5_session")
 
 
-def load_props() -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(PROPS_PATH)
-
-    return parser
-
-
 def splunk_format_to_strptime(time_format: str) -> str:
     return re.sub(r"%\d?N", "%f", time_format)
 
@@ -91,7 +85,7 @@ def telemetry_fixture() -> pd.DataFrame:
     # The composed run stays in CPU mode. Control 13 now asserts both modes reach the same frame, so running it
     # twice here would re-prove that at the cost of a second composed pipeline; what varies below is the mode the
     # wire stage itself runs in, which is what these tests are actually about.
-    yield tp.run_pipeline(tp.build_pipeline_config(), tp.build_corpus())
+    yield golden.composed(tp)
 
 
 @pytest.fixture(name="sessions", scope="module")
@@ -187,7 +181,7 @@ def assert_parses_as_its_own_stanza(config: Config, frame: pd.DataFrame, stanza:
     from morpheus.utils.type_utils import get_df_class
 
     entry = PRODUCED[stanza]
-    settings = load_props()[stanza]
+    settings = splunk_conf.read(PROPS_PATH)[stanza]
     pattern = re.compile(settings["TIME_PREFIX"])
     strptime_format = splunk_format_to_strptime(settings["TIME_FORMAT"])
 
@@ -421,7 +415,7 @@ def test_the_bucketed_binding_rows_already_carry_their_rendering(telemetry: pd.D
     # stage. Asserting it here is what stops that from silently regressing into a raw bucket ordinal.
     bindings = telemetry[telemetry["telemetry_class"] == "tc2_binding"].reset_index(drop=True)
     frame = tp.build_binding_table(bindings).to_bucketed_frame()
-    settings = load_props()["binding:bucketed"]
+    settings = splunk_conf.read(PROPS_PATH)["binding:bucketed"]
 
     assert len(frame) > 0
 
@@ -463,7 +457,7 @@ def test_the_unrendered_frame_does_not_parse(telemetry: pd.DataFrame):
     # The negative control on real data: without the stage, none of these lines matches, which is exactly the
     # silent failure the whole chain exists to prevent.
     rows = telemetry[telemetry["telemetry_class"] == "tc1"].reset_index(drop=True)
-    settings = load_props()["morpheus:score:l1"]
+    settings = splunk_conf.read(PROPS_PATH)["morpheus:score:l1"]
 
     assert len(rows) > 0
 

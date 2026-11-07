@@ -28,6 +28,9 @@ services:
       # first attempt at this run ended. run_search_head.sh copies both apps into place once Splunk is up, gives
       # them to the splunk user, and restarts it, so an edit to a saved search is tested by running it again.
       - ..:/splunk_lineage_app:ro
+      # The one reader of a .conf file, morpheus.utils.splunk_conf, for run_search_head.py, which runs under Splunk's
+      # own interpreter where Morpheus is not installed. Standard library only, so the file alone is enough.
+      - ../../../python/morpheus/morpheus/utils/splunk_conf.py:/morpheus_utils/splunk_conf.py:ro
     # No healthcheck of our own. The one this file used to carry called the management port without credentials,
     # which Splunk can refuse, and then the container never reads as healthy. The image ships its own, and
     # run_search_head.sh waits for an authenticated search to succeed instead, which is the readiness that matters.

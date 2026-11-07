@@ -63,7 +63,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 #99, for a cause the repository does not show -- and in GPU mode on one card, where the twelve that existed then
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
-That is sixty-two stages and fifty-three supporting
+That is sixty-two stages and fifty-four supporting
 modules, covered by 2,748 distinct tests, itemized in
 [Part 6](#provided). Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
@@ -3947,7 +3947,7 @@ fifth decimal digest identically; a genuine D0 comparison has to be made on unqu
 `permute_within_contiguous_groups` produces the legal input shuffles for check 6. The corpus is seeded
 code rather than checked-in data, which keeps it out of LFS while remaining exactly as fixed, and the
 golden output is a checked-in CSV regenerated deliberately, never silently, via
-`tests/morpheus/determinism/run_lineage_pipeline.py`. The cross-restart check runs that same driver in
+`tests/morpheus/determinism/run_golden.py lineage`. The cross-restart check runs that same driver in
 fresh interpreters with two different `PYTHONHASHSEED` values, which is the variation an in-process
 double run cannot see.
 

@@ -28,7 +28,6 @@ reach no port either, because a binding is an interval rather than a lookup.
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -38,17 +37,13 @@ from morpheus.config import Config
 from morpheus.stages.lineage.binding_resolver_stage import UNRESOLVED
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
-from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import envelope as universal_envelope  # noqa: E402
 import estate_pipeline as ep  # noqa: E402
-
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_estate_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_estate_pipeline.py")
+import golden  # noqa: E402
 
 NS = ep.NS_PER_SECOND
 
@@ -101,28 +96,6 @@ def _layers_per_chain(result: pd.DataFrame) -> pd.Series:
     return _chained(result).groupby("lineage_id")["osi_layer"].nunique()
 
 
-def _split(frame: pd.DataFrame, parts: int) -> list[pd.DataFrame]:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _windows(frame: pd.DataFrame) -> list[int]:
-    # The network inventory has no event time and is not windowed; the store it builds does not depend on the order
-    # of its records, so it is permuted as one group.
-    if ("event_time" not in frame.columns):
-        return [0] * len(frame)
-
-    return [window_id_from_timestamp(int(t), ep.PERIOD_SECONDS * NS) for t in frame["event_time"]]
-
-
-def _permuted(corpus: dict[str, pd.DataFrame], seed: int) -> dict[str, pd.DataFrame]:
-    return {
-        name: permute_within_contiguous_groups(frame, _windows(frame), seed=seed)
-        for (name, frame) in corpus.items()
-    }
-
-
 # --- Check 1: the corpus -------------------------------------------------------------------------------------------
 
 
@@ -173,42 +146,21 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("estate", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = ep.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is intended, "
-                    f"regenerate the golden file with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("estate", ep.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     # Control 5 over a pipeline whose chains are decided by a sealer fed the union of five classes. Batching
     # changes how that union is chunked, so a chain that depended on the chunking would show up here.
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, ep.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
 
@@ -218,7 +170,7 @@ def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFra
 def test_batch_split_sweep_by_row(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     # The same control at its extreme, one frame per row. Slow because the union then arrives as more than a
     # thousand single-row messages, which is the point: nothing about a chain may depend on that.
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, ep.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
 
@@ -229,7 +181,7 @@ def test_batch_split_sweep_by_row(pipeline_config: Config, corpus: dict[str, pd.
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2, 3):
-        shuffled = _permuted(corpus, seed)
+        shuffled = golden.permuted(corpus, seed, ep.PERIOD_SECONDS)
 
         assert any(not shuffled[name]["collector_seq"].equals(corpus[name]["collector_seq"])
                    for name in corpus if "collector_seq" in corpus[name].columns), "permutation was a no-op"
@@ -246,7 +198,8 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict[str, 
 
     for seed in (1, 2, 3):
         detected = detected or (diff_frames(
-            unsorted_baseline, ep.run_pipeline(pipeline_config, _permuted(corpus, seed), impose_order=False))
+            unsorted_baseline,
+            ep.run_pipeline(pipeline_config, golden.permuted(corpus, seed, ep.PERIOD_SECONDS), impose_order=False))
                                 is not None)
 
     assert detected, "Removing the total-order stage did not change any output under permutation."

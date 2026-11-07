@@ -16,6 +16,7 @@
 
 import pytest
 
+from _utils.frames import column_values
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
 from morpheus.messages import ControlMessage
@@ -35,15 +36,6 @@ SCRAMBLED = {
     "collector_seq": [3, 1, 1, 2],
     "value": ["d", "b", "a", "c"],
 }
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return series.tolist()
 
 
 def test_execution_modes(config: Config):
@@ -66,7 +58,7 @@ def test_rows_come_out_in_total_order(config: Config):
     meta = TotalOrderStage(config).on_data(MessageMeta(get_df_class(config.execution_mode)(SCRAMBLED)))
 
     # event_time first, then collector_id, then collector_seq: the tie at t=10 is broken by the collector name.
-    assert _as_list(meta, "value") == ["a", "b", "c", "d"]
+    assert column_values(meta, "value", nulls=False) == ["a", "b", "c", "d"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -99,7 +91,7 @@ def test_ties_can_be_accepted_explicitly(config: Config):
                            require_total_order=False).on_data(MessageMeta(get_df_class(config.execution_mode)(payload)))
 
     # Stable: the two t=10 rows keep their input order.
-    assert _as_list(meta, "value") == ["b", "a", "c", "d"]
+    assert column_values(meta, "value", nulls=False) == ["b", "a", "c", "d"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -110,7 +102,7 @@ def test_control_message_payload_is_replaced(config: Config):
     result = TotalOrderStage(config).on_data(message)
 
     assert result is message
-    assert _as_list(message.payload(), "value") == ["a", "b", "c", "d"]
+    assert column_values(message.payload(), "value", nulls=False) == ["a", "b", "c", "d"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -139,7 +131,7 @@ def test_a_scrambled_batch_yields_the_same_deltas_as_an_ordered_one(config: Conf
             meta = TotalOrderStage(config).on_data(meta)
 
         TC1NormalizeStage(config).on_data(meta)
-        values = _as_list(meta, "crc_errors_delta")
+        values = column_values(meta, "crc_errors_delta", nulls=False)
 
         import pandas as pd
         return [None if pd.isna(value) else int(value) for value in values]
@@ -164,7 +156,7 @@ def test_total_order_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "value") == ["a", "b", "c", "d"]
+    assert column_values(messages[0], "value", nulls=False) == ["a", "b", "c", "d"]
 
 
 def test_constructor_validation(config: Config):

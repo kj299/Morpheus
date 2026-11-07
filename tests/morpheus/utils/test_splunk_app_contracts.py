@@ -29,7 +29,6 @@ retention it is ordered against: the scored indexes keep 395 days, the score sou
 and the bindings that attribute those events outlive them.
 """
 
-import configparser
 import inspect
 import os
 import re
@@ -37,6 +36,7 @@ import re
 import pytest
 
 from morpheus.stages.lineage.community_id_stage import CommunityIdStage
+from morpheus.utils import splunk_conf
 from morpheus.utils.binding_table import DEFAULT_BUCKET_SECONDS
 from morpheus.utils.binding_table import DEFAULT_L1_BUCKET_SECONDS
 from morpheus.utils.community_id import community_id
@@ -47,6 +47,7 @@ APP_ROOT = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheu
 SAVEDSEARCHES_PATH = os.path.join(APP_ROOT, "default", "savedsearches.conf")
 INDEXES_PATH = os.path.join(APP_ROOT, "default", "indexes.conf")
 PROPS_PATH = os.path.join(APP_ROOT, "default", "props.conf")
+TRANSFORMS_PATH = os.path.join(APP_ROOT, "default", "transforms.conf")
 GUIDE_PATH = os.path.join(REPO_ROOT,
                           "docs",
                           "source",
@@ -134,8 +135,7 @@ def test_binding_retention_matches_between_index_and_expiry_job():
     # Contract 2. outputlookup never removes rows, so a separate job expires them. If the job's cutoff outlives
     # the index the lookup keeps rows whose events are gone; if it predeceases the index, events become
     # unattributable while still queryable. The README warns that these must move together; this enforces it.
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(INDEXES_PATH)
+    parser = splunk_conf.read(INDEXES_PATH)
 
     for index_name in BINDING_INDEXES:
         index_retention = int(parser[index_name]["frozenTimePeriodInSecs"])
@@ -152,26 +152,18 @@ def test_the_guide_and_the_app_agree_on_both_numbers():
 
 
 def _retention_by_index() -> dict:
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(INDEXES_PATH)
+    parser = splunk_conf.read(INDEXES_PATH)
 
     return {name: int(parser[name]["frozenTimePeriodInSecs"]) for name in parser.sections()}
 
 
 def _max_days_ago_by_sourcetype() -> dict:
-    values = {}
-    sourcetype = None
+    props = splunk_conf.read(PROPS_PATH)
 
-    for line in read_text(PROPS_PATH).splitlines():
-        stanza = re.match(r"^\[(.+)\]\s*$", line)
-        setting = re.match(r"^MAX_DAYS_AGO\s*=\s*(\d+)", line)
-
-        if (stanza):
-            sourcetype = stanza.group(1)
-        elif (setting):
-            values[sourcetype] = int(setting.group(1))
-
-    return values
+    return {
+        name: int(props[name]["MAX_DAYS_AGO"])
+        for name in props.sections() if props.has_option(name, "MAX_DAYS_AGO")
+    }
 
 
 def test_every_scored_index_keeps_thirteen_months():
@@ -222,16 +214,6 @@ def test_the_guide_quotes_the_app_s_retention():
     assert quoted == {name: retention[name] for name in quoted}
 
 
-def _stanza_names() -> list:
-    """The saved searches, read with a pattern rather than a parser.
-
-    `configparser` cannot read this file: Splunk continues a long search across lines with a trailing backslash,
-    which is a parse error to Python. The stanza headers are unambiguous on their own.
-    """
-    with open(SAVEDSEARCHES_PATH, encoding="utf-8") as handle:
-        return re.findall(r"^\[(.+)\]\s*$", handle.read(), re.MULTILINE)
-
-
 _UNITS = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
           "seventeen eighteen nineteen").split()
 _TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
@@ -275,7 +257,7 @@ def test_the_app_readme_states_the_number_of_searches_it_ships():
     # The README's inventory of savedsearches.conf listed eleven of the thirteen searches by name and had done
     # since before the layer 5 detections landed. A list of contents maintained by hand beside the thing it lists
     # drifts the moment the thing grows, and a reader counting stanzas gets a different answer than the document.
-    shipped = len(_stanza_names())
+    shipped = len(splunk_conf.stanzas(SAVEDSEARCHES_PATH))
 
     readme = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "README.md")
 
@@ -297,7 +279,7 @@ def test_every_detection_search_is_named_somewhere_in_the_app_readme():
     # The other half of the same drift: the README named the four layer 2 detections as the things not yet run
     # against a live instance, and never gained the two layer 5 ones. What has and has not met a search head is
     # the most consequential sentence in that document, so every rule it could be wrong about is checked.
-    rules = [name for name in _stanza_names() if name.startswith("R-")]
+    rules = [name for name in splunk_conf.stanzas(SAVEDSEARCHES_PATH) if name.startswith("R-")]
 
     assert len(rules) >= 7, f"expected the detection searches to still be there, found {rules}"
 
@@ -325,8 +307,7 @@ def test_kvstore_lookups_expose_the_key_they_are_written_by():
     # A KV Store lookup can only address a specific record when `_key` is in its fields_list. Without it the refresh
     # jobs' `key_field=_key` matches nothing, every overlapping window appends duplicates instead of overwriting,
     # and determinism control 11's idempotent sink does not hold at the SIEM boundary.
-    transforms = configparser.ConfigParser(interpolation=None)
-    transforms.read(os.path.join(APP_ROOT, "default", "transforms.conf"))
+    transforms = splunk_conf.read(TRANSFORMS_PATH)
 
     for lookup in ("binding_l2_l3", "binding_l2", "binding_l5_l2", "binding_l1", "binding_l1_history"):
         fields = [field.strip() for field in transforms[lookup]["fields_list"].split(",")]
@@ -349,19 +330,10 @@ def test_kvstore_lookups_expose_the_key_they_are_written_by():
 
 
 RULE_METADATA_PATH = os.path.join(APP_ROOT, "lookups", "rule_metadata.csv")
-TRANSFORMS_PATH = os.path.join(APP_ROOT, "default", "transforms.conf")
-
-
-def _parsed_savedsearches() -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.optionxform = str
-    parser.read_string(re.sub(r"\\\s*\r?\n\s*", " ", read_text(SAVEDSEARCHES_PATH)))
-
-    return parser
 
 
 def _detections() -> dict:
-    parsed = _parsed_savedsearches()
+    parsed = splunk_conf.read(SAVEDSEARCHES_PATH, preserve_case=True)
 
     return {name: parsed[name] for name in parsed.sections() if name.startswith("R-")}
 

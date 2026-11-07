@@ -87,3 +87,8 @@ def _collect(sink: InMemorySinkStage, drop_empty: bool = False) -> pd.DataFrame:
         return pd.DataFrame()
 
     return pd.concat(frames, ignore_index=True)
+
+
+def render(result: pd.DataFrame) -> str:
+    """The canonical CSV rendering a composition's golden file holds, compared byte for byte across restarts."""
+    return result.to_csv(index=False, lineterminator="\n")

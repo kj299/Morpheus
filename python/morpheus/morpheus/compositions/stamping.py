@@ -23,12 +23,12 @@ digest are `UNKNOWN`, honestly, because a corpus is not a deployment and a golde
 would prove nothing. A deployment supplies all three.
 """
 
-import configparser
 import re
 import typing
 
 from morpheus.compositions import resumable
 from morpheus.compositions.repository import repository_path
+from morpheus.utils import splunk_conf
 from morpheus.utils.determinism_envelope import UNKNOWN
 from morpheus.utils.determinism_envelope import DeterminismEnvelope
 from morpheus.utils.determinism_envelope import pipeline_fingerprint
@@ -53,16 +53,6 @@ _NUMBER_ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(-?\d+(?:\.\d+)
 _COMPARISON = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|>|<)\s*(-?\d+(?:\.\d+)?)(?![\w.])")
 
 
-def _searches() -> dict:
-    with open(SAVED_SEARCHES, encoding="utf-8") as handle:
-        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.read_string(folded)
-
-    return {name: parser[name]["search"] for name in parser.sections() if parser.has_option(name, "search")}
-
-
 def rule_thresholds(rule_ids: typing.Sequence[str]) -> dict:
     """
     Every numeric threshold the named rules' stanzas state, keyed by rule and then by the name it is stated under.
@@ -72,7 +62,7 @@ def rule_thresholds(rule_ids: typing.Sequence[str]) -> dict:
     digest. Read from the app rather than restated, so the fingerprint on an event follows the rule that would
     read it.
     """
-    searches = _searches()
+    searches = splunk_conf.searches(SAVED_SEARCHES)
     thresholds: dict = {}
 
     for rule_id in rule_ids:

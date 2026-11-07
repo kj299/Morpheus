@@ -22,7 +22,6 @@ Splunk parsing configuration cannot drift apart. The drift they exist to prevent
 becomes a rule about when the pipeline was busy.
 """
 
-import configparser
 import datetime
 import os
 import re
@@ -31,6 +30,7 @@ import pandas as pd
 import pytest
 
 from morpheus.io import serializers
+from morpheus.utils import splunk_conf
 from morpheus.utils.binding_table import TABLE_NAME_COLUMN
 from morpheus.utils.binding_table import BindingTable
 from morpheus.utils.siem_wire import SPLUNK_TIME_FORMAT
@@ -50,20 +50,13 @@ SAMPLE_NS = 1788114300123456789
 SAMPLE_RENDERED = "2026-08-30T18:25:00.123456UTC"
 
 
-def load_props() -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(PROPS_PATH)
-
-    return parser
-
-
 def splunk_format_to_strptime(time_format: str) -> str:
     """Translate a Splunk `TIME_FORMAT` to a `strptime` format: `%<n>N` subseconds become `%f`."""
     return re.sub(r"%\d?N", "%f", time_format)
 
 
 def event_time_stanzas() -> list[str]:
-    parser = load_props()
+    parser = splunk_conf.read(PROPS_PATH)
 
     return [name for name in parser.sections() if parser[name].get("TIME_PREFIX", "").startswith('"event_time"')]
 
@@ -78,7 +71,7 @@ def test_the_app_defines_event_time_stanzas():
 
 @pytest.mark.parametrize("stanza", event_time_stanzas())
 def test_every_event_time_stanza_uses_the_shared_format(stanza: str):
-    settings = load_props()[stanza]
+    settings = splunk_conf.read(PROPS_PATH)[stanza]
 
     assert settings["TIME_FORMAT"] == SPLUNK_TIME_FORMAT
     # The trailing quote is what requires event_time to be a JSON string rather than a bare number.
@@ -88,7 +81,7 @@ def test_every_event_time_stanza_uses_the_shared_format(stanza: str):
 def test_rendering_matches_the_shipped_prefix_and_format():
     # The whole contract in one assertion chain: render, serialize exactly as the Kafka sink does, then apply the
     # app's own TIME_PREFIX and TIME_FORMAT to what lands on the wire.
-    settings = load_props()["morpheus:score:l3"]
+    settings = splunk_conf.read(PROPS_PATH)["morpheus:score:l3"]
     line = serializers.df_to_json(pd.DataFrame({
         "event_time": [render_event_time(SAMPLE_NS)], "src_ip": ["10.0.1.10"]
     }),
@@ -108,7 +101,7 @@ def test_rendering_matches_the_shipped_prefix_and_format():
 def test_unrendered_nanoseconds_do_not_match():
     # The negative control, and the defect this contract exists to prevent: an integer event_time serializes
     # without the quote the prefix requires, Splunk matches nothing, and _time silently becomes index time.
-    settings = load_props()["morpheus:score:l3"]
+    settings = splunk_conf.read(PROPS_PATH)["morpheus:score:l3"]
     line = serializers.df_to_json(pd.DataFrame({
         "event_time": [SAMPLE_NS], "src_ip": ["10.0.1.10"]
     }),
@@ -118,7 +111,7 @@ def test_unrendered_nanoseconds_do_not_match():
 
 
 def test_prefix_tolerates_pretty_printed_json():
-    settings = load_props()["morpheus:score:l3"]
+    settings = splunk_conf.read(PROPS_PATH)["morpheus:score:l3"]
 
     assert re.search(settings["TIME_PREFIX"], f'{{"event_time": "{SAMPLE_RENDERED}"}}') is not None
 
@@ -159,7 +152,7 @@ def test_render_passes_nulls_through():
 
 def timestamped_stanzas() -> list[str]:
     """Every stanza that anchors `_time` on a field, whatever that field is called."""
-    parser = load_props()
+    parser = splunk_conf.read(PROPS_PATH)
 
     return [name for name in parser.sections() if parser[name].get("TIME_PREFIX")]
 
@@ -185,7 +178,7 @@ UNBUILT_TIMESTAMP_FIELDS: set = set()
 
 @pytest.mark.parametrize("stanza", timestamped_stanzas())
 def test_every_stanza_is_timed_on_a_field_something_actually_emits(stanza: str):
-    settings = load_props()[stanza]
+    settings = splunk_conf.read(PROPS_PATH)[stanza]
     field = re.match(r'"([a-z_]+)"', settings["TIME_PREFIX"])
 
     assert field is not None, f"{stanza} has a TIME_PREFIX this test cannot read: {settings['TIME_PREFIX']}"
@@ -211,7 +204,7 @@ def test_the_unbuilt_timestamp_fields_are_exactly_the_ones_marked_unbuilt():
 
 def test_the_bucketed_stanza_is_timed_on_the_field_the_expansion_writes():
     # The specific pairing that was wrong: bucketed rows carry no bind_start, only the bucket's own start.
-    settings = load_props()["binding:bucketed"]
+    settings = splunk_conf.read(PROPS_PATH)["binding:bucketed"]
 
     assert '"bucket_start"' in settings["TIME_PREFIX"]
 

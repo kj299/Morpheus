@@ -23,6 +23,7 @@ composition module's docstring describes what this corpus plants and why.
 import typing
 
 import pandas as pd
+from corpora.records import envelope as _envelope
 
 from morpheus.compositions.host_identity import INVENTORY_CLASS
 from morpheus.compositions.host_identity import LEASE_CLASS
@@ -48,16 +49,6 @@ def is_client(address: typing.Any, pools: tuple = (CLIENT_POOL, )) -> bool:
 def mac_for(address: str) -> str:
     """A client's network interface, numbered from its address so two clients never share one."""
     return "aa:10:" + ":".join(f"{int(part):02x}" for part in address.split("."))
-
-
-def _envelope(rows: list, collector: str, schema: str, origin: str, when: int) -> dict:
-    return {
-        "collector_id": collector,
-        "schema_version": schema,
-        "origin_hash": f"{origin}@{when}",
-        "collector_seq": len(rows),
-        "event_time": when,
-    }
 
 
 def hostname_for(address: str) -> str:

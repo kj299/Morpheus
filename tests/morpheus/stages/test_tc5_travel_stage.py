@@ -14,9 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
@@ -56,15 +56,6 @@ def frame(places: list,
     }
 
 
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [None if pd.isna(value) else value for value in series.tolist()]
-
-
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
     meta = MessageMeta(get_df_class(config.execution_mode)(payload))
     TC5TravelStage(config, **kwargs).on_data(meta)
@@ -76,17 +67,17 @@ def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
 def test_an_ordinary_flight_is_measured_and_is_an_ordinary_speed(config: Config):
     meta = run(config, frame([LONDON, NEW_YORK], times=[0, 7 * HOUR_NS]))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured"]
-    assert _as_list(meta, "travel_kmh")[1] == pytest.approx(796, abs=5)
-    assert _as_list(meta, "travel_distance_km")[1] == pytest.approx(5570, abs=15)
-    assert _as_list(meta, "travel_elapsed_ns")[1] == 7 * HOUR_NS
+    assert column_values(meta, "travel_status") == ["first_for_principal", "measured"]
+    assert column_values(meta, "travel_kmh")[1] == pytest.approx(796, abs=5)
+    assert column_values(meta, "travel_distance_km")[1] == pytest.approx(5570, abs=15)
+    assert column_values(meta, "travel_elapsed_ns")[1] == 7 * HOUR_NS
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_same_journey_in_one_hour_is_the_rules_firing_condition(config: Config):
     meta = run(config, frame([LONDON, NEW_YORK], times=[0, HOUR_NS]))
 
-    assert _as_list(meta, "travel_kmh")[1] > 900
+    assert column_values(meta, "travel_kmh")[1] > 900
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -94,10 +85,10 @@ def test_two_successes_at_one_instant_read_as_enormous_rather_than_null(config: 
     # A rule written as `travel_kmh >= 900` would otherwise miss the most impossible journey there is.
     meta = run(config, frame([LONDON, NEW_YORK], times=[0, 0]))
 
-    assert _as_list(meta, "travel_status")[1] == "measured"
-    assert _as_list(meta, "travel_kmh")[1] > 900
-    assert _as_list(meta, "travel_elapsed_ns")[1] == 0
-    assert _as_list(meta, "travel_elapsed_floored") == [False, True]
+    assert column_values(meta, "travel_status")[1] == "measured"
+    assert column_values(meta, "travel_kmh")[1] > 900
+    assert column_values(meta, "travel_elapsed_ns")[1] == 0
+    assert column_values(meta, "travel_elapsed_floored") == [False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -105,8 +96,8 @@ def test_a_failed_authentication_is_not_measured(config: Config):
     # Evidence that somebody tried, not that anybody was there.
     meta = run(config, frame([LONDON, NEW_YORK], results=["success", "failure"]))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "not_successful"]
-    assert _as_list(meta, "travel_kmh") == [None, None]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "not_successful"]
+    assert column_values(meta, "travel_kmh") == [None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -119,8 +110,8 @@ def test_a_failed_authentication_does_not_become_the_anchor(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "not_successful", "measured"]
-    assert _as_list(meta, "travel_distance_km")[2] == pytest.approx(5570, abs=15)
+    assert column_values(meta, "travel_status") == ["first_for_principal", "not_successful", "measured"]
+    assert column_values(meta, "travel_distance_km")[2] == pytest.approx(5570, abs=15)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -131,8 +122,8 @@ def test_a_token_refresh_is_excluded_and_does_not_move_the_anchor(config: Config
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "token_refresh", "measured"]
-    assert _as_list(meta, "travel_elapsed_ns")[2] == 2 * HOUR_NS
+    assert column_values(meta, "travel_status") == ["first_for_principal", "token_refresh", "measured"]
+    assert column_values(meta, "travel_elapsed_ns")[2] == 2 * HOUR_NS
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -141,7 +132,7 @@ def test_a_vpn_egress_address_is_excluded(config: Config):
 
     meta = run(config, payload, excluded_source_networks=("198.51.100.0/24", ))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "vpn_egress"]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "vpn_egress"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -150,7 +141,7 @@ def test_a_bare_address_in_the_exclusion_list_is_one_host(config: Config):
 
     meta = run(config, payload, excluded_source_networks=("198.51.100.7", ))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "vpn_egress", "measured"]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "vpn_egress", "measured"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -159,14 +150,14 @@ def test_the_exclusion_list_ships_empty_so_nothing_is_excluded_by_default(config
     # rule fires on VPN users until the estate supplies them. Stated rather than hidden.
     meta = run(config, frame([LONDON, NEW_YORK], addresses=["198.51.100.7"] * 2))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured"]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "measured"]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_an_absent_coordinate_is_not_measured(config: Config):
     meta = run(config, frame([LONDON, None]))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "no_coordinate"]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "no_coordinate"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -174,15 +165,15 @@ def test_a_coordinate_outside_the_globe_is_not_measured(config: Config):
     # A nonsense distance would read as impossible travel, which is an alert about a geolocation database.
     meta = run(config, frame([LONDON, (91.0, 0.0)]))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "no_coordinate"]
-    assert _as_list(meta, "travel_kmh") == [None, None]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "no_coordinate"]
+    assert column_values(meta, "travel_kmh") == [None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_record_with_no_principal_is_not_measured(config: Config):
     meta = run(config, frame([LONDON, NEW_YORK], principals=[None, ALICE]))
 
-    assert _as_list(meta, "travel_status") == ["no_principal", "first_for_principal"]
+    assert column_values(meta, "travel_status") == ["no_principal", "first_for_principal"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -191,7 +182,7 @@ def test_principals_do_not_share_a_location(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "first_for_principal"]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "first_for_principal"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -203,14 +194,14 @@ def test_a_source_that_reports_no_result_is_taken_at_face_value(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured"]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "measured"]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_result_vocabulary_is_case_insensitive(config: Config):
     meta = run(config, frame([LONDON, NEW_YORK], results=["SUCCESS", "Success"], times=[0, HOUR_NS]))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured"]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "measured"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -219,7 +210,7 @@ def test_a_collectors_own_result_vocabulary_can_be_supplied(config: Config):
                frame([LONDON, NEW_YORK], results=["ACCEPT", "ACCEPT"], times=[0, HOUR_NS]),
                success_values=("accept", ))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured"]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "measured"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -234,7 +225,7 @@ def test_state_persists_across_messages(config: Config):
     second = MessageMeta(get_df_class(config.execution_mode)(frame([NEW_YORK], times=[HOUR_NS])))
     stage.on_data(second)
 
-    assert _as_list(second, "travel_kmh")[0] > 900
+    assert column_values(second, "travel_kmh")[0] > 900
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -244,7 +235,7 @@ def test_control_message_accepted(config: Config):
 
     TC5TravelStage(config).on_data(message)
 
-    assert _as_list(message.payload(), "travel_status") == ["first_for_principal", "measured"]
+    assert column_values(message.payload(), "travel_status") == ["first_for_principal", "measured"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -260,7 +251,7 @@ def test_tc5_travel_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "travel_kmh")[1] > 900
+    assert column_values(messages[0], "travel_kmh")[1] > 900
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -282,10 +273,10 @@ def test_a_second_instance_writes_its_own_columns(config: Config):
     TC5TravelStage(config).on_data(meta)
     TC5TravelStage(config, column_prefix="site_travel", location_column="site", locations={"hq": LONDON}).on_data(meta)
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured"]
-    assert _as_list(meta, "travel_kmh")[1] > 5000
-    assert _as_list(meta, "site_travel_status") == ["first_for_principal", "measured"]
-    assert _as_list(meta, "site_travel_distance_km")[1] == 0
+    assert column_values(meta, "travel_status") == ["first_for_principal", "measured"]
+    assert column_values(meta, "travel_kmh")[1] > 5000
+    assert column_values(meta, "site_travel_status") == ["first_for_principal", "measured"]
+    assert column_values(meta, "site_travel_distance_km")[1] == 0
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -295,8 +286,8 @@ def test_a_named_location_is_measured_from_the_estates_own_record(config: Config
     meta = run(config, payload, location_column="site", locations={"hq": LONDON, "branch-ny": NEW_YORK})
 
     # Case-folded like every other key here; a site the record does not name is not a coordinate.
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured", "no_coordinate"]
-    assert _as_list(meta, "travel_kmh")[1] > 20000
+    assert column_values(meta, "travel_status") == ["first_for_principal", "measured", "no_coordinate"]
+    assert column_values(meta, "travel_kmh")[1] > 20000
 
 
 def test_a_location_column_needs_its_locations(config: Config):
@@ -329,7 +320,7 @@ def test_an_unparseable_source_address_is_measured_rather_than_excluded(config: 
 
     meta = run(config, payload, excluded_source_networks=("198.51.100.0/24", ))
 
-    assert _as_list(meta, "travel_status") == ["first_for_principal", "measured"]
+    assert column_values(meta, "travel_status") == ["first_for_principal", "measured"]
 
 
 @pytest.mark.cpu_mode
@@ -342,10 +333,10 @@ def test_an_out_of_order_record_measures_nothing_and_moves_nothing(config: Confi
     late = MessageMeta(get_df_class(config.execution_mode)(frame([NEW_YORK], times=[0])))
     stage.on_data(late)
 
-    assert _as_list(late, "travel_status") == ["out_of_order"]
+    assert column_values(late, "travel_status") == ["out_of_order"]
 
     # The anchor is still London.
     after = MessageMeta(get_df_class(config.execution_mode)(frame([LONDON], times=[11 * HOUR_NS])))
     stage.on_data(after)
 
-    assert _as_list(after, "travel_distance_km")[0] == pytest.approx(0.0, abs=1e-3)
+    assert column_values(after, "travel_distance_km")[0] == pytest.approx(0.0, abs=1e-3)

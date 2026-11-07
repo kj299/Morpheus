@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -45,15 +46,6 @@ def frame(rx_levels: list, entity: str = "hq:sw1:Gi1/0/1", tx_levels: list = Non
         "optical_tx_dbm": [-2.0] * count if tx_levels is None else tx_levels,
         "optical_rx_dbm": rx_levels,
     }
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [None if value is None or value is pd.NA or value != value else value for value in series.tolist()]
 
 
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
@@ -93,8 +85,8 @@ def test_a_tap_shows_as_a_negative_step(config: Config):
     # Four steady readings, then a 2 dB drop: a passive splitter diverting light to a tap.
     meta = run(config, frame([-7.0, -7.0, -7.0, -7.0, -9.0]))
 
-    assert _as_list(meta, "optical_rx_dbm_deviation") == [None, None, None, 0.0, -2.0]
-    assert _as_list(meta, "optical_rx_dbm_baseline") == [None, None, None, -7.0, -7.0]
+    assert column_values(meta, "optical_rx_dbm_deviation") == [None, None, None, 0.0, -2.0]
+    assert column_values(meta, "optical_rx_dbm_baseline") == [None, None, None, -7.0, -7.0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -103,7 +95,7 @@ def test_a_healthy_but_dark_link_does_not_alarm(config: Config):
     # the whole reason this is a baseline rather than a threshold.
     meta = run(config, frame([-24.0] * 5))
 
-    assert _as_list(meta, "optical_rx_dbm_deviation")[-1] == 0.0
+    assert column_values(meta, "optical_rx_dbm_deviation")[-1] == 0.0
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -118,7 +110,7 @@ def test_ports_do_not_share_a_baseline(config: Config):
     meta = run(config, payload, min_samples=2)
 
     # Each port is scored against itself, so neither the bright nor the dark link registers a deviation.
-    assert _as_list(meta, "optical_rx_dbm_deviation")[-2:] == [0.0, 0.0]
+    assert column_values(meta, "optical_rx_dbm_deviation")[-2:] == [0.0, 0.0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -128,8 +120,8 @@ def test_transmit_and_receive_are_scored_separately(config: Config):
     meta = run(config, payload)
 
     # The local laser fading is a different fault from losing light in the fibre, so the two must not be pooled.
-    assert _as_list(meta, "optical_tx_dbm_deviation")[-1] == -3.0
-    assert _as_list(meta, "optical_rx_dbm_deviation")[-1] == 0.0
+    assert column_values(meta, "optical_tx_dbm_deviation")[-1] == -3.0
+    assert column_values(meta, "optical_rx_dbm_deviation")[-1] == 0.0
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -137,17 +129,17 @@ def test_a_copper_port_carries_nulls_rather_than_a_baseline(config: Config):
     # A port with no optic reports no level. The stage has to survive a mixed estate without inventing a reference.
     meta = run(config, frame([None] * 5))
 
-    assert _as_list(meta, "optical_rx_dbm_baseline") == [None] * 5
-    assert _as_list(meta, "optical_rx_dbm_deviation") == [None] * 5
-    assert _as_list(meta, "optical_rx_dbm_baseline_samples") == [0] * 5
+    assert column_values(meta, "optical_rx_dbm_baseline") == [None] * 5
+    assert column_values(meta, "optical_rx_dbm_deviation") == [None] * 5
+    assert column_values(meta, "optical_rx_dbm_baseline_samples") == [0] * 5
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_warm_up_publishes_nothing(config: Config):
     meta = run(config, frame([-7.0, -7.0]), min_samples=5)
 
-    assert _as_list(meta, "optical_rx_dbm_deviation") == [None, None]
-    assert _as_list(meta, "optical_rx_dbm_baseline_samples") == [0, 1]
+    assert column_values(meta, "optical_rx_dbm_deviation") == [None, None]
+    assert column_values(meta, "optical_rx_dbm_baseline_samples") == [0, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -169,7 +161,7 @@ def test_state_persists_across_messages(config: Config):
     stage.on_data(second)
 
     # The baseline spans the message boundary, which is the whole reason this stage is stateful.
-    assert _as_list(second, "optical_rx_dbm_deviation") == [-2.0]
+    assert column_values(second, "optical_rx_dbm_deviation") == [-2.0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -202,14 +194,14 @@ def test_out_of_order_sample_is_flagged_not_scored(config: Config):
     meta = run(config, payload)
 
     # The late reading is not scored, and must not have entered the history either.
-    assert _as_list(meta, "optical_rx_dbm_deviation")[-1] is None
+    assert column_values(meta, "optical_rx_dbm_deviation")[-1] is None
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_raw_levels_are_preserved(config: Config):
     meta = run(config, frame([-7.0, -7.0, -7.0, -9.0]))
 
-    assert _as_list(meta, "optical_rx_dbm") == [-7.0, -7.0, -7.0, -9.0]
+    assert column_values(meta, "optical_rx_dbm") == [-7.0, -7.0, -7.0, -9.0]
     assert meta.count == 4
 
 
@@ -220,7 +212,7 @@ def test_control_message_accepted(config: Config):
 
     TC1OpticalStage(config, min_samples=3).on_data(message)
 
-    assert _as_list(message.payload(), "optical_rx_dbm_deviation")[-1] == 0.0
+    assert column_values(message.payload(), "optical_rx_dbm_deviation")[-1] == 0.0
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -236,7 +228,7 @@ def test_tc1_optical_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "optical_rx_dbm_deviation")[-1] == -2.0
+    assert column_values(messages[0], "optical_rx_dbm_deviation")[-1] == -2.0
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -270,8 +262,8 @@ def test_null_entity_keys_do_not_share_a_baseline(config: Config):
     }
     meta = run(config, payload, channel_columns=["rx_power_dbm"])
 
-    assert _as_list(meta, "rx_power_dbm_baseline") == [None] * 5
-    assert _as_list(meta, "rx_power_dbm_deviation") == [None] * 5
+    assert column_values(meta, "rx_power_dbm_baseline") == [None] * 5
+    assert column_values(meta, "rx_power_dbm_deviation") == [None] * 5
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -280,12 +272,12 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
     payload["event_time"] = [0, MINUTE_NS, 2 * MINUTE_NS, 3 * MINUTE_NS, YEARS_AHEAD_NS, 4 * MINUTE_NS]
     meta = run(config, payload)
 
-    assert _as_list(meta, "clock_refused") == [False, False, False, False, True, False]
-    assert _as_list(meta, "optical_rx_dbm_deviation")[4] is None
+    assert column_values(meta, "clock_refused") == [False, False, False, False, True, False]
+    assert column_values(meta, "optical_rx_dbm_deviation")[4] is None
     # Believed, the reading would have expired the window behind it; refused, the next honest reading is measured
     # against the four before it.
-    assert _as_list(meta, "optical_rx_dbm_baseline_samples")[5] == 4
-    assert _as_list(meta, "optical_rx_dbm_deviation")[5] == 0.0
+    assert column_values(meta, "optical_rx_dbm_baseline_samples")[5] == 4
+    assert column_values(meta, "optical_rx_dbm_deviation")[5] == 0.0
 
 
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):

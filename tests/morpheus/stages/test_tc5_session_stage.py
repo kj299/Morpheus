@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
@@ -42,17 +43,6 @@ def frame(actions: list, sessions: list = None, times: list = None, principals: 
     }
 
 
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    # `pd.isna` rather than the `value != value` NaN trick, which pylint reads as a redundant self-comparison. It
-    # covers None, pandas.NA and NaN together, and which of the three arrives depends on the column's dtype.
-    return [None if pd.isna(value) else value for value in series.tolist()]
-
-
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
     meta = MessageMeta(get_df_class(config.execution_mode)(payload))
     TC5SessionStage(config, **kwargs).on_data(meta)
@@ -64,9 +54,9 @@ def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
 def test_a_start_and_its_stop_become_a_duration(config: Config):
     meta = run(config, frame(["start", "end"], times=[0, 90 * NS_PER_SECOND]))
 
-    assert _as_list(meta, "session_duration_ns") == [None, 90 * NS_PER_SECOND]
-    assert _as_list(meta, "session_duration_s") == [None, 90]
-    assert _as_list(meta, "session_unpaired") == [None, False]
+    assert column_values(meta, "session_duration_ns") == [None, 90 * NS_PER_SECOND]
+    assert column_values(meta, "session_duration_s") == [None, 90]
+    assert column_values(meta, "session_unpaired") == [None, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -74,8 +64,8 @@ def test_the_seconds_are_a_floor_and_the_nanoseconds_are_exact(config: Config):
     # Anything doing arithmetic reads the nanosecond column; the seconds exist so a threshold is legible.
     meta = run(config, frame(["start", "end"], times=[0, NS_PER_SECOND + 999_999_999]))
 
-    assert _as_list(meta, "session_duration_ns") == [None, NS_PER_SECOND + 999_999_999]
-    assert _as_list(meta, "session_duration_s") == [None, 1]
+    assert column_values(meta, "session_duration_ns") == [None, NS_PER_SECOND + 999_999_999]
+    assert column_values(meta, "session_duration_s") == [None, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -84,8 +74,8 @@ def test_a_stop_with_no_start_is_reported_rather_than_dropped(config: Config):
     # reads as missing data instead of as an explained absence.
     meta = run(config, frame(["end"]))
 
-    assert _as_list(meta, "session_unpaired") == [True]
-    assert _as_list(meta, "session_duration_ns") == [None]
+    assert column_values(meta, "session_unpaired") == [True]
+    assert column_values(meta, "session_duration_ns") == [None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -94,16 +84,16 @@ def test_a_second_start_on_one_identifier_is_counted_not_treated_as_a_retry(conf
     # or an identifier being reused, and either is worth telling apart from a clean pairing.
     meta = run(config, frame(["start", "start", "end"], times=[0, NS_PER_SECOND, 10 * NS_PER_SECOND]))
 
-    assert _as_list(meta, "session_starts") == [None, None, 2]
+    assert column_values(meta, "session_starts") == [None, None, 2]
     # The duration runs from the most recent start, which is what the timer holds.
-    assert _as_list(meta, "session_duration_s") == [None, None, 9]
+    assert column_values(meta, "session_duration_s") == [None, None, 9]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_clean_pairing_reports_one_start(config: Config):
     meta = run(config, frame(["start", "end"], times=[0, NS_PER_SECOND]))
 
-    assert _as_list(meta, "session_starts") == [None, 1]
+    assert column_values(meta, "session_starts") == [None, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -115,7 +105,7 @@ def test_two_principals_sessions_do_not_close_each_other(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "session_duration_s") == [None, None, 4, 30]
+    assert column_values(meta, "session_duration_s") == [None, None, 4, 30]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -126,22 +116,22 @@ def test_a_stop_carrying_no_principal_still_pairs(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "session_unpaired") == [None, False]
-    assert _as_list(meta, "session_duration_s") == [None, 60]
+    assert column_values(meta, "session_unpaired") == [None, False]
+    assert column_values(meta, "session_duration_s") == [None, 60]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_session_key_composes_the_principal_with_the_identifier(config: Config):
     meta = run(config, frame(["start"]))
 
-    assert _as_list(meta, "session_key") == [f"{ALICE}:s-1"]
+    assert column_values(meta, "session_key") == [f"{ALICE}:s-1"]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_missing_part_yields_a_null_key_rather_than_the_string_none(config: Config):
     meta = run(config, frame(["start"], principals=[None]))
 
-    assert _as_list(meta, "session_key") == [None]
+    assert column_values(meta, "session_key") == [None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -152,22 +142,22 @@ def test_a_record_naming_neither_end_of_the_lifecycle_pairs_with_nothing(config:
     # record that was never a start.
     meta = run(config, frame(["start", absent, "end"], times=[0, NS_PER_SECOND, 10 * NS_PER_SECOND]))
 
-    assert _as_list(meta, "session_duration_s") == [None, None, 10]
-    assert _as_list(meta, "session_unpaired") == [None, None, False]
+    assert column_values(meta, "session_duration_s") == [None, None, 10]
+    assert column_values(meta, "session_unpaired") == [None, None, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_an_unrecognised_action_pairs_with_nothing(config: Config):
     meta = run(config, frame(["start", "renew", "end"], times=[0, NS_PER_SECOND, 10 * NS_PER_SECOND]))
 
-    assert _as_list(meta, "session_duration_s") == [None, None, 10]
+    assert column_values(meta, "session_duration_s") == [None, None, 10]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_lifecycle_vocabulary_is_case_insensitive(config: Config):
     meta = run(config, frame(["Logon", "LOGOFF"], times=[0, 5 * NS_PER_SECOND]))
 
-    assert _as_list(meta, "session_duration_s") == [None, 5]
+    assert column_values(meta, "session_duration_s") == [None, 5]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -177,15 +167,15 @@ def test_a_collectors_own_vocabulary_can_be_supplied(config: Config):
                start_actions=("acct-start", ),
                end_actions=("acct-stop", ))
 
-    assert _as_list(meta, "session_duration_s") == [None, 5]
+    assert column_values(meta, "session_duration_s") == [None, 5]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_null_identifier_pairs_with_nothing(config: Config):
     meta = run(config, frame(["start", "end"], sessions=[None, None], times=[0, NS_PER_SECOND]))
 
-    assert _as_list(meta, "session_unpaired") == [None, None]
-    assert _as_list(meta, "session_duration_ns") == [None, None]
+    assert column_values(meta, "session_unpaired") == [None, None]
+    assert column_values(meta, "session_duration_ns") == [None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -200,7 +190,7 @@ def test_state_persists_across_messages(config: Config):
     second = MessageMeta(get_df_class(config.execution_mode)(frame(["end"], times=[120 * NS_PER_SECOND])))
     stage.on_data(second)
 
-    assert _as_list(second, "session_duration_s") == [120]
+    assert column_values(second, "session_duration_s") == [120]
     assert stage.open_sessions == 0
 
 
@@ -208,7 +198,7 @@ def test_state_persists_across_messages(config: Config):
 def test_nulls_survive_as_nulls_not_false(config: Config):
     meta = run(config, frame(["start"]))
 
-    assert _as_list(meta, "session_unpaired") == [None]
+    assert column_values(meta, "session_unpaired") == [None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -219,7 +209,7 @@ def test_control_message_accepted(config: Config):
 
     TC5SessionStage(config).on_data(message)
 
-    assert _as_list(message.payload(), "session_duration_s") == [None, 3]
+    assert column_values(message.payload(), "session_duration_s") == [None, 3]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -236,7 +226,7 @@ def test_tc5_session_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "session_unpaired") == [None, False, True]
+    assert column_values(messages[0], "session_unpaired") == [None, False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -278,13 +268,13 @@ def test_a_session_past_the_timeout_is_abandoned(config: Config):
 
     assert stage.open_sessions == 0
     # The record whose arrival abandoned the session carries the count, for the health record to sum.
-    assert _as_list(second, "session_abandoned") == [1, 0]
+    assert column_values(second, "session_abandoned") == [1, 0]
 
     # The lost session's stop, if it ever arrives, reads as unpaired rather than as a two-day session.
     third = MessageMeta(get_df_class(config.execution_mode)(frame(["end"], times=[3 * HOUR_NS])))
     stage.on_data(third)
 
-    assert _as_list(third, "session_unpaired") == [True]
+    assert column_values(third, "session_unpaired") == [True]
 
 
 @pytest.mark.cpu_mode
@@ -297,7 +287,7 @@ def test_a_session_inside_the_timeout_still_pairs(config: Config):
     second = MessageMeta(get_df_class(config.execution_mode)(frame(["end"], times=[1800 * NS_PER_SECOND])))
     stage.on_data(second)
 
-    assert _as_list(second, "session_duration_s") == [1800]
+    assert column_values(second, "session_duration_s") == [1800]
 
 
 @pytest.mark.cpu_mode
@@ -316,8 +306,8 @@ def test_expiry_falls_in_the_same_place_however_the_stream_is_batched(config: Co
     for row in rows:
         split.on_data(row)
 
-    assert _as_list(whole, "session_unpaired")[1] is True
-    assert _as_list(rows[1], "session_unpaired")[0] is True
+    assert column_values(whole, "session_unpaired")[1] is True
+    assert column_values(rows[1], "session_unpaired")[0] is True
 
 
 @pytest.mark.cpu_mode
@@ -332,14 +322,14 @@ def test_one_row_from_a_broken_clock_does_not_abandon_every_open_session(config:
         get_df_class(config.execution_mode)(frame(["start"], sessions=["s-9"], times=[10 * 365 * 24 * HOUR_NS])))
     stage.on_data(broken)
 
-    assert _as_list(broken, "session_unpaired") == [None]
-    assert _as_list(broken, "clock_refused") == [True]
+    assert column_values(broken, "session_unpaired") == [None]
+    assert column_values(broken, "clock_refused") == [True]
     assert stage.open_sessions == 1
 
     closed = MessageMeta(get_df_class(config.execution_mode)(frame(["end"], times=[600 * NS_PER_SECOND])))
     stage.on_data(closed)
 
-    assert _as_list(closed, "session_duration_s") == [600]
+    assert column_values(closed, "session_duration_s") == [600]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -348,9 +338,9 @@ def test_the_lifecycle_column_names_each_end_in_two_words_whatever_the_collector
     # the same search as one that says start and end.
     meta = run(config, frame(["logon", "LOGOFF", "start", "stop", "heartbeat"]))
 
-    assert _as_list(meta, "session_lifecycle") == ["start", "end", "start", "end", None]
+    assert column_values(meta, "session_lifecycle") == ["start", "end", "start", "end", None]
     # The one the stage could not place is marked, so the health record counts it rather than a log line.
-    assert _as_list(meta, "session_unclassified") == [False, False, False, False, True]
+    assert column_values(meta, "session_unclassified") == [False, False, False, False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -363,9 +353,9 @@ def test_a_single_record_session_is_a_subtraction(config: Config):
     meta = MessageMeta(get_df_class(config.execution_mode)(payload))
     stage.on_data(meta)
 
-    assert _as_list(meta, "session_duration_s") == [2 * 3600]
-    assert _as_list(meta, "session_out_of_order") == [False]
-    assert _as_list(meta, "session_unpaired") == [False]
+    assert column_values(meta, "session_duration_s") == [2 * 3600]
+    assert column_values(meta, "session_out_of_order") == [False]
+    assert column_values(meta, "session_unpaired") == [False]
     # The pairing state is untouched: a single record opens nothing a later stop could close.
     assert stage.open_sessions == 0
 
@@ -378,8 +368,8 @@ def test_a_single_record_ending_before_it_starts_is_out_of_order_and_untimed(con
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "session_duration_s") == [None]
-    assert _as_list(meta, "session_out_of_order") == [True]
+    assert column_values(meta, "session_duration_s") == [None]
+    assert column_values(meta, "session_out_of_order") == [True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -390,7 +380,7 @@ def test_paired_and_single_record_rows_coexist(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "session_duration_s") == [None, 3600, 2 * 3600]
+    assert column_values(meta, "session_duration_s") == [None, 3600, 2 * 3600]
 
 
 def _sessions_of(durations_h: list, principal: str = ALICE) -> dict:
@@ -413,9 +403,9 @@ def test_a_session_is_measured_against_the_principals_own_prior_sessions(config:
     # longest of them, and the eleven-hour session is measured against it, not folded into it first.
     meta = run(config, _sessions_of([8, 8, 8, 8, 11]), baseline_min_samples=4)
 
-    assert _as_list(meta, "session_duration_mature") == [False, False, False, False, True]
-    assert _as_list(meta, "session_duration_baseline") == [None, None, None, None, 8 * 3600.0]
-    assert _as_list(meta, "session_duration_ratio") == [None, None, None, None, 1.375]
+    assert column_values(meta, "session_duration_mature") == [False, False, False, False, True]
+    assert column_values(meta, "session_duration_baseline") == [None, None, None, None, 8 * 3600.0]
+    assert column_values(meta, "session_duration_ratio") == [None, None, None, None, 1.375]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -423,8 +413,8 @@ def test_nothing_is_published_below_the_sample_floor(config: Config):
     # The default floor is a hundred prior sessions, where a 99th percentile stops being the longest ever seen.
     meta = run(config, _sessions_of([8, 8, 8, 8, 11]))
 
-    assert _as_list(meta, "session_duration_ratio") == [None] * 5
-    assert _as_list(meta, "session_duration_mature") == [False] * 5
+    assert column_values(meta, "session_duration_ratio") == [None] * 5
+    assert column_values(meta, "session_duration_mature") == [False] * 5
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -435,7 +425,7 @@ def test_each_principal_has_their_own_baseline(config: Config):
 
     meta = run(config, payload, baseline_min_samples=4)
 
-    assert _as_list(meta, "session_duration_ratio") == [None, None, None, None, 1.375, None, None, None, None, 2.0]
+    assert column_values(meta, "session_duration_ratio") == [None, None, None, None, 1.375, None, None, None, None, 2.0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -443,8 +433,8 @@ def test_an_untimed_session_is_not_measured(config: Config):
     # A stop with no start has no duration, and a baseline built from a guess at one would excuse the next long one.
     meta = run(config, frame(["end"]), baseline_min_samples=1)
 
-    assert _as_list(meta, "session_duration_ratio") == [None]
-    assert _as_list(meta, "session_duration_mature") == [None]
+    assert column_values(meta, "session_duration_ratio") == [None]
+    assert column_values(meta, "session_duration_mature") == [None]
 
 
 def test_the_baseline_window_must_be_positive(config: Config):

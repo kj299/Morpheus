@@ -16,9 +16,9 @@
 
 import datetime
 
-import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
@@ -47,17 +47,6 @@ def frame(times: list, principals: list = None) -> dict:
     }
 
 
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    # `pd.isna` rather than the `value != value` NaN trick, which pylint reads as a redundant self-comparison. It
-    # covers None, pandas.NA and NaN together, and which of the three arrives depends on the column's dtype.
-    return [None if pd.isna(value) else value for value in series.tolist()]
-
-
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
     meta = MessageMeta(get_df_class(config.execution_mode)(payload))
     TC5CadenceStage(config, **kwargs).on_data(meta)
@@ -80,15 +69,15 @@ def test_the_hour_and_weekday_match_the_calendar(config: Config):
 
     expected = [datetime.datetime.fromtimestamp(time / 10**9, tz=datetime.timezone.utc) for time in times]
 
-    assert _as_list(meta, "local_hour") == [moment.hour for moment in expected]
-    assert _as_list(meta, "local_weekday") == [moment.weekday() for moment in expected]
+    assert column_values(meta, "local_hour") == [moment.hour for moment in expected]
+    assert column_values(meta, "local_weekday") == [moment.weekday() for moment in expected]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_epoch_was_a_thursday(config: Config):
     meta = run(config, frame([at(0, 0)]))
 
-    assert _as_list(meta, "local_weekday") == [3]
+    assert column_values(meta, "local_weekday") == [3]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -96,8 +85,8 @@ def test_the_offset_moves_the_hour_and_can_move_the_day(config: Config):
     # 1970-01-01 23:00 UTC is 1970-01-02 08:00 in a nine-hour zone, which is a Friday rather than a Thursday.
     meta = run(config, frame([at(0, 23)]), utc_offset_minutes=9 * 60)
 
-    assert _as_list(meta, "local_hour") == [8]
-    assert _as_list(meta, "local_weekday") == [4]
+    assert column_values(meta, "local_hour") == [8]
+    assert column_values(meta, "local_weekday") == [4]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -105,8 +94,8 @@ def test_a_negative_offset_can_move_the_day_backwards(config: Config):
     # 1970-01-02 02:00 UTC is 1970-01-01 21:00 five hours west.
     meta = run(config, frame([at(1, 2)]), utc_offset_minutes=-5 * 60)
 
-    assert _as_list(meta, "local_hour") == [21]
-    assert _as_list(meta, "local_weekday") == [3]
+    assert column_values(meta, "local_hour") == [21]
+    assert column_values(meta, "local_weekday") == [3]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -114,7 +103,7 @@ def test_an_offset_off_the_hour_is_honoured(config: Config):
     # Several populated zones are not on an hour boundary, which is why the parameter is in minutes.
     meta = run(config, frame([at(0, 10)]), utc_offset_minutes=345)
 
-    assert _as_list(meta, "local_hour") == [15]
+    assert column_values(meta, "local_hour") == [15]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -122,14 +111,14 @@ def test_a_night_login_is_unseen_against_a_history_of_office_hours(config: Confi
     times = office_week() + [at(20, 3)]
     meta = run(config, frame(times))
 
-    assert _as_list(meta, "hour_unseen")[-1] is True
-    assert _as_list(meta, "hour_share")[-1] < _as_list(meta, "hour_share")[-2]
+    assert column_values(meta, "hour_unseen")[-1] is True
+    assert column_values(meta, "hour_share")[-1] < column_values(meta, "hour_share")[-2]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_repeated_hour_becomes_unremarkable(config: Config):
     meta = run(config, frame(office_week()))
-    bits = _as_list(meta, "hour_surprise_bits")
+    bits = column_values(meta, "hour_surprise_bits")
 
     assert bits == sorted(bits, reverse=True)
     assert bits[0] > bits[-1]
@@ -141,8 +130,8 @@ def test_the_sample_is_judged_against_history_that_excludes_it(config: Config):
     # share the measure has, at the moment it should hold the most.
     meta = run(config, frame(office_week(4) + [at(4, 3)]))
 
-    assert _as_list(meta, "cadence_samples") == [0, 1, 2, 3, 4]
-    assert _as_list(meta, "hour_unseen") == [True, False, False, False, True]
+    assert column_values(meta, "cadence_samples") == [0, 1, 2, 3, 4]
+    assert column_values(meta, "hour_unseen") == [True, False, False, False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -151,8 +140,8 @@ def test_maturity_is_reported_rather_than_used_to_withhold_a_score(config: Confi
     # written either way and the rule decides.
     meta = run(config, frame(office_week(4)), min_samples=2)
 
-    assert _as_list(meta, "cadence_mature") == [False, False, True, True]
-    assert all(value is not None for value in _as_list(meta, "hour_share"))
+    assert column_values(meta, "cadence_mature") == [False, False, True, True]
+    assert all(value is not None for value in column_values(meta, "hour_share"))
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -163,9 +152,9 @@ def test_a_weekend_login_is_scored_separately_from_the_hour(config: Config):
 
     meta = run(config, frame(weekdays + [saturday]))
 
-    assert _as_list(meta, "hour_unseen")[-1] is False
-    assert _as_list(meta, "weekday_unseen")[-1] is True
-    assert _as_list(meta, "weekday_surprise_bits")[-1] > _as_list(meta, "hour_surprise_bits")[-1]
+    assert column_values(meta, "hour_unseen")[-1] is False
+    assert column_values(meta, "weekday_unseen")[-1] is True
+    assert column_values(meta, "weekday_surprise_bits")[-1] > column_values(meta, "hour_surprise_bits")[-1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -175,8 +164,8 @@ def test_principals_do_not_share_a_histogram(config: Config):
 
     meta = run(config, frame(times, principals=principals))
 
-    assert _as_list(meta, "cadence_samples")[-1] == 0
-    assert _as_list(meta, "hour_share")[-1] == pytest.approx(1 / 24, abs=1e-4)
+    assert column_values(meta, "cadence_samples")[-1] == 0
+    assert column_values(meta, "hour_share")[-1] == pytest.approx(1 / 24, abs=1e-4)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -185,9 +174,9 @@ def test_a_record_with_no_principal_still_carries_its_hour(config: Config):
     # history exists to score it against.
     meta = run(config, frame([at(0, 9), at(0, 10)], principals=[None, ALICE]))
 
-    assert _as_list(meta, "local_hour") == [9, 10]
-    assert _as_list(meta, "hour_share") == [None, pytest.approx(1 / 24, abs=1e-4)]
-    assert _as_list(meta, "cadence_samples") == [None, 0]
+    assert column_values(meta, "local_hour") == [9, 10]
+    assert column_values(meta, "hour_share") == [None, pytest.approx(1 / 24, abs=1e-4)]
+    assert column_values(meta, "cadence_samples") == [None, 0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -200,8 +189,8 @@ def test_state_persists_across_messages(config: Config):
     second = MessageMeta(get_df_class(config.execution_mode)(frame([at(5, 10)])))
     stage.on_data(second)
 
-    assert _as_list(second, "cadence_samples") == [5]
-    assert _as_list(second, "hour_unseen") == [False]
+    assert column_values(second, "cadence_samples") == [5]
+    assert column_values(second, "hour_unseen") == [False]
     assert stage.tracked_principals == 1
 
 
@@ -212,7 +201,7 @@ def test_control_message_accepted(config: Config):
 
     TC5CadenceStage(config).on_data(message)
 
-    assert _as_list(message.payload(), "cadence_samples") == [0, 1, 2]
+    assert column_values(message.payload(), "cadence_samples") == [0, 1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -228,7 +217,7 @@ def test_tc5_cadence_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "hour_unseen") == [True, False, False, False, True]
+    assert column_values(messages[0], "hour_unseen") == [True, False, False, False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -258,11 +247,11 @@ def test_an_out_of_order_record_is_scored_but_does_not_join_the_histogram(config
     late = MessageMeta(get_df_class(config.execution_mode)(frame([at(0, 3)])))
     stage.on_data(late)
 
-    assert _as_list(late, "cadence_samples") == [4]
+    assert column_values(late, "cadence_samples") == [4]
 
     # And 03:00 is still unseen, because the late record did not join the history.
     after = MessageMeta(get_df_class(config.execution_mode)(frame([at(9, 3)])))
     stage.on_data(after)
 
-    assert _as_list(after, "hour_unseen") == [True]
-    assert _as_list(after, "cadence_samples") == [4]
+    assert column_values(after, "hour_unseen") == [True]
+    assert column_values(after, "cadence_samples") == [4]

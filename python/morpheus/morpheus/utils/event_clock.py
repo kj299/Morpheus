@@ -173,7 +173,9 @@ def event_times_ns(df, column: str, time_unit: str = "ns") -> list[typing.Option
     return times
 
 
-def _truthy(value: typing.Any) -> bool:
+def is_true(value: typing.Any) -> bool:
+    """A nullable boolean as a plain one, compared by value: only a true value is true, and a null or anything
+    that cannot be compared is not."""
     try:
         # A nullable boolean, compared by value rather than identity.
         return value is not None and bool(value == True)  # noqa: E712 pylint: disable=singleton-comparison
@@ -200,7 +202,7 @@ def mark_refused(df, refused: typing.Sequence[bool]) -> None:
 
     assign_nullable_bool_column(df,
                                 CLOCK_REFUSED_COLUMN,
-                                [_truthy(prior) or bool(now) for (prior, now) in zip(earlier, refused)])
+                                [is_true(prior) or bool(now) for (prior, now) in zip(earlier, refused)])
 
 
 def refuse_rows(df, refused: typing.Sequence[bool], *, logger: logging.Logger, stage: str, what: str,
