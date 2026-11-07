@@ -68,3 +68,13 @@ def as_nullable_integers(host: pd.DataFrame, columns) -> pd.DataFrame:
         host[name] = host[name].astype("Int64")
 
     return host
+
+
+def truthy(value) -> bool:
+    """
+    A column value as a plain bool, with a null reading as False.
+
+    `bool(pd.NA)` raises rather than returning False, and a flag on a row is nullable because "not yet answerable" is
+    a distinct state from "no". Code that means "this did not fire" says so through this.
+    """
+    return False if pd.isna(value) else bool(value)

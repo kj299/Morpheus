@@ -24,7 +24,6 @@ worse than no rule -- volume nobody can triage is how a detection stops being re
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -33,16 +32,13 @@ import pytest
 from morpheus.config import Config
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import golden  # noqa: E402
 import network_pipeline as np_  # noqa: E402
-
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_network_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_network_pipeline.py")
 
 BEACON_CV_THRESHOLD = 0.15
 """R-B-L3-002's own figure, repeated so these tests evaluate the rule rather than something near it."""
@@ -96,10 +92,6 @@ def _to(result: pd.DataFrame, destination: str) -> pd.DataFrame:
     return result[result["dst_ip"] == destination]
 
 
-def _true(frame: pd.DataFrame, column: str) -> pd.Series:
-    return frame[column].astype("boolean").fillna(False).astype(bool)
-
-
 def _scored(result: pd.DataFrame) -> pd.DataFrame:
     return result[result["event_time"].astype("int64") >= np_.at(0)]
 
@@ -114,45 +106,26 @@ def _scored_window(hour: int) -> int:
 
 def fan_out_expansion(frame: pd.DataFrame) -> pd.DataFrame:
     """R-B-L3-001's predicate, row by row, as the stanza states it."""
-    return frame[_true(frame, "dsts_per_src_baseline_mature") & (frame["dsts_per_src_step"] > 0)
+    return frame[golden.flags(frame, "dsts_per_src_baseline_mature") & (frame["dsts_per_src_step"] > 0)
                  & (frame["dsts_per_src"] > FAN_OUT_FLOOR) & (frame["internal_dst_ratio"] > INTERNAL_MAJORITY)]
 
 
 def fan_in_onto_a_workstation(frame: pd.DataFrame) -> pd.DataFrame:
     """R-B-L3-006's predicate."""
     return frame[(frame["dst_ctx_device_role"] == "workstation").fillna(False)
-                 & _true(frame, "srcs_per_dst_baseline_mature") & (frame["srcs_per_dst_step"] > 0)
+                 & golden.flags(frame, "srcs_per_dst_baseline_mature") & (frame["srcs_per_dst_step"] > 0)
                  & (frame["srcs_per_dst"] >= FAN_IN_FLOOR)]
 
 
 def first_contact_upload(frame: pd.DataFrame) -> pd.DataFrame:
     """R-B-L3-007's predicate."""
-    return frame[_true(frame, "dst_asn_first_seen") & _true(frame, "byte_asymmetry_baseline_mature")
+    return frame[golden.flags(frame, "dst_asn_first_seen") & golden.flags(frame, "byte_asymmetry_baseline_mature")
                  & (frame["byte_asymmetry_step"] > 0) & (frame["byte_asymmetry"] >= UPLOAD_FLOOR)]
 
 
 def port_sweep(frame: pd.DataFrame) -> pd.DataFrame:
     """R-D-L3-008's predicate."""
-    return frame[(frame["dst_ports_per_src"] >= SWEEP_PORTS_THRESHOLD) & _true(frame, "dst_is_private")]
-
-
-def _split(frame: pd.DataFrame, parts: int) -> list:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _windows(frame: pd.DataFrame) -> list:
-    period_ns = np_.PERIOD_SECONDS * np_.NS_PER_SECOND
-
-    return [window_id_from_timestamp(int(stamp), period_ns) for stamp in frame["event_time"]]
-
-
-def _permuted(corpus: dict, seed: int) -> dict:
-    return {
-        name: permute_within_contiguous_groups(frame, _windows(frame), seed=seed)
-        for (name, frame) in corpus.items()
-    }
+    return frame[(frame["dst_ports_per_src"] >= SWEEP_PORTS_THRESHOLD) & golden.flags(frame, "dst_is_private")]
 
 
 # --- Check 1: the corpus is fixed and shaped like a flow exporter ----------------------------------------------
@@ -221,41 +194,20 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("network", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = np_.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO  # pylint: disable=import-outside-toplevel
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is "
-                    f"intended, regenerate the golden with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("network", np_.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, np_.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, np_.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
@@ -264,7 +216,7 @@ def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFra
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2, 3):
-        shuffled = np_.run_pipeline(pipeline_config, _permuted(corpus, seed))
+        shuffled = np_.run_pipeline(pipeline_config, golden.permuted(corpus, seed, np_.PERIOD_SECONDS))
 
         assert diff_frames(result, shuffled) is None, seed
 
@@ -275,7 +227,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     # rhythm and a reference are all functions of what came before -- so removing the imposed order has to
     # change the answer, or the check is passing over a pipeline that never needed it.
     ordered = np_.run_pipeline(pipeline_config, corpus, impose_order=False)
-    shuffled = np_.run_pipeline(pipeline_config, _permuted(corpus, 5), impose_order=False)
+    shuffled = np_.run_pipeline(pipeline_config, golden.permuted(corpus, 5, np_.PERIOD_SECONDS), impose_order=False)
 
     assert diff_frames(ordered, shuffled) is not None
 
@@ -397,8 +349,8 @@ def test_the_history_is_quiet(result: pd.DataFrame):
     assert len(fan_in_onto_a_workstation(history)) == 0
     assert len(first_contact_upload(history)) == 0
     assert len(port_sweep(history)) == 0
-    assert not _true(history, "dst_is_reserved").any()
-    assert not _true(history, "ip_ttl_shifted").any()
+    assert not golden.flags(history, "dst_is_reserved").any()
+    assert not golden.flags(history, "ip_ttl_shifted").any()
 
     literal = history[(history["dsts_per_src"] > FAN_OUT_FLOOR) & (history["internal_dst_ratio"] > INTERNAL_MAJORITY)]
     assert set(literal["src_ip"]) == {np_.DHCP_SERVER}
@@ -411,11 +363,11 @@ def test_every_host_with_a_fortnight_has_a_mature_baseline(result: pd.DataFrame)
     for host in (np_.SCANNER, np_.DHCP_SERVER, np_.UPLOADER):
         rows = _for(first_hour, host)
         assert len(rows) > 0, host
-        assert _true(rows, "dsts_per_src_baseline_mature").all(), host
+        assert golden.flags(rows, "dsts_per_src_baseline_mature").all(), host
 
     for host in (np_.DNS_SERVER, np_.REACHED_WORKSTATION, np_.APP_SERVER):
         rows = _to(result[result["window_id"] >= _scored_window(0)], host)
-        assert _true(rows, "srcs_per_dst_baseline_mature").all(), host
+        assert golden.flags(rows, "srcs_per_dst_baseline_mature").all(), host
 
 
 @pytest.mark.cpu_mode
@@ -466,7 +418,7 @@ def test_a_first_contact_upload_and_each_half_alone(result: pd.DataFrame):
     uploader = _scored(_for(result, np_.UPLOADER))
     by_network = uploader.set_index("bgp_as_dst")
 
-    assert _true(uploader, "dst_asn_first_seen").sum() == 2
+    assert golden.flags(uploader, "dst_asn_first_seen").sum() == 2
     assert by_network.loc[np_.DOWNLOAD_ASN, "byte_asymmetry_step"] < 0
     assert not bool(by_network.loc[np_.BACKUP_ASN, "dst_asn_first_seen"])
     assert by_network.loc[np_.BACKUP_ASN, "byte_asymmetry_step"] > 0
@@ -491,5 +443,4 @@ def test_a_port_sweep_inside_the_estate_and_media_outside_it(result: pd.DataFram
 @pytest.mark.cpu_mode
 def test_every_flow_carries_its_community_id(result: pd.DataFrame):
     # The equality join key across layers 3, 4 and 6. Every flow here has the ports it needs, so none is null.
-    assert result["community_id"].notna().all()
-    assert result["community_id"].str.startswith("1:").all()
+    golden.assert_every_row_carries_a_community_id(result)

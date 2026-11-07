@@ -23,6 +23,7 @@ composition module's docstring describes what this corpus plants and why.
 import random
 
 from corpora import merged  # noqa: F401
+from corpora.records import envelope as _envelope
 
 from morpheus.compositions import envelope
 
@@ -71,16 +72,6 @@ SERVICES = r"C:\Windows\System32\services.exe"
 SVCHOST = r"C:\Windows\System32\svchost.exe"
 USUAL_PAIRS = ((EXPLORER, r"C:\Program Files\Browser\browser.exe"), (SERVICES, SVCHOST),
                (EXPLORER, r"C:\Program Files\Office\outlook.exe"))
-
-
-def _envelope(rows: list, collector: str, schema: str, origin: str, when: int) -> dict:
-    return {
-        "collector_id": collector,
-        "schema_version": schema,
-        "origin_hash": f"{origin}@{when}",
-        "collector_seq": len(rows),
-        "event_time": when,
-    }
 
 
 def _flow(rows: list, source: str, destination: str, when: int, bytes_out: int, bytes_in: int):

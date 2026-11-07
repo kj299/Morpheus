@@ -23,6 +23,7 @@ composition module's docstring describes what this corpus plants and why.
 import typing
 
 from corpora import merged  # noqa: F401
+from corpora.records import envelope as _envelope
 
 from morpheus.compositions import envelope
 
@@ -245,16 +246,6 @@ PUBLIC_ISSUER = "CN=Public Web CA, O=Example Trust"
 C2_PORT = 47000
 """The attacker's new stack's connection: the handshake that showed the new fingerprint, and the beacon's first flow
 record, which the flow exporter writes when that connection ends. One connection at two layers, one Community ID."""
-
-
-def _envelope(rows: list, collector: str, schema: str, origin: str, when: int) -> dict:
-    return {
-        "collector_id": collector,
-        "schema_version": schema,
-        "origin_hash": f"{origin}@{when}",
-        "collector_seq": len(rows),
-        "event_time": when,
-    }
 
 
 def _ephemeral_port(rows: list) -> int:

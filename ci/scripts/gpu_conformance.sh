@@ -145,6 +145,7 @@ TARGETS=(
 UNMARKED=(
     tests/morpheus/determinism/test_nothing_imports_tests.py
     tests/morpheus/determinism/test_estate_context.py
+    tests/morpheus/determinism/test_one_definition.py
     tests/morpheus/stages/test_kafka_source_provenance.py
     tests/morpheus/stages/test_partition_merge_stage.py
     tests/morpheus/determinism/test_clock_skew_experiment.py

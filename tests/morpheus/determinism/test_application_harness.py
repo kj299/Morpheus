@@ -35,26 +35,22 @@ and each has an actor too new to have a history, held to the rule's floor alone.
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
 import pytest
 
 from morpheus.config import Config
+from morpheus.utils import splunk_conf
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
-from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import application_pipeline as ap_  # noqa: E402
+import golden  # noqa: E402
 import host_identity  # noqa: E402
-
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_application_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_application_pipeline.py")
 
 
 @pytest.fixture(name="corpus", scope="module")
@@ -93,13 +89,9 @@ def _service(result: pd.DataFrame) -> pd.DataFrame:
     return result[result["telemetry_class"] == ap_.SERVICE_CLASS]
 
 
-def _true(frame: pd.DataFrame, column: str) -> pd.Series:
-    return frame[column].astype("boolean").fillna(False).astype(bool)
-
-
 def _measured(frame: pd.DataFrame, column: str) -> pd.Series:
     """Rows a baseline condition admits: a client with no week of days, or one at least twice its busiest day."""
-    unmeasured = ~_true(frame, f"{column}_baseline_mature")
+    unmeasured = ~golden.flags(frame, f"{column}_baseline_mature")
     far_beyond = frame[f"{column}_ratio"].astype("Float64").fillna(0) >= ap_.BASELINE_MULTIPLE
 
     return unmeasured | far_beyond
@@ -176,8 +168,8 @@ def _service_hours(service: pd.DataFrame) -> pd.DataFrame:
     """Each service's hours, reduced the way R-B-L7-007's search reduces them."""
     frame = service.assign(clients=service["service_clients_in_window"].astype("Int64"),
                            ratio=service["service_clients_ratio"].astype("Float64"),
-                           novel=_true(service, "service_client_fingerprint_first_seen").astype(int),
-                           mature=_true(service, "service_clients_baseline_mature").astype(int))
+                           novel=golden.flags(service, "service_client_fingerprint_first_seen").astype(int),
+                           mature=golden.flags(service, "service_clients_baseline_mature").astype(int))
 
     return frame.groupby(["service_key", "window_id"]).agg(clients=("clients", "max"),
                                                            ratio=("ratio", "max"),
@@ -207,25 +199,6 @@ def _serving(service: pd.DataFrame,
         keep &= hours["novel"] > 0
 
     return set(hours[keep].index.get_level_values(0))
-
-
-def _split(frame: pd.DataFrame, parts: int) -> list:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _windows(frame: pd.DataFrame) -> list:
-    period_ns = ap_.PERIOD_SECONDS * ap_.NS_PER_SECOND
-
-    return [window_id_from_timestamp(int(stamp), period_ns) for stamp in frame["event_time"]]
-
-
-def _permuted(corpus: dict, seed: int) -> dict:
-    return {
-        name: permute_within_contiguous_groups(frame, _windows(frame), seed=seed)
-        for (name, frame) in corpus.items()
-    }
 
 
 # --- Check 1: the corpus is fixed and shaped like a resolver and a proxy ----------------------------------------
@@ -270,41 +243,20 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("application", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = ap_.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO  # pylint: disable=import-outside-toplevel
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is "
-                    f"intended, regenerate the golden with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("application", ap_.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, ap_.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, ap_.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
@@ -313,7 +265,7 @@ def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFra
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2, 3):
-        shuffled = ap_.run_pipeline(pipeline_config, _permuted(corpus, seed))
+        shuffled = ap_.run_pipeline(pipeline_config, golden.permuted(corpus, seed, ap_.PERIOD_SECONDS))
 
         assert diff_frames(result, shuffled) is None, seed
 
@@ -323,7 +275,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     # The negative control for the check above. Both stages keep windowed state, so removing the imposed order has
     # to change the answer, or the check is passing over a pipeline that never needed it.
     ordered = ap_.run_pipeline(pipeline_config, corpus, impose_order=False)
-    shuffled = ap_.run_pipeline(pipeline_config, _permuted(corpus, 5), impose_order=False)
+    shuffled = ap_.run_pipeline(pipeline_config, golden.permuted(corpus, 5, ap_.PERIOD_SECONDS), impose_order=False)
 
     assert diff_frames(ordered, shuffled) is not None
 
@@ -339,7 +291,7 @@ def test_the_tunnel_is_the_only_domain_that_clears_all_four(result: pd.DataFrame
     assert _fires_dns(dns) == {ap_.TUNNEL_DOMAIN}
     # Through its baseline, not around it: the tunneller has a week of ordinary days, and the tunnel is a hundred
     # and thirty times the busiest of them.
-    assert _true(tunnel, "dns_subdomains_per_domain_baseline_mature").all()
+    assert golden.flags(tunnel, "dns_subdomains_per_domain_baseline_mature").all()
     assert tunnel["dns_subdomains_per_domain_ratio"].astype("Float64").max() > 100
 
 
@@ -349,7 +301,7 @@ def test_the_reputation_agent_is_stopped_by_its_own_history_alone(result: pd.Dat
     # rules are read it clears the hundred too; it is no busier than any day of its life, and that is all that keeps
     # it out.
     dns = _dns(result)
-    today = dns[(dns["src_ip"] == ap_.HASH_LOOKUP) & _true(dns, "dns_subdomains_per_domain_baseline_mature")]
+    today = dns[(dns["src_ip"] == ap_.HASH_LOOKUP) & golden.flags(dns, "dns_subdomains_per_domain_baseline_mature")]
 
     assert ap_.REPUTATION_DOMAIN not in _fires_dns(dns)
     assert ap_.REPUTATION_DOMAIN in _fires_dns(dns, baseline=False)
@@ -366,7 +318,7 @@ def test_a_client_with_no_week_of_days_is_held_to_the_floor_alone(result: pd.Dat
     for client in (ap_.CDN_CLIENT, ap_.TENANT_CLIENT, ap_.SAAS_CLIENT):
         rows = dns[dns["src_ip"] == client]
 
-        assert not _true(rows, "dns_subdomains_per_domain_baseline_mature").any(), client
+        assert not golden.flags(rows, "dns_subdomains_per_domain_baseline_mature").any(), client
         assert rows["dns_subdomains_per_domain_baseline"].isna().all(), client
 
 
@@ -477,7 +429,7 @@ def test_the_slow_tunnel_clears_every_literal_but_the_count_and_is_never_twice_i
 
     event_day = slow[slow["event_time"].astype("int64") >= ap_.event(0)]
 
-    assert _true(event_day, "dns_subdomains_per_domain_baseline_mature").all()
+    assert golden.flags(event_day, "dns_subdomains_per_domain_baseline_mature").all()
     assert 1 < event_day["dns_subdomains_per_domain_ratio"].astype("Float64").max() < ap_.BASELINE_MULTIPLE
 
     # No other client's busiest domain rises for four days: the tunneller's week is flat and then a spike, and the
@@ -545,7 +497,7 @@ def test_the_slow_enumerator_is_never_an_enumerator(result: pd.DataFrame):
 
     event_day = slow[slow["event_time"].astype("int64") >= ap_.event(0)]
 
-    assert _true(event_day, "http_distinct_paths_baseline_mature").all()
+    assert golden.flags(event_day, "http_distinct_paths_baseline_mature").all()
     assert 1 < event_day["http_distinct_paths_ratio"].astype("Float64").max() < ap_.BASELINE_MULTIPLE
 
     # No other client's busiest ten minutes rise for four days: the scanner's mornings are as busy as each other.
@@ -566,7 +518,7 @@ def test_both_enumerators_fire_and_nothing_else_does(result: pd.DataFrame):
 def test_the_scanner_is_stopped_by_its_own_history_alone(result: pd.DataFrame):
     # An enumerator by every other measure, every morning of its life.
     http = _http(result)
-    today = http[(http["src_ip"] == ap_.SCANNER) & _true(http, "http_distinct_paths_baseline_mature")]
+    today = http[(http["src_ip"] == ap_.SCANNER) & golden.flags(http, "http_distinct_paths_baseline_mature")]
 
     assert ap_.SCANNER not in _enumerating(http)
     assert ap_.SCANNER in _enumerating(http, baseline=False)
@@ -581,9 +533,9 @@ def test_the_enumerator_fires_through_its_baseline_and_the_new_one_on_the_floor(
     seasoned = http[(http["src_ip"] == ap_.ENUMERATOR) & (http["http_distinct_paths"].astype("Int64") > 200)]
     newcomer = http[http["src_ip"] == ap_.EMPTY_HANDED]
 
-    assert _true(seasoned, "http_distinct_paths_baseline_mature").all()
+    assert golden.flags(seasoned, "http_distinct_paths_baseline_mature").all()
     assert seasoned["http_distinct_paths_ratio"].astype("Float64").min() > 10 * ap_.BASELINE_MULTIPLE
-    assert not _true(newcomer, "http_distinct_paths_baseline_mature").any()
+    assert not golden.flags(newcomer, "http_distinct_paths_baseline_mature").any()
 
 
 @pytest.mark.cpu_mode
@@ -637,7 +589,7 @@ def test_only_the_enumerator_brings_client_software_it_has_never_run(result: pd.
     # User-agent novelty per client: the enumerator browsed in Chrome all week and enumerates with curl. Every other
     # client sends what it always has, and a client's first request is novel to nothing.
     http = _http(result)
-    novel = http[_true(http, "http_ua_family_first_seen")]
+    novel = http[golden.flags(http, "http_ua_family_first_seen")]
 
     assert set(zip(novel["src_ip"], novel["http_ua_family"])) == {(ap_.ENUMERATOR, "curl")}
 
@@ -726,7 +678,7 @@ def test_a_service_deployed_this_morning_has_no_days_to_change_from(result: pd.D
     assert f"{ap_.NEW_APP}:443" not in _serving(service)
     assert new["service_clients_ratio"].isna().all()
     assert new["service_clients_in_window"].astype("Int64").max() == ap_.NEW_APP_CLIENTS
-    assert _true(new, "service_client_fingerprint_first_seen").any()
+    assert golden.flags(new, "service_client_fingerprint_first_seen").any()
 
 
 @pytest.mark.cpu_mode
@@ -739,7 +691,7 @@ def test_a_request_and_a_connection_carry_the_application_that_answered(result: 
     assert set(http["ctx_application_name"]) == {"intranet-web"}
     assert set(service[service["dst_ip"] == ap_.EDGE_PROXY]["ctx_application_name"]) == {"corp-edge-proxy"}
     assert set(service[service["dst_ip"] == ap_.EDGE_PROXY]["ctx_application_service_account"]) == {"svc-edge"}
-    assert not _true(service[service["dst_ip"] == ap_.NEW_SERVER], "ctx_application_found").any()
+    assert not golden.flags(service[service["dst_ip"] == ap_.NEW_SERVER], "ctx_application_found").any()
 
 
 # --- R-B-L7-003: sensitive data in transit, on the SID model ---------------------------------------------------
@@ -766,7 +718,7 @@ def test_the_leaker_is_the_only_client_whose_bodies_carry_something(result: pd.D
 def test_the_sensitive_data_rule_never_copies_the_body_into_the_risk_record():
     # The rule reads what the model found, not what the body said; a risk record that carried the body would copy
     # the very value the rule exists to find into a second index.
-    search = _search("R-B-L7-003 - Sensitive data in transit").split("search =", 1)[1]
+    search = splunk_conf.search_text(SAVEDSEARCHES, "R-B-L7-003 - Sensitive data in transit")
 
     assert ap_.BODY_COLUMN not in search
     assert "sid_labels" in search and "sid_model_version" in search
@@ -785,13 +737,6 @@ SAVEDSEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "savedsearches.conf")
 
 MINIMIZATION_KEY = b"test-key-not-a-secret-0123456789"
-
-
-def _search(name: str) -> str:
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    return text.split(f"[{name}]", 1)[1].split("action.correlationsearch.label", 1)[0]
 
 
 @pytest.mark.cpu_mode
@@ -815,9 +760,9 @@ def test_the_tunnelling_rule_survives_pseudonymizing_the_names(result: pd.DataFr
 def test_the_enumeration_rule_never_reads_the_path_itself():
     # The other half of the same claim: R-D-L7-005 reads the counts the stage computed from `url_path`, never the
     # path, so an estate can drop the column at the wire and keep the rule.
-    search = _search("R-D-L7-005 - Enumeration")
+    search = splunk_conf.search_text(SAVEDSEARCHES, "R-D-L7-005 - Enumeration")
 
-    assert "url_path" not in search.split("search =", 1)[1]
+    assert "url_path" not in search
     assert "http_distinct_paths" in search
 
 

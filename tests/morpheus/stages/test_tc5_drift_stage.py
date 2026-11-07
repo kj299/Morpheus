@@ -14,9 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
@@ -43,15 +43,6 @@ def frame(scores: list, principals: list = None, windows: list = None) -> dict:
     }
 
 
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [None if pd.isna(value) else value for value in series.tolist()]
-
-
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
     meta = MessageMeta(get_df_class(config.execution_mode)(payload))
     TC5DriftStage(config, **kwargs).on_data(meta)
@@ -65,9 +56,9 @@ def test_the_predictive_shape_is_readable_off_the_last_row(config: Config):
     # deviations, with no single window crossing the alerting threshold. Every part has to be on one row.
     meta = run(config, frame(FLAT + CLIMB))
 
-    assert _as_list(meta, "drift_rising_windows")[-1] >= 4
-    assert _as_list(meta, "drift_rise_sigmas")[-1] > 1.5
-    assert _as_list(meta, "drift_mature")[-1] is True
+    assert column_values(meta, "drift_rising_windows")[-1] >= 4
+    assert column_values(meta, "drift_rise_sigmas")[-1] > 1.5
+    assert column_values(meta, "drift_mature")[-1] is True
     # And the rule's other half: no single window is extreme on its own.
     assert max(FLAT + CLIMB) < 6.0
 
@@ -76,15 +67,15 @@ def test_the_predictive_shape_is_readable_off_the_last_row(config: Config):
 def test_a_flat_principal_produces_no_run(config: Config):
     meta = run(config, frame(FLAT))
 
-    assert max(value for value in _as_list(meta, "drift_rising_windows") if value is not None) < 4
+    assert max(value for value in column_values(meta, "drift_rising_windows") if value is not None) < 4
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_velocity_and_acceleration_are_the_two_differences(config: Config):
     meta = run(config, frame([1.0, 1.1, 1.5]))
 
-    assert _as_list(meta, "drift_velocity") == [None, pytest.approx(0.1), pytest.approx(0.4)]
-    assert _as_list(meta, "drift_acceleration")[-1] == pytest.approx(0.3)
+    assert column_values(meta, "drift_velocity") == [None, pytest.approx(0.1), pytest.approx(0.4)]
+    assert column_values(meta, "drift_acceleration")[-1] == pytest.approx(0.3)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -92,8 +83,8 @@ def test_a_gap_in_windows_restarts_the_run(config: Config):
     # A principal who did not authenticate for two days has not been rising for four consecutive windows.
     meta = run(config, frame([1.0, 1.2, 1.5], windows=[100, 101, 110]))
 
-    assert _as_list(meta, "drift_run_restarted") == [False, False, True]
-    assert _as_list(meta, "drift_rising_windows") == [1, 2, 1]
+    assert column_values(meta, "drift_run_restarted") == [False, False, True]
+    assert column_values(meta, "drift_rising_windows") == [1, 2, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -102,7 +93,7 @@ def test_principals_do_not_share_a_trajectory(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "drift_rising_windows") == [1, 2, 1]
+    assert column_values(meta, "drift_rising_windows") == [1, 2, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -114,8 +105,8 @@ def test_a_pipeline_with_no_model_carries_nulls_rather_than_failing(config: Conf
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "drift_rising_windows") == [None, None]
-    assert _as_list(meta, "drift_rise_sigmas") == [None, None]
+    assert column_values(meta, "drift_rising_windows") == [None, None]
+    assert column_values(meta, "drift_rise_sigmas") == [None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -126,7 +117,7 @@ def test_an_unscored_window_breaks_the_run_rather_than_being_bridged(config: Con
     # would be a claim about a window nothing scored.
     meta = run(config, frame([1.0, absent, 1.5]))
 
-    assert _as_list(meta, "drift_rising_windows") == [1, None, 1]
+    assert column_values(meta, "drift_rising_windows") == [1, None, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -134,8 +125,8 @@ def test_a_principal_who_has_never_varied_reports_no_sigmas(config: Config):
     # Dividing by a zero spread would make the flattest history the most alarming.
     meta = run(config, frame([1.0] * 5 + [1.5]))
 
-    assert _as_list(meta, "drift_baseline_sigma")[-1] == 0.0
-    assert _as_list(meta, "drift_rise_sigmas")[-1] is None
+    assert column_values(meta, "drift_baseline_sigma")[-1] == 0.0
+    assert column_values(meta, "drift_rise_sigmas")[-1] is None
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -158,7 +149,7 @@ def test_a_nullable_score_column_carrying_pandas_na_does_not_raise(config: Confi
 
     TC5DriftStage(config).on_data(meta)
 
-    assert _as_list(meta, "drift_rising_windows") == [1, None, 1]
+    assert column_values(meta, "drift_rising_windows") == [1, None, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -168,7 +159,7 @@ def test_a_differently_named_score_column_is_honoured(config: Config):
 
     meta = run(config, payload, score_column="max_abs_z")
 
-    assert _as_list(meta, "drift_rising_windows")[-1] >= 4
+    assert column_values(meta, "drift_rising_windows")[-1] >= 4
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -181,7 +172,7 @@ def test_state_persists_across_messages(config: Config):
     second = MessageMeta(get_df_class(config.execution_mode)(frame(CLIMB, windows=[106, 107, 108, 109])))
     stage.on_data(second)
 
-    assert _as_list(second, "drift_rising_windows")[-1] >= 4
+    assert column_values(second, "drift_rising_windows")[-1] >= 4
     assert stage.tracked_entities == 1
 
 
@@ -192,7 +183,7 @@ def test_control_message_accepted(config: Config):
 
     TC5DriftStage(config).on_data(message)
 
-    assert _as_list(message.payload(), "drift_rising_windows") == [1, 2]
+    assert column_values(message.payload(), "drift_rising_windows") == [1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -208,7 +199,7 @@ def test_tc5_drift_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "drift_rising_windows")[-1] >= 4
+    assert column_values(messages[0], "drift_rising_windows")[-1] >= 4
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -290,7 +281,7 @@ def test_an_out_of_order_window_does_not_join_the_trajectory(config: Config):
     after = MessageMeta(get_df_class(config.execution_mode)(frame([1.5], windows=[112])))
     stage.on_data(after)
 
-    assert _as_list(after, "drift_rising_windows") == [3]
+    assert column_values(after, "drift_rising_windows") == [3]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -301,8 +292,8 @@ def test_aggregate_mean_reduces_a_window_to_one_observation(config: Config):
     windows = [100, 100, 101, 101, 102, 102, 103, 103]
     meta = run(config, frame(scores, windows=windows), aggregate="mean")
 
-    velocity = _as_list(meta, "drift_velocity")
-    rising = _as_list(meta, "drift_rising_windows")
+    velocity = column_values(meta, "drift_velocity")
+    rising = column_values(meta, "drift_rising_windows")
 
     # Both rows of one day say the same thing.
     for day in range(4):
@@ -321,7 +312,7 @@ def test_aggregate_mean_is_the_mean_and_not_the_first_or_last(config: Config):
     windows = [100, 100, 101]
     meta = run(config, frame(scores, windows=windows), aggregate="mean")
 
-    assert _as_list(meta, "drift_velocity")[-1] == pytest.approx(0.5)
+    assert column_values(meta, "drift_velocity")[-1] == pytest.approx(0.5)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -332,8 +323,8 @@ def test_aggregate_max_takes_a_running_count_at_its_total(config: Config):
     windows = [100, 100, 100, 101, 101]
     meta = run(config, frame(scores, windows=windows), aggregate="max")
 
-    assert _as_list(meta, "drift_velocity")[-1] == pytest.approx(1.0)
-    assert _as_list(meta, "drift_rising_windows") == [1, 1, 1, 2, 2]
+    assert column_values(meta, "drift_velocity")[-1] == pytest.approx(1.0)
+    assert column_values(meta, "drift_rising_windows") == [1, 1, 1, 2, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -346,8 +337,8 @@ def test_aggregate_mean_does_not_depend_on_row_order_inside_the_window(config: C
                         frame([1.2, 1.4, 1.0, 2.4, 2.2, 2.0], windows=[100, 100, 100, 101, 101, 101]),
                         aggregate="mean")
 
-    assert _as_list(forward, "drift_velocity")[-1] == _as_list(reversed_rows, "drift_velocity")[-1]
-    assert _as_list(forward, "drift_velocity")[-1] == pytest.approx(1.0)
+    assert column_values(forward, "drift_velocity")[-1] == column_values(reversed_rows, "drift_velocity")[-1]
+    assert column_values(forward, "drift_velocity")[-1] == pytest.approx(1.0)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -356,7 +347,7 @@ def test_without_aggregation_a_repeat_is_still_a_repeat(config: Config):
     # warns. A caller who has per-event scores has to ask for the reduction.
     meta = run(config, frame([1.0, 1.0, 1.2], windows=[100, 100, 101]))
 
-    assert _as_list(meta, "drift_velocity")[1] is None
+    assert column_values(meta, "drift_velocity")[1] is None
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -366,7 +357,7 @@ def test_aggregate_keeps_entities_apart(config: Config):
     windows = [100, 100, 101, 101]
     meta = run(config, frame(scores, principals=principals, windows=windows), aggregate="mean")
 
-    velocity = _as_list(meta, "drift_velocity")
+    velocity = column_values(meta, "drift_velocity")
 
     assert velocity[2] == pytest.approx(0.5)
     assert velocity[3] == pytest.approx(0.5)
@@ -377,31 +368,31 @@ def test_a_rising_run_is_projected_to_the_ceiling(config: Config):
     # Ten, sixteen, twenty-two, twenty-eight: six a window, and a ceiling of a hundred is twelve windows on.
     meta = run(config, frame([10.0, 16.0, 22.0, 28.0]), ceiling=100)
 
-    assert _as_list(meta, "drift_trend_per_window") == [None, None, pytest.approx(6.0), pytest.approx(6.0)]
-    assert _as_list(meta, "drift_forecast_next")[-1] == pytest.approx(34.0)
-    assert _as_list(meta, "drift_windows_to_ceiling") == [None, None, 13, 12]
+    assert column_values(meta, "drift_trend_per_window") == [None, None, pytest.approx(6.0), pytest.approx(6.0)]
+    assert column_values(meta, "drift_forecast_next")[-1] == pytest.approx(34.0)
+    assert column_values(meta, "drift_windows_to_ceiling") == [None, None, 13, 12]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_window_at_the_ceiling_is_zero_windows_from_it(config: Config):
     meta = run(config, frame([80.0, 90.0, 100.0, 110.0]), ceiling=100)
 
-    assert _as_list(meta, "drift_windows_to_ceiling")[-2:] == [0, 0]
+    assert column_values(meta, "drift_windows_to_ceiling")[-2:] == [0, 0]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_without_a_ceiling_the_trend_is_written_and_the_count_is_not(config: Config):
     meta = run(config, frame([10.0, 16.0, 22.0, 28.0]))
 
-    assert _as_list(meta, "drift_trend_per_window")[-1] == pytest.approx(6.0)
-    assert _as_list(meta, "drift_windows_to_ceiling") == [None] * 4
+    assert column_values(meta, "drift_trend_per_window")[-1] == pytest.approx(6.0)
+    assert column_values(meta, "drift_windows_to_ceiling") == [None] * 4
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_falling_window_is_no_distance_from_the_ceiling(config: Config):
     meta = run(config, frame([10.0, 16.0, 22.0, 12.0]), ceiling=100)
 
-    assert _as_list(meta, "drift_windows_to_ceiling")[-1] is None
+    assert column_values(meta, "drift_windows_to_ceiling")[-1] is None
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -415,7 +406,7 @@ def test_aggregate_distinct_counts_the_values_a_window_takes(config: Config):
                score_column="endpoint_pair",
                aggregate="distinct")
 
-    assert _as_list(meta, "drift_velocity") == [None, None, None, 1.0, 1.0, 1.0, 1.0]
+    assert column_values(meta, "drift_velocity") == [None, None, None, 1.0, 1.0, 1.0, 1.0]
 
 
 def test_an_unknown_aggregate_is_refused(config: Config):

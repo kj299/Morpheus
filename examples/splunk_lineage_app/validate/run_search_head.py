@@ -17,8 +17,9 @@
 Index the sample events into the validation container and dispatch every saved search, recording what each returns.
 
 Runs inside the container, under Splunk's own interpreter (`splunk cmd python3`), so the machine driving it needs
-Docker and nothing else; `run_search_head.sh` is the host side. Standard library only, and every call to Splunk
-goes through its command line, which already knows how to reach its own management port.
+Docker and nothing else; `run_search_head.sh` is the host side. Standard library only -- the `.conf` reader it
+shares with the package, `morpheus.utils.splunk_conf`, is too, and the compose file mounts that one file -- and every
+call to Splunk goes through its command line, which already knows how to reach its own management port.
 
 Two things stand between the checked-in events and a faithful run, and both are handled here rather than left to
 whoever runs it:
@@ -60,6 +61,14 @@ import re
 import subprocess
 import sys
 import time
+
+try:
+    from morpheus.utils import splunk_conf
+except ImportError:
+    # Inside the container, under Splunk's interpreter, where Morpheus is not installed: the compose file mounts the
+    # module, which is standard library only, on its own.
+    sys.path.insert(0, "/morpheus_utils")
+    import splunk_conf  # noqa: E402  # pylint: disable=import-error
 
 SPLUNK = "/opt/splunk/bin/splunk"
 APP = "TA-morpheus-lineage"
@@ -147,8 +156,7 @@ def shift_line(line: str, offset_seconds: int) -> str:
 
 
 def stanzas(path: str = SAVED_SEARCHES) -> list[str]:
-    with open(path, encoding="utf-8") as handle:
-        return re.findall(r"^\[(.+)\]\s*$", handle.read(), re.MULTILINE)
+    return splunk_conf.stanzas(path)
 
 
 def ordered(names: list[str]) -> list[tuple[str, str]]:
@@ -165,12 +173,7 @@ def ordered(names: list[str]) -> list[tuple[str, str]]:
 
 def search_text(name: str, path: str = SAVED_SEARCHES) -> str:
     """One stanza's SPL with its continuation lines folded."""
-    with open(path, encoding="utf-8") as handle:
-        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    body = folded.split(f"[{name}]", 1)[1].split("\n[", 1)[0]
-
-    return re.search(r"^search\s*=\s*(.*)$", body, re.MULTILINE).group(1).strip()
+    return splunk_conf.search_text(path, name)
 
 
 def chain_risk_query(path: str = SAVED_SEARCHES) -> str:

@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -55,15 +56,6 @@ def frame(senders: list, targets: list, macs: list = None, ops: list = None, tim
 def gratuitous(count: int, sender: str = GATEWAY, **kwargs) -> dict:
     """A run of packets in which the sender claims its own address."""
     return frame([sender] * count, [sender] * count, **kwargs)
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [None if value is None or value is pd.NA or value != value else value for value in series.tolist()]
 
 
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
@@ -105,7 +97,7 @@ def test_gratuitous_is_sender_equals_target(config: Config):
     meta = run(config, payload)
 
     # Claiming your own address is gratuitous; asking about someone else's is ordinary resolution.
-    assert _as_list(meta, "arp_is_gratuitous") == [True, False]
+    assert column_values(meta, "arp_is_gratuitous") == [True, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -114,7 +106,7 @@ def test_a_null_address_is_not_a_claim_of_equality(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "arp_is_gratuitous") == [False, False]
+    assert column_values(meta, "arp_is_gratuitous") == [False, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -122,15 +114,15 @@ def test_no_ratio_below_the_denominator_floor(config: Config):
     # A proportion over two packets is noise, and one gratuitous packet out of one reads as 1.0.
     meta = run(config, gratuitous(4), min_denominator=4)
 
-    assert _as_list(meta, "gratuitous_arp_ratio") == [None, None, None, 1.0]
+    assert column_values(meta, "gratuitous_arp_ratio") == [None, None, None, 1.0]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_poisoning_stream_reads_high(config: Config):
     meta = run(config, gratuitous(6))
 
-    assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
-    assert _as_list(meta, "gratuitous_arp_count")[-1] == 6
+    assert column_values(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
+    assert column_values(meta, "gratuitous_arp_count")[-1] == 6
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -140,7 +132,7 @@ def test_ordinary_resolution_reads_low(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(0.0)
+    assert column_values(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(0.0)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -150,8 +142,8 @@ def test_a_chatty_host_is_not_penalised_for_volume(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "gratuitous_arp_count")[-1] == 1
-    assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(0.125)
+    assert column_values(meta, "gratuitous_arp_count")[-1] == 1
+    assert column_values(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(0.125)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -161,8 +153,8 @@ def test_only_replies_count_by_default(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "arp_is_gratuitous") == [True] * 4
-    assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(0.0)
+    assert column_values(meta, "arp_is_gratuitous") == [True] * 4
+    assert column_values(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(0.0)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -171,7 +163,7 @@ def test_gratuitous_requests_can_be_included(config: Config):
 
     meta = run(config, payload, include_gratuitous_requests=True)
 
-    assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
+    assert column_values(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -181,7 +173,7 @@ def test_opcode_renderings_are_understood(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
+    assert column_values(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -191,8 +183,8 @@ def test_the_proportion_is_taken_per_sender(config: Config):
     meta = run(config, payload)
 
     # The device doing the claiming is what a responder needs to identify, so the share is per sender MAC.
-    assert _as_list(meta, "gratuitous_arp_ratio")[3] == pytest.approx(1.0)
-    assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(0.0)
+    assert column_values(meta, "gratuitous_arp_ratio")[3] == pytest.approx(1.0)
+    assert column_values(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(0.0)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -202,7 +194,7 @@ def test_two_macs_claiming_one_address_are_counted(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "macs_claiming_sender_ip") == [1, 2]
+    assert column_values(meta, "macs_claiming_sender_ip") == [1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -214,8 +206,8 @@ def test_a_redundancy_address_is_marked_rather_than_dropped(config: Config):
 
     meta = run(config, payload, excluded_sender_ips=[GATEWAY])
 
-    assert _as_list(meta, "arp_sender_ip_excluded") == [True, True]
-    assert _as_list(meta, "macs_claiming_sender_ip") == [1, 2]
+    assert column_values(meta, "arp_sender_ip_excluded") == [True, True]
+    assert column_values(meta, "macs_claiming_sender_ip") == [1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -224,7 +216,7 @@ def test_an_unlisted_address_is_not_excluded(config: Config):
 
     meta = run(config, payload, excluded_sender_ips=[GATEWAY])
 
-    assert _as_list(meta, "arp_sender_ip_excluded") == [False]
+    assert column_values(meta, "arp_sender_ip_excluded") == [False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -234,7 +226,7 @@ def test_events_leave_the_window(config: Config):
     meta = run(config, payload, window_seconds=10, min_denominator=1)
 
     # An hour later the burst has expired, so the host reads as a single announcement rather than a flood.
-    assert _as_list(meta, "arp_count_in_window")[-1] == 1
+    assert column_values(meta, "arp_count_in_window")[-1] == 1
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -247,7 +239,7 @@ def test_state_persists_across_messages(config: Config):
     stage.on_data(second)
 
     # The window spans the message boundary, which is the whole reason this stage is stateful.
-    assert _as_list(second, "gratuitous_arp_ratio") == [1.0]
+    assert column_values(second, "gratuitous_arp_ratio") == [1.0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -268,7 +260,7 @@ def test_control_message_accepted(config: Config):
 
     TC2ArpStage(config, min_denominator=4).on_data(message)
 
-    assert _as_list(message.payload(), "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
+    assert column_values(message.payload(), "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -284,7 +276,7 @@ def test_tc2_arp_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
+    assert column_values(messages[0], "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -311,8 +303,8 @@ def test_a_flood_stamped_at_one_second_resolution_is_counted_in_full(config: Con
     # This stage saw one of them and published no ratio at all.
     meta = run(config, gratuitous(20, times=[NS_PER_SECOND] * 20))
 
-    assert _as_list(meta, "arp_count_in_window")[-1] == 20
-    assert _as_list(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
+    assert column_values(meta, "arp_count_in_window")[-1] == 20
+    assert column_values(meta, "gratuitous_arp_ratio")[-1] == pytest.approx(1.0)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -322,10 +314,10 @@ def test_a_null_sender_mac_yields_no_ratio_and_a_null_sender_ip_no_claimant_coun
     payload = frame([GATEWAY, None, GATEWAY], [GATEWAY, GATEWAY, GATEWAY], macs=[None, ATTACKER_MAC, ATTACKER_MAC])
     meta = run(config, payload, min_denominator=1)
 
-    assert _as_list(meta, "arp_count_in_window") == [None, 1, 2]
+    assert column_values(meta, "arp_count_in_window") == [None, 1, 2]
     # A claim needs both an address and a MAC. The first packet has no MAC, so it claims nothing; counting it would
     # make the gateway look contested by a phantom.
-    assert _as_list(meta, "macs_claiming_sender_ip") == [None, None, 1]
+    assert column_values(meta, "macs_claiming_sender_ip") == [None, None, 1]
 
 
 @pytest.mark.cpu_mode
@@ -343,7 +335,7 @@ def test_a_saturated_claimant_count_is_marked_as_a_lower_bound(config: Config):
     }
     meta = run(config, payload, window_seconds=count * 2)
 
-    saturated = _as_list(meta, "macs_claiming_sender_ip_saturated")
+    saturated = column_values(meta, "macs_claiming_sender_ip_saturated")
 
     # Nothing is saturated until the cap actually binds, and once it does the flag says so rather than the count
     # quietly becoming a floor.
@@ -363,8 +355,8 @@ def test_an_unsaturated_measure_says_so_rather_than_carrying_a_null(config: Conf
     }
     meta = run(config, payload)
 
-    assert _as_list(meta, "macs_claiming_sender_ip_saturated") == [False, False]
-    assert _as_list(meta, "gratuitous_arp_ratio_saturated") == [False, False]
+    assert column_values(meta, "macs_claiming_sender_ip_saturated") == [False, False]
+    assert column_values(meta, "gratuitous_arp_ratio_saturated") == [False, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -374,11 +366,11 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
                     times=[0, YEARS_AHEAD_NS, NS_PER_SECOND])
     meta = run(config, payload)
 
-    assert _as_list(meta, "clock_refused") == [False, True, False]
-    assert _as_list(meta, "macs_claiming_sender_ip")[1] is None
+    assert column_values(meta, "clock_refused") == [False, True, False]
+    assert column_values(meta, "macs_claiming_sender_ip")[1] is None
     # Believed, the decade-ahead packet would have emptied the window and the contested address would have read
     # as claimed by one MAC; refused, the router's claim is still there beside the attacker's.
-    assert _as_list(meta, "macs_claiming_sender_ip")[2] == 2
+    assert column_values(meta, "macs_claiming_sender_ip")[2] == 2
 
 
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):

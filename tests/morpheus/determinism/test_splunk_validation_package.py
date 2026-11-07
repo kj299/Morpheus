@@ -39,6 +39,7 @@ import pandas as pd
 import pytest
 
 from morpheus.stages.telemetry.tc7_endpoint_stage import normalize_image_path
+from morpheus.utils import splunk_conf
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 VALIDATE = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "validate")
@@ -58,21 +59,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # pylint: disable=wrong-import-position
 import campaign_pipeline  # noqa: E402
 import endpoint_pipeline  # noqa: E402
+import golden  # noqa: E402
 import session_pipeline as sp  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 
 
-def _stanza_search(name: str) -> str:
+def _search(name: str) -> str:
     """One saved search's SPL, with its continuation lines folded."""
-    import configparser  # pylint: disable=import-outside-toplevel
-
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.read_string(folded)
-
-    return parser[name]["search"]
+    return splunk_conf.search_text(SAVEDSEARCHES, name)
 
 
 def threshold(stanza: str, pattern: str) -> float:
@@ -84,7 +78,7 @@ def threshold(stanza: str, pattern: str) -> float:
     around the number.
     """
 
-    match = re.search(pattern, _stanza_search(stanza))
+    match = re.search(pattern, _search(stanza))
 
     assert match is not None, f"{stanza} no longer states {pattern!r}"
 
@@ -160,7 +154,7 @@ def expected_fixture() -> dict:
 
 @pytest.fixture(name="telemetry", scope="module")
 def telemetry_fixture() -> pd.DataFrame:
-    yield tp.run_pipeline(tp.build_pipeline_config(), tp.build_corpus())
+    yield golden.composed(tp)
 
 
 @pytest.fixture(name="sessions", scope="module")
@@ -168,34 +162,10 @@ def sessions_fixture() -> pd.DataFrame:
     yield sp.run_pipeline(sp.build_pipeline_config(), sp.build_corpus())
 
 
-def _searches() -> set:
-    import configparser
-
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.read_string(folded)
-
-    return {name for name in parser.sections() if parser.has_option(name, "search")}
-
-
-def _search_text(name: str) -> str:
-    import configparser
-
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.read_string(folded)
-
-    return parser[name]["search"]
-
-
 def test_every_shipped_search_has_a_written_expectation(expected: dict):
     # A search with no entry is one nobody has said what to expect from, which on this app means nobody can tell
     # its correct empty result from a broken one.
-    assert set(expected["searches"]) == _searches()
+    assert set(expected["searches"]) == set(splunk_conf.searches(SAVEDSEARCHES))
 
 
 def test_the_detections_return_exactly_what_is_written(expected: dict, telemetry: pd.DataFrame):
@@ -527,10 +497,6 @@ def _peer_tool_pairs() -> set:
     }
 
 
-def _true(frame: pd.DataFrame, column: str) -> pd.Series:
-    return frame[column].astype("boolean").fillna(False)
-
-
 def test_the_principal_baseline_rules_return_exactly_what_is_written(expected: dict, sessions: pd.DataFrame):
     # R-D-L5-007, R-D-L5-008 and R-D-L5-009, each evaluated as its search states it. The three read columns the
     # layer 5 stages had computed for weeks with no search reading any of them.
@@ -538,10 +504,10 @@ def test_the_principal_baseline_rules_return_exactly_what_is_written(expected: d
     searches = expected["searches"]
     success = auth["auth_result"] == "success"
 
-    off_hours = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature") & success]
-    novelty = auth[success & _true(auth, "cadence_mature")
-                   & (_true(auth, "location_first_seen") | _true(auth, "device_first_seen"))]
-    failures = auth[_true(auth, "auth_failed_then_succeeded")
+    off_hours = auth[golden.flags(auth, "hour_unseen") & golden.flags(auth, "cadence_mature") & success]
+    novelty = auth[success & golden.flags(auth, "cadence_mature")
+                   & (golden.flags(auth, "location_first_seen") | golden.flags(auth, "device_first_seen"))]
+    failures = auth[golden.flags(auth, "auth_failed_then_succeeded")
                     & (auth["consecutive_auth_failures"].astype(float) >= FAILURE_RUN_THRESHOLD)]
 
     entry = searches["R-D-L5-007 - Off-hours authentication"]
@@ -583,7 +549,7 @@ def test_the_session_duration_rule_returns_exactly_what_is_written(expected: dic
         "risk_score": severity.get(event.get("ctx_privilege_level"), 40),
     } for event in fires] == entry["key_values"]
 
-    search = _stanza_search("R-B-L5-005 - Session duration anomaly")
+    search = _search("R-B-L5-005 - Session duration anomaly")
 
     for (level, score) in severity.items():
         assert f'ctx_privilege_level == "{level}", {score}' in search
@@ -611,7 +577,7 @@ def test_the_model_rules_return_exactly_what_is_written(expected: dict, sessions
         assert entry["expected_empty"] is False, name
         assert entry["candidate_rows_without_the_gate"] == len(ungated), name
         assert entry["by_principal"] == dict(sorted(collections.Counter(gated["user_principal"]).items())), name
-        assert "model_fallback_used=false" in _stanza_search(name), name
+        assert "model_fallback_used=false" in _search(name), name
 
 
 def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: dict):
@@ -619,12 +585,8 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
     # predictive searches write the lookup the app defines, keyed so a re-run overwrites, and the bulk-access
     # search reads that lookup by the field the writers key it on. The entries R-P-L5-006 writes are recomputed;
     # VALIDATION.md states the count a search head should hold, and it is checked against that here.
-    import configparser  # pylint: disable=import-outside-toplevel
-
-    transforms = configparser.ConfigParser(interpolation=None, strict=False)
-    transforms.read(os.path.join(os.path.dirname(SAVEDSEARCHES), "transforms.conf"))
-    kvstore = configparser.ConfigParser(interpolation=None, strict=False)
-    kvstore.read(os.path.join(os.path.dirname(SAVEDSEARCHES), "collections.conf"))
+    transforms = splunk_conf.read(os.path.join(os.path.dirname(SAVEDSEARCHES), "transforms.conf"))
+    kvstore = splunk_conf.read(os.path.join(os.path.dirname(SAVEDSEARCHES), "collections.conf"))
 
     fields = [name.strip() for name in transforms["principal_watchlist"]["fields_list"].split(",")]
     collection = transforms["principal_watchlist"]["collection"]
@@ -633,14 +595,14 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
     assert {f"field.{name}" for name in fields[1:]} <= set(kvstore[collection])
 
     for name in ("R-P-L5-006 - Drift trajectory", "R-P-L7-006 - Access breadth trajectory"):
-        search = _stanza_search(name)
+        search = _search(name)
 
         assert "outputlookup principal_watchlist append=true key_field=_key" in search, name
 
         for field in fields[1:]:
             assert re.search(rf"\b{field}\b", search), f"{name} writes no {field}"
 
-    assert "lookup principal_watchlist user_principal OUTPUT" in _stanza_search("R-B-L7-002 - Bulk data access")
+    assert "lookup principal_watchlist user_principal OUTPUT" in _search("R-B-L7-002 - Bulk data access")
 
     # The hosts' list is the same contract keyed on the host: the three host trajectory rules write it by key, and the
     # process-ancestry rule reads it by the host its rows name.
@@ -650,7 +612,7 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
     assert {f"field.{name}" for name in host_fields[1:]} <= set(kvstore[transforms["host_watchlist"]["collection"]])
 
     for name in ("R-P-L3-009 - Host drift trajectory", STACK_TRAJECTORY, SUBDOMAIN_TRAJECTORY):
-        host_search = _stanza_search(name)
+        host_search = _search(name)
 
         assert "outputlookup host_watchlist append=true key_field=_key" in host_search, name
 
@@ -659,12 +621,11 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
 
     # The layer 6 and 7 rows name the host through the lease; a row the lease does not cover is keyed on its address.
     for name in (STACK_TRAJECTORY, SUBDOMAIN_TRAJECTORY, PATH_TRAJECTORY):
-        assert "host_key = coalesce(host_key, src_ip)" in _stanza_search(name), name
+        assert "host_key = coalesce(host_key, src_ip)" in _search(name), name
 
-    assert "host_key = coalesce(host_key, endpoint_host)" in _stanza_search(BREADTH_TRAJECTORY)
+    assert "host_key = coalesce(host_key, endpoint_host)" in _search(BREADTH_TRAJECTORY)
 
-    assert "lookup host_watchlist host_key AS endpoint_host OUTPUT" in _stanza_search(
-        "R-B-L7-004 - Process ancestry novelty")
+    assert "lookup host_watchlist host_key AS endpoint_host OUTPUT" in _search("R-B-L7-004 - Process ancestry novelty")
 
     drift = expected["searches"]["R-P-L5-006 - Drift trajectory"]
     breadth = expected["searches"]["R-P-L7-006 - Access breadth trajectory"]
@@ -1169,7 +1130,7 @@ def test_the_tls_table_coverage_counts_exactly_what_is_written(expected: dict):
     handshakes = [event for event in _events_of("morpheus_score_l6.jsonlines") if event.get("window_complete") is True]
     entry = expected["searches"]["TLS table coverage - unrecognized values"]
     written = entry["key_values"]
-    search = _stanza_search("TLS table coverage - unrecognized values")
+    search = _search("TLS table coverage - unrecognized values")
 
     for column in ("cipher_unrecognized", "content_category_unclassified"):
         assert f'if({column}="true", 1, 0)' in search, column
@@ -1546,7 +1507,7 @@ def _events_read_by(name: str) -> list:
     rows and `morpheus:score:*` those and the host segment's. Chain assembly reads the former, because the host
     frame is one layer with nothing to chain; the summary reads the latter, so a machine has a `peak_z`.
     """
-    glob = re.search(r"sourcetype=morpheus:score:(\S+)", _search_text(name)).group(1)
+    glob = re.search(r"sourcetype=morpheus:score:(\S+)", _search(name)).group(1)
     prefix = "morpheus_score_" + glob.rstrip("*")
 
     return [
@@ -1625,7 +1586,7 @@ def test_the_fan_out_trajectory_returns_exactly_what_is_written(expected: dict):
     # `previous_destinations`, which Splunk evaluates as null on every row. The search now takes two passes, and
     # the runner dispatches it after the summary is searchable.
 
-    search = _search_text("R-P-L3-005 - Fan-out trajectory")
+    search = _search("R-P-L3-005 - Fan-out trajectory")
     passes = re.findall(r"streamstats current=f last\((\w+)\) AS (\w+) BY entity_key", search)
 
     assert passes == [("peak_destinations", "previous_destinations"), ("previous_destinations", "earlier_destinations")]
@@ -1653,7 +1614,7 @@ def test_the_chain_assembly_returns_the_tapped_desk_and_not_the_flooding_host(ex
     # search-head run records the per-chain totals.
 
     entry = expected["searches"]["Chain assembly - cross-layer risk"]
-    chain = _search_text("Chain assembly - cross-layer risk")
+    chain = _search("Chain assembly - cross-layer risk")
     events = _events_read_by("Chain assembly - cross-layer risk")
 
     with open(os.path.join(EVENTS, "morpheus_edge.jsonlines"), encoding="utf-8") as handle:
@@ -2282,9 +2243,9 @@ def _notables(rule_id: str) -> list:
 
 
 def _risk_score(rule_id: str) -> float:
-    stanza = next(name for name in _searches() if name.startswith(rule_id + " "))
+    stanza = next(name for name in set(splunk_conf.searches(SAVEDSEARCHES)) if name.startswith(rule_id + " "))
 
-    return float(re.search(r'rule_id = "' + rule_id + r'", risk_score = (\d+)', _search_text(stanza)).group(1))
+    return float(re.search(r'rule_id = "' + rule_id + r'", risk_score = (\d+)', _search(stanza)).group(1))
 
 
 def test_the_new_layer_1_detections_return_exactly_what_is_written(expected: dict):
@@ -2394,13 +2355,7 @@ def test_no_scored_event_reaches_the_detections_from_an_incomplete_window():
 
 
 def test_every_detection_reads_only_complete_windows():
-    import configparser  # pylint: disable=import-outside-toplevel
-
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.read_string(folded)
+    parser = splunk_conf.read(SAVEDSEARCHES)
 
     for name in parser.sections():
         query = parser[name].get("search", "")
@@ -2602,7 +2557,7 @@ def test_each_binding_refresh_fills_its_lookup(expected: dict):
         assert len({(row[key], row["bucket"]) for row in rows}) == len(rows), f"{table}: one row per key and bucket"
         assert entry["expected_rows"] == len(rows) and entry["expected_empty"] is False, search
 
-        stanza = _search_text(search)
+        stanza = _search(search)
 
         assert f"binding_table={table}" in stanza and "key_field=_key" in stanza, search
 
@@ -2671,7 +2626,7 @@ def _kept_by_the_run(age_seconds: float, retention_seconds: float, bucket_second
 
 def _watchlist_terms(name: str) -> tuple:
     """A predictive rule's `reason` and how long its entries live, as its stanza states them."""
-    search = _stanza_search(name)
+    search = _search(name)
 
     return (re.search(r'reason = "([\w-]+)"', search).group(1),
             float(re.search(r"expires = _time \+ (\d+)", search).group(1)))
@@ -2796,7 +2751,7 @@ def _asserts_the_expiry_keeps_what_is_written(name: str, entries: list, expected
     dropped = [entry for entry in entries if entry not in kept]
     written = expected["searches"][name]
 
-    assert "where expires >= now()" in _stanza_search(name)
+    assert "where expires >= now()" in _search(name)
     assert collections.Counter(entry["rule_id"] for entry in entries) == {
         rule_id: expected["searches"][writer]["expected_rows"] for (rule_id, writer) in writers.items()
     }, "the lists hold one entry per row the writers return"
@@ -2849,7 +2804,7 @@ def test_the_l5_l2_expiry_keeps_exactly_what_is_written(expected: dict):
     reproduced is the store: a search head's lookup also holds what earlier refreshes appended.
     """
     name = "Binding lookup - L5/L2 expiry"
-    search = _stanza_search(name)
+    search = _search(name)
     retention = float(re.search(r"bucket >= floor\(\(now\(\) - (\d+)\)", search).group(1))
     bucket_seconds = float(re.search(r"now\(\) - \d+\) / (\d+)\)", search).group(1))
     rows = _bucketed("dot1x_supplicant")

@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -55,16 +56,6 @@ def make_stage(config: Config, **kwargs) -> TC1NormalizeStage:
     defaults.update(kwargs)
 
     return TC1NormalizeStage(config, **defaults)
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    """Read a column as host values, with every flavour of missing collapsed to `None`."""
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [None if value is None or value is pd.NA or value != value else value for value in series.tolist()]
 
 
 @pytest.fixture(name="samples_df")
@@ -110,10 +101,10 @@ def test_tc1_normalize_stage_pipe(config: Config, samples_df):
     messages = sink.get_messages()
     assert len(messages) == 1
 
-    assert _as_list(messages[0], "entity_key") == ["hq:sw1:Gi1/0/1"] * 3
+    assert column_values(messages[0], "entity_key") == ["hq:sw1:Gi1/0/1"] * 3
     # First sample has no predecessor, second is a steady increase, third follows a reboot.
-    assert _as_list(messages[0], "crc_errors_delta") == [None, 42, 7]
-    assert _as_list(messages[0], "counter_reset") == [False, False, True]
+    assert column_values(messages[0], "crc_errors_delta") == [None, 42, 7]
+    assert column_values(messages[0], "counter_reset") == [False, False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -133,7 +124,7 @@ def test_entity_key_composes_the_three_identifiers(config: Config):
 
     make_stage(config).on_data(meta)
 
-    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/1", "dc2:sw9:Te1/1/4"]
+    assert column_values(meta, "entity_key") == ["hq:sw1:Gi1/0/1", "dc2:sw9:Te1/1/4"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -144,7 +135,7 @@ def test_interval_is_capped_at_uptime_after_a_reset(config: Config, samples_df):
 
     # The third sample follows a reboot 30 seconds before it, so its counters cover 30 seconds, not the 60 second
     # polling gap. A rate computed against the gap would understate the error burst by half.
-    assert _as_list(meta, "interval_seconds") == [None, 60.0, 30.0]
+    assert column_values(meta, "interval_seconds") == [None, 60.0, 30.0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -165,9 +156,9 @@ def test_thirty_two_bit_wrap_is_corrected(config: Config):
 
     make_stage(config, counter32_columns=["crc_errors"]).on_data(meta)
 
-    assert _as_list(meta, "crc_errors_delta") == [None, 15]
-    assert _as_list(meta, "counter_wrapped") == [False, True]
-    assert _as_list(meta, "counter_reset") == [False, False]
+    assert column_values(meta, "crc_errors_delta") == [None, 15]
+    assert column_values(meta, "counter_wrapped") == [False, True]
+    assert column_values(meta, "counter_reset") == [False, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -188,7 +179,7 @@ def test_ports_do_not_contaminate_each_other(config: Config):
 
     make_stage(config).on_data(meta)
 
-    assert _as_list(meta, "crc_errors_delta") == [None, None, 10, 1]
+    assert column_values(meta, "crc_errors_delta") == [None, None, 10, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -210,8 +201,8 @@ def test_out_of_order_sample_is_flagged_not_negated(config: Config):
     make_stage(config).on_data(meta)
 
     # A naive subtraction would report minus fifty errors for the late sample.
-    assert _as_list(meta, "sample_out_of_order") == [False, False, True]
-    assert _as_list(meta, "crc_errors_delta") == [None, 100, None]
+    assert column_values(meta, "sample_out_of_order") == [False, False, True]
+    assert column_values(meta, "crc_errors_delta") == [None, 100, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -231,8 +222,8 @@ def test_decrease_without_uptime_yields_no_delta(config: Config):
 
     make_stage(config, uptime_column=None).on_data(meta)
 
-    assert _as_list(meta, "counter_reset") == [False, True]
-    assert _as_list(meta, "crc_errors_delta") == [None, None]
+    assert column_values(meta, "counter_reset") == [False, True]
+    assert column_values(meta, "crc_errors_delta") == [None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -258,7 +249,7 @@ def test_state_persists_across_messages(config: Config):
     stage.on_data(second)
 
     # The delta spans the message boundary, which is the whole reason this stage is stateful.
-    assert _as_list(second, "crc_errors_delta") == [30]
+    assert column_values(second, "crc_errors_delta") == [30]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -281,7 +272,7 @@ def test_raw_counters_are_preserved(config: Config, samples_df):
 
     make_stage(config).on_data(meta)
 
-    assert _as_list(meta, "crc_errors") == [100, 142, 7]
+    assert column_values(meta, "crc_errors") == [100, 142, 7]
     assert meta.count == 3
 
 
@@ -292,7 +283,7 @@ def test_control_message_accepted(config: Config, samples_df):
 
     make_stage(config).on_data(message)
 
-    assert _as_list(message.payload(), "entity_key")[0] == "hq:sw1:Gi1/0/1"
+    assert column_values(message.payload(), "entity_key")[0] == "hq:sw1:Gi1/0/1"
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -325,13 +316,13 @@ def test_a_missing_key_part_yields_a_null_key_not_the_string_none(config: Config
     meta = MessageMeta(get_df_class(config.execution_mode)(payload))
     make_stage(config).on_data(meta)
 
-    keys = _as_list(meta, "entity_key")
+    keys = column_values(meta, "entity_key")
     assert keys[0] is None
     assert keys[1] == "hq:sw1:Gi1/0/1"
     # The keyless row differenced nothing, and the keyed rows are not confused by it: the second row is the first
     # sighting of its own key, so it carries no delta either, and the third differences against the second.
-    assert _as_list(meta, "crc_errors_delta")[0] is None
-    assert _as_list(meta, "sample_out_of_order")[0] is False
+    assert column_values(meta, "crc_errors_delta")[0] is None
+    assert column_values(meta, "sample_out_of_order")[0] is False
 
 
 def test_needed_columns_include_the_traffic_counters_and_the_link(config: Config):
@@ -354,9 +345,9 @@ def test_traffic_counters_are_differenced_where_the_collector_sends_them(config:
 
     make_stage(config).on_data(meta)
 
-    assert _as_list(meta, "if_hc_in_octets_delta") == [None, 750, 40]
-    assert _as_list(meta, "if_hc_out_octets_delta") == [None, 10, 0]
-    assert _as_list(meta, "counter_wrapped") == [False, False, False]
+    assert column_values(meta, "if_hc_in_octets_delta") == [None, 750, 40]
+    assert column_values(meta, "if_hc_out_octets_delta") == [None, 10, 0]
+    assert column_values(meta, "counter_wrapped") == [False, False, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -365,8 +356,8 @@ def test_a_port_without_traffic_counters_still_scores_and_says_nothing_about_tra
 
     make_stage(config).on_data(meta)
 
-    assert _as_list(meta, "crc_errors_delta") == [None, 42, 7]
-    assert _as_list(meta, "if_hc_in_octets_delta") == [None, None, None]
+    assert column_values(meta, "crc_errors_delta") == [None, 42, 7]
+    assert column_values(meta, "if_hc_in_octets_delta") == [None, None, None]
 
 
 def test_a_traffic_counter_cannot_also_be_an_error_counter(config: Config):
@@ -387,7 +378,7 @@ def test_the_link_is_the_port_and_its_neighbour(config: Config):
     make_stage(config).on_data(meta)
 
     # A neighbour the switch has not relearned since it came back is not a link to nobody in particular.
-    assert _as_list(meta, "link_key") == ["hq:sw1:Gi1/0/1|sw3:Gi3/0/1", "hq:sw1:Gi1/0/1|sw3:Gi3/0/1", None]
+    assert column_values(meta, "link_key") == ["hq:sw1:Gi1/0/1|sw3:Gi3/0/1", "hq:sw1:Gi1/0/1|sw3:Gi3/0/1", None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -396,7 +387,7 @@ def test_a_collector_without_lldp_carries_no_link(config: Config, samples_df):
 
     make_stage(config).on_data(meta)
 
-    assert _as_list(meta, "link_key") == [None, None, None]
+    assert column_values(meta, "link_key") == [None, None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -408,11 +399,11 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
     meta = MessageMeta(get_df_class(config.execution_mode)(payload))
     make_stage(config).on_data(meta)
 
-    assert _as_list(meta, "clock_refused") == [False, True, False]
+    assert column_values(meta, "clock_refused") == [False, True, False]
     # Believed, the decade-ahead sample would have become the port's previous one, and the honest sample after it
     # would have read as out of order with no delta.
-    assert _as_list(meta, "crc_errors_delta") == [None, None, 42]
-    assert _as_list(meta, "sample_out_of_order") == [False, False, False]
+    assert column_values(meta, "crc_errors_delta") == [None, None, 42]
+    assert column_values(meta, "sample_out_of_order") == [False, False, False]
 
 
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):
@@ -446,11 +437,11 @@ def test_a_renamed_port_keeps_its_key_and_its_history(config: Config):
     meta = MessageMeta(get_df_class(config.execution_mode)(_renamed_samples()))
     make_stage(config, port_anchor_column="if_index").on_data(meta)
 
-    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 4
+    assert column_values(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 4
     # Unanchored, the third poll would be a new port's first sample, with no delta.
-    assert _as_list(meta, "crc_errors_delta") == [None, 10, 15, 6]
-    assert _as_list(meta, "reported_entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
-    assert _as_list(meta, "identity_renamed") == [False, False, True, True]
+    assert column_values(meta, "crc_errors_delta") == [None, 10, 15, 6]
+    assert column_values(meta, "reported_entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
+    assert column_values(meta, "identity_renamed") == [False, False, True, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -459,8 +450,8 @@ def test_without_an_anchor_a_rename_is_a_new_port_as_before(config: Config):
     stage = make_stage(config)
     stage.on_data(meta)
 
-    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
-    assert _as_list(meta, "crc_errors_delta") == [None, 10, None, 6]
+    assert column_values(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
+    assert column_values(meta, "crc_errors_delta") == [None, 10, None, 6]
     # The columns that describe an anchor exist only where one is configured.
     assert "reported_entity_key" not in meta.get_column_names()
     assert "identity_renamed" not in stage.get_needed_columns()
@@ -472,9 +463,9 @@ def test_a_rehostnamed_switch_keeps_its_ports(config: Config):
     meta = MessageMeta(get_df_class(config.execution_mode)(samples))
     make_stage(config, device_anchor_column="chassis_serial").on_data(meta)
 
-    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 4
-    assert _as_list(meta, "crc_errors_delta") == [None, 10, 15, 6]
-    assert _as_list(meta, "identity_renamed") == [False, False, True, True]
+    assert column_values(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 4
+    assert column_values(meta, "crc_errors_delta") == [None, 10, 15, 6]
+    assert column_values(meta, "identity_renamed") == [False, False, True, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -494,7 +485,7 @@ def test_the_port_anchor_is_scoped_to_its_device(config: Config):
     meta = MessageMeta(get_df_class(config.execution_mode)(samples))
     make_stage(config, port_anchor_column="if_index").on_data(meta)
 
-    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5", "hq:sw2:Gi1/0/9"]
+    assert column_values(meta, "entity_key") == ["hq:sw1:Gi1/0/5", "hq:sw2:Gi1/0/9"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -502,8 +493,8 @@ def test_a_row_without_an_anchor_keeps_its_reported_name(config: Config):
     meta = MessageMeta(get_df_class(config.execution_mode)(_renamed_samples(if_index=[10105, 10105, None, None])))
     make_stage(config, port_anchor_column="if_index").on_data(meta)
 
-    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
-    assert _as_list(meta, "identity_renamed") == [False] * 4
+    assert column_values(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
+    assert column_values(meta, "identity_renamed") == [False] * 4
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -513,7 +504,7 @@ def test_an_anchor_column_the_collector_did_not_send_is_no_anchor(config: Config
     meta = MessageMeta(get_df_class(config.execution_mode)(samples))
     make_stage(config, port_anchor_column="if_index").on_data(meta)
 
-    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
+    assert column_values(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2 + ["hq:sw1:uplink-core-2"] * 2
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -535,9 +526,9 @@ def test_a_refused_sample_teaches_the_anchor_nothing(config: Config):
     meta = MessageMeta(get_df_class(config.execution_mode)(samples))
     make_stage(config, port_anchor_column="if_index").on_data(meta)
 
-    assert _as_list(meta, "clock_refused") == [False, True, False, False]
-    assert _as_list(meta,
-                    "entity_key") == ["hq:sw1:Gi1/0/1", "hq:sw1:uplink-core-2", "hq:sw1:Gi1/0/5", "hq:sw1:Gi1/0/5"]
+    assert column_values(meta, "clock_refused") == [False, True, False, False]
+    assert column_values(
+        meta, "entity_key") == ["hq:sw1:Gi1/0/1", "hq:sw1:uplink-core-2", "hq:sw1:Gi1/0/5", "hq:sw1:Gi1/0/5"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -547,7 +538,7 @@ def test_the_link_is_named_from_the_anchored_port(config: Config):
     make_stage(config, port_anchor_column="if_index").on_data(meta)
 
     # A rename on the near end is not a re-patch, so the link the adjacency lookup is keyed on does not change.
-    assert set(_as_list(meta, "link_key")) == {"core2:Te1/1/1|hq:sw1:Gi1/0/5"}
+    assert set(column_values(meta, "link_key")) == {"core2:Te1/1/1|hq:sw1:Gi1/0/5"}
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -565,5 +556,5 @@ def test_the_anchors_survive_a_checkpoint(config: Config):
     meta = MessageMeta(df_class(second_half))
     resumed.on_data(meta)
 
-    assert _as_list(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2
-    assert _as_list(meta, "crc_errors_delta") == [15, 6]
+    assert column_values(meta, "entity_key") == ["hq:sw1:Gi1/0/5"] * 2
+    assert column_values(meta, "crc_errors_delta") == [15, 6]

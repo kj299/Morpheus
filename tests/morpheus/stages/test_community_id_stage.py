@@ -16,6 +16,7 @@
 
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -47,15 +48,6 @@ def flow_df_fixture(config: Config):
     yield get_df_class(config.execution_mode)(FLOW_DATA)
 
 
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return series.tolist()
-
-
 def test_execution_modes(config: Config):
     assert issubclass(CommunityIdStage, GpuAndCpuMixin)
 
@@ -82,7 +74,7 @@ def test_community_id_stage_pipe(config: Config, flow_df):
     messages = sink.get_messages()
     assert len(messages) == 1
 
-    values = _as_list(messages[0], "community_id")
+    values = column_values(messages[0], "community_id", nulls=False)
 
     assert len(values) == 3
     assert values[0] == EXPECTED_TCP_ID
@@ -97,7 +89,7 @@ def test_on_data_accepts_message_meta(config: Config, flow_df):
 
     CommunityIdStage(config).on_data(meta)
 
-    assert _as_list(meta, "community_id")[0] == EXPECTED_TCP_ID
+    assert column_values(meta, "community_id", nulls=False)[0] == EXPECTED_TCP_ID
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -107,7 +99,7 @@ def test_on_data_accepts_control_message(config: Config, flow_df):
 
     CommunityIdStage(config).on_data(message)
 
-    assert _as_list(message.payload(), "community_id")[0] == EXPECTED_TCP_ID
+    assert column_values(message.payload(), "community_id", nulls=False)[0] == EXPECTED_TCP_ID
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -127,7 +119,7 @@ def test_portless_protocol(config: Config):
 
     CommunityIdStage(config, src_port_column=None, dst_port_column=None).on_data(meta)
 
-    assert _as_list(meta, "community_id") == [community_id("10.1.2.3", "10.4.5.6", 47)]
+    assert column_values(meta, "community_id", nulls=False) == [community_id("10.1.2.3", "10.4.5.6", 47)]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -146,7 +138,8 @@ def test_custom_columns_seed_and_rendering(config: Config):
                              output_column="cid")
     stage.on_data(meta)
 
-    assert _as_list(meta, "cid") == [community_id("10.0.0.1", "10.0.0.2", 6, 1, 2, seed=7, use_base64=False)]
+    assert column_values(meta, "cid",
+                         nulls=False) == [community_id("10.0.0.1", "10.0.0.2", 6, 1, 2, seed=7, use_base64=False)]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -172,7 +165,7 @@ def test_malformed_row_does_not_discard_the_batch(config: Config):
 
     CommunityIdStage(config).on_data(meta)
 
-    values = _as_list(meta, "community_id")
+    values = column_values(meta, "community_id", nulls=False)
 
     assert values[0] is None
     assert values[1] == community_id("10.0.0.1", "10.0.0.2", 6, 1, 2)

@@ -28,26 +28,23 @@ run anywhere in them, and how many different role assignments they carry.
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
 import pytest
 
 from morpheus.config import Config
+from morpheus.utils import splunk_conf
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
-from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import envelope  # noqa: E402
+import golden  # noqa: E402
 import saas_pipeline as sp_  # noqa: E402
 
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_saas_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_saas_pipeline.py")
 SAVEDSEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "..",
                              "..",
@@ -129,7 +126,9 @@ def _watchlist_boost() -> int:
     """The severity R-B-L7-002 adds for a watched principal, read from the search rather than repeated here."""
     import re  # pylint: disable=import-outside-toplevel
 
-    return int(re.search(r"watchlist_boost\s*=\s*(\d+)", _search("R-B-L7-002 - Bulk data access")).group(1))
+    return int(
+        re.search(r"watchlist_boost\s*=\s*(\d+)",
+                  splunk_conf.search_text(SAVEDSEARCHES, "R-B-L7-002 - Bulk data access")).group(1))
 
 
 def _creeping(result: pd.DataFrame, role: bool = True) -> dict:
@@ -153,24 +152,6 @@ def _creeping(result: pd.DataFrame, role: bool = True) -> dict:
                 fired.setdefault(principal, []).append(week)
 
     return fired
-
-
-def _split(frame: pd.DataFrame, parts: int) -> list:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _permuted(corpus: dict, seed: int) -> dict:
-    period_ns = sp_.PERIOD_SECONDS * sp_.NS_PER_SECOND
-
-    return {
-        name:
-            permute_within_contiguous_groups(frame,
-                                             [window_id_from_timestamp(int(t), period_ns) for t in frame["event_time"]],
-                                             seed=seed)
-        for (name, frame) in corpus.items()
-    }
 
 
 # --- Check 1: the corpus is fixed and shaped like a SaaS audit log ---------------------------------------------
@@ -211,41 +192,20 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("saas", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = sp_.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO  # pylint: disable=import-outside-toplevel
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is "
-                    f"intended, regenerate the golden with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("saas", sp_.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, sp_.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, sp_.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
@@ -254,7 +214,7 @@ def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFra
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2, 3):
-        assert diff_frames(result, sp_.run_pipeline(pipeline_config, _permuted(corpus, seed))) is None, seed
+        assert diff_frames(result, sp_.run_pipeline(pipeline_config, golden.permuted(corpus, seed, sp_.PERIOD_SECONDS))) is None, seed
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -262,7 +222,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     # The negative control for the check above. The weekly tally is a running count, so without the imposed order
     # the count a row carries depends on which rows of its week arrived first.
     ordered = sp_.run_pipeline(pipeline_config, corpus, impose_order=False)
-    shuffled = sp_.run_pipeline(pipeline_config, _permuted(corpus, 5), impose_order=False)
+    shuffled = sp_.run_pipeline(pipeline_config, golden.permuted(corpus, 5, sp_.PERIOD_SECONDS), impose_order=False)
 
     assert diff_frames(ordered, shuffled) is not None
 
@@ -398,19 +358,12 @@ def test_a_role_change_recorded_late_is_watchlisted_on_what_was_known_and_would_
 # --- Minimization, and the searches as shipped -----------------------------------------------------------------
 
 
-def _search(name: str) -> str:
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    return text.split(f"[{name}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
-
-
 def test_neither_saas_rule_reads_the_object_name():
     # `target_object` is the name of what was read -- a file, a site, a record -- and routinely personal. Neither
     # rule needs it: the classification it would be looked up by is attached upstream, so an estate can drop or
     # pseudonymize the name at the wire and keep both rules.
     for name in ("R-B-L7-002 - Bulk data access", "R-P-L7-006 - Access breadth trajectory"):
-        search = _search(name)
+        search = splunk_conf.search_text(SAVEDSEARCHES, name)
 
         assert "target_object " not in search and not search.rstrip().endswith("target_object"), name
         assert "target_object," not in search, name
@@ -421,7 +374,7 @@ def test_the_breadth_rule_writes_one_watchlist_entry_per_principal(result: pd.Da
     # R-P-L7-006 puts a principal on watch by writing the principal_watchlist lookup: one entry per principal and
     # rule, so the weekly re-run overwrites rather than duplicates, with the reason the bulk rule reports beside
     # the notable. The entries are what the search's last two commands write from the principals it returns.
-    breadth = _search("R-P-L7-006 - Access breadth trajectory")
+    breadth = splunk_conf.search_text(SAVEDSEARCHES, "R-P-L7-006 - Access breadth trajectory")
 
     assert '_key = user_principal . ":" . rule_id' in breadth
     assert 'reason = "access-breadth"' in breadth
@@ -453,8 +406,8 @@ def test_a_watched_principal_s_export_is_reported_more_loudly_and_still_only_whe
 
 
 def test_the_searches_carry_the_thresholds_this_harness_asserts():
-    bulk = _search("R-B-L7-002 - Bulk data access")
-    breadth = _search("R-P-L7-006 - Access breadth trajectory")
+    bulk = splunk_conf.search_text(SAVEDSEARCHES, "R-B-L7-002 - Bulk data access")
+    breadth = splunk_conf.search_text(SAVEDSEARCHES, "R-P-L7-006 - Access breadth trajectory")
 
     assert f"saas_record_ratio>{int(sp_.RECORD_MULTIPLE)}" in bulk
     assert "saas_baseline_mature=true" in bulk

@@ -46,6 +46,8 @@ import re
 
 import pytest
 
+from morpheus.utils import splunk_conf
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 DOCUMENTS = {
     "README":
@@ -244,8 +246,7 @@ SAVED_SEARCHES = os.path.join(REPO_ROOT,
                               "savedsearches.conf")
 REGISTERED_STAGE = re.compile(r"^@register_stage\(.*?\n(?:.*\n)*?class\s+(\w+)\(", re.MULTILINE)
 """A `@register_stage` decorator and the class it decorates, however many decorator lines sit between them."""
-RULE_STANZA = re.compile(r"^\[(R-[A-Z]-(?:L\d-)?\d{3}) - ", re.MULTILINE)
-ANY_STANZA = re.compile(r"^\[", re.MULTILINE)
+RULE_STANZA = re.compile(r"(R-[A-Z]-(?:L\d-)?\d{3}) - ")
 RULE_ID = re.compile(r"\bR-[A-Z]-(?:L\d-)?\d{3}\b")
 
 
@@ -283,10 +284,9 @@ def test_the_stages_page_names_every_stage_this_fork_registers():
 
 def shipped_rules() -> tuple:
     """The rule stanzas in the app and the stanza total, read from savedsearches.conf."""
-    with open(SAVED_SEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
+    names = splunk_conf.stanzas(SAVED_SEARCHES)
 
-    return (sorted(set(RULE_STANZA.findall(text))), len(ANY_STANZA.findall(text)))
+    return (sorted({match.group(1) for match in map(RULE_STANZA.match, names) if match}), len(names))
 
 
 def specified_rules() -> list:

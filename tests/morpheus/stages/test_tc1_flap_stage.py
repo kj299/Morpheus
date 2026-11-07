@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -48,15 +49,6 @@ def frame(statuses: list, last_changes: list = None, entity: str = "hq:sw1:Gi1/0
         payload["last_change_time"] = last_changes
 
     return payload
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [None if value is None or value is pd.NA or value != value else value for value in series.tolist()]
 
 
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
@@ -95,8 +87,8 @@ def test_cli_command_builds():
 def test_a_stable_port_never_counts(config: Config):
     meta = run(config, frame(["up"] * 4, last_changes=[0] * 4))
 
-    assert _as_list(meta, "link_flaps") == [None, 0, 0, 0]
-    assert _as_list(meta, "link_flaps_in_window") == [None, 0, 0, 0]
+    assert column_values(meta, "link_flaps") == [None, 0, 0, 0]
+    assert column_values(meta, "link_flaps_in_window") == [None, 0, 0, 0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -105,16 +97,16 @@ def test_a_flap_inside_the_polling_gap_is_counted(config: Config):
     # them, which is the flapping port a naive diff misses.
     meta = run(config, frame(["up", "up"], last_changes=[0, 30 * NS_PER_SECOND]))
 
-    assert _as_list(meta, "link_flaps") == [None, 2]
-    assert _as_list(meta, "link_flap_unpolled") == [False, True]
+    assert column_values(meta, "link_flaps") == [None, 2]
+    assert column_values(meta, "link_flap_unpolled") == [False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_visible_transition_counts_once(config: Config):
     meta = run(config, frame(["up", "down"], last_changes=[0, 30 * NS_PER_SECOND]))
 
-    assert _as_list(meta, "link_flaps") == [None, 1]
-    assert _as_list(meta, "link_flap_unpolled") == [False, False]
+    assert column_values(meta, "link_flaps") == [None, 1]
+    assert column_values(meta, "link_flap_unpolled") == [False, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -124,7 +116,7 @@ def test_without_last_change_only_visible_transitions_are_seen(config: Config):
 
     meta = run(config, payload, last_change_column=None)
 
-    assert _as_list(meta, "link_flaps") == [None, 0, 1]
+    assert column_values(meta, "link_flaps") == [None, 0, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -133,23 +125,23 @@ def test_a_device_reboot_is_counted_and_labelled(config: Config):
 
     # Two transitions, because the link went down with the device and came back, but labelled so a rule can
     # exclude a planned reboot rather than having it silently inflate flap counts.
-    assert _as_list(meta, "link_flaps") == [None, 2]
-    assert _as_list(meta, "link_flap_device_reset") == [False, True]
+    assert column_values(meta, "link_flaps") == [None, 2]
+    assert column_values(meta, "link_flap_device_reset") == [False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_self_contradicting_device_is_flagged(config: Config):
     meta = run(config, frame(["up", "down"], last_changes=[1000, 1000]))
 
-    assert _as_list(meta, "link_flaps") == [None, 1]
-    assert _as_list(meta, "link_flap_last_change_inconsistent") == [False, True]
+    assert column_values(meta, "link_flaps") == [None, 1]
+    assert column_values(meta, "link_flap_last_change_inconsistent") == [False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_window_accumulates(config: Config):
     meta = run(config, frame(["up", "down", "up", "down"], last_changes=[0, MINUTE_NS, 2 * MINUTE_NS, 3 * MINUTE_NS]))
 
-    assert _as_list(meta, "link_flaps_in_window") == [None, 1, 2, 3]
+    assert column_values(meta, "link_flaps_in_window") == [None, 1, 2, 3]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -165,7 +157,7 @@ def test_the_window_expires(config: Config):
 
     # The transition aged out of the ten-minute window, so the port reads as quiet again rather than carrying its
     # history forever.
-    assert _as_list(meta, "link_flaps_in_window") == [None, 1, 0]
+    assert column_values(meta, "link_flaps_in_window") == [None, 1, 0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -179,7 +171,7 @@ def test_ports_are_counted_separately(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "link_flaps") == [None, None, 1, 0]
+    assert column_values(meta, "link_flaps") == [None, None, 1, 0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -201,7 +193,7 @@ def test_state_persists_across_messages(config: Config):
     stage.on_data(second)
 
     # The comparison spans the message boundary, which is the whole reason this stage is stateful.
-    assert _as_list(second, "link_flaps") == [1]
+    assert column_values(second, "link_flaps") == [1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -225,7 +217,7 @@ def test_control_message_accepted(config: Config):
 
     TC1FlapStage(config, last_change_column="last_change_time").on_data(message)
 
-    assert _as_list(message.payload(), "link_flaps") == [None, 1]
+    assert column_values(message.payload(), "link_flaps") == [None, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -242,7 +234,7 @@ def test_tc1_flap_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "link_flaps_in_window") == [None, 2, 3]
+    assert column_values(messages[0], "link_flaps_in_window") == [None, 2, 3]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -265,8 +257,8 @@ def test_null_entity_keys_do_not_share_a_flap_count(config: Config):
     # every other one, and a segment of stable ports reports a storm that no port had.
     meta = run(config, frame(["up", "down", "up", "down"], entity=None))
 
-    assert _as_list(meta, "link_flaps") == [None, None, None, None]
-    assert _as_list(meta, "link_flaps_in_window") == [None, None, None, None]
+    assert column_values(meta, "link_flaps") == [None, None, None, None]
+    assert column_values(meta, "link_flaps_in_window") == [None, None, None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -275,10 +267,10 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
     payload["event_time"] = [0, MINUTE_NS, YEARS_AHEAD_NS, 2 * MINUTE_NS]
     meta = run(config, payload)
 
-    assert _as_list(meta, "clock_refused") == [False, False, True, False]
-    assert _as_list(meta, "link_flaps")[2] is None
+    assert column_values(meta, "clock_refused") == [False, False, True, False]
+    assert column_values(meta, "link_flaps")[2] is None
     # The poll after it is compared with the one before it, and the port never went down.
-    assert _as_list(meta, "link_flaps")[3] == 0
+    assert column_values(meta, "link_flaps")[3] == 0
 
 
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):

@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
@@ -50,15 +51,6 @@ def frame(results: list,
     }
 
 
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [None if pd.isna(value) else value for value in series.tolist()]
-
-
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
     meta = MessageMeta(get_df_class(config.execution_mode)(payload))
     TC5RiskStage(config, **kwargs).on_data(meta)
@@ -79,10 +71,10 @@ def test_the_mfa_fatigue_shape_is_readable_off_the_approving_row(config: Config)
     # Every part of the rule has to be readable off one row, or the rule cannot be written as a search.
     meta = run(config, fatigue())
 
-    assert _as_list(meta, "mfa_attempts_in_window")[-1] == 5
-    assert _as_list(meta, "mfa_denials_in_window")[-1] == 4
-    assert _as_list(meta, "consecutive_mfa_denials")[-1] == 4
-    assert _as_list(meta, "mfa_denied_then_approved")[-1] is True
+    assert column_values(meta, "mfa_attempts_in_window")[-1] == 5
+    assert column_values(meta, "mfa_denials_in_window")[-1] == 4
+    assert column_values(meta, "consecutive_mfa_denials")[-1] == 4
+    assert column_values(meta, "mfa_denied_then_approved")[-1] is True
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -91,7 +83,7 @@ def test_the_denials_alone_never_report_the_pattern(config: Config):
     # fumbles a prompt.
     meta = run(config, fatigue())
 
-    assert _as_list(meta, "mfa_denied_then_approved")[:4] == [False] * 4
+    assert column_values(meta, "mfa_denied_then_approved")[:4] == [False] * 4
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -104,8 +96,8 @@ def test_denials_need_not_be_contiguous_to_be_counted(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "mfa_denials_in_window")[-1] == 4
-    assert _as_list(meta, "consecutive_mfa_denials")[-1] == 2
+    assert column_values(meta, "mfa_denials_in_window")[-1] == 4
+    assert column_values(meta, "consecutive_mfa_denials")[-1] == 2
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -118,25 +110,25 @@ def test_the_counts_decay_out_of_the_ten_minute_window(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "mfa_denials_in_window")[-1] == 0
-    assert _as_list(meta, "mfa_denied_then_approved")[-1] is False
+    assert column_values(meta, "mfa_denials_in_window")[-1] == 0
+    assert column_values(meta, "mfa_denied_then_approved")[-1] is False
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_ordinary_authentication_outcomes_are_counted_the_same_way(config: Config):
     meta = run(config, frame(["failure", "failure", "success"]))
 
-    assert _as_list(meta, "auth_failures_in_window")[-1] == 2
-    assert _as_list(meta, "consecutive_auth_failures")[-1] == 2
-    assert _as_list(meta, "auth_failed_then_succeeded") == [False, False, True]
+    assert column_values(meta, "auth_failures_in_window")[-1] == 2
+    assert column_values(meta, "consecutive_auth_failures")[-1] == 2
+    assert column_values(meta, "auth_failed_then_succeeded") == [False, False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_success_with_nothing_before_it_is_not_the_pattern(config: Config):
     meta = run(config, frame(["success"]))
 
-    assert _as_list(meta, "auth_failed_then_succeeded") == [False]
-    assert _as_list(meta, "consecutive_auth_failures") == [0]
+    assert column_values(meta, "auth_failed_then_succeeded") == [False]
+    assert column_values(meta, "consecutive_auth_failures") == [0]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -146,9 +138,9 @@ def test_an_unknown_outcome_is_not_guessed_at(config: Config, absent):
     # better than declining, so the row carries no authentication counts and the run is left where it was.
     meta = run(config, frame(["failure", absent, "success"]))
 
-    assert _as_list(meta, "auth_failures_in_window") == [1, None, 1]
-    assert _as_list(meta, "consecutive_auth_failures")[-1] == 1
-    assert _as_list(meta, "auth_failed_then_succeeded")[-1] is True
+    assert column_values(meta, "auth_failures_in_window") == [1, None, 1]
+    assert column_values(meta, "consecutive_auth_failures")[-1] == 1
+    assert column_values(meta, "auth_failed_then_succeeded")[-1] is True
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -158,7 +150,7 @@ def test_a_record_is_a_challenge_if_either_field_says_so(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "mfa_challenge") == [True, True, False]
+    assert column_values(meta, "mfa_challenge") == [True, True, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -168,9 +160,9 @@ def test_a_challenge_with_no_outcome_joins_no_run(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "mfa_challenge") == [True, True]
-    assert _as_list(meta, "mfa_attempts_in_window") == [None, 1]
-    assert _as_list(meta, "mfa_denied_then_approved") == [None, False]
+    assert column_values(meta, "mfa_challenge") == [True, True]
+    assert column_values(meta, "mfa_attempts_in_window") == [None, 1]
+    assert column_values(meta, "mfa_denied_then_approved") == [None, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -178,7 +170,7 @@ def test_a_challenge_with_no_outcome_joins_no_run(config: Config):
 def test_a_textual_flag_is_read_as_true(config: Config, flag):
     meta = run(config, frame(["success"], mfa_used=[flag]))
 
-    assert _as_list(meta, "mfa_challenge") == [True]
+    assert column_values(meta, "mfa_challenge") == [True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -186,8 +178,8 @@ def test_the_ratio_is_withheld_until_there_is_enough_to_measure(config: Config):
     # Below the minimum a proportion is noise rather than a measurement.
     meta = run(config, frame(["success"] * 4, mfa_used=[True, True, False, False]), min_denominator=4)
 
-    assert _as_list(meta, "mfa_ratio")[:3] == [None, None, None]
-    assert _as_list(meta, "mfa_ratio")[3] == pytest.approx(0.5)
+    assert column_values(meta, "mfa_ratio")[:3] == [None, None, None]
+    assert column_values(meta, "mfa_ratio")[3] == pytest.approx(0.5)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -201,8 +193,8 @@ def test_the_ratio_uses_a_wider_window_than_the_runs(config: Config):
     meta = run(config, payload, min_denominator=1, run_window_seconds=600, ratio_window_seconds=86400)
 
     # The last record is an hour later: outside the run window, inside the ratio window.
-    assert _as_list(meta, "mfa_ratio")[-1] == pytest.approx(0.5)
-    assert _as_list(meta, "auth_attempts_in_window")[-1] == 1
+    assert column_values(meta, "mfa_ratio")[-1] == pytest.approx(0.5)
+    assert column_values(meta, "auth_attempts_in_window")[-1] == 1
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -211,23 +203,23 @@ def test_principals_do_not_share_a_window(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "auth_failures_in_window")[-1] == 0
-    assert _as_list(meta, "auth_failed_then_succeeded")[-1] is False
+    assert column_values(meta, "auth_failures_in_window")[-1] == 0
+    assert column_values(meta, "auth_failed_then_succeeded")[-1] is False
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_record_with_no_principal_carries_no_counts(config: Config):
     meta = run(config, frame(["failure", "success"], principals=[None, ALICE]))
 
-    assert _as_list(meta, "auth_failures_in_window") == [None, 0]
-    assert _as_list(meta, "mfa_ratio") == [None, None]
+    assert column_values(meta, "auth_failures_in_window") == [None, 0]
+    assert column_values(meta, "mfa_ratio") == [None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_result_vocabulary_is_case_insensitive(config: Config):
     meta = run(config, frame(["FAILURE", "Success"]))
 
-    assert _as_list(meta, "auth_failed_then_succeeded") == [False, True]
+    assert column_values(meta, "auth_failed_then_succeeded") == [False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -237,8 +229,8 @@ def test_a_collectors_own_vocabulary_can_be_supplied(config: Config):
                success_values=("accept", ),
                mfa_success_values=("accept", ))
 
-    assert _as_list(meta, "auth_failed_then_succeeded") == [False, True]
-    assert _as_list(meta, "mfa_denied_then_approved") == [False, True]
+    assert column_values(meta, "auth_failed_then_succeeded") == [False, True]
+    assert column_values(meta, "mfa_denied_then_approved") == [False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -259,8 +251,8 @@ def test_state_persists_across_messages(config: Config):
                                                   times=[4 * MINUTE_NS])))
     stage.on_data(second)
 
-    assert _as_list(second, "mfa_denials_in_window") == [4]
-    assert _as_list(second, "mfa_denied_then_approved") == [True]
+    assert column_values(second, "mfa_denials_in_window") == [4]
+    assert column_values(second, "mfa_denied_then_approved") == [True]
     assert stage.tracked_principals == 1
 
 
@@ -271,7 +263,7 @@ def test_control_message_accepted(config: Config):
 
     TC5RiskStage(config).on_data(message)
 
-    assert _as_list(message.payload(), "mfa_denied_then_approved")[-1] is True
+    assert column_values(message.payload(), "mfa_denied_then_approved")[-1] is True
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -287,7 +279,7 @@ def test_tc5_risk_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "consecutive_mfa_denials")[-1] == 4
+    assert column_values(messages[0], "consecutive_mfa_denials")[-1] == 4
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -313,8 +305,8 @@ def test_the_sample_cap_marks_the_counts_as_a_floor(config: Config):
     # proportion from, which is a build-time error rather than a silently null column.
     meta = run(config, frame(["failure"] * 5), max_samples=3, min_denominator=1)
 
-    assert _as_list(meta, "risk_counts_saturated")[-1] is True
-    assert _as_list(meta, "auth_attempts_in_window")[-1] == 3
+    assert column_values(meta, "risk_counts_saturated")[-1] is True
+    assert column_values(meta, "auth_attempts_in_window")[-1] == 3
 
 
 @pytest.mark.cpu_mode
@@ -328,11 +320,11 @@ def test_an_out_of_order_record_does_not_join_a_run(config: Config):
     late = MessageMeta(get_df_class(config.execution_mode)(frame(["success"], times=[0])))
     stage.on_data(late)
 
-    assert _as_list(late, "auth_failed_then_succeeded") == [False]
+    assert column_values(late, "auth_failed_then_succeeded") == [False]
 
     # And the run it declined to end is still going.
     after = MessageMeta(get_df_class(config.execution_mode)(frame(["success"], times=[7 * MINUTE_NS])))
     stage.on_data(after)
 
-    assert _as_list(after, "consecutive_auth_failures") == [2]
-    assert _as_list(after, "auth_failed_then_succeeded") == [True]
+    assert column_values(after, "consecutive_auth_failures") == [2]
+    assert column_values(after, "auth_failed_then_succeeded") == [True]

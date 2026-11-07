@@ -24,6 +24,7 @@ import random
 import typing
 
 import pandas as pd
+from corpora.records import seeded_envelope as _envelope
 
 from morpheus.compositions import envelope as universal_envelope
 from morpheus.compositions.estate_context import EstateContext
@@ -242,15 +243,6 @@ INVERTED_DAY = 5
 INVERTED_HOURS = (17, 16)
 """Two sessions from an identity provider that emits one record per session with both ends in it. The first is
 three hours; the second ends an hour before it starts, which is a defect in the record and is reported as one."""
-
-
-def _envelope(rng: random.Random, collector: str, schema: str, seq: int) -> dict:
-    return {
-        "collector_id": collector,
-        "schema_version": schema,
-        "origin_hash": f"{rng.getrandbits(64):016x}",
-        "collector_seq": seq,
-    }
 
 
 def build_corpus() -> dict[str, pd.DataFrame]:

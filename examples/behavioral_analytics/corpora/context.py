@@ -23,6 +23,7 @@ composition module's docstring describes what this corpus plants and why.
 import typing
 
 import pandas as pd
+from corpora.records import at
 
 from morpheus.compositions import envelope
 from morpheus.compositions.context import APPLICATION_CLASS
@@ -39,7 +40,6 @@ from morpheus.stages.telemetry.tc0_asset_stage import DEFAULT_ASSET_COLUMNS
 from morpheus.stages.telemetry.tc0_identity_stage import DEFAULT_PROFILE_COLUMNS
 from morpheus.stages.telemetry.tc0_identity_stage import PROFILE
 from morpheus.utils import bitemporal
-from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.bitemporal import BitemporalStore
 from morpheus.utils.bitemporal import make_version
 from morpheus.utils.entity_key import compose_key
@@ -97,12 +97,6 @@ APPLICATIONS = {
     "ledger-api": ("finance-apps", "svc-ledger", "high", "restricted"),
 }
 """Each application's owning team, service account, criticality and data classification."""
-
-
-def at(day: float, hour: float = 0) -> int:
-    """An instant `day` days and `hour` hours into the corpus, in nanoseconds since the epoch."""
-    return int((day * DAY_SECONDS + hour * 3600) * NS_PER_SECOND)
-
 
 SNAPSHOT_HOUR = 6
 DELTA_HOUR = 9

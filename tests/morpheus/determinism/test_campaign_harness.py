@@ -23,26 +23,23 @@ see.
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
 import pytest
 
 from morpheus.config import Config
+from morpheus.utils import splunk_conf
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.entity_key import normalize_hostname
-from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import campaign_pipeline as cp_  # noqa: E402
+import golden  # noqa: E402
 
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_campaign_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_campaign_pipeline.py")
 SAVEDSEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "..",
                              "..",
@@ -85,24 +82,6 @@ def result_fixture(pipeline_config: Config, corpus: dict[str, pd.DataFrame]) -> 
 
 def _principals(fired: dict) -> set:
     return {principal for (_, principal, _) in fired}
-
-
-def _split(frame: pd.DataFrame, parts: int) -> list:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _permuted(corpus: dict, seed: int) -> dict:
-    period_ns = cp_.PERIOD_SECONDS * cp_.NS_PER_SECOND
-
-    return {
-        name:
-            permute_within_contiguous_groups(frame,
-                                             [window_id_from_timestamp(int(t), period_ns) for t in frame["event_time"]],
-                                             seed=seed)
-        for (name, frame) in corpus.items()
-    }
 
 
 # --- Check 1: the corpus is fixed and is one estate seen by three collectors -----------------------------------------
@@ -156,41 +135,20 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("campaign", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = cp_.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO  # pylint: disable=import-outside-toplevel
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is "
-                    f"intended, regenerate the golden with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("campaign", cp_.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, cp_.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, cp_.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
@@ -199,7 +157,7 @@ def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFra
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2, 3):
-        assert diff_frames(result, cp_.run_pipeline(pipeline_config, _permuted(corpus, seed))) is None, seed
+        assert diff_frames(result, cp_.run_pipeline(pipeline_config, golden.permuted(corpus, seed, cp_.PERIOD_SECONDS))) is None, seed
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -207,7 +165,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     # The negative control for the check above. The fan-out burst is twenty-five flows in one hour; without the
     # imposed order, each flow's distinct count depends on which of the others arrived first.
     ordered = cp_.run_pipeline(pipeline_config, corpus, impose_order=False)
-    shuffled = cp_.run_pipeline(pipeline_config, _permuted(corpus, 5), impose_order=False)
+    shuffled = cp_.run_pipeline(pipeline_config, golden.permuted(corpus, 5, cp_.PERIOD_SECONDS), impose_order=False)
 
     assert diff_frames(ordered, shuffled) is not None
 
@@ -339,11 +297,8 @@ def test_one_connection_is_joined_across_layers_3_4_and_6_by_its_community_id(re
 
 
 def test_the_connection_search_joins_on_community_id_and_wants_all_three_layers():
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    stanza = text.split("[Connection evidence - layers 3, 4 and 6]", 1)[1].split("\n[", 1)[0]
-    search = stanza.split("search =", 1)[1]
+    stanza = splunk_conf.read(SAVEDSEARCHES)["Connection evidence - layers 3, 4 and 6"]
+    search = stanza["search"]
 
     assert "BY community_id" in search
     assert "where layers = 3" in search
@@ -664,15 +619,8 @@ def test_a_ports_first_walk_says_nothing_about_vendors(result: pd.DataFrame):
     assert first["oui_first_seen_on_port"].isna().all()
 
 
-def _physical_search() -> str:
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    return text.split(f"[{PHYSICAL_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
-
-
 def test_the_physical_compromise_search_carries_the_conditions_this_harness_asserts():
-    search = _physical_search()
+    search = splunk_conf.search_text(SAVEDSEARCHES, PHYSICAL_RULE)
 
     assert "(transceiver_serial_changed=true OR link_flaps>0)" in search
     assert "oui_first_seen_on_port=true" in search
@@ -686,15 +634,8 @@ def test_the_physical_compromise_search_carries_the_conditions_this_harness_asse
     assert "notable" not in search
 
 
-def _replay_search() -> str:
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    return text.split(f"[{REPLAY_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
-
-
 def test_the_credential_replay_search_carries_the_conditions_this_harness_asserts():
-    search = _replay_search()
+    search = splunk_conf.search_text(SAVEDSEARCHES, REPLAY_RULE)
 
     assert "sourcetype=morpheus:score:l5" in search
     assert 'site_travel_status="measured" OR site_travel_status="first_for_principal"' in search
@@ -703,15 +644,8 @@ def test_the_credential_replay_search_carries_the_conditions_this_harness_assert
     assert "notable" not in search
 
 
-def _search() -> str:
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    return text.split(f"[{RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
-
-
 def test_the_search_carries_the_conditions_this_harness_asserts():
-    search = _search()
+    search = splunk_conf.search_text(SAVEDSEARCHES, RULE)
     tolerance = cp_.JOIN_TOLERANCE_SECONDS
     window = cp_.CHAIN_WINDOW_SECONDS
 
@@ -728,15 +662,8 @@ def test_the_search_carries_the_conditions_this_harness_asserts():
     assert f"risk_score = {cp_.SEVERITY}" in search
 
 
-def _exfil_search() -> str:
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    return text.split(f"[{EXFIL_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
-
-
 def test_the_exfiltration_search_carries_the_conditions_this_harness_asserts():
-    search = _exfil_search()
+    search = splunk_conf.search_text(SAVEDSEARCHES, EXFIL_RULE)
     tolerance = cp_.JOIN_TOLERANCE_SECONDS
     window = cp_.EXFIL_WINDOW_SECONDS
 
@@ -754,10 +681,7 @@ def test_the_exfiltration_search_carries_the_conditions_this_harness_asserts():
 
 
 def test_the_command_and_control_search_carries_the_conditions_this_harness_asserts():
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    search = text.split(f"[{C2_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
+    search = splunk_conf.search_text(SAVEDSEARCHES, C2_RULE)
     tolerance = cp_.JOIN_TOLERANCE_SECONDS
     window = cp_.C2_WINDOW_SECONDS
 
@@ -773,7 +697,7 @@ def test_the_search_reads_scored_events_rather_than_notables():
     # Notables exist only once the detection searches have run and written them; R-C-002 read them, and returned no
     # row anywhere this fork could test until it was rewritten to read events too. Everything before a rule stamps
     # its own rule_id is what it reads.
-    reads = _search().split('| eval _time = t_process, rule_id', 1)[0]
+    reads = splunk_conf.search_text(SAVEDSEARCHES, RULE).split('| eval _time = t_process, rule_id', 1)[0]
 
     assert "rule_id" not in reads
 
@@ -965,11 +889,8 @@ def test_without_community_ids_the_command_and_control_chain_falls_back_to_the_p
 
 
 def test_the_chained_searches_join_on_the_hard_keys_and_fall_back():
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    exfiltration = text.split(f"[{EXFIL_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0]
-    c2 = text.split(f"[{C2_RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0]
+    exfiltration = splunk_conf.search_text(SAVEDSEARCHES, EXFIL_RULE)
+    c2 = splunk_conf.search_text(SAVEDSEARCHES, C2_RULE)
 
     assert "link = coalesce(session_key, src_ip)" in exfiltration
     assert "(isnotnull(breach_session) AND link == session_key) OR (isnull(breach_session) AND link == src_ip" in (

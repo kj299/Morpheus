@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -50,15 +51,6 @@ def frame(macs: list, ports: list, times: list = None, switches: list = None, vl
         "port_id": ports,
         "vlan_id": ["10"] * count if vlans is None else vlans,
     }
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return series.tolist()
 
 
 def feed(config: Config, payload: dict, **kwargs) -> tuple:
@@ -109,14 +101,14 @@ def test_a_move_emits_a_closed_binding(config: Config):
     assert len(emitted) == 1
     binding = emitted[0]
 
-    assert _as_list(binding, "mac_address") == [MAC_A]
-    assert _as_list(binding, "port_id") == ["Gi1/0/1"]
-    assert _as_list(binding, "bind_start") == [0]
+    assert column_values(binding, "mac_address", nulls=False) == [MAC_A]
+    assert column_values(binding, "port_id", nulls=False) == ["Gi1/0/1"]
+    assert column_values(binding, "bind_start", nulls=False) == [0]
     # Closed one tick past the last sighting on the old port, not at the sighting on the new one.
-    assert _as_list(binding, "bind_end") == [MINUTE_NS + 1]
-    assert _as_list(binding, "bind_end_reason") == [DISPLACED]
-    assert _as_list(binding, "bind_end_observed") == [False]
-    assert _as_list(binding, "bind_observations") == [2]
+    assert column_values(binding, "bind_end", nulls=False) == [MINUTE_NS + 1]
+    assert column_values(binding, "bind_end_reason", nulls=False) == [DISPLACED]
+    assert column_values(binding, "bind_end_observed", nulls=False) == [False]
+    assert column_values(binding, "bind_observations", nulls=False) == [2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -172,8 +164,8 @@ def test_still_open_bindings_are_emitted_at_the_end(config: Config):
     final = stage.on_completed()
 
     assert len(final) == 1
-    assert _as_list(final[0], "mac_address") == [MAC_A]
-    assert _as_list(final[0], "bind_end_reason") == [DRAINED]
+    assert column_values(final[0], "mac_address", nulls=False) == [MAC_A]
+    assert column_values(final[0], "bind_end_reason", nulls=False) == [DRAINED]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -191,7 +183,7 @@ def test_macs_are_tracked_separately(config: Config):
     (emitted, stage) = feed(config, payload)
 
     # Only the MAC that moved closed a binding; the stationary one is still open.
-    assert _as_list(emitted[0], "mac_address") == [MAC_A]
+    assert column_values(emitted[0], "mac_address", nulls=False) == [MAC_A]
     assert stage.open_count == 2
 
 
@@ -205,7 +197,7 @@ def test_state_persists_across_messages(config: Config):
 
     # The displacement spans the message boundary, which is the whole reason this stage is stateful.
     assert len(emitted) == 1
-    assert _as_list(emitted[0], "port_id") == ["Gi1/0/1"]
+    assert column_values(emitted[0], "port_id", nulls=False) == ["Gi1/0/1"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -225,7 +217,7 @@ def test_a_vlan_change_is_a_displacement(config: Config):
 
     (emitted, _) = feed(config, payload)
 
-    assert _as_list(emitted[0], "vlan_id") == ["10"]
+    assert column_values(emitted[0], "vlan_id", nulls=False) == ["10"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -236,7 +228,7 @@ def test_out_of_order_observation_is_skipped(config: Config):
 
     # The late sighting on the other port must not displace a binding it predates.
     assert emitted == []
-    assert _as_list(stage.on_completed()[0], "port_id") == ["Gi1/0/1"]
+    assert column_values(stage.on_completed()[0], "port_id", nulls=False) == ["Gi1/0/1"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -253,7 +245,8 @@ def test_tc2_binding_stage_pipe(config: Config):
     messages = sink.get_messages()
 
     # One binding closed by the move, and one drained at the end of the stream.
-    reasons = sorted(reason for message in messages for reason in _as_list(message, "bind_end_reason"))
+    reasons = sorted(reason for message in messages
+                     for reason in column_values(message, "bind_end_reason", nulls=False))
     assert reasons == [DISPLACED, DRAINED]
 
 
@@ -265,7 +258,7 @@ def test_control_message_accepted(config: Config):
 
     emitted = TC2BindingStage(config).on_data(message)
 
-    assert _as_list(emitted[0], "port_id") == ["Gi1/0/1"]
+    assert column_values(emitted[0], "port_id", nulls=False) == ["Gi1/0/1"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -304,7 +297,8 @@ def test_a_closed_binding_carries_the_port_as_layer_1_spells_it(config: Config):
         }))
     TC1NormalizeStage(config).on_data(layer_1)
 
-    assert _as_list(binding, "port_key") == _as_list(layer_1, "entity_key") == ["hq:sw1:Gi1/0/1"]
+    assert column_values(binding, "port_key", nulls=False) == column_values(layer_1, "entity_key",
+                                                                            nulls=False) == ["hq:sw1:Gi1/0/1"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -323,7 +317,7 @@ def test_port_key_is_null_when_the_target_does_not_name_a_full_port(config: Conf
     (_, stage) = feed(config, frame([MAC_A], ["Gi1/0/1"]), attribute_columns=["switch_id", "vlan_id"])
     binding = stage.on_completed()[0]
 
-    assert _as_list(binding, "port_key") == [None]
+    assert column_values(binding, "port_key", nulls=False) == [None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -340,14 +334,14 @@ def test_a_provisional_record_is_emitted_the_moment_a_binding_opens(config: Conf
 
     assert len(emitted) == 1
     record = emitted[0]
-    assert _as_list(record, "mac_address") == [MAC_A]
-    assert _as_list(record, "bind_provisional") == [True]
-    assert _as_list(record, "bind_end_reason") == ["open"]
-    assert _as_list(record, "bind_end_observed") == [False]
-    assert _as_list(record, "port_key") == ["hq:sw1:Gi1/0/1"]
+    assert column_values(record, "mac_address", nulls=False) == [MAC_A]
+    assert column_values(record, "bind_provisional", nulls=False) == [True]
+    assert column_values(record, "bind_end_reason", nulls=False) == ["open"]
+    assert column_values(record, "bind_end_observed", nulls=False) == [False]
+    assert column_values(record, "port_key", nulls=False) == ["hq:sw1:Gi1/0/1"]
     # One record per binding, not per sample: the second sighting extended it and emitted nothing more. The record
     # describes the binding as it stands at the end of the batch, so it already counts both sightings.
-    assert _as_list(record, "bind_observations") == [2]
+    assert column_values(record, "bind_observations", nulls=False) == [2]
 
     ends = record.get_data("bind_end")
     assert int(ends.isna().sum()) == 1
@@ -363,11 +357,14 @@ def test_the_closed_record_supersedes_the_provisional_one(config: Config):
     first = stage.on_data(MessageMeta(df_class(frame([MAC_A], ["Gi1/0/1"], times=[0]))))
     second = stage.on_data(MessageMeta(df_class(frame([MAC_A], ["Gi1/0/2"], times=[MINUTE_NS]))))
 
-    assert [(p, prov, start) for (p, prov, start) in zip(_as_list(first[0], "port_id"), _as_list(
-        first[0], "bind_provisional"), _as_list(first[0], "bind_start"))] == [("Gi1/0/1", True, 0)]
+    assert [(p, prov, start) for (p, prov, start) in zip(column_values(first[0], "port_id", nulls=False), column_values(
+        first[0], "bind_provisional", nulls=False), column_values(first[0], "bind_start", nulls=False))
+            ] == [("Gi1/0/1", True, 0)]
 
     rows = set(
-        zip(_as_list(second[0], "port_id"), _as_list(second[0], "bind_provisional"), _as_list(second[0], "bind_start")))
+        zip(column_values(second[0], "port_id", nulls=False),
+            column_values(second[0], "bind_provisional", nulls=False),
+            column_values(second[0], "bind_start", nulls=False)))
     assert rows == {("Gi1/0/1", False, 0), ("Gi1/0/2", True, MINUTE_NS)}
 
 
@@ -376,7 +373,9 @@ def test_a_binding_opened_and_closed_in_one_batch_is_emitted_only_as_closed(conf
     # There is nothing provisional left to say about it by the time the batch is rendered.
     (emitted, _) = feed(config, frame([MAC_A, MAC_A], ["Gi1/0/1", "Gi1/0/2"]), emit_open_bindings=True)
 
-    rows = set(zip(_as_list(emitted[0], "port_id"), _as_list(emitted[0], "bind_provisional")))
+    rows = set(
+        zip(column_values(emitted[0], "port_id", nulls=False),
+            column_values(emitted[0], "bind_provisional", nulls=False)))
     assert rows == {("Gi1/0/1", False), ("Gi1/0/2", True)}
 
 
@@ -421,10 +420,10 @@ def test_a_silent_mac_has_its_binding_closed_rather_than_stretched(config: Confi
                         idle_timeout_seconds=idle)
 
     assert len(emitted) == 1
-    assert _as_list(emitted[0], "bind_end_reason") == [IDLE_TIMEOUT]
+    assert column_values(emitted[0], "bind_end_reason", nulls=False) == [IDLE_TIMEOUT]
     # The binding ends one tick past the last time the MAC was actually seen, not at the moment it came back.
-    assert _as_list(emitted[0], "bind_end") == [1]
-    assert _as_list(emitted[0], "bind_observations") == [1]
+    assert column_values(emitted[0], "bind_end", nulls=False) == [1]
+    assert column_values(emitted[0], "bind_observations", nulls=False) == [1]
 
 
 @pytest.mark.cpu_mode
@@ -449,8 +448,8 @@ def test_idle_expiry_falls_in_the_same_place_however_the_stream_is_batched(confi
     payload = frame(["aa:bb:cc:00:00:01"] * 3, ["Gi1/0/1"] * 3, times=times)
 
     (whole, _) = feed(config, payload, idle_timeout_seconds=idle)
-    whole_rows = [(reason, end) for frame_ in whole
-                  for (reason, end) in zip(_as_list(frame_, "bind_end_reason"), _as_list(frame_, "bind_end"))]
+    whole_rows = [(reason, end) for frame_ in whole for (reason, end) in zip(
+        column_values(frame_, "bind_end_reason", nulls=False), column_values(frame_, "bind_end", nulls=False))]
 
     stage = TC2BindingStage(config, idle_timeout_seconds=idle)
     split_rows = []
@@ -458,7 +457,9 @@ def test_idle_expiry_falls_in_the_same_place_however_the_stream_is_batched(confi
     for start in range(len(times)):
         piece = {name: values[start:start + 1] for (name, values) in payload.items()}
         for frame_ in stage.on_data(MessageMeta(get_df_class(config.execution_mode)(piece))):
-            split_rows.extend(zip(_as_list(frame_, "bind_end_reason"), _as_list(frame_, "bind_end")))
+            split_rows.extend(
+                zip(column_values(frame_, "bind_end_reason", nulls=False),
+                    column_values(frame_, "bind_end", nulls=False)))
 
     assert whole_rows == split_rows == [(IDLE_TIMEOUT, 1)]
 
@@ -513,7 +514,7 @@ def test_a_refused_time_does_not_disable_expiry_for_the_rest_of_the_run(config: 
             get_df_class(config.execution_mode)(frame(["aa:bb:cc:00:00:02"], ["Gi1/0/2"],
                                                       times=[(1000 + idle + 60) * NS_PER_SECOND]))))
 
-    reasons = [reason for meta in emitted for reason in _as_list(meta, "bind_end_reason")]
+    reasons = [reason for meta in emitted for reason in column_values(meta, "bind_end_reason", nulls=False)]
 
     assert IDLE_TIMEOUT in reasons, "the quiet MAC still expires after a refused row"
 
@@ -532,7 +533,7 @@ def test_a_believable_gap_is_not_mistaken_for_a_broken_clock(config: Config):
     emitted = stage.on_data(
         MessageMeta(get_df_class(config.execution_mode)(frame(["aa:bb:cc:00:00:02"], ["Gi1/0/2"], times=[three_days]))))
 
-    reasons = [reason for meta in emitted for reason in _as_list(meta, "bind_end_reason")]
+    reasons = [reason for meta in emitted for reason in column_values(meta, "bind_end_reason", nulls=False)]
 
     assert IDLE_TIMEOUT in reasons, "a three-day gap is believable and still expires the quiet binding"
 
@@ -653,8 +654,8 @@ def test_a_binding_names_the_vendor_of_its_mac(config: Config):
     # vendor was on the port. It never changes for one MAC, so it never splits a binding.
     (emitted, _) = feed(config, frame(["b8:27:eb:00:00:01"] * 3, ["Gi1/0/1", "Gi1/0/1", "Gi1/0/2"]))
 
-    assert _as_list(emitted[0], "oui") == ["b8:27:eb"]
-    assert _as_list(emitted[0], "bind_observations") == [2]
+    assert column_values(emitted[0], "oui", nulls=False) == ["b8:27:eb"]
+    assert column_values(emitted[0], "bind_observations", nulls=False) == [2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -663,7 +664,7 @@ def test_a_supplied_oui_is_the_attribute(config: Config):
     payload["oui"] = ["B8:27:EB"] * 2
     (emitted, _) = feed(config, payload)
 
-    assert _as_list(emitted[0], "oui") == ["B8:27:EB"]
+    assert column_values(emitted[0], "oui", nulls=False) == ["B8:27:EB"]
 
 
 @pytest.mark.gpu_and_cpu_mode

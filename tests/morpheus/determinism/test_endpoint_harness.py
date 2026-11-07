@@ -22,7 +22,6 @@ way the shipped search evaluates it, one row at a time, from the columns the sta
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -30,19 +29,17 @@ import pytest
 
 from morpheus.config import Config
 from morpheus.stages.telemetry.tc7_endpoint_stage import normalize_image_path
+from morpheus.utils import splunk_conf
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.entity_key import normalize_hostname
-from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import endpoint_pipeline as ep_  # noqa: E402
+import golden  # noqa: E402
 
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_endpoint_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_endpoint_pipeline.py")
 SAVEDSEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "..",
                              "..",
@@ -168,24 +165,6 @@ def _decisive(result: pd.DataFrame, host: str, image: str) -> pd.Series:
     return rows.iloc[0]
 
 
-def _split(frame: pd.DataFrame, parts: int) -> list:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _permuted(corpus: dict, seed: int) -> dict:
-    period_ns = ep_.PERIOD_SECONDS * ep_.NS_PER_SECOND
-
-    return {
-        name:
-            permute_within_contiguous_groups(frame,
-                                             [window_id_from_timestamp(int(t), period_ns) for t in frame["event_time"]],
-                                             seed=seed)
-        for (name, frame) in corpus.items()
-    }
-
-
 # --- Check 1: the corpus is fixed and shaped like EDR process telemetry --------------------------------------------
 
 
@@ -231,41 +210,20 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("endpoint", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = ep_.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO  # pylint: disable=import-outside-toplevel
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is "
-                    f"intended, regenerate the golden with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("endpoint", ep_.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, ep_.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, ep_.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
@@ -274,7 +232,7 @@ def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFra
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2, 3):
-        assert diff_frames(result, ep_.run_pipeline(pipeline_config, _permuted(corpus, seed))) is None, seed
+        assert diff_frames(result, ep_.run_pipeline(pipeline_config, golden.permuted(corpus, seed, ep_.PERIOD_SECONDS))) is None, seed
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -282,7 +240,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     # The negative control for the check above. Without the imposed order, a process from later in the hour can
     # arrive first, and the one it overtook is refused as out of order.
     ordered = ep_.run_pipeline(pipeline_config, corpus, impose_order=False)
-    shuffled = ep_.run_pipeline(pipeline_config, _permuted(corpus, 5), impose_order=False)
+    shuffled = ep_.run_pipeline(pipeline_config, golden.permuted(corpus, 5, ep_.PERIOD_SECONDS), impose_order=False)
 
     assert diff_frames(ordered, shuffled) is not None
 
@@ -438,24 +396,17 @@ def test_processes_that_share_a_second_are_all_judged(result: pd.DataFrame):
 # --- Minimization, and the search as shipped -----------------------------------------------------------------------
 
 
-def _search() -> str:
-    with open(SAVEDSEARCHES, encoding="utf-8") as handle:
-        text = handle.read()
-
-    return text.split(f"[{RULE}]", 1)[1].split("action.correlationsearch.label", 1)[0].split("search =", 1)[1]
-
-
 def test_the_rule_reads_neither_the_command_line_nor_the_process_identifiers():
     # The command line routinely carries file names, user names and secrets; process identifiers are per process
     # and say nothing a pair does not. An estate can drop both at the wire and keep the rule.
-    search = _search()
+    search = splunk_conf.search_text(SAVEDSEARCHES, RULE)
 
     for column in ("command_line_hash", "process_guid", "parent_process_guid"):
         assert column not in search, column
 
 
 def test_the_search_carries_the_weights_this_harness_asserts():
-    search = _search()
+    search = splunk_conf.search_text(SAVEDSEARCHES, RULE)
 
     assert "endpoint_pair_novel=true" in search
 

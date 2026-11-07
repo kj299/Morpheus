@@ -72,6 +72,7 @@ from morpheus.utils.bucket_peak import measure_rows
 from morpheus.utils.column_assign import to_host_frame
 from morpheus.utils.entity_key import KEY_SEPARATOR
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.event_clock import is_true
 
 logger = logging.getLogger(__name__)
 
@@ -117,14 +118,6 @@ HEALTH_COLUMNS = ("event_time",
                   "rows_baseline_mature",
                   "rows_step")
 """Every field a health record carries, in order."""
-
-
-def _true(value: typing.Any) -> bool:
-    try:
-        # A nullable boolean, compared by value rather than identity.
-        return value is not None and bool(value == True)  # noqa: E712 pylint: disable=singleton-comparison
-    except (TypeError, ValueError):
-        return False
 
 
 def _number(value: typing.Any) -> typing.Optional[float]:
@@ -232,7 +225,7 @@ class PipelineHealthStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
         if (len(present) == 0):
             return None
 
-        flags = zip(*[[_true(value) for value in group[name]] for name in present])
+        flags = zip(*[[is_true(value) for value in group[name]] for name in present])
 
         return int(sum(1 for row in flags if any(row)))
 
@@ -294,7 +287,8 @@ class PipelineHealthStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Si
             "tenant_id": tenant,
             "rows": len(group),
             "envelope_invalid": (None if "envelope_valid" not in group else int(
-                sum(1 for value in group["envelope_valid"] if normalize_text(value) is not None and not _true(value)))),
+                sum(1 for value in group["envelope_valid"]
+                    if normalize_text(value) is not None and not is_true(value)))),
             "clock_refused": self._count(group, ("clock_refused", )),
             "keyless": (None if "entity_key" not in group else int(
                 sum(1 for value in group["entity_key"] if normalize_text(value) is None))),

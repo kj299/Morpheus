@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import truthy
 from morpheus.config import Config
 from morpheus.messages import MessageMeta
 from morpheus.stages.telemetry.tc6_content_stage import TC6ContentStage
@@ -32,15 +33,6 @@ def transfers(declared, detected) -> dict:
         "content_type_detected": list(detected),
         "event_time": [START + index * SECOND for index in range(len(declared))],
     }
-
-
-def truthy(value) -> bool:
-    """A column value as a plain bool, with a null reading as False.
-
-    `bool(pd.NA)` raises rather than returning False, and every flag on these rows is nullable because "not yet
-    answerable" is a distinct state from "no". Tests that mean "this did not fire" say so through this.
-    """
-    return False if pd.isna(value) else bool(value)
 
 
 def run(config: Config, payload: dict, **kwargs) -> pd.DataFrame:

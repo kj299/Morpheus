@@ -30,7 +30,6 @@ The registry starts non-empty, which is the point. Naming the void is what makes
 than by accident.
 """
 
-import configparser
 import glob
 import os
 import re
@@ -38,6 +37,7 @@ import re
 import pytest
 
 from morpheus.utils import siem_sourcetypes
+from morpheus.utils import splunk_conf
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 APP = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheus-lineage", "default")
@@ -64,26 +64,9 @@ must be read by some search, it must carry a real reason, and it must stop being
 produces it."""
 
 
-def _load(path: str) -> configparser.ConfigParser:
-    """
-    Read a Splunk `.conf`, folding its line continuations first.
-
-    Splunk continues a value with a trailing backslash; configparser continues one with indentation, and reading
-    a search written the Splunk way as though it were written the Python way is a parse error rather than a
-    misreading -- which is the better failure, but only if it is handled here rather than at the call site.
-    """
-    with open(path, encoding="utf-8") as handle:
-        folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
-    parser.read_string(folded)
-
-    return parser
-
-
 def searches() -> dict:
     """Every scheduled search in the app, by name."""
-    parsed = _load(SAVEDSEARCHES)
+    parsed = splunk_conf.read(SAVEDSEARCHES)
 
     return {name: parsed[name]["search"] for name in parsed.sections() if parsed.has_option(name, "search")}
 
@@ -156,7 +139,7 @@ def stage_columns() -> set:
 
 def lookup_fields() -> set:
     """Every field the KV Store lookups define, from transforms.conf's own `fields_list`."""
-    parsed = _load(TRANSFORMS)
+    parsed = splunk_conf.read(TRANSFORMS)
     fields = set()
 
     for name in parsed.sections():

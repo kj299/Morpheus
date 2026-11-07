@@ -16,6 +16,7 @@
 
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -47,15 +48,6 @@ EXPECTED_UIDS = [
 @pytest.fixture(name="envelope_df")
 def envelope_df_fixture(config: Config):
     yield get_df_class(config.execution_mode)(ENVELOPE_DATA)
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return series.tolist()
 
 
 def test_execution_modes(config: Config):
@@ -91,7 +83,7 @@ def test_lineage_stamp_stage_pipe(config: Config, envelope_df):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "event_uid") == EXPECTED_UIDS
+    assert column_values(messages[0], "event_uid", nulls=False) == EXPECTED_UIDS
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -100,7 +92,7 @@ def test_on_data_accepts_message_meta(config: Config, envelope_df):
 
     LineageStampStage(config).on_data(meta)
 
-    assert _as_list(meta, "event_uid") == EXPECTED_UIDS
+    assert column_values(meta, "event_uid", nulls=False) == EXPECTED_UIDS
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -110,7 +102,7 @@ def test_on_data_accepts_control_message(config: Config, envelope_df):
 
     LineageStampStage(config).on_data(message)
 
-    assert _as_list(message.payload(), "event_uid") == EXPECTED_UIDS
+    assert column_values(message.payload(), "event_uid", nulls=False) == EXPECTED_UIDS
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -121,7 +113,7 @@ def test_stamping_is_repeatable(config: Config, envelope_df):
     LineageStampStage(config).on_data(first)
     LineageStampStage(config).on_data(second)
 
-    assert _as_list(first, "event_uid") == _as_list(second, "event_uid")
+    assert column_values(first, "event_uid", nulls=False) == column_values(second, "event_uid", nulls=False)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -131,7 +123,7 @@ def test_row_order_does_not_change_identity(config: Config, envelope_df):
 
     LineageStampStage(config).on_data(meta)
 
-    assert _as_list(meta, "event_uid") == [EXPECTED_UIDS[2], EXPECTED_UIDS[0], EXPECTED_UIDS[1]]
+    assert column_values(meta, "event_uid", nulls=False) == [EXPECTED_UIDS[2], EXPECTED_UIDS[0], EXPECTED_UIDS[1]]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -145,13 +137,13 @@ def test_edges_are_emitted(config: Config, envelope_df):
                               join_method="hard:flow_id")
     stage.on_data(meta)
 
-    links = _as_list(meta, "link_uid")
+    links = column_values(meta, "link_uid", nulls=False)
 
     assert links[0] == link_uid("p1", EXPECTED_UIDS[0], "carried_by", "hard:flow_id")
     # A record with no parent is a chain root, not an error.
     assert links[1] is None
     assert links[2] is None
-    assert _as_list(meta, "join_method") == ["hard:flow_id"] * 3
+    assert column_values(meta, "join_method", nulls=False) == ["hard:flow_id"] * 3
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -161,7 +153,7 @@ def test_custom_id_columns_and_digest_length(config: Config):
 
     LineageStampStage(config, id_columns=["a", "b"], digest_length=16, event_uid_column="uid").on_data(meta)
 
-    assert _as_list(meta, "uid") == [event_uid("x", "y", digest_length=16)]
+    assert column_values(meta, "uid", nulls=False) == [event_uid("x", "y", digest_length=16)]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -174,7 +166,7 @@ def test_id_column_order_is_significant(config: Config):
     LineageStampStage(config, id_columns=["a", "b"]).on_data(forward)
     LineageStampStage(config, id_columns=["b", "a"]).on_data(reverse)
 
-    assert _as_list(forward, "event_uid") != _as_list(reverse, "event_uid")
+    assert column_values(forward, "event_uid", nulls=False) != column_values(reverse, "event_uid", nulls=False)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -219,9 +211,9 @@ def test_gpu_hashing_matches_host_path(config: Config, envelope_df):
     LineageStampStage(config, **common).on_data(host_meta)
     LineageStampStage(config, use_gpu_hashing=True, **common).on_data(gpu_meta)
 
-    assert _as_list(gpu_meta, "event_uid") == _as_list(host_meta, "event_uid")
-    assert _as_list(gpu_meta, "link_uid") == _as_list(host_meta, "link_uid")
-    assert _as_list(gpu_meta, "join_method") == _as_list(host_meta, "join_method")
+    assert column_values(gpu_meta, "event_uid", nulls=False) == column_values(host_meta, "event_uid", nulls=False)
+    assert column_values(gpu_meta, "link_uid", nulls=False) == column_values(host_meta, "link_uid", nulls=False)
+    assert column_values(gpu_meta, "join_method", nulls=False) == column_values(host_meta, "join_method", nulls=False)
 
 
 @pytest.mark.gpu_mode

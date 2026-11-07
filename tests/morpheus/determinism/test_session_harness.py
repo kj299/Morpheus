@@ -27,7 +27,6 @@ make it fire has been shown almost nothing.
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -36,22 +35,18 @@ import pytest
 from morpheus.config import Config
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
 from morpheus.utils.determinism import quantize_value
 from morpheus.utils.dfencoder_scorer import DfencoderScorer
 from morpheus.utils.dfencoder_scorer import load_models
-from morpheus.utils.lineage import window_id_from_timestamp
 from morpheus.utils.model_manifest import ModelManifest
 from morpheus.utils.sharding import stable_shard
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import golden  # noqa: E402
 import session_pipeline as sp  # noqa: E402
 import stamping  # noqa: E402
-
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_session_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_session_pipeline.py")
 
 NS = sp.NS_PER_SECOND
 
@@ -113,24 +108,6 @@ the off-hours sign-in and the journey, the flight and the move to New York, and 
 UNCHANGED = {sp.DAVE, sp.BATCH}
 """The modelled principals whose scored week is their fortnight again: the controls."""
 
-
-def _windows(frame: pd.DataFrame) -> list[int]:
-    return [window_id_from_timestamp(int(t), sp.PERIOD_SECONDS * NS) for t in frame["event_time"]]
-
-
-def _split(frame: pd.DataFrame, parts: int) -> list[pd.DataFrame]:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _permuted(corpus: dict[str, pd.DataFrame], seed: int) -> dict[str, pd.DataFrame]:
-    return {
-        name: permute_within_contiguous_groups(frame, _windows(frame), seed=seed)
-        for (name, frame) in corpus.items()
-    }
-
-
 # --- Check 1: the corpus ---------------------------------------------------------------------------------------
 
 
@@ -185,41 +162,20 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("session", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = sp.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is intended, "
-                    f"regenerate the golden file with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("session", sp.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, sp.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, sp.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
@@ -264,7 +220,7 @@ def test_a_row_is_scored_the_same_however_the_stream_was_chunked(pipeline_config
     (scorer, manifest) = _shape_sensitive(rows_per_call=1)
 
     whole = sp.run_pipeline(pipeline_config, corpus, scorer=scorer, manifest=manifest)
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
     chunked = sp.run_pipeline(pipeline_config, corpus, batches=thirds, scorer=scorer, manifest=manifest)
 
     assert diff_frames(whole, chunked) is None
@@ -278,7 +234,7 @@ def test_the_shape_check_has_teeth(pipeline_config: Config, corpus: dict[str, pd
     (scorer, manifest) = _shape_sensitive(rows_per_call=10_000)
 
     whole = sp.run_pipeline(pipeline_config, corpus, scorer=scorer, manifest=manifest)
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
     chunked = sp.run_pipeline(pipeline_config, corpus, batches=thirds, scorer=scorer, manifest=manifest)
 
     assert diff_frames(whole, chunked) is not None
@@ -295,7 +251,8 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict[str, 
     detected = False
     for seed in (1, 2, 3):
         detected = detected or (diff_frames(
-            unsorted_baseline, sp.run_pipeline(pipeline_config, _permuted(corpus, seed), impose_order=False))
+            unsorted_baseline,
+            sp.run_pipeline(pipeline_config, golden.permuted(corpus, seed, sp.PERIOD_SECONDS), impose_order=False))
                                 is not None)
 
     assert detected, "Removing the total-order stage did not change any output under permutation."
@@ -304,7 +261,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict[str, 
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2, 3):
-        shuffled = _permuted(corpus, seed)
+        shuffled = golden.permuted(corpus, seed, sp.PERIOD_SECONDS)
 
         assert any(not shuffled[name]["collector_seq"].equals(corpus[name]["collector_seq"])
                    for name in corpus), "permutation was a no-op"
@@ -816,17 +773,14 @@ def test_the_drift_rule_fires_on_exactly_the_climbs_it_should(result: pd.DataFra
     assert fires["drift_velocity"].astype(float).abs().max() < 0.05
 
 
-def _true(frame: pd.DataFrame, column: str) -> pd.Series:
-    return frame[column].astype("boolean").fillna(False)
-
-
 @pytest.mark.cpu_mode
 def test_the_off_hours_rule_fires_on_the_planted_login_and_not_on_the_nightly_batch(result: pd.DataFrame):
     # R-D-L5-007 as the search states it. The planted 03:00 sign-in fires and the service account's 03:00 does
     # not, which is the cadence feature's own negative control turned into a rule. The traveller's sign-in before
     # his flight fires too: 08:00 is an hour his office week never used, and a real change of habit.
     auth = _rows(result, "tc5_auth")
-    fires = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature") & (auth["auth_result"] == "success")]
+    fires = auth[golden.flags(auth, "hour_unseen") & golden.flags(auth, "cadence_mature") &
+                 (auth["auth_result"] == "success")]
 
     # Erin's takeover afternoon fires twice, at the two of its hours her office week never used.
     assert set(zip(fires["user_principal"], fires["local_hour"].astype(int))) == {
@@ -838,7 +792,7 @@ def test_the_off_hours_rule_fires_on_the_planted_login_and_not_on_the_nightly_ba
     assert sp.BATCH not in set(fires["user_principal"])
 
     # The fatigue burst is at an unseen hour too, and its rows are refusals: R-D-L5-004's and R-D-L5-009's.
-    unseen = auth[_true(auth, "hour_unseen") & _true(auth, "cadence_mature")]
+    unseen = auth[golden.flags(auth, "hour_unseen") & golden.flags(auth, "cadence_mature")]
     assert set(unseen["user_principal"]) == {sp.ALICE, sp.BOB, sp.CAROL, sp.ERIN}
 
 
@@ -849,8 +803,8 @@ def test_the_novelty_rule_fires_on_the_new_country_and_not_on_the_controls(resul
     # the control that makes the gate a condition rather than a decoration.
     auth = _rows(result, "tc5_auth")
     new = auth[(auth["auth_result"] == "success")
-               & (_true(auth, "location_first_seen") | _true(auth, "device_first_seen"))]
-    fires = new[_true(new, "cadence_mature")]
+               & (golden.flags(auth, "location_first_seen") | golden.flags(auth, "device_first_seen"))]
+    fires = new[golden.flags(new, "cadence_mature")]
 
     assert set(zip(fires["user_principal"], fires["user_location"])) == {
         (sp.ALICE, "us:ny:new-york"),
@@ -874,8 +828,8 @@ def test_the_novelty_rule_misses_a_new_place_whose_first_sign_in_failed(result: 
     assert bool(first["location_first_seen"]) and bool(first["device_first_seen"])
 
     successes = takeover[takeover["auth_result"] == "success"]
-    assert not _true(successes, "location_first_seen").any()
-    assert not _true(successes, "device_first_seen").any()
+    assert not golden.flags(successes, "location_first_seen").any()
+    assert not golden.flags(successes, "device_first_seen").any()
 
     (composite, _) = _model_rules(_rows(result, "tc5_auth"))
     assert set(successes.index) <= set(composite.index)
@@ -886,7 +840,7 @@ def test_the_failure_run_rule_fires_on_the_burst_and_not_on_the_fumbled_password
     # R-D-L5-009. Both are failure-then-success; only the threshold separates them.
     auth = _rows(result, "tc5_auth")
     threshold = stamping.rule_thresholds(["R-D-L5-009"])["R-D-L5-009"]["failure_threshold"]
-    runs = auth[_true(auth, "auth_failed_then_succeeded")]
+    runs = auth[golden.flags(auth, "auth_failed_then_succeeded")]
     fires = runs[runs["consecutive_auth_failures"].astype(float) >= threshold]
 
     assert list(fires["user_principal"]) == [sp.CAROL]

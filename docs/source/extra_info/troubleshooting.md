@@ -79,10 +79,10 @@ scripts/fetch_data.py fetch tests validation
 
 **Regenerating Golden Files After a cuDF Data Type Change**
 
-The determinism harnesses compare each composed pipeline's output with a checked-in golden file, `tests/morpheus/determinism/golden_<corpus>_expected.csv`. A change in how cuDF or pandas returns a column's data type, such as an integer column arriving as float, shows up as a golden mismatch like `404.0` against `404`. First confirm the output is collected through `tests/morpheus/determinism/host_frame.py`, which keeps integer columns as pandas `Int64`, a type that can hold a gap, in both execution modes; a golden that disagrees only on such a widening usually means a collector skipped it. If the change in output is intended, regenerate the golden deliberately with that corpus's driver in CPU mode and review the diff before committing it:
+The determinism harnesses compare each composed pipeline's output with a checked-in golden file, `tests/morpheus/determinism/golden_<corpus>_expected.csv`. A change in how cuDF or pandas returns a column's data type, such as an integer column arriving as float, shows up as a golden mismatch like `404.0` against `404`. First confirm the output is collected through `tests/morpheus/determinism/host_frame.py`, which keeps integer columns as pandas `Int64`, a type that can hold a gap, in both execution modes; a golden that disagrees only on such a widening usually means a collector skipped it. If the change in output is intended, regenerate the golden deliberately with the one golden driver, naming the corpus, in CPU mode and review the diff before committing it:
 
 ```bash
-python tests/morpheus/determinism/run_<corpus>_pipeline.py tests/morpheus/determinism/golden_<corpus>_expected.csv cpu
+python tests/morpheus/determinism/run_golden.py <corpus> tests/morpheus/determinism/golden_<corpus>_expected.csv cpu
 git diff tests/morpheus/determinism/golden_<corpus>_expected.csv
 ```
 

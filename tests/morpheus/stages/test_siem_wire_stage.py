@@ -22,7 +22,6 @@ rendering that satisfies these tests is one Splunk will read; a rendering that m
 which is the whole reason the defect this stage prevents went unnoticed for so long.
 """
 
-import configparser
 import datetime
 import os
 import re
@@ -39,6 +38,7 @@ from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
 from morpheus.stages.output.siem_wire_stage import SiemWireStage
 from morpheus.utils import siem_sourcetypes
+from morpheus.utils import splunk_conf
 from morpheus.utils.type_utils import get_df_class
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
@@ -91,13 +91,6 @@ SCORE_L2_COLUMNS = {
 }
 
 
-def load_props() -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(PROPS_PATH)
-
-    return parser
-
-
 def splunk_format_to_strptime(time_format: str) -> str:
     """Translate a Splunk `TIME_FORMAT` to a `strptime` format: `%<n>N` subseconds become `%f`."""
     return re.sub(r"%\d?N", "%f", time_format)
@@ -105,7 +98,7 @@ def splunk_format_to_strptime(time_format: str) -> str:
 
 def parse_as_splunk_would(line: str, stanza: str) -> datetime.datetime:
     """Apply one stanza's own TIME_PREFIX and TIME_FORMAT to a serialized record, the way Splunk does."""
-    settings = load_props()[stanza]
+    settings = splunk_conf.read(PROPS_PATH)[stanza]
     match = re.search(settings["TIME_PREFIX"], line)
 
     assert match is not None, f"TIME_PREFIX for {stanza} did not match the serialized event: {line}"
@@ -149,7 +142,7 @@ def test_without_the_stage_splunk_parses_nothing(config: Config):
             for (name, values) in SCORE_L2_COLUMNS.items()
         }
     })
-    settings = load_props()["morpheus:score:l2"]
+    settings = splunk_conf.read(PROPS_PATH)["morpheus:score:l2"]
 
     assert re.search(settings["TIME_PREFIX"], as_lines(frame)[0]) is None
 

@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.messages import MessageMeta
@@ -55,17 +56,6 @@ def frame(count: int,
     }
 
 
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    # `pd.isna` rather than the `value != value` NaN trick, which pylint reads as a redundant self-comparison. It
-    # covers None, pandas.NA and NaN together, and which of the three arrives depends on the column's dtype.
-    return [None if pd.isna(value) else value for value in series.tolist()]
-
-
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
     meta = MessageMeta(get_df_class(config.execution_mode)(payload))
     TC5NoveltyStage(config, **kwargs).on_data(meta)
@@ -77,7 +67,7 @@ def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
 def test_logcount_counts_every_record_in_the_window(config: Config):
     meta = run(config, frame(4))
 
-    assert _as_list(meta, "logcount") == [1, 2, 3, 4]
+    assert column_values(meta, "logcount") == [1, 2, 3, 4]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -86,7 +76,7 @@ def test_logcount_decays_out_of_the_window(config: Config):
     times = [0, MINUTE_NS, 2 * 3600 * NS_PER_SECOND]
     meta = run(config, frame(3, times=times), window_seconds=3600)
 
-    assert _as_list(meta, "logcount") == [1, 2, 1]
+    assert column_values(meta, "logcount") == [1, 2, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -100,15 +90,15 @@ def test_the_increments_are_cumulative_and_do_not_decay(config: Config):
                window_seconds=3600,
                max_clock_skew_seconds=30 * 24 * 3600)
 
-    assert _as_list(meta, "locincrement") == [1, 2]
+    assert column_values(meta, "locincrement") == [1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_returning_location_does_not_raise_the_increment(config: Config):
     meta = run(config, frame(3, countries=["gb", "fr", "gb"], cities=["london", "paris", "london"]))
 
-    assert _as_list(meta, "locincrement") == [1, 2, 2]
-    assert _as_list(meta, "location_first_seen") == [None, True, False]
+    assert column_values(meta, "locincrement") == [1, 2, 2]
+    assert column_values(meta, "location_first_seen") == [None, True, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -126,15 +116,15 @@ def test_authentications_in_one_second_are_measured_against_the_history_before_i
     meta = run(config, payload, target_host_column="target_host")
 
     by_city = {}
-    for (city, increment, location_new, host_new) in zip(_as_list(meta, "source_city"),
-                                                         _as_list(meta, "locincrement"),
-                                                         _as_list(meta, "location_first_seen"),
-                                                         _as_list(meta, "target_host_first_seen")):
+    for (city, increment, location_new, host_new) in zip(column_values(meta, "source_city"),
+                                                         column_values(meta, "locincrement"),
+                                                         column_values(meta, "location_first_seen"),
+                                                         column_values(meta, "target_host_first_seen")):
         by_city.setdefault(city, set()).add((increment, location_new, host_new))
 
     assert by_city["paris"] == {(2, True, True)}
     assert by_city["london"] == {(1, None, None), (1, False, False)}
-    assert _as_list(meta, "logcount") == [1, 2, 3, 4]
+    assert column_values(meta, "logcount") == [1, 2, 3, 4]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -143,16 +133,16 @@ def test_the_first_sample_answers_null_rather_than_true(config: Config):
     # already reads one, which carries the same fact without answering a question the history cannot yet answer.
     meta = run(config, frame(1))
 
-    assert _as_list(meta, "location_first_seen") == [None]
-    assert _as_list(meta, "locincrement") == [1]
+    assert column_values(meta, "location_first_seen") == [None]
+    assert column_values(meta, "locincrement") == [1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_applications_and_devices_are_counted_the_same_way(config: Config):
     meta = run(config, frame(3, apps=["vpn", "wiki", "vpn"], devices=["laptop-1", "laptop-1", "phone-1"]))
 
-    assert _as_list(meta, "appincrement") == [1, 2, 2]
-    assert _as_list(meta, "deviceincrement") == [1, 1, 2]
+    assert column_values(meta, "appincrement") == [1, 2, 2]
+    assert column_values(meta, "deviceincrement") == [1, 1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -163,8 +153,8 @@ def test_a_dropped_field_is_an_omission_rather_than_a_new_application(config: Co
     # application the principal had never used before -- and R-B-L5-002 reads exactly that column.
     meta = run(config, frame(3, apps=["vpn", absent, "vpn"]))
 
-    assert _as_list(meta, "appincrement") == [1, None, 1]
-    assert _as_list(meta, "app_first_seen") == [None, None, False]
+    assert column_values(meta, "appincrement") == [1, None, 1]
+    assert column_values(meta, "app_first_seen") == [None, None, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -172,15 +162,15 @@ def test_a_dropped_field_does_not_stop_the_others_counting(config: Config):
     # Each cumulative field is tracked on its own, so a row missing one still counts the rest.
     meta = run(config, frame(2, apps=["vpn", None], devices=["laptop-1", "phone-1"]))
 
-    assert _as_list(meta, "appincrement") == [1, None]
-    assert _as_list(meta, "deviceincrement") == [1, 2]
+    assert column_values(meta, "appincrement") == [1, None]
+    assert column_values(meta, "deviceincrement") == [1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_the_location_is_the_concatenation_of_its_parts(config: Config):
     meta = run(config, frame(1))
 
-    assert _as_list(meta, "user_location") == ["gb:england:london"]
+    assert column_values(meta, "user_location") == ["gb:england:london"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -189,8 +179,8 @@ def test_a_null_part_yields_no_location_rather_than_a_second_one(config: Config)
     # failed, and each would read as somewhere the principal had never authenticated from.
     meta = run(config, frame(3, cities=["london", None, "london"]))
 
-    assert _as_list(meta, "user_location") == ["gb:england:london", None, "gb:england:london"]
-    assert _as_list(meta, "locincrement") == [1, None, 1]
+    assert column_values(meta, "user_location") == ["gb:england:london", None, "gb:england:london"]
+    assert column_values(meta, "locincrement") == [1, None, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -201,8 +191,8 @@ def test_a_source_reporting_only_a_country_still_counts_locations(config: Config
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "user_location") == ["gb", "fr"]
-    assert _as_list(meta, "locincrement") == [1, 2]
+    assert column_values(meta, "user_location") == ["gb", "fr"]
+    assert column_values(meta, "locincrement") == [1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -210,14 +200,14 @@ def test_distinct_asns_are_windowed_rather_than_cumulative(config: Config):
     times = [0, MINUTE_NS, 2 * 3600 * NS_PER_SECOND]
     meta = run(config, frame(3, asns=["as1", "as2", "as3"], times=times), window_seconds=3600)
 
-    assert _as_list(meta, "asns_in_window") == [1, 2, 1]
+    assert column_values(meta, "asns_in_window") == [1, 2, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_missing_asn_carries_no_count(config: Config):
     meta = run(config, frame(2, asns=["as1", None]))
 
-    assert _as_list(meta, "asns_in_window") == [1, None]
+    assert column_values(meta, "asns_in_window") == [1, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -226,8 +216,8 @@ def test_principals_do_not_see_each_others_history(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "logcount") == [1, 1, 2]
-    assert _as_list(meta, "locincrement") == [1, 1, 1]
+    assert column_values(meta, "logcount") == [1, 1, 2]
+    assert column_values(meta, "locincrement") == [1, 1, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -235,8 +225,8 @@ def test_a_record_with_no_principal_carries_no_counts(config: Config):
     # Pooling these would make every unattributed authentication in the estate look like one very busy account.
     meta = run(config, frame(2, principals=[None, ALICE]))
 
-    assert _as_list(meta, "logcount") == [None, 1]
-    assert _as_list(meta, "locincrement") == [None, 1]
+    assert column_values(meta, "logcount") == [None, 1]
+    assert column_values(meta, "locincrement") == [None, 1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -247,8 +237,8 @@ def test_a_host_the_principal_has_never_logged_into_is_first_seen(config: Config
 
     # The first sample establishes normal; the name is normalized, so WS-01 and ws-01. are the host already seen,
     # and the key the novelty was kept on is on the row for a search to join on.
-    assert _as_list(meta, "target_host_first_seen") == [None, False, True, False]
-    assert _as_list(meta, "target_host_key") == ["ws-01", "ws-01", "ws-02", "ws-01"]
+    assert column_values(meta, "target_host_first_seen") == [None, False, True, False]
+    assert column_values(meta, "target_host_key") == ["ws-01", "ws-01", "ws-02", "ws-01"]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -257,7 +247,7 @@ def test_target_hosts_are_kept_per_principal(config: Config):
     payload["target_host"] = ["ws-01", "ws-02", "ws-02"]
     meta = run(config, payload, target_host_column="target_host")
 
-    assert _as_list(meta, "target_host_first_seen") == [None, None, True]
+    assert column_values(meta, "target_host_first_seen") == [None, None, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -266,7 +256,7 @@ def test_a_row_without_a_target_host_observes_none(config: Config):
     payload["target_host"] = ["ws-01", None, "ws-01"]
     meta = run(config, payload, target_host_column="target_host")
 
-    assert _as_list(meta, "target_host_first_seen") == [None, None, False]
+    assert column_values(meta, "target_host_first_seen") == [None, None, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -288,8 +278,8 @@ def test_state_persists_across_messages(config: Config):
     second = MessageMeta(get_df_class(config.execution_mode)(frame(1, countries=["fr"], times=[MINUTE_NS])))
     stage.on_data(second)
 
-    assert _as_list(second, "logcount") == [2]
-    assert _as_list(second, "locincrement") == [2]
+    assert column_values(second, "logcount") == [2]
+    assert column_values(second, "locincrement") == [2]
     assert stage.tracked_principals == 1
 
 
@@ -300,7 +290,7 @@ def test_control_message_accepted(config: Config):
 
     TC5NoveltyStage(config).on_data(message)
 
-    assert _as_list(message.payload(), "logcount") == [1, 2]
+    assert column_values(message.payload(), "logcount") == [1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -317,7 +307,7 @@ def test_tc5_novelty_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "locincrement") == [1, 1, 2]
+    assert column_values(messages[0], "locincrement") == [1, 1, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -347,10 +337,10 @@ def test_an_out_of_order_record_leaves_the_increments_untouched(config: Config):
     late = MessageMeta(get_df_class(config.execution_mode)(frame(1, countries=["fr"], times=[0])))
     stage.on_data(late)
 
-    assert _as_list(late, "locincrement") == [None]
+    assert column_values(late, "locincrement") == [None]
 
     # And the history it declined to join is unchanged: France is still new.
     after = MessageMeta(get_df_class(config.execution_mode)(frame(1, countries=["fr"], times=[20 * MINUTE_NS])))
     stage.on_data(after)
 
-    assert _as_list(after, "locincrement") == [2]
+    assert column_values(after, "locincrement") == [2]

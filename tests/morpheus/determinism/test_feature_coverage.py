@@ -71,6 +71,7 @@ from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage  # noqa:
 from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage  # noqa: E402
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage  # noqa: E402
 from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage  # noqa: E402
+from morpheus.utils import splunk_conf
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 SAVED_SEARCHES = os.path.join(REPO_ROOT,
@@ -92,8 +93,6 @@ DOCUMENTS = {
         os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "README.md"),
 }
 HEADING = re.compile(r"^#+ Features without a rule\s*$", re.M)
-SEARCH_BODY = re.compile(r"^search\s*=((?:[^\n]*\\\n)*[^\n]*)$", re.M)
-"""A `search =` line and the continuation lines its trailing backslashes join to it."""
 
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -157,10 +156,7 @@ def _emitted() -> dict:
 
 
 def _searched() -> set:
-    with open(SAVED_SEARCHES, encoding="utf-8") as handle:
-        bodies = SEARCH_BODY.findall(handle.read())
-
-    return set(IDENTIFIER.findall("\n".join(bodies)))
+    return set(IDENTIFIER.findall("\n".join(splunk_conf.searches(SAVED_SEARCHES).values())))
 
 
 def _model_inputs() -> dict:

@@ -21,6 +21,7 @@ composition module's docstring describes what this corpus plants and why.
 """
 
 import pandas as pd
+from corpora.records import at
 
 from morpheus.compositions import envelope
 from morpheus.compositions.estate_context import EstateContext
@@ -119,11 +120,6 @@ LATE_RECORDING_WEEK = 9
 """Kate's change reaches the directory after the corpus ends."""
 
 DAY_SECONDS = 86400
-
-
-def at(day: float, hour: float = 0) -> int:
-    """An instant `day` days and `hour` hours into the corpus, in nanoseconds since the epoch."""
-    return int((day * DAY_SECONDS + hour * 3600) * NS_PER_SECOND)
 
 
 def week_start(week: int) -> int:

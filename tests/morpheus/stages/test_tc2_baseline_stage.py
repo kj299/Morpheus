@@ -14,11 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-
-import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -54,18 +52,6 @@ def frame(counts: list, entity: str = PORT, times: list = None) -> dict:
         "macs_per_port": counts,
         "ports_per_mac": [1] * count,
     }
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [
-        None if (value is None or value is pd.NA or (isinstance(value, float) and math.isnan(value))) else value
-        for value in series.tolist()
-    ]
 
 
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
@@ -108,13 +94,13 @@ def test_a_hub_is_a_step_above_the_ports_own_history(config: Config):
     payload = frame(STEADY + HUB, times=[index * PERIOD_NS for index in range(8)] + [8 * PERIOD_NS] * 5)
     meta = run(config, payload)
 
-    steps = _as_list(meta, "macs_per_port_step")
+    steps = column_values(meta, "macs_per_port_step")
     assert steps[0:4] == [None, None, None, None], "no baseline until four periods are committed"
     assert steps[4:8] == [0, 0, 0, 0]
     assert steps[8:] == [0, 1, 2, 3, 4]
-    assert _as_list(meta, "macs_per_port_baseline_max")[-1] == 1
-    assert _as_list(meta, "macs_per_port_baseline_buckets")[-1] == 8
-    assert _as_list(meta, "macs_per_port_baseline_mature")[-1] is True
+    assert column_values(meta, "macs_per_port_baseline_max")[-1] == 1
+    assert column_values(meta, "macs_per_port_baseline_buckets")[-1] == 8
+    assert column_values(meta, "macs_per_port_baseline_mature")[-1] is True
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -123,16 +109,16 @@ def test_the_next_period_has_absorbed_the_hub(config: Config):
                     times=[index * PERIOD_NS for index in range(8)] + [8 * PERIOD_NS] * 5 + [9 * PERIOD_NS])
     meta = run(config, payload)
 
-    assert _as_list(meta, "macs_per_port_baseline_max")[-1] == 5
-    assert _as_list(meta, "macs_per_port_step")[-1] == 0
+    assert column_values(meta, "macs_per_port_baseline_max")[-1] == 5
+    assert column_values(meta, "macs_per_port_step")[-1] == 0
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_port_the_estate_has_only_just_met_has_no_baseline(config: Config):
     meta = run(config, frame([1, 7, 7]))
 
-    assert _as_list(meta, "macs_per_port_baseline_mature") == [False, False, False]
-    assert _as_list(meta, "macs_per_port_step") == [None, None, None]
+    assert column_values(meta, "macs_per_port_baseline_mature") == [False, False, False]
+    assert column_values(meta, "macs_per_port_step") == [None, None, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -145,15 +131,15 @@ def test_ports_do_not_share_a_history(config: Config):
     }
     meta = run(config, payload)
 
-    assert _as_list(meta, "macs_per_port_step")[4] == 0
-    assert _as_list(meta, "macs_per_port_step")[9] == 1
+    assert column_values(meta, "macs_per_port_step")[4] == 0
+    assert column_values(meta, "macs_per_port_step")[9] == 1
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_another_count_can_be_baselined_and_names_its_own_columns(config: Config):
     meta = run(config, frame(STEADY), value_column="ports_per_mac")
 
-    assert _as_list(meta, "ports_per_mac_step")[-1] == 0
+    assert column_values(meta, "ports_per_mac_step")[-1] == 0
     assert "macs_per_port_step" not in meta.get_column_names()
 
 
@@ -166,8 +152,8 @@ def test_state_persists_across_messages(config: Config):
     second = MessageMeta(df_class(frame([1, 1, 1, 4], times=[index * PERIOD_NS for index in range(5, 9)])))
     stage.on_data(second)
 
-    assert _as_list(second, "macs_per_port_baseline_buckets") == [5, 6, 7, 8]
-    assert _as_list(second, "macs_per_port_step") == [0, 0, 0, 3]
+    assert column_values(second, "macs_per_port_baseline_buckets") == [5, 6, 7, 8]
+    assert column_values(second, "macs_per_port_step") == [0, 0, 0, 3]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -186,9 +172,9 @@ def test_the_reference_does_not_depend_on_where_the_batches_fall(config: Config)
     for (start, stop) in ((0, 10), (10, 13)):
         piece = MessageMeta(df_class({name: values[start:stop] for (name, values) in rows.items()}))
         stage.on_data(piece)
-        pieces.extend(_as_list(piece, "macs_per_port_step"))
+        pieces.extend(column_values(piece, "macs_per_port_step"))
 
-    assert pieces == _as_list(whole, "macs_per_port_step")
+    assert pieces == column_values(whole, "macs_per_port_step")
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -218,14 +204,14 @@ def test_composes_with_the_cardinality_stage(config: Config):
     TC2CardinalityStage(config).on_data(meta)
     TC2BaselineStage(config, bucket_seconds=300, min_buckets=4).on_data(meta)
 
-    steps = _as_list(meta, "macs_per_port_step")
-    first = _as_list(meta, "macs_per_port_first_in_window")
+    steps = column_values(meta, "macs_per_port_step")
+    first = column_values(meta, "macs_per_port_first_in_window")
 
     # The hub's four addresses each raise the count above everything the port has carried, and each is new to the
     # window: the rows R-B-L2-002 fires on, and the address that was always there is not among them.
     assert steps[-5:] == [0, 1, 2, 3, 4]
     assert first[-4:] == [True, True, True, True]
-    assert _as_list(meta, "port_key")[-1] == PORT
+    assert column_values(meta, "port_key")[-1] == PORT
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -235,8 +221,8 @@ def test_out_of_order_row_is_flagged_not_scored(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "macs_per_port_step")[4] == 0
-    assert _as_list(meta, "macs_per_port_step")[5] is None
+    assert column_values(meta, "macs_per_port_step")[4] == 0
+    assert column_values(meta, "macs_per_port_step")[5] is None
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -248,7 +234,7 @@ def test_control_message_accepted(config: Config):
     returned = TC2BaselineStage(config, bucket_seconds=300, min_buckets=4).on_data(message)
 
     assert returned is message
-    assert _as_list(message.payload(), "macs_per_port_step")[-1] == 0
+    assert column_values(message.payload(), "macs_per_port_step")[-1] == 0
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -264,7 +250,7 @@ def test_tc2_baseline_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "macs_per_port_baseline_buckets")[-1] == 7
+    assert column_values(messages[0], "macs_per_port_baseline_buckets")[-1] == 7
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -300,18 +286,18 @@ def test_null_entities_and_counts_are_not_pooled(config: Config):
 
     # The keyless row and the countless row carry nulls; the real port's history is three periods deep after them,
     # not five.
-    assert _as_list(meta, "macs_per_port_step")[2] is None
-    assert _as_list(meta, "macs_per_port_step")[3] is None
-    assert _as_list(meta, "macs_per_port_baseline_buckets")[4] == 2
+    assert column_values(meta, "macs_per_port_step")[2] is None
+    assert column_values(meta, "macs_per_port_step")[3] is None
+    assert column_values(meta, "macs_per_port_baseline_buckets")[4] == 2
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
     meta = run(config, frame([1, 1, 9, 1], times=[0, PERIOD_NS, YEARS_AHEAD_NS, 2 * PERIOD_NS]))
 
-    assert _as_list(meta, "clock_refused") == [False, False, True, False]
-    assert _as_list(meta, "macs_per_port_baseline_buckets")[2] is None
-    assert _as_list(meta, "macs_per_port_baseline_buckets")[3] == 2
+    assert column_values(meta, "clock_refused") == [False, False, True, False]
+    assert column_values(meta, "macs_per_port_baseline_buckets")[2] is None
+    assert column_values(meta, "macs_per_port_baseline_buckets")[3] == 2
 
 
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):

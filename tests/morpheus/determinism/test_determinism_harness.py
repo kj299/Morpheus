@@ -19,7 +19,6 @@ lineage pipeline over the golden corpus.
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -35,10 +34,8 @@ from morpheus.utils.lineage import window_id_from_timestamp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import golden  # noqa: E402
 import lineage_pipeline  # noqa: E402
-
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_lineage_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_lineage_pipeline.py")
 
 
 @pytest.fixture(name="corpus", scope="module")
@@ -97,16 +94,7 @@ def test_cross_restart_diff(execution_mode, tmp_path):
     # Check 3: run in two fresh interpreters with different hash seeds. Catches PYTHONHASHSEED dependence and
     # state captured from the parent process, which the in-process double run cannot see. The mode travels on the
     # driver's command line, because a fresh interpreter is exactly what this check is for.
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=600)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("lineage", execution_mode, tmp_path, timeout=600)
 
     assert outputs[0] == outputs[1]
 
@@ -115,13 +103,13 @@ def test_cross_restart_diff(execution_mode, tmp_path):
 def test_against_golden(pipeline_config: Config, corpus: pd.DataFrame):
     # Check 4a: compare against the checked-in golden output, so drift introduced by a code or dependency change
     # is caught even when the change is internally consistent. A legitimate behavior change regenerates the golden
-    # file via run_lineage_pipeline.py and reviews the diff.
-    golden = pd.read_csv(GOLDEN_PATH)
+    # file with `run_golden.py lineage` and reviews the diff.
+    expected = pd.read_csv(golden.golden_path("lineage"))
     result = _run(pipeline_config, [corpus.copy()])
 
-    golden = golden.astype({column: result[column].dtype for column in result.columns})
+    expected = expected.astype({column: result[column].dtype for column in result.columns})
 
-    assert diff_frames(result, golden) is None, diff_frames(result, golden)
+    assert diff_frames(result, expected) is None, diff_frames(result, expected)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -137,7 +125,7 @@ def test_against_golden_via_compare_dataframe_stage(pipeline_config: Config, cor
     from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
     from morpheus.stages.lineage.window_seal_stage import WindowSealStage
 
-    golden = pd.read_csv(GOLDEN_PATH)
+    expected = pd.read_csv(golden.golden_path("lineage"))
 
     pipe = LinearPipeline(pipeline_config)
     pipe.set_source(InMemorySourceStage(pipeline_config, dataframes=[corpus.copy()]))
@@ -158,14 +146,14 @@ def test_against_golden_via_compare_dataframe_stage(pipeline_config: Config, cor
     # window_seq is derived by the harness after collection, not by a stage, so it is excluded from the raw
     # in-pipeline comparison; the harness-side golden check covers it.
     comp_stage = pipe.add_stage(
-        CompareDataFrameStage(pipeline_config, compare_df=golden, index_col="event_uid", exclude=["window_seq"]))
+        CompareDataFrameStage(pipeline_config, compare_df=expected, index_col="event_uid", exclude=["window_seq"]))
 
     pipe.run()
 
     results = comp_stage.get_results(clear=False)
 
     assert results["diff_rows"] == 0, results
-    assert results["total_rows"] == len(golden)
+    assert results["total_rows"] == len(expected)
     assert len(results["missing_cols"]) == 0
 
 

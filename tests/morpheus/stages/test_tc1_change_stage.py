@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -45,15 +46,6 @@ def frame(serials: list, neighbors: list = None, times: list = None, entity: str
         "transceiver_serial": serials,
         "lldp_neighbor_chassis_id": ["chassis-a"] * count if neighbors is None else neighbors,
     }
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [None if value is None or value is pd.NA or value != value else value for value in series.tolist()]
 
 
 LONE_PORT_SKEW_SECONDS = 500 * 86400
@@ -99,8 +91,8 @@ def test_cli_command_builds():
 def test_a_substitution_is_detected(config: Config):
     meta = run(config, frame(["SN-AAA", "SN-AAA", "SN-BBB"]))
 
-    assert _as_list(meta, "transceiver_serial_changed") == [None, False, True]
-    assert _as_list(meta, "transceiver_serial_first_seen") == [None, False, True]
+    assert column_values(meta, "transceiver_serial_changed") == [None, False, True]
+    assert column_values(meta, "transceiver_serial_first_seen") == [None, False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -111,7 +103,7 @@ def test_a_change_across_a_month_boundary_is_detected(config: Config):
                frame(["SN-AAA", "SN-BBB"], times=[0, 40 * DAY_NS]),
                max_clock_skew_seconds=LONE_PORT_SKEW_SECONDS)
 
-    assert _as_list(meta, "transceiver_serial_changed") == [None, True]
+    assert column_values(meta, "transceiver_serial_changed") == [None, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -121,7 +113,7 @@ def test_a_change_across_any_gap_is_detected(config: Config):
                frame(["SN-AAA", "SN-BBB"], times=[0, 400 * DAY_NS]),
                max_clock_skew_seconds=LONE_PORT_SKEW_SECONDS)
 
-    assert _as_list(meta, "transceiver_serial_changed") == [None, True]
+    assert column_values(meta, "transceiver_serial_changed") == [None, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -130,9 +122,9 @@ def test_the_first_sample_answers_neither_question(config: Config):
 
     # A null, not False. A rule reading "did not change" must not count a port's first appearance as evidence of
     # stability that was never established.
-    assert _as_list(meta, "transceiver_serial_changed") == [None]
-    assert _as_list(meta, "transceiver_serial_first_seen") == [None]
-    assert _as_list(meta, "transceiver_serial_distinct_count") == [1]
+    assert column_values(meta, "transceiver_serial_changed") == [None]
+    assert column_values(meta, "transceiver_serial_first_seen") == [None]
+    assert column_values(meta, "transceiver_serial_distinct_count") == [1]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -153,9 +145,9 @@ def test_returning_to_a_previous_optic_is_a_change_but_not_new(config: Config):
     meta = run(config, frame(["SN-AAA", "SN-BBB", "SN-AAA"]))
 
     # Swapped out and swapped back is two substitutions, and the second is explained by the estate's own history.
-    assert _as_list(meta, "transceiver_serial_changed") == [None, True, True]
-    assert _as_list(meta, "transceiver_serial_first_seen") == [None, True, False]
-    assert _as_list(meta, "transceiver_serial_distinct_count") == [1, 2, 2]
+    assert column_values(meta, "transceiver_serial_changed") == [None, True, True]
+    assert column_values(meta, "transceiver_serial_first_seen") == [None, True, False]
+    assert column_values(meta, "transceiver_serial_distinct_count") == [1, 2, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -163,7 +155,7 @@ def test_an_empty_cage_is_a_value(config: Config):
     meta = run(config, frame([None, None, "SN-AAA", None]))
 
     # Installing an optic and pulling it are both changes; a null is a physical state, not missing data.
-    assert _as_list(meta, "transceiver_serial_changed") == [None, False, True, True]
+    assert column_values(meta, "transceiver_serial_changed") == [None, False, True, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -171,8 +163,8 @@ def test_identifiers_are_tracked_independently(config: Config):
     meta = run(config, frame(["SN-AAA", "SN-AAA"], neighbors=["chassis-a", "chassis-b"]))
 
     # Swapping the optic and re-cabling to a different neighbor are different events.
-    assert _as_list(meta, "transceiver_serial_changed") == [None, False]
-    assert _as_list(meta, "lldp_neighbor_chassis_id_changed") == [None, True]
+    assert column_values(meta, "transceiver_serial_changed") == [None, False]
+    assert column_values(meta, "lldp_neighbor_chassis_id_changed") == [None, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -187,7 +179,7 @@ def test_ports_do_not_contaminate_each_other(config: Config):
     meta = run(config, payload)
 
     # Two ports legitimately hold different optics; only a change within one port is a substitution.
-    assert _as_list(meta, "transceiver_serial_changed") == [None, None, False, False]
+    assert column_values(meta, "transceiver_serial_changed") == [None, None, False, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -203,7 +195,7 @@ def test_state_persists_across_messages(config: Config):
     stage.on_data(second)
 
     # The comparison spans the message boundary, which is the whole reason this stage is stateful.
-    assert _as_list(second, "transceiver_serial_changed") == [True]
+    assert column_values(second, "transceiver_serial_changed") == [True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -213,7 +205,7 @@ def test_out_of_order_sample_is_flagged_not_scored(config: Config):
     meta = run(config, payload)
 
     # The late sample carries no verdict, and must not have become the state the next one is compared against.
-    assert _as_list(meta, "transceiver_serial_changed") == [None, False, None, False]
+    assert column_values(meta, "transceiver_serial_changed") == [None, False, None, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -223,7 +215,7 @@ def test_control_message_accepted(config: Config):
 
     TC1ChangeStage(config).on_data(message)
 
-    assert _as_list(message.payload(), "transceiver_serial_changed") == [None, True]
+    assert column_values(message.payload(), "transceiver_serial_changed") == [None, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -239,7 +231,7 @@ def test_tc1_change_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "transceiver_serial_changed") == [None, False, True]
+    assert column_values(messages[0], "transceiver_serial_changed") == [None, False, True]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -271,8 +263,8 @@ def test_null_entity_keys_are_not_pooled_into_one_port(config: Config):
     }
     meta = run(config, payload, novelty_columns=["transceiver_serial"])
 
-    assert _as_list(meta, "transceiver_serial_changed") == [None, None]
-    assert _as_list(meta, "transceiver_serial_first_seen") == [None, None]
+    assert column_values(meta, "transceiver_serial_changed") == [None, None]
+    assert column_values(meta, "transceiver_serial_first_seen") == [None, None]
 
 
 @pytest.mark.cpu_mode
@@ -288,19 +280,19 @@ def test_a_null_key_does_not_disturb_a_real_ones_state(config: Config):
     # The real port saw one serial twice. Its first sighting has nothing to compare against, so `changed` is null
     # there; the second is a comparison against the same value, so it is False. Had the keyless row leaked into this
     # port's history, the third row would have compared SN-AAA against SN-ZZZ and reported a substitution.
-    assert _as_list(meta, "transceiver_serial_changed") == [None, None, False]
-    assert _as_list(meta, "transceiver_serial_first_seen") == [None, None, False]
+    assert column_values(meta, "transceiver_serial_changed") == [None, None, False]
+    assert column_values(meta, "transceiver_serial_first_seen") == [None, None, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
     meta = run(config, frame(["SN-AAA", "SN-AAA", "SN-ZZZ", "SN-AAA"], times=[0, DAY_NS, YEARS_AHEAD_NS, 2 * DAY_NS]))
 
-    assert _as_list(meta, "clock_refused") == [False, False, True, False]
-    assert _as_list(meta, "transceiver_serial_changed")[2] is None
+    assert column_values(meta, "clock_refused") == [False, False, True, False]
+    assert column_values(meta, "transceiver_serial_changed")[2] is None
     # Believed, the decade-ahead poll would have been the port's previous one and the next honest poll would have
     # been out of order with no verdict; refused, the optic simply never changed.
-    assert _as_list(meta, "transceiver_serial_changed")[3] is False
+    assert column_values(meta, "transceiver_serial_changed")[3] is False
 
 
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):

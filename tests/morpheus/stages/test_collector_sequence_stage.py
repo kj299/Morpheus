@@ -17,6 +17,7 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -31,15 +32,6 @@ def frame(sequences: list, collectors: list = None) -> dict:
         "collector_id": ["poller-a"] * len(sequences) if collectors is None else collectors,
         "collector_seq": sequences,
     }
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [None if value is None or value is pd.NA or value != value else value for value in series.tolist()]
 
 
 def run(config: Config, payload: dict, stage: CollectorSequenceStage = None) -> MessageMeta:
@@ -76,32 +68,32 @@ def test_a_contiguous_stream_has_no_gaps_and_the_first_record_answers_nothing(co
     meta = run(config, frame([10, 11, 12]))
 
     # Null on the first record: a stream nobody has seen before was not shown to be contiguous.
-    assert _as_list(meta, "collector_seq_gap") == [None, 0, 0]
-    assert _as_list(meta, "collector_seq_regressed") == [None, False, False]
+    assert column_values(meta, "collector_seq_gap") == [None, 0, 0]
+    assert column_values(meta, "collector_seq_regressed") == [None, False, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_gap_counts_the_records_the_collector_numbered_and_never_delivered(config: Config):
     meta = run(config, frame([1, 2, 6, 7]))
 
-    assert _as_list(meta, "collector_seq_gap") == [None, 0, 3, 0]
+    assert column_values(meta, "collector_seq_gap") == [None, 0, 3, 0]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_repeat_or_an_earlier_number_is_a_regression_and_moves_nothing(config: Config):
     meta = run(config, frame([1, 2, 2, 0, 3]))
 
-    assert _as_list(meta, "collector_seq_regressed") == [None, False, True, True, False]
+    assert column_values(meta, "collector_seq_regressed") == [None, False, True, True, False]
     # The replayed records leave the position at two, so the next honest record is not a gap.
-    assert _as_list(meta, "collector_seq_gap") == [None, 0, 0, 0, 0]
+    assert column_values(meta, "collector_seq_gap") == [None, 0, 0, 0, 0]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_each_collector_keeps_its_own_position(config: Config):
     meta = run(config, frame([1, 1, 2, 2], collectors=["poller-a", "poller-b", "poller-a", "poller-b"]))
 
-    assert _as_list(meta, "collector_seq_gap") == [None, None, 0, 0]
-    assert _as_list(meta, "collector_seq_regressed") == [None, None, False, False]
+    assert column_values(meta, "collector_seq_gap") == [None, None, 0, 0]
+    assert column_values(meta, "collector_seq_regressed") == [None, None, False, False]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -110,7 +102,7 @@ def test_the_position_survives_from_one_batch_to_the_next(config: Config):
     run(config, frame([1, 2]), stage)
     meta = run(config, frame([5]), stage)
 
-    assert _as_list(meta, "collector_seq_gap") == [2]
+    assert column_values(meta, "collector_seq_gap") == [2]
     assert stage.tracked_collectors == 1
 
 
@@ -118,8 +110,8 @@ def test_the_position_survives_from_one_batch_to_the_next(config: Config):
 def test_a_record_with_no_collector_or_no_number_is_placed_nowhere(config: Config):
     meta = run(config, frame([1, None, 2], collectors=["poller-a", "poller-a", None]))
 
-    assert _as_list(meta, "collector_seq_gap") == [None, None, None]
-    assert _as_list(meta, "collector_seq_regressed") == [None, None, None]
+    assert column_values(meta, "collector_seq_gap") == [None, None, None]
+    assert column_values(meta, "collector_seq_regressed") == [None, None, None]
 
 
 @pytest.mark.cpu_mode

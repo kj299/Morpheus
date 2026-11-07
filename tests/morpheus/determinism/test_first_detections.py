@@ -35,6 +35,7 @@ import sys
 import pandas as pd
 import pytest
 
+from morpheus.utils import splunk_conf
 from morpheus.utils.binding_closer import CONFLICT
 from morpheus.utils.binding_closer import DISPLACED
 from morpheus.utils.optical_forecast import DEFAULT_MIN_SAMPLES
@@ -46,6 +47,7 @@ from morpheus.utils.optical_forecast import STATUS_PROJECTED
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import golden  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -101,39 +103,14 @@ LOOKUP = os.path.join(REPO_ROOT,
                       "port_designations.csv")
 
 
-def read_conf(path: str) -> dict[str, dict[str, str]]:
-    """Parse a Splunk .conf file: `[stanza]` headers, `key = value` pairs, backslash line continuations."""
-    with open(path, encoding="utf-8") as handle:
-        raw = handle.read()
-
-    joined = re.sub(r"\\\n", " ", raw)
-    stanzas: dict[str, dict[str, str]] = {}
-    current = None
-
-    for line in joined.splitlines():
-        stripped = line.strip()
-
-        if (not stripped or stripped.startswith("#")):
-            continue
-
-        if (stripped.startswith("[") and stripped.endswith("]")):
-            current = stripped[1:-1]
-            stanzas[current] = {}
-        elif (current is not None and "=" in stripped):
-            (key, value) = stripped.split("=", 1)
-            stanzas[current][key.strip()] = value.strip()
-
-    return stanzas
-
-
 @pytest.fixture(name="result", scope="module")
 def result_fixture() -> pd.DataFrame:
-    yield tp.run_pipeline(tp.build_pipeline_config(), tp.build_corpus())
+    yield golden.composed(tp)
 
 
 @pytest.fixture(name="searches", scope="module")
 def searches_fixture() -> dict[str, dict[str, str]]:
-    yield read_conf(SAVED_SEARCHES)
+    yield splunk_conf.read(SAVED_SEARCHES)
 
 
 # --- The predicates, in Python, over the planted corpus ---------------------------------------------------------
@@ -603,7 +580,7 @@ def test_layer_3_seals_hourly_as_the_lateral_movement_chain_assumes(searches: di
 
 def test_the_binding_sourcetype_is_timed_on_the_end():
     # A binding opened hours ago and closed by a conflict now must land in the detection window that covers now.
-    props = read_conf(PROPS)
+    props = splunk_conf.read(PROPS)
 
     assert "binding:l2" in props
     assert '"bind_end"' in props["binding:l2"]["TIME_PREFIX"]
@@ -618,13 +595,13 @@ def test_the_designation_lookup_ships_with_its_schema_and_no_guesses():
 
     assert lines == ["port_key,designation,max_macs"]
 
-    transforms = read_conf(os.path.join(APP_DEFAULT, "transforms.conf"))
+    transforms = splunk_conf.read(os.path.join(APP_DEFAULT, "transforms.conf"))
     assert transforms["port_designations"]["filename"] == os.path.basename(LOOKUP)
 
 
 def test_the_open_binding_sourcetype_is_timed_on_the_start():
     # A provisional record has no end yet; its only time is when the binding opened.
-    props = read_conf(PROPS)
+    props = splunk_conf.read(PROPS)
 
     assert "binding:l2:open" in props
     assert '"bind_start"' in props["binding:l2:open"]["TIME_PREFIX"]

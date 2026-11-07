@@ -24,6 +24,7 @@ import hashlib
 import random
 
 import pandas as pd
+from corpora.records import seeded_envelope as _envelope
 
 from morpheus.compositions import envelope as universal_envelope
 from morpheus.compositions.estate_context import EstateContext
@@ -331,15 +332,6 @@ TELEMETRY_CLASSES = ("tc1",
                      "tc2_arp",
                      "tc2_auth",
                      NETWORK_CONTEXT_CLASS)
-
-
-def _envelope(rng: random.Random, collector: str, schema: str, seq: int) -> dict:
-    return {
-        "collector_id": collector,
-        "schema_version": schema,
-        "origin_hash": f"{rng.getrandbits(64):016x}",
-        "collector_seq": seq,
-    }
 
 
 def build_corpus() -> dict[str, pd.DataFrame]:

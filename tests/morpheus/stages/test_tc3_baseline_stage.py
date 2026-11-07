@@ -14,11 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-
 import pandas as pd
 import pytest
 
+from _utils.frames import column_values
+from _utils.frames import drive
+from _utils.frames import without_row
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -49,18 +50,6 @@ def frame(fan_out: list, fan_in: list = None, asymmetry: list = None, times: lis
         "srcs_per_dst": [1] * count if fan_in is None else fan_in,
         "byte_asymmetry": [0.25] * count if asymmetry is None else asymmetry,
     }
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [
-        None if (value is None or value is pd.NA or (isinstance(value, float) and math.isnan(value))) else value
-        for value in series.tolist()
-    ]
 
 
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
@@ -114,11 +103,11 @@ def test_a_scan_is_a_step_above_the_hosts_own_history(config: Config):
     # before it, which never reached more than three.
     meta = run(config, frame([3, 3, 3, 3, 40]))
 
-    steps = _as_list(meta, "dsts_per_src_step")
+    steps = column_values(meta, "dsts_per_src_step")
     assert steps[0:4] == [None, None, None, None], "no baseline until four hours are committed"
     assert steps[4] == 37
-    assert _as_list(meta, "dsts_per_src_baseline_max")[4] == 3
-    assert _as_list(meta, "dsts_per_src_baseline_mature")[4] is True
+    assert column_values(meta, "dsts_per_src_baseline_max")[4] == 3
+    assert column_values(meta, "dsts_per_src_baseline_mature")[4] is True
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -126,8 +115,8 @@ def test_a_busy_server_is_measured_against_its_own_busy_hours(config: Config):
     # The infrastructure case a literal threshold cannot tell from a scan: seventy every hour is no step.
     meta = run(config, frame([70, 64, 70, 66, 69]))
 
-    assert _as_list(meta, "dsts_per_src_step")[4] == -1
-    assert _as_list(meta, "dsts_per_src_baseline_max")[4] == 70
+    assert column_values(meta, "dsts_per_src_step")[4] == -1
+    assert column_values(meta, "dsts_per_src_baseline_max")[4] == 70
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -143,18 +132,18 @@ def test_fan_in_is_kept_per_destination(config: Config):
     }
     meta = run(config, payload, min_buckets=2)
 
-    assert _as_list(meta, "srcs_per_dst_baseline_max")[4:] == [2, 2]
-    assert _as_list(meta, "srcs_per_dst_step")[4:] == [-1, 7]
+    assert column_values(meta, "srcs_per_dst_baseline_max")[4:] == [2, 2]
+    assert column_values(meta, "srcs_per_dst_step")[4:] == [-1, 7]
     # The sources each have their own fan-out history, two hours deep, regardless.
-    assert _as_list(meta, "dsts_per_src_baseline_buckets")[4:] == [2, 2]
+    assert column_values(meta, "dsts_per_src_baseline_buckets")[4:] == [2, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_asymmetry_is_measured_against_the_hosts_own_envelope(config: Config):
     meta = run(config, frame([1] * 5, asymmetry=[0.2, 0.5, 0.3, 0.4, 12.0]))
 
-    assert _as_list(meta, "byte_asymmetry_baseline_max")[4] == pytest.approx(0.5)
-    assert _as_list(meta, "byte_asymmetry_step")[4] == pytest.approx(11.5)
+    assert column_values(meta, "byte_asymmetry_baseline_max")[4] == pytest.approx(0.5)
+    assert column_values(meta, "byte_asymmetry_step")[4] == pytest.approx(11.5)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -169,8 +158,8 @@ def test_a_group_scopes_the_history(config: Config):
 
     # Pooled, the second tenant's rows run backwards in time and are refused, and its scan is measured against the
     # first tenant's busy hours, which hide it.
-    assert _as_list(pooled, "dsts_per_src_step")[-1] == -20
-    assert _as_list(scoped, "dsts_per_src_step")[-1] == 37
+    assert column_values(pooled, "dsts_per_src_step")[-1] == -20
+    assert column_values(scoped, "dsts_per_src_step")[-1] == 37
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -180,7 +169,7 @@ def test_a_null_group_gets_no_baseline(config: Config):
 
     meta = run(config, payload, group_column="tenant")
 
-    assert _as_list(meta, "dsts_per_src_step")[-1] is None
+    assert column_values(meta, "dsts_per_src_step")[-1] is None
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -192,7 +181,7 @@ def test_state_persists_across_messages(config: Config):
     second = MessageMeta(df_class(frame([5], times=[4 * HOUR_NS])))
     stage.on_data(second)
 
-    assert _as_list(second, "dsts_per_src_step") == [2]
+    assert column_values(second, "dsts_per_src_step") == [2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -221,7 +210,7 @@ def test_composes_with_the_cardinality_stage(config: Config):
     TC3CardinalityStage(config).on_data(meta)
     TC3BaselineStage(config, min_buckets=4).on_data(meta)
 
-    assert _as_list(meta, "dsts_per_src_step")[-6:] == [0, 1, 2, 3, 4, 5]
+    assert column_values(meta, "dsts_per_src_step")[-6:] == [0, 1, 2, 3, 4, 5]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -233,7 +222,7 @@ def test_control_message_accepted(config: Config):
     returned = TC3BaselineStage(config, min_buckets=4).on_data(message)
 
     assert returned is message
-    assert _as_list(message.payload(), "dsts_per_src_step")[-1] == 1
+    assert column_values(message.payload(), "dsts_per_src_step")[-1] == 1
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -249,7 +238,7 @@ def test_tc3_baseline_stage_pipe(config: Config):
 
     messages = sink.get_messages()
     assert len(messages) == 1
-    assert _as_list(messages[0], "dsts_per_src_baseline_buckets")[-1] == 4
+    assert column_values(messages[0], "dsts_per_src_baseline_buckets")[-1] == 4
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -286,37 +275,16 @@ def test_null_hosts_and_values_are_not_pooled(config: Config):
 
     meta = run(config, payload)
 
-    assert _as_list(meta, "dsts_per_src_step")[2] is None
-    assert _as_list(meta, "dsts_per_src_step")[3] is None
+    assert column_values(meta, "dsts_per_src_step")[2] is None
+    assert column_values(meta, "dsts_per_src_step")[3] is None
     # The real host's history is three hours deep at the last row, not five.
-    assert _as_list(meta, "dsts_per_src_baseline_buckets")[5] == 3
+    assert column_values(meta, "dsts_per_src_baseline_buckets")[5] == 3
 
 
 # --- The clock guard ------------------------------------------------------------------------------------------
 
 YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
 """A collector clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
-
-
-def _without_row(payload: dict, position: int) -> dict:
-    """The same frame with one row left out, which is what a refused row must be indistinguishable from."""
-    return {
-        name: [value for (index, value) in enumerate(values) if index != position]
-        for (name, values) in payload.items()
-    }
-
-
-def _pandas(meta: MessageMeta) -> pd.DataFrame:
-    df = meta.copy_dataframe()
-
-    return df.to_pandas() if hasattr(df, "to_pandas") else df
-
-
-def _drive(config: Config, stage, payload: dict) -> pd.DataFrame:
-    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
-    stage.on_data(meta)
-
-    return _pandas(meta)
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -326,8 +294,8 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
     payload = frame([3, 3, 3, 3])
     payload["event_time"] = [0, HOUR_NS, YEARS_AHEAD_NS, 2 * HOUR_NS]
 
-    with_bad = _drive(config, TC3BaselineStage(config, min_buckets=4), payload)
-    control = _drive(config, TC3BaselineStage(config, min_buckets=4), _without_row(payload, 2))
+    with_bad = drive(config, TC3BaselineStage(config, min_buckets=4), payload)
+    control = drive(config, TC3BaselineStage(config, min_buckets=4), without_row(payload, 2))
 
     assert [bool(value) for value in with_bad["clock_refused"]] == [False, False, True, False]
     assert pd.isna(with_bad["dsts_per_src_baseline_buckets"][2])
@@ -342,7 +310,7 @@ def test_a_frame_with_nothing_refused_carries_the_column_as_false(config: Config
     # which rows shared a batch; a believed row reads False, which the health record counts as 0 rather than null.
     payload = frame([3, 3, 3, 3])
 
-    measured = _drive(config, TC3BaselineStage(config, min_buckets=4), payload)
+    measured = drive(config, TC3BaselineStage(config, min_buckets=4), payload)
 
     assert [bool(value) for value in measured["clock_refused"]] == [False] * len(measured)
 
@@ -367,9 +335,9 @@ def test_a_stop_and_restore_round_trip_keeps_the_clock(config: Config):
     })
 
     stopped = TC3BaselineStage(config, min_buckets=4)
-    _drive(config, stopped, before)
+    drive(config, stopped, before)
 
     resumed = TC3BaselineStage(config, min_buckets=4)
     resumed.restore_state(stopped.checkpoint_state())
 
-    assert [bool(value) for value in _drive(config, resumed, after)["clock_refused"]] == [True, False]
+    assert [bool(value) for value in drive(config, resumed, after)["clock_refused"]] == [True, False]

@@ -22,7 +22,6 @@ much, so every anomaly planted in the corpus is asserted here as the column a ru
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -32,8 +31,6 @@ from morpheus.config import Config
 from morpheus.utils.binding_closer import CONFLICT
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
-from morpheus.utils.lineage import window_id_from_timestamp
 from morpheus.utils.optical_forecast import DEFAULT_MIN_SAMPLES
 from morpheus.utils.optical_forecast import STATUS_IMMATURE
 from morpheus.utils.optical_forecast import STATUS_NONLINEAR
@@ -43,10 +40,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import envelope as universal_envelope  # noqa: E402
+import golden  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
-
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_telemetry_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_telemetry_pipeline.py")
 
 NS = tp.NS_PER_SECOND
 
@@ -80,22 +75,6 @@ def result_fixture(pipeline_config: Config, corpus: dict[str, pd.DataFrame]) -> 
 
 def _rows(result: pd.DataFrame, telemetry_class: str) -> pd.DataFrame:
     return result[result["telemetry_class"] == telemetry_class]
-
-
-def _windows(frame: pd.DataFrame) -> list[int]:
-    # The network inventory has no event time and is not windowed; the store it builds does not depend on the order
-    # of its records, so it is permuted as one group.
-    if ("event_time" not in frame.columns):
-        return [0] * len(frame)
-
-    return [window_id_from_timestamp(int(t), tp.PERIOD_SECONDS * NS) for t in frame["event_time"]]
-
-
-def _permuted(corpus: dict[str, pd.DataFrame], seed: int) -> dict[str, pd.DataFrame]:
-    return {
-        name: permute_within_contiguous_groups(frame, _windows(frame), seed=seed)
-        for (name, frame) in corpus.items()
-    }
 
 
 # --- Check 1: the corpus -------------------------------------------------------------------------------------------
@@ -158,16 +137,7 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 def test_cross_restart_diff(execution_mode, tmp_path):
     # The driver takes the mode as an argument, because this check is the one that cannot share a process with the
     # test that asks for it: a fresh interpreter is the whole point, so the mode has to travel on the command line.
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("telemetry", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
@@ -177,19 +147,7 @@ def test_against_golden(result: pd.DataFrame):
     # The rendering is compared byte for byte, the same way the cross-restart check compares it, so the nullable
     # integer and boolean columns never pass through a CSV-to-dtype round trip. On a mismatch, both sides are read
     # back as text so the first differing cell is named.
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = tp.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is intended, "
-                    f"regenerate the golden file with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("telemetry", tp.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -216,7 +174,8 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict[str, 
     detected = False
     for seed in (1, 2, 3):
         detected = detected or (diff_frames(
-            unsorted_baseline, tp.run_pipeline(pipeline_config, _permuted(corpus, seed), impose_order=False))
+            unsorted_baseline,
+            tp.run_pipeline(pipeline_config, golden.permuted(corpus, seed, tp.PERIOD_SECONDS), impose_order=False))
                                 is not None)
 
     assert detected, "Removing the total-order stage did not change any output under permutation."
@@ -227,7 +186,7 @@ def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, p
     # Check 6, and the direct test for control 8 on the telemetry stages: shuffling rows within a window must not
     # change the output once the total-order stage is in front of them.
     for seed in (1, 2, 3):
-        shuffled = _permuted(corpus, seed)
+        shuffled = golden.permuted(corpus, seed, tp.PERIOD_SECONDS)
 
         assert any(not shuffled[name]["collector_seq"].equals(corpus[name]["collector_seq"])
                    for name in corpus if "collector_seq" in corpus[name].columns), "permutation was a no-op"
@@ -324,7 +283,7 @@ def test_a_chain_survives_a_permutation_of_its_own_events(corpus: dict[str, pd.D
     # The chain root is a Merkle root over the members, which deduplicates and sorts, so membership rather than
     # arrival order decides it. Control 13's own permutation check covers the whole frame; this says the property
     # the identifier depends on is the reason.
-    shuffled = tp.run_pipeline(tp.build_pipeline_config(), _permuted(corpus, 1))
+    shuffled = tp.run_pipeline(tp.build_pipeline_config(), golden.permuted(corpus, 1, tp.PERIOD_SECONDS))
 
     for name in tp.CHAIN_ROOTS:
         before = set(_rows(result, name)["lineage_id"].dropna())

@@ -28,7 +28,6 @@ handshake, and that the issuer and cipher rules decline until their entity has a
 """
 
 import os
-import subprocess
 import sys
 
 import pandas as pd
@@ -39,16 +38,12 @@ from morpheus.messages import MessageMeta
 from morpheus.stages.telemetry.tc6_certificate_stage import TC6CertificateStage
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
-from morpheus.utils.determinism import permute_within_contiguous_groups
-from morpheus.utils.lineage import window_id_from_timestamp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
+import golden  # noqa: E402
 import presentation_pipeline as pp_  # noqa: E402
-
-GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_presentation_expected.csv")
-DRIVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_presentation_pipeline.py")
 
 SETTLED_HANDSHAKES = 20
 """Prior handshakes R-B-L6-001 requires before a host's new stack is a finding. The corpus separates its two
@@ -86,30 +81,6 @@ def result_fixture(pipeline_config: Config, corpus: dict[str, pd.DataFrame]) -> 
         _RESULTS[mode] = pp_.run_pipeline(pipeline_config, corpus)
 
     yield _RESULTS[mode]
-
-
-def _truth(frame: pd.DataFrame, column: str) -> pd.Series:
-    """A nullable flag as a plain boolean, with "not answerable" reading as "did not fire"."""
-    return frame[column].astype("boolean").fillna(False)
-
-
-def _split(frame: pd.DataFrame, parts: int) -> list:
-    size = max(1, len(frame) // parts)
-
-    return [frame.iloc[start:start + size].reset_index(drop=True) for start in range(0, len(frame), size)]
-
-
-def _windows(frame: pd.DataFrame) -> list:
-    period_ns = pp_.PERIOD_SECONDS * pp_.NS_PER_SECOND
-
-    return [window_id_from_timestamp(int(stamp), period_ns) for stamp in frame["event_time"]]
-
-
-def _permuted(corpus: dict, seed: int) -> dict:
-    return {
-        name: permute_within_contiguous_groups(frame, _windows(frame), seed=seed)
-        for (name, frame) in corpus.items()
-    }
 
 
 # --- Check 1: the corpus is fixed and shaped like an inspection point -------------------------------------------
@@ -188,41 +159,20 @@ def test_double_run_diff(pipeline_config: Config, corpus: dict[str, pd.DataFrame
 @pytest.mark.slow
 @pytest.mark.gpu_and_cpu_mode
 def test_cross_restart_diff(execution_mode, tmp_path):
-    mode = "gpu" if execution_mode.value == "GPU" else "cpu"
-    outputs = []
-
-    for (label, hash_seed) in (("a", "0"), ("b", "4242")):
-        out_path = tmp_path / f"restart_{label}.csv"
-        env = dict(os.environ)
-        env["PYTHONHASHSEED"] = hash_seed
-
-        subprocess.run([sys.executable, DRIVER_PATH, str(out_path), mode], env=env, check=True, timeout=900)
-        outputs.append(out_path.read_bytes())
+    outputs = golden.cross_restart_outputs("presentation", execution_mode, tmp_path)
 
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_against_golden(result: pd.DataFrame):
-    with open(GOLDEN_PATH, encoding="utf-8") as handle:
-        golden_text = handle.read()
-
-    rendered = pp_.render(result)
-
-    if (rendered != golden_text):
-        from io import StringIO  # pylint: disable=import-outside-toplevel
-        as_text = {"dtype": str, "keep_default_na": False}
-        difference = diff_frames(pd.read_csv(StringIO(rendered), **as_text),
-                                 pd.read_csv(StringIO(golden_text), **as_text))
-
-        pytest.fail(f"Output drifted from {os.path.basename(GOLDEN_PATH)}: {difference}. If the change is "
-                    f"intended, regenerate the golden with {os.path.basename(DRIVER_PATH)} and review the diff.")
+    golden.assert_matches_golden("presentation", pp_.render(result))
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
-    thirds = {name: _split(frame, 3) for (name, frame) in corpus.items()}
-    by_row = {name: _split(frame, len(frame)) for (name, frame) in corpus.items()}
+    thirds = {name: golden.split(frame, 3) for (name, frame) in corpus.items()}
+    by_row = {name: golden.split(frame, len(frame)) for (name, frame) in corpus.items()}
 
     assert diff_frames(result, pp_.run_pipeline(pipeline_config, corpus, batches=thirds)) is None
     assert diff_frames(result, pp_.run_pipeline(pipeline_config, corpus, batches=by_row)) is None
@@ -231,7 +181,7 @@ def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFra
 @pytest.mark.gpu_and_cpu_mode
 def test_permutation_within_windows(pipeline_config: Config, corpus: dict[str, pd.DataFrame], result: pd.DataFrame):
     for seed in (1, 2, 3):
-        shuffled = pp_.run_pipeline(pipeline_config, _permuted(corpus, seed))
+        shuffled = pp_.run_pipeline(pipeline_config, golden.permuted(corpus, seed, pp_.PERIOD_SECONDS))
 
         assert diff_frames(result, shuffled) is None, seed
 
@@ -242,7 +192,7 @@ def test_permutation_check_has_teeth(pipeline_config: Config, corpus: dict):
     # and a running minimum are each functions of what came before -- so removing the imposed order has to
     # change the answer, or the check is passing over a pipeline that never needed it.
     ordered = pp_.run_pipeline(pipeline_config, corpus, impose_order=False)
-    shuffled = pp_.run_pipeline(pipeline_config, _permuted(corpus, 5), impose_order=False)
+    shuffled = pp_.run_pipeline(pipeline_config, golden.permuted(corpus, 5, pp_.PERIOD_SECONDS), impose_order=False)
 
     assert diff_frames(ordered, shuffled) is not None
 
@@ -255,7 +205,7 @@ def test_a_settled_host_acquiring_a_stack_is_the_finding_and_a_new_host_is_not(r
     # R-B-L6-001, both halves, and the half the corpus had to be rebuilt to show. Both hosts below report a
     # fingerprint they have never presented; only one of them had a history to depart from. Without the
     # prior-handshake count the two rows are identical, which is why the count is on the row.
-    novel = result[_truth(result, "ja4_client_first_seen") & (result["src_ip"] != pp_.PERSONAL_DEVICE)]
+    novel = result[golden.flags(result, "ja4_client_first_seen") & (result["src_ip"] != pp_.PERSONAL_DEVICE)]
 
     assert set(novel["src_ip"]) == {pp_.MANAGED, pp_.VARIED, pp_.CREEPER, pp_.UPDATED}
 
@@ -274,16 +224,16 @@ def test_a_settled_host_acquiring_a_stack_is_the_finding_and_a_new_host_is_not(r
 def test_a_personal_device_acquiring_a_stack_is_not_a_managed_endpoint_doing_so(result: pd.DataFrame):
     # R-B-L6-001's managed-endpoint gate. The phone's history is as settled and its new stack as new as the managed
     # endpoint's; only the inventory tells them apart, and the rule reads it.
-    settled = result[_truth(result, "ja4_client_first_seen")
+    settled = result[golden.flags(result, "ja4_client_first_seen")
                      & (result["ja4_client_observations"] >= SETTLED_HANDSHAKES)]
 
     assert set(settled["src_ip"]) == {pp_.MANAGED, pp_.PERSONAL_DEVICE, pp_.CREEPER, pp_.UPDATED}
 
-    fired = settled[_truth(settled, "ctx_found")]
+    fired = settled[golden.flags(settled, "ctx_found")]
 
     assert set(fired["src_ip"]) == {pp_.MANAGED, pp_.CREEPER, pp_.UPDATED}
     assert list(fired[fired["src_ip"] == pp_.MANAGED]["ctx_criticality"]) == ["medium"]
-    assert not _truth(result[result["src_ip"] == pp_.PERSONAL_DEVICE], "ctx_found").any()
+    assert not golden.flags(result[result["src_ip"] == pp_.PERSONAL_DEVICE], "ctx_found").any()
 
 
 # --- R-P-L6-006: the creeping host, and the host that stops ------------------------------------------------------
@@ -318,7 +268,7 @@ def test_the_creeping_host_is_watchlisted_from_its_fifth_day(result: pd.DataFram
     assert sorted(fired["day"]) == list(range(RISING_WINDOWS, pp_.HISTORY_DAYS + 1))
 
     # R-B-L6-001 reports each acquisition after the first day on its own; six notables that the trajectory reads as one.
-    acquisitions = result[_truth(result, "ja4_client_first_seen") & (result["src_ip"] == pp_.CREEPER)
+    acquisitions = result[golden.flags(result, "ja4_client_first_seen") & (result["src_ip"] == pp_.CREEPER)
                           & (result["ja4_client_observations"] >= SETTLED_HANDSHAKES)]
 
     assert len(acquisitions) == pp_.HISTORY_DAYS
@@ -341,8 +291,7 @@ def test_a_host_that_acquires_two_stacks_and_stops_is_a_rise_too_short_to_watchl
 
 @pytest.mark.cpu_mode
 def test_every_handshake_carries_its_community_id(result: pd.DataFrame):
-    assert result["community_id"].notna().all()
-    assert result["community_id"].str.startswith("1:").all()
+    golden.assert_every_row_carries_a_community_id(result)
 
 
 @pytest.mark.cpu_mode
@@ -351,8 +300,8 @@ def test_alternating_between_two_known_stacks_is_never_novel_again(result: pd.Da
     # between a browser and an updater all corpus long, and after each has been seen once neither is new.
     varied = result[result["src_ip"] == pp_.VARIED].sort_values("event_time", kind="mergesort")
 
-    assert int(_truth(varied, "ja4_client_changed").sum()) > 10
-    assert int(_truth(varied, "ja4_client_first_seen").sum()) == 1
+    assert int(golden.flags(varied, "ja4_client_changed").sum()) > 10
+    assert int(golden.flags(varied, "ja4_client_first_seen").sum()) == 1
 
 
 @pytest.mark.cpu_mode
@@ -360,8 +309,8 @@ def test_an_interception_differs_and_a_delivery_host_behind_four_authorities_doe
     # R-D-L6-002, both halves. The content delivery host rotates among four authorities legitimately and
     # differs from its own mode constantly; the distinct count is what separates it from a destination that
     # has only ever presented one and suddenly presents another.
-    mature = result[_truth(result, "cert_issuer_mature")]
-    differs = mature[_truth(mature, "cert_issuer_differs")]
+    mature = result[golden.flags(result, "cert_issuer_mature")]
+    differs = mature[golden.flags(mature, "cert_issuer_differs")]
 
     assert pp_.CDN in set(differs["dst_ip"]), "the negative control must reach the predicate to be a control"
 
@@ -384,7 +333,7 @@ def test_one_address_terminating_two_names_is_two_destinations(result: pd.DataFr
 
     assert set(shared["tls_destination_key"]) == {f"{pp_.SHARED}:{pp_.SHOP}", f"{pp_.SHARED}:{pp_.MAIL}"}
 
-    differs = shared[_truth(shared, "cert_issuer_differs")]
+    differs = shared[golden.flags(shared, "cert_issuer_differs")]
 
     assert list(differs["sni"]) == [pp_.SHOP]
     assert list(differs["certificate_issuer"]) == [pp_.PROXY_CA]
@@ -414,7 +363,7 @@ def test_a_destination_port_the_cmdb_maps_carries_its_application(result: pd.Dat
     elsewhere = result[result["dst_ip"] != pp_.APPLIANCE]
 
     assert set(appliance["ctx_application_name"]) == {"badge-controller"}
-    assert not _truth(elsewhere, "ctx_application_found").any()
+    assert not golden.flags(elsewhere, "ctx_application_found").any()
 
 
 @pytest.mark.cpu_mode
@@ -423,7 +372,7 @@ def test_an_authority_rotation_is_reported_once_and_then_stops(result: pd.DataFr
     # it would be silenced by hand within a week. Two things stop it: the reference follows the destination, and
     # the single-issuer gate closes the moment the destination has demonstrably presented two.
     rotated = result[result["dst_ip"] == pp_.ROTATED].sort_values("event_time", kind="mergesort")
-    differs = _truth(rotated, "cert_issuer_differs")
+    differs = golden.flags(rotated, "cert_issuer_differs")
 
     assert int(differs.sum()) > 1, "the rotation must be visible at all for the gate to be doing anything"
 
@@ -440,11 +389,11 @@ def test_an_authority_rotation_is_reported_once_and_then_stops(result: pd.DataFr
 def test_a_self_signed_certificate_leaving_the_estate_fires_and_an_internal_one_does_not(result: pd.DataFrame):
     # R-D-L6-003, both halves. The internal appliance's self-signed certificate is ordinary -- a management
     # interface nobody bought a certificate for -- and an estate has hundreds of them.
-    self_signed = result[_truth(result, "cert_self_signed")]
+    self_signed = result[golden.flags(result, "cert_self_signed")]
 
     assert set(self_signed["dst_ip"]) == {pp_.ATTACKER, pp_.APPLIANCE}
 
-    external = result[_truth(result, "cert_self_signed_external")]
+    external = result[golden.flags(result, "cert_self_signed_external")]
 
     assert set(external["dst_ip"]) == {pp_.ATTACKER}
     assert set(external["cert_validity_days"]) == {float(pp_.SHORT_VALIDITY_DAYS)}
@@ -454,7 +403,7 @@ def test_a_self_signed_certificate_leaving_the_estate_fires_and_an_internal_one_
 def test_a_downgrade_fires_and_a_pair_s_own_variation_does_not(result: pd.DataFrame):
     # R-B-L6-004, both halves. The varied host's conversations move between two sound suites routinely, which a
     # reference taken as a mode would have called a downgrade every time the weaker one was negotiated.
-    downgraded = result[_truth(result, "cipher_downgraded")]
+    downgraded = result[golden.flags(result, "cipher_downgraded")]
 
     assert len(downgraded) == 1
     assert list(downgraded["src_ip"]) == [pp_.LEGACY_CLIENT]
@@ -464,7 +413,7 @@ def test_a_downgrade_fires_and_a_pair_s_own_variation_does_not(result: pd.DataFr
     varied = result[result["src_ip"] == pp_.VARIED]
 
     assert len(set(varied["cipher_suite"])) > 1
-    assert not any(_truth(varied, "cipher_downgraded"))
+    assert not any(golden.flags(varied, "cipher_downgraded"))
 
 
 @pytest.mark.cpu_mode
@@ -475,14 +424,14 @@ def test_a_legacy_appliance_keeps_its_own_low_floor_without_firing(result: pd.Da
     appliance = result[result["dst_ip"] == pp_.APPLIANCE]
 
     assert set(appliance["cipher_tier"]) == {"legacy"}
-    assert not any(_truth(appliance, "cipher_downgraded"))
+    assert not any(golden.flags(appliance, "cipher_downgraded"))
 
 
 @pytest.mark.cpu_mode
 def test_a_file_behind_a_declared_image_crosses_and_a_re_encoding_does_not(result: pd.DataFrame):
     # R-D-L6-005, both halves. The re-encodings are the volume an estate actually has, and a rule reporting
     # every declared-versus-detected mismatch would bury the one row that matters under them.
-    crossed = result[_truth(result, "content_category_crossed")]
+    crossed = result[golden.flags(result, "content_category_crossed")]
 
     assert len(crossed) == 1
     assert list(crossed["content_type_declared"]) == [pp_.PNG]
@@ -498,8 +447,8 @@ def test_nothing_in_the_corpus_falls_outside_the_two_tables(result: pd.DataFrame
     # Both tables report what they could not place rather than guessing, so a corpus that quietly drifted out of
     # their coverage would make the rules above fire less and say nothing about why. Asserting zero here is what
     # keeps the counts above meaning what they claim.
-    assert int(_truth(result, "cipher_unrecognized").sum()) == 0
-    assert int(_truth(result, "content_category_unclassified").sum()) == 0
+    assert int(golden.flags(result, "cipher_unrecognized").sum()) == 0
+    assert int(golden.flags(result, "content_category_unclassified").sum()) == 0
 
 
 @pytest.mark.cpu_mode
@@ -522,13 +471,13 @@ def test_the_two_rules_that_need_a_history_decline_until_they_have_one(result: p
     # The other half of the same statement. Before maturity the issuer and cipher rules publish no verdict at
     # all rather than a negative one, which is what stops a destination nobody has seen enough of from being
     # reported as consistent.
-    immature = result[~_truth(result, "cert_issuer_mature")]
+    immature = result[~golden.flags(result, "cert_issuer_mature")]
 
     assert len(immature) > 0
     assert immature["cert_issuer_differs"].isna().all()
     assert immature["cert_issuer_established"].isna().all()
 
-    unfloored = result[~_truth(result, "cipher_mature")]
+    unfloored = result[~golden.flags(result, "cipher_mature")]
 
     assert len(unfloored) > 0
     assert unfloored["cipher_downgraded"].isna().all()

@@ -17,6 +17,8 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import drive
+from _utils.frames import without_row
 from morpheus.config import Config
 from morpheus.messages import MessageMeta
 from morpheus.stages.telemetry.tc3_beacon_stage import TC3BeaconStage
@@ -152,27 +154,6 @@ YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
 """A collector clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
 
 
-def _without_row(payload: dict, position: int) -> dict:
-    """The same frame with one row left out, which is what a refused row must be indistinguishable from."""
-    return {
-        name: [value for (index, value) in enumerate(values) if index != position]
-        for (name, values) in payload.items()
-    }
-
-
-def _pandas(meta: MessageMeta) -> pd.DataFrame:
-    df = meta.copy_dataframe()
-
-    return df.to_pandas() if hasattr(df, "to_pandas") else df
-
-
-def _drive(config: Config, stage, payload: dict) -> pd.DataFrame:
-    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
-    stage.on_data(meta)
-
-    return _pandas(meta)
-
-
 @pytest.mark.gpu_and_cpu_mode
 def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
     # Row 2 is stamped a decade ahead. Admitted, it would drive every horizon in the stage past the rows before it
@@ -180,8 +161,8 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
     payload = flows(4)
     payload["event_time"] = [START, START + PERIOD, START + YEARS_AHEAD_NS, START + 2 * PERIOD]
 
-    with_bad = _drive(config, TC3BeaconStage(config), payload)
-    control = _drive(config, TC3BeaconStage(config), _without_row(payload, 2))
+    with_bad = drive(config, TC3BeaconStage(config), payload)
+    control = drive(config, TC3BeaconStage(config), without_row(payload, 2))
 
     assert [bool(value) for value in with_bad["clock_refused"]] == [False, False, True, False]
     assert pd.isna(with_bad["flow_intervals"][2])
@@ -196,7 +177,7 @@ def test_a_frame_with_nothing_refused_carries_the_column_as_false(config: Config
     # which rows shared a batch; a believed row reads False, which the health record counts as 0 rather than null.
     payload = flows(4)
 
-    frame = _drive(config, TC3BeaconStage(config), payload)
+    frame = drive(config, TC3BeaconStage(config), payload)
 
     assert [bool(value) for value in frame["clock_refused"]] == [False] * len(frame)
 
@@ -221,9 +202,9 @@ def test_a_stop_and_restore_round_trip_keeps_the_clock(config: Config):
     })
 
     stopped = TC3BeaconStage(config)
-    _drive(config, stopped, before)
+    drive(config, stopped, before)
 
     resumed = TC3BeaconStage(config)
     resumed.restore_state(stopped.checkpoint_state())
 
-    assert [bool(value) for value in _drive(config, resumed, after)["clock_refused"]] == [True, False]
+    assert [bool(value) for value in drive(config, resumed, after)["clock_refused"]] == [True, False]

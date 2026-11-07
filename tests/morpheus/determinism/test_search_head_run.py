@@ -34,6 +34,8 @@ import re
 
 import pytest
 
+from morpheus.utils import splunk_conf
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 VALIDATE = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "validate")
 RUNNER = os.path.join(VALIDATE, "run_search_head.py")
@@ -163,15 +165,11 @@ def test_each_sourcetype_goes_where_the_procedure_sends_it(runner):
 
 def test_the_validation_settings_cover_every_sourcetype_the_app_defines():
     # One sourcetype left on the shipped thirty days would have its oldest events silently retimed.
-    def stanzas(path):
-        with open(path, encoding="utf-8") as handle:
-            return set(re.findall(r"^\[(.+)\]\s*$", handle.read(), re.MULTILINE))
-
     with open(VALIDATION_PROPS, encoding="utf-8") as handle:
         values = re.findall(r"^MAX_DAYS_AGO\s*=\s*(\d+)", handle.read(), re.MULTILINE)
 
-    assert stanzas(VALIDATION_PROPS) == stanzas(APP_PROPS)
-    assert len(values) == len(stanzas(APP_PROPS)) and all(int(value) >= 60 for value in values)
+    assert set(splunk_conf.stanzas(VALIDATION_PROPS)) == set(splunk_conf.stanzas(APP_PROPS))
+    assert len(values) == len(splunk_conf.stanzas(APP_PROPS)) and all(int(value) >= 60 for value in values)
 
 
 def test_the_recorded_run_returned_what_is_written():

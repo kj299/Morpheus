@@ -17,6 +17,10 @@
 import pandas as pd
 import pytest
 
+from _utils.frames import cell
+from _utils.frames import drive
+from _utils.frames import truthy
+from _utils.frames import without_row
 from morpheus.config import Config
 from morpheus.messages import MessageMeta
 from morpheus.stages.telemetry.tc7_saas_stage import TC7SaasStage
@@ -25,15 +29,6 @@ from morpheus.utils.type_utils import get_df_class
 HOUR = 3600 * 10**9
 DAY = 24 * HOUR
 MONDAY = 4 * DAY
-
-
-def truthy(value) -> bool:
-    """A column value as a plain bool, with a null reading as False."""
-    return False if pd.isna(value) else bool(value)
-
-
-def cell(value):
-    return None if pd.isna(value) else value
 
 
 def run(config: Config, payload: dict, stage: TC7SaasStage = None, **kwargs) -> pd.DataFrame:
@@ -189,27 +184,6 @@ YEARS_AHEAD_NS = 10 * 365 * 86400 * 10**9
 """A collector clock wrong by a decade: the failure an unset RTC produces, far beyond any gap a real feed has."""
 
 
-def _without_row(payload: dict, position: int) -> dict:
-    """The same frame with one row left out, which is what a refused row must be indistinguishable from."""
-    return {
-        name: [value for (index, value) in enumerate(values) if index != position]
-        for (name, values) in payload.items()
-    }
-
-
-def _pandas(meta: MessageMeta) -> pd.DataFrame:
-    df = meta.copy_dataframe()
-
-    return df.to_pandas() if hasattr(df, "to_pandas") else df
-
-
-def _drive(config: Config, stage, payload: dict) -> pd.DataFrame:
-    meta = MessageMeta(get_df_class(config.execution_mode)(payload))
-    stage.on_data(meta)
-
-    return _pandas(meta)
-
-
 @pytest.mark.gpu_and_cpu_mode
 def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
     # Row 2 is stamped a decade ahead. Admitted, it would drive every horizon in the stage past the rows before it
@@ -217,8 +191,8 @@ def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: C
     payload = operations([10, 10, 10, 40])
     payload["event_time"] = [MONDAY, MONDAY + HOUR, MONDAY + YEARS_AHEAD_NS, MONDAY + 2 * HOUR]
 
-    with_bad = _drive(config, TC7SaasStage(config, min_samples=2), payload)
-    control = _drive(config, TC7SaasStage(config, min_samples=2), _without_row(payload, 2))
+    with_bad = drive(config, TC7SaasStage(config, min_samples=2), payload)
+    control = drive(config, TC7SaasStage(config, min_samples=2), without_row(payload, 2))
 
     assert [bool(value) for value in with_bad["clock_refused"]] == [False, False, True, False]
     assert pd.isna(with_bad["saas_week_id"][2])
@@ -233,7 +207,7 @@ def test_a_frame_with_nothing_refused_carries_the_column_as_false(config: Config
     # which rows shared a batch; a believed row reads False, which the health record counts as 0 rather than null.
     payload = operations([10, 10, 10, 40])
 
-    frame = _drive(config, TC7SaasStage(config, min_samples=2), payload)
+    frame = drive(config, TC7SaasStage(config, min_samples=2), payload)
 
     assert [bool(value) for value in frame["clock_refused"]] == [False] * len(frame)
 
@@ -258,9 +232,9 @@ def test_a_stop_and_restore_round_trip_keeps_the_clock(config: Config):
     })
 
     stopped = TC7SaasStage(config, min_samples=2)
-    _drive(config, stopped, before)
+    drive(config, stopped, before)
 
     resumed = TC7SaasStage(config, min_samples=2)
     resumed.restore_state(stopped.checkpoint_state())
 
-    assert [bool(value) for value in _drive(config, resumed, after)["clock_refused"]] == [True, False]
+    assert [bool(value) for value in drive(config, resumed, after)["clock_refused"]] == [True, False]

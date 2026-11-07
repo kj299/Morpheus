@@ -14,11 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-
-import pandas as pd
 import pytest
 
+from _utils.frames import column_values
 from morpheus.common import TypeId
 from morpheus.config import Config
 from morpheus.config import ExecutionMode
@@ -60,18 +58,6 @@ def frame(errors: list, octets_in: list = None, octets_out: list = None, times: 
         "link_speed_bps": [TEN_GIGABIT] * count,
         **columns,
     }
-
-
-def _as_list(meta: MessageMeta, column: str) -> list:
-    series = meta.get_data(column)
-
-    if (hasattr(series, "to_pandas")):
-        series = series.to_pandas()
-
-    return [
-        None if (value is None or value is pd.NA or (isinstance(value, float) and math.isnan(value))) else value
-        for value in series.tolist()
-    ]
 
 
 def run(config: Config, payload: dict, **kwargs) -> MessageMeta:
@@ -136,13 +122,13 @@ def test_a_rate_is_the_delta_over_the_interval_it_covers(config: Config):
     meta = run(config, frame([30, 60]))
 
     # Thirty CRC errors over sixty seconds, plus no symbol errors.
-    assert _as_list(meta, "error_rate") == [0.5, 1.0]
-    assert _as_list(meta, "discard_rate") == [0.1, 0.1]
+    assert column_values(meta, "error_rate") == [0.5, 1.0]
+    assert column_values(meta, "discard_rate") == [0.1, 0.1]
     # Octets are bits once multiplied by eight, and the busier direction is what fills the link.
-    assert _as_list(meta, "bits_in_per_second") == [100_000.0, 100_000.0]
-    assert _as_list(meta, "bits_out_per_second") == [50_000.0, 50_000.0]
-    assert _as_list(meta, "bits_per_second") == [150_000.0, 150_000.0]
-    assert _as_list(meta, "utilization") == [1e-05, 1e-05]
+    assert column_values(meta, "bits_in_per_second") == [100_000.0, 100_000.0]
+    assert column_values(meta, "bits_out_per_second") == [50_000.0, 50_000.0]
+    assert column_values(meta, "bits_per_second") == [150_000.0, 150_000.0]
+    assert column_values(meta, "utilization") == [1e-05, 1e-05]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -154,17 +140,17 @@ def test_a_reset_or_a_late_sample_is_not_a_rate(config: Config):
 
     # The reboot's delta covers the uptime, not a period the history can compare with; it would otherwise read as
     # a burst on every port of the switch.
-    assert _as_list(meta, "error_rate") == [4 / 60, None, None, 4 / 60]
-    assert _as_list(meta, "bits_per_second") == [150_000.0, None, None, 150_000.0]
+    assert column_values(meta, "error_rate") == [4 / 60, None, None, 4 / 60]
+    assert column_values(meta, "bits_per_second") == [150_000.0, None, None, 150_000.0]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_missing_counter_is_no_rate_rather_than_a_smaller_one(config: Config):
     meta = run(config, frame([4, None], octets_in=[750_000, None]))
 
-    assert _as_list(meta, "error_rate") == [4 / 60, None]
-    assert _as_list(meta, "bits_in_per_second") == [100_000.0, None]
-    assert _as_list(meta, "bits_per_second") == [150_000.0, None]
+    assert column_values(meta, "error_rate") == [4 / 60, None]
+    assert column_values(meta, "bits_in_per_second") == [100_000.0, None]
+    assert column_values(meta, "bits_per_second") == [150_000.0, None]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -172,16 +158,16 @@ def test_a_climbing_error_rate_is_a_step_above_the_ports_own_history(config: Con
     # Four quiet periods, then one with a hundred and twenty errors a minute.
     meta = run(config, frame([2, 3, 1, 3, 120]))
 
-    assert _as_list(meta, "error_rate_baseline_mature") == [False, False, False, False, True]
-    assert _as_list(meta, "error_rate_baseline_max")[4] == pytest.approx(3 / 60)
-    assert _as_list(meta, "error_rate_step")[4] == pytest.approx(117 / 60)
+    assert column_values(meta, "error_rate_baseline_mature") == [False, False, False, False, True]
+    assert column_values(meta, "error_rate_baseline_max")[4] == pytest.approx(3 / 60)
+    assert column_values(meta, "error_rate_step")[4] == pytest.approx(117 / 60)
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_port_that_always_ran_errors_is_measured_against_that(config: Config):
     meta = run(config, frame([90, 120, 100, 110, 115]))
 
-    assert _as_list(meta, "error_rate_step")[4] < 0
+    assert column_values(meta, "error_rate_step")[4] < 0
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -189,19 +175,19 @@ def test_volume_is_measured_against_its_peak_and_its_trough(config: Config):
     octets = [750_000, 700_000, 800_000, 760_000, 7_500_000, 0]
     meta = run(config, frame([0] * 6, octets_in=octets, octets_out=[0] * 6))
 
-    assert _as_list(meta, "bits_per_second_baseline_max")[4] == pytest.approx(800_000 * 8 / 60)
-    assert _as_list(meta, "bits_per_second_baseline_min")[4] == pytest.approx(700_000 * 8 / 60)
-    assert _as_list(meta, "bits_per_second_step")[4] == pytest.approx((7_500_000 - 800_000) * 8 / 60)
+    assert column_values(meta, "bits_per_second_baseline_max")[4] == pytest.approx(800_000 * 8 / 60)
+    assert column_values(meta, "bits_per_second_baseline_min")[4] == pytest.approx(700_000 * 8 / 60)
+    assert column_values(meta, "bits_per_second_step")[4] == pytest.approx((7_500_000 - 800_000) * 8 / 60)
     # The silent period is measured against a history the burst has now joined at the top and not at the bottom.
-    assert _as_list(meta, "bits_per_second")[5] == 0.0
-    assert _as_list(meta, "bits_per_second_baseline_min")[5] == pytest.approx(700_000 * 8 / 60)
+    assert column_values(meta, "bits_per_second")[5] == 0.0
+    assert column_values(meta, "bits_per_second_baseline_min")[5] == pytest.approx(700_000 * 8 / 60)
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_port_that_has_been_idle_has_a_trough_of_zero(config: Config):
     meta = run(config, frame([0] * 5, octets_in=[0, 750_000, 0, 750_000, 0], octets_out=[0] * 5))
 
-    assert _as_list(meta, "bits_per_second_baseline_min")[4] == 0.0
+    assert column_values(meta, "bits_per_second_baseline_min")[4] == 0.0
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -221,8 +207,8 @@ def test_traffic_is_measured_against_the_same_hour_when_asked(config: Config):
     pooled = run(config, payload, volume_seasonality="none")
 
     # Against three o'clock, the fifth three o'clock is a step; against the whole day it is an ordinary morning.
-    assert _as_list(seasonal, "bits_per_second_step")[-1] > 0
-    assert _as_list(pooled, "bits_per_second_step")[-1] == 0.0
+    assert column_values(seasonal, "bits_per_second_step")[-1] > 0
+    assert column_values(pooled, "bits_per_second_step")[-1] == 0.0
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -232,7 +218,7 @@ def test_two_ports_keep_two_histories(config: Config):
     payload["event_time"] = [0, 0, PERIOD_NS, PERIOD_NS, 2 * PERIOD_NS, 2 * PERIOD_NS]
     meta = run(config, payload, min_buckets=2)
 
-    assert _as_list(meta, "error_rate_baseline_buckets") == [0, 0, 1, 1, 2, 2]
+    assert column_values(meta, "error_rate_baseline_buckets") == [0, 0, 1, 1, 2, 2]
 
 
 @pytest.mark.gpu_and_cpu_mode
@@ -261,19 +247,19 @@ def test_rates_compose_behind_the_normalize_stage(config: Config):
 
     meta = sink.get_messages()[0]
 
-    assert _as_list(meta, "error_rate") == [None, 0.5, 1.0]
-    assert _as_list(meta, "bits_per_second") == [None, 10_000.0, 10_000.0]
+    assert column_values(meta, "error_rate") == [None, 0.5, 1.0]
+    assert column_values(meta, "bits_per_second") == [None, 10_000.0, 10_000.0]
 
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_time_years_ahead_of_the_stream_is_refused_and_moves_nothing(config: Config):
     meta = run(config, frame([2, 2, 2, 2], times=[0, PERIOD_NS, YEARS_AHEAD_NS, 2 * PERIOD_NS]))
 
-    assert _as_list(meta, "clock_refused") == [False, False, True, False]
-    assert _as_list(meta, "error_rate")[2] is None
+    assert column_values(meta, "clock_refused") == [False, False, True, False]
+    assert column_values(meta, "error_rate")[2] is None
     # Believed, the decade-ahead poll would have committed every open period and left the next honest poll out of
     # order; refused, the history holds the two periods before it.
-    assert _as_list(meta, "error_rate_baseline_buckets")[3] == 2
+    assert column_values(meta, "error_rate_baseline_buckets")[3] == 2
 
 
 def test_a_clock_bound_that_admits_nothing_is_refused(config: Config):

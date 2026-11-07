@@ -22,12 +22,12 @@ These tests read the app's actual configuration file rather than a copy of its v
 drift apart.
 """
 
-import configparser
 import os
 import re
 
 import pytest
 
+from morpheus.utils import splunk_conf
 from morpheus.utils.siem_sourcetypes import PRODUCED
 from morpheus.utils.siem_sourcetypes import UNPRODUCED
 from morpheus.utils.siem_sourcetypes import Sourcetype
@@ -43,13 +43,6 @@ PROPS_PATH = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morph
 ANCHOR_PATTERN = re.compile(r'^"(?P<field>[A-Za-z0-9_]+)"')
 
 
-def load_props() -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(PROPS_PATH)
-
-    return parser
-
-
 def anchor_column(time_prefix: str) -> str:
     match = ANCHOR_PATTERN.match(time_prefix)
 
@@ -61,11 +54,11 @@ def anchor_column(time_prefix: str) -> str:
 def test_the_configuration_file_is_where_we_think_it_is():
     # If this fails every other test here is asserting against an empty parse, which would pass vacuously.
     assert os.path.exists(PROPS_PATH)
-    assert len(load_props().sections()) > 0
+    assert len(splunk_conf.read(PROPS_PATH).sections()) > 0
 
 
 def test_every_stanza_is_accounted_for_exactly_once():
-    stanzas = set(load_props().sections())
+    stanzas = set(splunk_conf.read(PROPS_PATH).sections())
 
     assert stanzas == set(stanza_names()), (
         f"props.conf and siem_sourcetypes disagree. Only in props.conf: {sorted(stanzas - set(stanza_names()))}. "
@@ -73,11 +66,11 @@ def test_every_stanza_is_accounted_for_exactly_once():
     assert set(PRODUCED).isdisjoint(set(UNPRODUCED)), "a sourcetype cannot be both produced and unproduced"
 
 
-@pytest.mark.parametrize("name", sorted(load_props().sections()))
+@pytest.mark.parametrize("name", sorted(splunk_conf.read(PROPS_PATH).sections()))
 def test_the_declared_time_column_is_the_one_the_stanza_anchors_on(name: str):
     # The assertion the whole module exists for. A producer rendering the wrong column would leave _time falling
     # back to index time, with nothing raised anywhere.
-    settings = load_props()[name]
+    settings = splunk_conf.read(PROPS_PATH)[name]
 
     assert describe(name).time_column == anchor_column(settings["TIME_PREFIX"])
 

@@ -31,13 +31,14 @@ evaluate the whole run at once, the same simplification `expected_results.json` 
 decision it is said beside the rule.
 """
 
-import configparser
 import csv
 import os
 import re
 import typing
 
 import pandas as pd
+
+from morpheus.utils import splunk_conf
 
 SAVED_SEARCHES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "..",
@@ -56,12 +57,7 @@ _STANZAS: dict = {}
 def stanza(name: str) -> dict:
     """One stanza of the shipped `savedsearches.conf`, its continuation lines folded."""
     if (not _STANZAS):
-        with open(SAVED_SEARCHES, encoding="utf-8") as handle:
-            folded = re.sub(r"\\\s*\r?\n\s*", " ", handle.read())
-
-        parser = configparser.ConfigParser(interpolation=None, strict=False)
-        parser.optionxform = str
-        parser.read_string(folded)
+        parser = splunk_conf.read(SAVED_SEARCHES, preserve_case=True)
         _STANZAS.update({section: dict(parser[section]) for section in parser.sections()})
 
     return _STANZAS[name]
