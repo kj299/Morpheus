@@ -471,7 +471,7 @@ that replaces it. Each item says how to know it is done.
    -- one checking its list against the disk rather than reading it -- read the corpora from the golden files, and
    the context tests read the enriching segments from their samples and the compositions from the package. The
    search, sourcetype and lookup-job counts that tests stated as numbers (87, 20, 13, 9, 8) are read from the app's
-   `.conf` files and `siem_sourcetypes`. Five readers of a count a document spells out -- two parsers and three
+   `.conf` files and `siem_sourcetypes`. Eight readers of a count a document spells out -- two parsers and six
    tables of the words written so far, one of them eighty-seven entries long -- are one, `tests/_utils/number_words.py`.
    Prose that stated the size of something that grows says "every" now: a README said fifty-seven stages when
    sixty-two shipped, and a docstring said nineteen sourcetype stanzas when there were twenty. Records of a past

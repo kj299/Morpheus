@@ -16,7 +16,7 @@
 A count a document spells out, read back as the number it names (guide 13 plan item 7).
 
 Tests that hold a README or a guide to the count it states read that count as words. Each kept its own reader, and
-three of the five were tables of the words the documents had used so far -- a list kept by hand beside the thing it
+six of the eight were tables of the words the documents had used so far -- a list kept by hand beside the thing it
 lists, which failed the first time a count reached a number nobody had written into it. This parses instead.
 """
 
