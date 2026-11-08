@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,119 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,131 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -100,7 +100,8 @@ context files beside the segments' samples) and the seven section 4.6a added (th
 the harnesses' golden helpers and its test, the stage tests' frame helpers and shared samples, and the corpora's
 record helpers) and the two section 4.6b added (the number-word reader and the test that holds the counts) and the one section 4.7a added (the search-head
 run it superseded, kept as history) and the seven section 4.7b added (six fixture files for the layer 1, 2 and 5
-classes and the search-head run it superseded), less
+classes and the search-head run it superseded) and the twelve section 4.7c added (eleven fixture files for the last
+eight classes and the search-head run it superseded), less
 the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
@@ -110,7 +111,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and 
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 480 |
+| `keep` | 492 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -536,7 +537,8 @@ that replaces it. Each item says how to know it is done.
     ServiceNow's `sys_audit` history folded into versions of each CMDB item (`tc0_asset`, `tc0_application`); and
     NetBox's object changelog (`tc0_network`). ServiceNow, NetBox and Entra ID keep only when a change was
     entered, so `valid_from` is named in the test as not carried by them. NetBox has to record a device before its
-    ports, so the corpus's network inventory now does too, which renumbered that inventory's `source_seq`.
+    ports, so the corpus's network inventory now does too, which renumbered that inventory's `source_seq`; the search-head run recorded over the regenerated events returned
+    the same rows for every search.
 13. **Compose `EdgeEmitStage` and `PipelineHealthStage` in a runner.** Both are built and tested, and no runner uses
     them. Done when a segment runner emits both streams.
 14. **Documentation the fork owns.** A contributor guide and a getting-started page for the fork's CPU path, the
