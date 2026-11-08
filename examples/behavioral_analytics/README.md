@@ -222,7 +222,7 @@ command line is shown to produce records and not only to parse.
 
 ## From real feeds
 
-`fixtures/` holds seven of the samples as the feeds that produce them write them, and `fixtures/make_fixtures.py`
+`fixtures/` holds the samples of every class below as the feeds that produce them write them, and `fixtures/make_fixtures.py`
 renders and reads them back:
 
 | Class | Fixture | Read with |
@@ -234,6 +234,12 @@ renders and reads them back:
 | `tc7_dns` | `application/dns.log` (Zeek) | `collector_schemas.zeek_dns` |
 | `tc7_saas` | `saas/audit.jsonlines`, unified audit log records | `collector_schemas.m365_audit` |
 | `tc7_endpoint` | `endpoint/sysmon.xml`, events 1 and 7 as `wevtutil qe /f:xml` writes them | `collector_schemas.sysmon_process` |
+| `tc1` | `telemetry/snmp-poller.jsonlines` and `snmp-poller-dmz.jsonlines`, two Telegraf SNMP pollers' JSON | `collector_schemas.snmp_ports`, then `merge_collectors` |
+| `tc1_device` | `telemetry/snmp-poller.jsonlines`, the estate poller's scalars and BGP peers | `collector_schemas.snmp_devices` |
+| `tc2_mac` | `telemetry/mac-table.jsonlines`, Q-BRIDGE-MIB walks and MAC notification traps through Telegraf | `collector_schemas.fdb_entries` |
+| `tc2_arp` | `telemetry/arp.pcap`, the ARP packets the sensor saw | `collector_schemas.arp_packets` |
+| `tc2_auth` | `telemetry/radius-auth.detail`, FreeRADIUS `auth_log` and `reply_log` entries | `collector_schemas.radius_auth` |
+| `tc5_session` | `session/radius-acct.detail`, FreeRADIUS accounting Starts and Stops | `collector_schemas.radius_accounting` |
 
 A fixture carries only what its format carries. The collector's own facts -- its identity, contract version,
 tenant, clock discipline and sampling -- are a `CollectorProfile`, the exporters' names are an inventory the stage
@@ -241,7 +247,10 @@ is given, and `collector_seq` counts records in the order read. `tests/morpheus/
 holds each normalized fixture to its sample, column for column, and runs the network, session, application, SaaS
 and endpoint segments over them to the same files the samples give, byte for byte. Zeek does not see inside a TLS
 session, so the two content types an inspecting proxy reports are null from the Zeek schema, and the
-presentation segment's content rule needs a feed that supplies them.
+presentation segment's content rule needs a feed that supplies them. SNMP holds no hash of a device's
+configuration and no syslog rate, so those two `tc1_device` columns are null from it; a capture numbers nothing, so
+the ARP fixture cannot show the three records the sensor numbered and lost; and the identity provider's own
+session records are another feed than RADIUS accounting, and not in its fixture.
 
 # R-D-L2-004, end to end
 

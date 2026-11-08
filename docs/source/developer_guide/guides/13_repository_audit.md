@@ -513,7 +513,18 @@ that replaces it. Each item says how to know it is done.
     digests came from is still taken, so every other value in those corpora keeps the stream it was planted with:
     the same plants, the same findings, new lineage identifiers. `test_input_contracts.py` holds every sample to the
     form and refuses a bare digest. The goldens, samples, fixtures and sample events regenerated, and the search-head
-    run was recorded again over them. The fixtures for the fourteen classes without one follow in 4.7b and 4.7c.
+    run was recorded again over them. *Built under plan section 4.7b:* real-format fixtures for the six layer 1, 2
+    and 5 classes. What two Telegraf SNMP pollers write through the JSON serializer carries `tc1` and `tc1_device`,
+    one measurement per MIB table joined back into one record per port and per device each poll; a Q-BRIDGE-MIB
+    walk with its bridge-port maps and a CISCO-MAC-NOTIFICATION-MIB trap carries `tc2_mac`; a capture of the ARP
+    frames `tc2_arp`; and FreeRADIUS detail files the 802.1X exchanges of `tc2_auth`, each reply paired with the
+    request it answers by user and receipt time, and the VPN accounting of `tc5_session`. Each normalizes back to
+    its sample column for column, with three things named rather than invented: SNMP holds no configuration hash
+    and no syslog rate, a capture numbers nothing and so cannot show the three ARP records the sensor lost, and the
+    identity provider's own session records are another feed than RADIUS. Building it found the corpus naming a
+    renamed port's polls by the old name in `origin_hash`, which no poller could; the origin is now the name the
+    device reported, which moved 26 lineage identifiers in the telemetry and estate goldens. The fixtures for the
+    eight classes still without one follow in 4.7c.
 13. **Compose `EdgeEmitStage` and `PipelineHealthStage` in a runner.** Both are built and tested, and no runner uses
     them. Done when a segment runner emits both streams.
 14. **Documentation the fork owns.** A contributor guide and a getting-started page for the fork's CPU path, the

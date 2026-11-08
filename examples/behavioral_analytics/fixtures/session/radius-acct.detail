@@ -1,0 +1,648 @@
+Mon Jan 19 03:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-batch-0"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 19 1970 03:00:00 UTC"
+	Timestamp = 1566000
+
+Mon Jan 19 03:10:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-batch-0"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 19 1970 03:10:00 UTC"
+	Acct-Session-Time = 600
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1566600
+
+Mon Jan 19 09:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-alice-0"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 19 1970 09:00:00 UTC"
+	Timestamp = 1587600
+
+Mon Jan 19 09:00:01 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-bob-0"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 19 1970 09:00:01 UTC"
+	Timestamp = 1587601
+
+Mon Jan 19 09:00:02 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-carol-0"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 19 1970 09:00:02 UTC"
+	Timestamp = 1587602
+
+Mon Jan 19 17:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-alice-0"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 19 1970 17:00:00 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1616400
+
+Mon Jan 19 17:00:01 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-bob-0"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 19 1970 17:00:01 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1616401
+
+Mon Jan 19 17:00:02 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-carol-0"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 19 1970 17:00:02 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1616402
+
+Tue Jan 20 03:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-batch-1"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 20 1970 03:00:00 UTC"
+	Timestamp = 1652400
+
+Tue Jan 20 07:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-batch-1"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 20 1970 07:00:00 UTC"
+	Acct-Session-Time = 14400
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1666800
+
+Tue Jan 20 09:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-alice-1"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 20 1970 09:00:00 UTC"
+	Timestamp = 1674000
+
+Tue Jan 20 09:00:01 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-bob-1"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 20 1970 09:00:01 UTC"
+	Timestamp = 1674001
+
+Tue Jan 20 09:00:02 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-carol-1"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 20 1970 09:00:02 UTC"
+	Timestamp = 1674002
+
+Tue Jan 20 10:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-abandoned"
+	User-Name = "dave@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 20 1970 10:00:00 UTC"
+	Timestamp = 1677600
+
+Tue Jan 20 17:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-alice-1"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 20 1970 17:00:00 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1702800
+
+Tue Jan 20 17:00:01 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-bob-1"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 20 1970 17:00:01 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1702801
+
+Tue Jan 20 17:00:02 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-carol-1"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 20 1970 17:00:02 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1702802
+
+Wed Jan 21 03:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-batch-2"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 21 1970 03:00:00 UTC"
+	Timestamp = 1738800
+
+Wed Jan 21 03:10:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-batch-2"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 21 1970 03:10:00 UTC"
+	Acct-Session-Time = 600
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1739400
+
+Wed Jan 21 09:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-alice-2"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 21 1970 09:00:00 UTC"
+	Timestamp = 1760400
+
+Wed Jan 21 09:00:01 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-bob-2"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 21 1970 09:00:01 UTC"
+	Timestamp = 1760401
+
+Wed Jan 21 09:00:02 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-carol-2"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 21 1970 09:00:02 UTC"
+	Timestamp = 1760402
+
+Wed Jan 21 12:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-unpaired"
+	User-Name = "dave@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 21 1970 12:00:00 UTC"
+	Timestamp = 1771200
+
+Wed Jan 21 17:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-alice-2"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 21 1970 17:00:00 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1789200
+
+Wed Jan 21 17:00:01 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-bob-2"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 21 1970 17:00:01 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1789201
+
+Wed Jan 21 17:00:02 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-carol-2"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 21 1970 17:00:02 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1789202
+
+Thu Jan 22 03:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-batch-3"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 03:00:00 UTC"
+	Timestamp = 1825200
+
+Thu Jan 22 07:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-batch-3"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 07:00:00 UTC"
+	Acct-Session-Time = 14400
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1839600
+
+Thu Jan 22 09:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-alice-3"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 09:00:00 UTC"
+	Timestamp = 1846800
+
+Thu Jan 22 09:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-duplicated"
+	User-Name = "dave@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 09:00:00 UTC"
+	Timestamp = 1846800
+
+Thu Jan 22 09:00:01 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-bob-3"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 09:00:01 UTC"
+	Timestamp = 1846801
+
+Thu Jan 22 09:00:02 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-carol-3"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 09:00:02 UTC"
+	Timestamp = 1846802
+
+Thu Jan 22 09:00:30 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-duplicated"
+	User-Name = "dave@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 09:00:30 UTC"
+	Timestamp = 1846830
+
+Thu Jan 22 11:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-duplicated"
+	User-Name = "dave@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 11:00:00 UTC"
+	Acct-Session-Time = 7170
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1854000
+
+Thu Jan 22 17:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-alice-3"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 17:00:00 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1875600
+
+Thu Jan 22 17:00:01 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-bob-3"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 17:00:01 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1875601
+
+Thu Jan 22 17:00:02 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-carol-3"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 22 1970 17:00:02 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1875602
+
+Fri Jan 23 03:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-batch-4"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 23 1970 03:00:00 UTC"
+	Timestamp = 1911600
+
+Fri Jan 23 03:10:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-batch-4"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 23 1970 03:10:00 UTC"
+	Acct-Session-Time = 600
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1912200
+
+Fri Jan 23 09:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-alice-4"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 23 1970 09:00:00 UTC"
+	Timestamp = 1933200
+
+Fri Jan 23 09:00:01 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-bob-4"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 23 1970 09:00:01 UTC"
+	Timestamp = 1933201
+
+Fri Jan 23 09:00:02 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-carol-4"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 23 1970 09:00:02 UTC"
+	Timestamp = 1933202
+
+Fri Jan 23 17:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-alice-4"
+	User-Name = "alice@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 23 1970 17:00:00 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1962000
+
+Fri Jan 23 17:00:01 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-bob-4"
+	User-Name = "bob@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 23 1970 17:00:01 UTC"
+	Acct-Session-Time = 28800
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1962001
+
+Fri Jan 23 20:00:02 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-carol-4"
+	User-Name = "carol@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 23 1970 20:00:02 UTC"
+	Acct-Session-Time = 39600
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 1972802
+
+Sat Jan 24 03:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-batch-5"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 24 1970 03:00:00 UTC"
+	Timestamp = 1998000
+
+Sat Jan 24 07:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-batch-5"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 24 1970 07:00:00 UTC"
+	Acct-Session-Time = 14400
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 2012400
+
+Sun Jan 25 03:00:00 1970
+	Acct-Status-Type = Start
+	Acct-Session-Id = "sess-batch-6"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 25 1970 03:00:00 UTC"
+	Timestamp = 2084400
+
+Sun Jan 25 08:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-batch-6"
+	User-Name = "svc-batch@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 25 1970 08:00:00 UTC"
+	Acct-Session-Time = 18000
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 2102400
+
+Sun Jan 25 10:00:00 1970
+	Acct-Status-Type = Stop
+	Acct-Session-Id = "sess-abandoned"
+	User-Name = "dave@example.com"
+	NAS-IP-Address = 192.0.2.41
+	NAS-Identifier = "vpn-gw-1"
+	NAS-Port-Type = Virtual
+	Acct-Authentic = RADIUS
+	Acct-Delay-Time = 0
+	Event-Timestamp = "Jan 25 1970 10:00:00 UTC"
+	Acct-Session-Time = 432000
+	Acct-Terminate-Cause = User-Request
+	Timestamp = 2109600
+

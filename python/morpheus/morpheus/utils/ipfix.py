@@ -314,21 +314,14 @@ def _udp_payload(frame: bytes, port: int) -> typing.Optional[tuple[str, bytes]]:
     return (source, frame[udp + 8:end])
 
 
-def read_pcap(path: str, port: int = IPFIX_PORT) -> Capture:
+def read_frames(path: str) -> typing.Iterator[tuple[int, bytes]]:
     """
-    Every data record in a capture of IPFIX over UDP, in the order received.
+    Every frame in a classic libpcap capture of Ethernet frames, with its capture time in nanoseconds.
 
     Parameters
     ----------
     path : str
         A classic libpcap file (microsecond or nanosecond timestamps) of Ethernet frames.
-    port : int, default = 4739
-        The UDP port the collector listens on.
-
-    Returns
-    -------
-    `Capture`
-        The records and what was skipped.
 
     Raises
     ------
@@ -354,14 +347,41 @@ def read_pcap(path: str, port: int = IPFIX_PORT) -> Capture:
     if (linktype != LINKTYPE_ETHERNET):
         raise ValueError(f"{path} has link type {linktype}; only Ethernet captures are read")
 
-    capture = Capture(records=[])
-    templates: dict = {}
     offset = 24
 
     while (offset + 16 <= len(data)):
         (seconds, fraction, included, _) = struct.unpack_from(endian + "IIII", data, offset)
         frame = data[offset + 16:offset + 16 + included]
         offset += 16 + included
+
+        yield (seconds * 1_000_000_000 + fraction * scale, frame)
+
+
+def read_pcap(path: str, port: int = IPFIX_PORT) -> Capture:
+    """
+    Every data record in a capture of IPFIX over UDP, in the order received.
+
+    Parameters
+    ----------
+    path : str
+        A classic libpcap file (microsecond or nanosecond timestamps) of Ethernet frames.
+    port : int, default = 4739
+        The UDP port the collector listens on.
+
+    Returns
+    -------
+    `Capture`
+        The records and what was skipped.
+
+    Raises
+    ------
+    ValueError
+        If the file is not a libpcap capture of Ethernet frames.
+    """
+    capture = Capture(records=[])
+    templates: dict = {}
+
+    for (received_ns, frame) in read_frames(path):
         payload = _udp_payload(frame, port)
 
         if (payload is None):
@@ -369,7 +389,6 @@ def read_pcap(path: str, port: int = IPFIX_PORT) -> Capture:
             continue
 
         (exporter, message) = payload
-        received_ns = seconds * 1_000_000_000 + fraction * scale
         capture.messages += 1
         capture.records.extend(decode_message(message, exporter, templates, received_ns, capture))
 
@@ -492,6 +511,43 @@ def _checksum(header: bytes) -> int:
     return ~total & 0xFFFF
 
 
+def write_frames(path: str, frames: typing.Iterable[tuple[int, bytes]]):
+    """
+    Write Ethernet frames to a classic libpcap file.
+
+    Parameters
+    ----------
+    path : str
+        Where to write.
+    frames : iterable of (int, bytes)
+        Capture time in ns (written to the microsecond) and the frame.
+    """
+    with open(path, "wb") as handle:
+        handle.write(struct.pack("<IHHiIII", PCAP_MAGIC, 2, 4, 0, 0, 65535, LINKTYPE_ETHERNET))
+
+        for (when_ns, frame) in frames:
+            (seconds, remainder) = divmod(when_ns, 1_000_000_000)
+            handle.write(struct.pack("<IIII", seconds, remainder // 1000, len(frame), len(frame)) + frame)
+
+
+def _udp_frame(identifier: int, source: str, destination: str, port: int, payload: bytes) -> bytes:
+    udp = struct.pack("!HHHH", 49152 + identifier % 16384, port, 8 + len(payload), 0) + payload
+    ip = struct.pack("!BBHHHBBH4s4s",
+                     0x45,
+                     0,
+                     20 + len(udp),
+                     identifier & 0xFFFF,
+                     0,
+                     64,
+                     IPPROTO_UDP,
+                     0,
+                     ipaddress.IPv4Address(source).packed,
+                     ipaddress.IPv4Address(destination).packed)
+    ip = ip[:10] + struct.pack("!H", _checksum(ip)) + ip[12:]
+
+    return b"\x02\x00\x00\x00\x00\x02" + b"\x02\x00\x00\x00\x00\x01" + struct.pack("!H", ETHERTYPE_IPV4) + ip + udp
+
+
 def write_pcap(path: str, datagrams: typing.Iterable[tuple[int, str, str, bytes]], port: int = IPFIX_PORT):
     """
     Write UDP datagrams to a classic libpcap file as Ethernet frames.
@@ -505,24 +561,6 @@ def write_pcap(path: str, datagrams: typing.Iterable[tuple[int, str, str, bytes]
     port : int, default = 4739
         The destination port.
     """
-    with open(path, "wb") as handle:
-        handle.write(struct.pack("<IHHiIII", PCAP_MAGIC, 2, 4, 0, 0, 65535, LINKTYPE_ETHERNET))
-
-        for (identifier, (when_ns, source, destination, payload)) in enumerate(datagrams):
-            udp = struct.pack("!HHHH", 49152 + identifier % 16384, port, 8 + len(payload), 0) + payload
-            ip = struct.pack("!BBHHHBBH4s4s",
-                             0x45,
-                             0,
-                             20 + len(udp),
-                             identifier & 0xFFFF,
-                             0,
-                             64,
-                             IPPROTO_UDP,
-                             0,
-                             ipaddress.IPv4Address(source).packed,
-                             ipaddress.IPv4Address(destination).packed)
-            ip = ip[:10] + struct.pack("!H", _checksum(ip)) + ip[12:]
-            frame = b"\x02\x00\x00\x00\x00\x02" + b"\x02\x00\x00\x00\x00\x01" + struct.pack("!H",
-                                                                                            ETHERTYPE_IPV4) + ip + udp
-            (seconds, remainder) = divmod(when_ns, 1_000_000_000)
-            handle.write(struct.pack("<IIII", seconds, remainder // 1000, len(frame), len(frame)) + frame)
+    write_frames(path,
+                 ((when_ns, _udp_frame(identifier, source, destination, port, payload))
+                  for (identifier, (when_ns, source, destination, payload)) in enumerate(datagrams)))

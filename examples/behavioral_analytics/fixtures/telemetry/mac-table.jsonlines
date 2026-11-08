@@ -1,0 +1,439 @@
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 0}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 0}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 0}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 0}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 0}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 0}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 0}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 0}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 0}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 0}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 0}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 0}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 0}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 0}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 0}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 0}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 0}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 0}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 0}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 0}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 0}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 0}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 0}
+{"fields": {"dot1qTpFdbPort": 6, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.8", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 0}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 2}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 2}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 2}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 2}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 2}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 2}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 2}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 300}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 300}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 300}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 300}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 300}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 300}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 300}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 300}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 300}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 300}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 300}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 300}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 300}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 300}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 300}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 300}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 300}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 300}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 300}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 300}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 300}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 300}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 300}
+{"fields": {"dot1qTpFdbPort": 6, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.8", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 300}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 302}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 302}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 302}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 302}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 302}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 302}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 302}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 600}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 600}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 600}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 600}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 600}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 600}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 600}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 600}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 600}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 600}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 600}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 600}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 600}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 600}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 600}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 600}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 600}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 600}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 600}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 600}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 600}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 600}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 600}
+{"fields": {"dot1qTpFdbPort": 6, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.8", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 600}
+{"fields": {"dot1qTpFdbPort": 7, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.9", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 600}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 602}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 602}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 602}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 602}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 602}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 602}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 602}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 900}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 900}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 900}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 900}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 900}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 900}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 900}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 900}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 900}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 900}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 900}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 900}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 900}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 900}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 900}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 900}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 900}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 900}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 900}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 900}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 900}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 900}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 900}
+{"fields": {"dot1qTpFdbPort": 6, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.8", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 900}
+{"fields": {"dot1qTpFdbPort": 7, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.9", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 900}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 902}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 902}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 902}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 902}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 902}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 902}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 902}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 902}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 1200}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 1200}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 1200}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 1200}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 1200}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 1200}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 1200}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 1200}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 1200}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 1200}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 1200}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 1200}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 1200}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 1200}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 1200}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 1200}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 1200}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 1200}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1200}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1200}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1200}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1200}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1200}
+{"fields": {"dot1qTpFdbPort": 6, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.8", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1200}
+{"fields": {"dot1qTpFdbPort": 7, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.9", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1200}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 1202}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 1202}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 1202}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 1202}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 1202}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 1202}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 1202}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 1500}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 1500}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 1500}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 1500}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 1500}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 1500}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 1500}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 1500}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 1500}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 1500}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 1500}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 1500}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 1500}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 1500}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 1500}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 1500}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 1500}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 1500}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1500}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1500}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1500}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1500}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1500}
+{"fields": {"dot1qTpFdbPort": 7, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.9", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1500}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 1502}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 1502}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 1502}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 1502}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 1502}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 1502}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 1502}
+{"fields": {"cmnHistMacChangedMsg": "02000aaabbcc000009000700"}, "name": "snmp_trap", "tags": {"host": "mac-table", "mib": "CISCO-MAC-NOTIFICATION-MIB", "name": "cmnMacChangedNotification", "oid": ".1.3.6.1.4.1.9.9.215.2.0.1", "source": "192.0.2.21", "version": "2c"}, "timestamp": 1560}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 1800}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 1800}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 1800}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 1800}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 1800}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 1800}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 1800}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 1800}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 1800}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 1800}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 1800}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 1800}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 1800}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 1800}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 1800}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 1800}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 1800}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 1800}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1800}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1800}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1800}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1800}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1800}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1800}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.4", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1800}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1800}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 1800}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 1802}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 1802}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 1802}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 1802}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 1802}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 1802}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 1802}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 2100}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 2100}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 2100}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 2100}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 2100}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 2100}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 2100}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 2100}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 2100}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 2100}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 2100}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 2100}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 2100}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 2100}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 2100}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 2100}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 2100}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 2100}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2100}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2100}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2100}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2100}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2100}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2100}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.4", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2100}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2100}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2100}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 2102}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 2102}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 2102}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 2102}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 2102}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 2102}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 2102}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 2400}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 2400}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 2400}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 2400}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 2400}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 2400}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 2400}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 2400}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 2400}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 2400}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 2400}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 2400}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 2400}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 2400}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 2400}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 2400}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 2400}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.4", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"dot1qTpFdbPort": 4, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.184.39.235.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2400}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 2402}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 2402}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 2402}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 2402}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 2402}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 2402}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 2402}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 2700}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 2700}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 2700}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 2700}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 2700}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 2700}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 2700}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 2700}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 2700}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 2700}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 2700}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 2700}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 2700}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 2700}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 2700}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 2700}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 2700}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.4", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 4, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.184.39.235.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"dot1qTpFdbPort": 5, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 2700}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 2702}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 2702}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 2702}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 2702}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 2702}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 2702}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 2702}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 3000}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 3000}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 3000}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 3000}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 3000}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 3000}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 3000}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 3000}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 3000}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 3000}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 3000}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 3000}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 3000}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 3000}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 3000}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 3000}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 3000}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.4", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 4, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.184.39.235.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"dot1qTpFdbPort": 5, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3000}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 3002}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 3002}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 3002}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 3002}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 3002}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 3002}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 3002}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 3300}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 3300}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 3300}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 3300}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 3300}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 3300}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 3300}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 3300}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 3300}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 3300}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 3300}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 3300}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 3300}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 3300}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 3300}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 3300}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 3300}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.4", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 4, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.184.39.235.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"dot1qTpFdbPort": 5, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3300}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 3302}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 3302}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 3302}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 3302}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 3302}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 3302}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 3302}
+{"fields": {"ifName": "Gi1/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "45640"}, "timestamp": 3600}
+{"fields": {"dot1dBasePortIfIndex": 45640}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "1"}, "timestamp": 3600}
+{"fields": {"ifName": "Gi1/0/13"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8755"}, "timestamp": 3600}
+{"fields": {"dot1dBasePortIfIndex": 8755}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "2"}, "timestamp": 3600}
+{"fields": {"ifName": "Gi1/0/14"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8415"}, "timestamp": 3600}
+{"fields": {"dot1dBasePortIfIndex": 8415}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "3"}, "timestamp": 3600}
+{"fields": {"ifName": "Gi1/0/15"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "1528"}, "timestamp": 3600}
+{"fields": {"dot1dBasePortIfIndex": 1528}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "4"}, "timestamp": 3600}
+{"fields": {"ifName": "Gi1/0/16"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "5966"}, "timestamp": 3600}
+{"fields": {"dot1dBasePortIfIndex": 5966}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "5"}, "timestamp": 3600}
+{"fields": {"ifName": "Gi1/0/17"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "8888"}, "timestamp": 3600}
+{"fields": {"dot1dBasePortIfIndex": 8888}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "6"}, "timestamp": 3600}
+{"fields": {"ifName": "Gi1/0/18"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "6318"}, "timestamp": 3600}
+{"fields": {"dot1dBasePortIfIndex": 6318}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "7"}, "timestamp": 3600}
+{"fields": {"ifName": "Gi1/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "68652"}, "timestamp": 3600}
+{"fields": {"dot1dBasePortIfIndex": 68652}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "8"}, "timestamp": 3600}
+{"fields": {"ifName": "Gi1/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "ifIndex": "19609"}, "timestamp": 3600}
+{"fields": {"dot1dBasePortIfIndex": 19609}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "9"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 1, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 8, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.170.187.204.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 9, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "10.222.173.190.239.0.4", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.2", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 4, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.184.39.235.0.0.1", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"dot1qTpFdbPort": 5, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.21", "host": "mac-table", "index": "20.0.64.140.0.0.3", "sysLocation": "hq", "sysName": "sw1"}, "timestamp": 3600}
+{"fields": {"ifName": "Gi3/0/1"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5573"}, "timestamp": 3602}
+{"fields": {"dot1dBasePortIfIndex": 5573}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "1"}, "timestamp": 3602}
+{"fields": {"ifName": "Gi3/0/2"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "5380"}, "timestamp": 3602}
+{"fields": {"dot1dBasePortIfIndex": 5380}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "2"}, "timestamp": 3602}
+{"fields": {"ifName": "Gi3/0/3"}, "name": "ifXTable", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "ifIndex": "6905"}, "timestamp": 3602}
+{"fields": {"dot1dBasePortIfIndex": 6905}, "name": "bridge_port", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "3"}, "timestamp": 3602}
+{"fields": {"dot1qTpFdbPort": 3, "dot1qTpFdbStatus": 3}, "name": "fdb", "tags": {"agent_host": "192.0.2.23", "host": "mac-table", "index": "10.170.187.204.0.0.4", "sysLocation": "hq", "sysName": "sw3"}, "timestamp": 3602}
