@@ -72,6 +72,10 @@ PROFILES = {
     "tc2_arp": CollectorProfile("arp-sensor", "tc2_arp.v1", "corp", "ntp_disciplined", 16, first_seq=1),
     "tc2_auth": CollectorProfile("radius", "tc2_auth.v1", "corp", "ntp_disciplined", 0, first_seq=1),
     "tc5_session": CollectorProfile("radius-accounting", "tc5_session.v1", "corp", "ntp_disciplined", -3, first_seq=1),
+    "tc4": CollectorProfile("pcap-01", "tc4.v1", "corp", "ptp", 12),
+    "tc3_dhcp": CollectorProfile("dhcp-01", "tc3_dhcp.v1", "corp", "ntp_disciplined", -10),
+    "tc7_host_inventory": CollectorProfile("edr-inventory", "tc7_host_inventory.v1", "corp", "ntp_disciplined", -9),
+    "tc7_service": CollectorProfile("lb-01", "tc7_service.v1", "corp", "ntp_disciplined", 19),
 }
 """What each collector says about itself, which its records do not."""
 
@@ -93,6 +97,10 @@ CLASSES = {
     "tc2_arp": ("telemetry", ["arp.pcap"]),
     "tc2_auth": ("telemetry", ["radius-auth.detail"]),
     "tc5_session": ("session", ["radius-acct.detail"]),
+    "tc4": ("transport", ["tc4.pcap"]),
+    "tc3_dhcp": ("network", ["kea-dhcp4.log"]),
+    "tc7_host_inventory": ("network", ["osqueryd.results.log"]),
+    "tc7_service": ("application", ["conn.log", "ssl.log"]),
 }
 """Each class's segment and the files its fixture is."""
 
@@ -972,6 +980,194 @@ def write_radius_accounting(directory: str):
         handle.write("".join(entries))
 
 
+TCP_OPTION_BYTES = {"nop": b"\x01", "sok": b"\x04\x02", "ts": b"\x08\x0a" + bytes(8)}
+"""The options a stack's SYN carries that hold no value the corpus names; `mss` and `ws` are written with theirs."""
+
+WINDOW_SCALE = 8
+CRAFTED_SYN_WINDOW = 1024
+"""The window a scanner's raw socket writes into a SYN it crafts without options."""
+
+ESTABLISHED_WINDOW = 502
+"""The scaled window every packet after the handshake carries."""
+
+DHCP_SERVER_PID = "1201.139975612345088"
+OSQUERY_INTERFACE = "eth0"
+REPORT_VALID_SECONDS = 90000
+"""How long the inventory's report stands: the deployment's schedule, which osquery's results do not carry."""
+
+CONN_FIELDS = [("ts", "time"), ("uid", "string"), ("id.orig_h", "addr"), ("id.orig_p", "port"), ("id.resp_h", "addr"),
+               ("id.resp_p", "port"), ("proto", "enum"), ("service", "string"), ("duration", "interval"),
+               ("orig_bytes", "count"), ("resp_bytes", "count"), ("conn_state", "string"), ("history", "string")]
+SERVICE_SSL_FIELDS = [("ts", "time"), ("uid", "string"), ("id.orig_h", "addr"), ("id.orig_p", "port"),
+                      ("id.resp_h", "addr"), ("id.resp_p", "port"), ("version", "string"), ("server_name", "string"),
+                      ("established", "bool"), ("ja4", "string")]
+
+
+def _tcp_options(order: str, mss: int) -> bytes:
+    options = b""
+
+    for name in order.split(","):
+        if (name == "mss"):
+            options += b"\x02\x04" + mss.to_bytes(2, "big")
+        elif (name == "ws"):
+            options += b"\x03\x03" + bytes([WINDOW_SCALE])
+        else:
+            options += TCP_OPTION_BYTES[name]
+
+    if (len(options) % 4 != 0):
+        raise ValueError(f"the options {order} are not a whole number of 32-bit words")
+
+    return options
+
+
+def write_packets(directory: str):
+    """
+    `tc4.pcap`: every packet the capture point saw, as Ethernet frames of IPv4 and TCP.
+
+    A SYN a stack sent carries the stack's options, MSS and window; a SYN crafted without options carries a raw
+    socket's window; every other packet the established window. The payload is zeros of the sample's length.
+    """
+    frames = []
+
+    for row in sample("transport", "tc4"):
+        if (row["protocol"] != "tcp"):
+            raise ValueError(f"{row['origin_hash']} is not TCP")
+
+        options = b"" if row["tcp_options_order"] is None else _tcp_options(row["tcp_options_order"], row["tcp_mss"])
+        window = row["tcp_window_initial"] if row["tcp_window_initial"] is not None else (
+            CRAFTED_SYN_WINDOW if row["tcp_flags"] & collector_schemas.TCP_SYN else ESTABLISHED_WINDOW)
+        sequence = int(_digest("seq", row["collector_seq"], length=8), 16)
+        tcp = struct.pack("!HHIIBBHHH",
+                          row["src_port"],
+                          row["dst_port"],
+                          sequence,
+                          0, (20 + len(options)) // 4 << 4,
+                          row["tcp_flags"],
+                          window,
+                          0,
+                          0) + options
+        payload = bytes(row["data_len"])
+        ip = struct.pack("!BBHHHBBH4s4s",
+                         0x45,
+                         0,
+                         20 + len(tcp) + len(payload),
+                         row["collector_seq"] & 0xFFFF,
+                         0,
+                         64,
+                         6,
+                         0,
+                         ipaddress.IPv4Address(row["src_ip"]).packed,
+                         ipaddress.IPv4Address(row["dst_ip"]).packed)
+
+        if (row["event_time"] % 1000 != 0):
+            raise ValueError("a capture's timestamp carries microseconds")
+
+        frames.append((row["event_time"],
+                       b"\x02\x00\x00\x00\x00\x02\x02\x00\x00\x00\x00\x01" + ipfix.ETHERTYPE_IPV4.to_bytes(2, "big") +
+                       ip + tcp + payload))
+
+    ipfix.write_frames(os.path.join(directory, "tc4.pcap"), frames)
+
+
+def _kea_time(when_ns: int) -> str:
+    if (when_ns % 1_000_000 != 0):
+        raise ValueError("Kea's log writes the time to the millisecond")
+
+    stamp = pd.Timestamp(when_ns, unit="ns", tz="UTC")
+
+    return stamp.strftime("%Y-%m-%d %H:%M:%S.") + f"{stamp.microsecond // 1000:03d}"
+
+
+def write_kea(directory: str):
+    """`kea-dhcp4.log`: the leases the DHCP server granted, as Kea's `kea-dhcp4.leases` logger writes them."""
+    lines = []
+
+    for row in sample("network", "tc3_dhcp"):
+        if (row["dhcp_message"] != "ack" or row.get("switch_id") is not None):
+            raise ValueError(f"{row['origin_hash']} is not an acknowledgement Kea's lease log can write")
+
+        lines.append(f"{_kea_time(row['event_time'])} INFO  [kea-dhcp4.leases/{DHCP_SERVER_PID}] DHCP4_LEASE_ALLOC "
+                     f"[hwtype=1 {row['mac']}], cid=[no info], tid=0x{_digest('tid', row['origin_hash'], length=8)}: "
+                     f"lease {row['ip']} has been allocated for {row['lease_seconds']} seconds")
+
+    with open(os.path.join(directory, "kea-dhcp4.log"), "w", encoding="utf-8") as handle:
+        handle.write("".join(line + "\n" for line in lines))
+
+
+def write_osquery(directory: str):
+    """`osqueryd.results.log`: each agent's `interface_details` snapshot, one result per report."""
+    lines = []
+
+    for (counter, row) in enumerate(sample("network", "tc7_host_inventory")):
+        if (row["report_valid_seconds"] != REPORT_VALID_SECONDS):
+            raise ValueError(f"{row['origin_hash']} stands for another schedule than the deployment's")
+
+        seconds = _poll_seconds(row["event_time"])
+        stamp = pd.Timestamp(seconds, unit="s", tz="UTC")
+        lines.append(
+            json.dumps({
+                "snapshot": [{
+                    "interface": OSQUERY_INTERFACE, "mac": row["mac"], "type": "6", "mtu": "1500", "enabled": "1"
+                }],
+                "action": "snapshot",
+                "name": "pack/inventory/interface_details",
+                "hostIdentifier": row["hostname"],
+                "calendarTime": f"{stamp:%a %b} {stamp.day:2d} {stamp:%H:%M:%S %Y} UTC",
+                "unixTime": seconds,
+                "epoch": 0,
+                "counter": counter,
+                "numerics": False,
+            }))
+
+    with open(os.path.join(directory, "osqueryd.results.log"), "w", encoding="utf-8") as handle:
+        handle.write("".join(line + "\n" for line in lines))
+
+
+def write_service(directory: str):
+    """
+    `conn.log` and `ssl.log`: each connection to a `service` the sensor saw, and its handshake, joined on `uid`.
+
+    The bytes are split between the two directions; the schema adds them back.
+    """
+    (connections, handshakes) = ([], [])
+
+    for row in sample("application", "tc7_service"):
+        uid = "C" + _digest("service", row["origin_hash"])
+        port = _port("service", row["origin_hash"])
+        when = _seconds(row["event_time"])
+        sent = row["bytes_total"] // 4
+        connections.append([
+            when,
+            uid,
+            row["src_ip"],
+            port,
+            row["dst_ip"],
+            row["dst_port"],
+            "tcp",
+            "ssl",
+            "1.000000",
+            sent,
+            row["bytes_total"] - sent,
+            "SF",
+            "ShADadFf"
+        ])
+        handshakes.append([
+            when,
+            uid,
+            row["src_ip"],
+            port,
+            row["dst_ip"],
+            row["dst_port"],
+            "TLSv13",
+            row["sni"],
+            "T",
+            row["ja4_client"]
+        ])
+
+    _zeek_log(os.path.join(directory, "conn.log"), "conn", CONN_FIELDS, connections)
+    _zeek_log(os.path.join(directory, "ssl.log"), "ssl", SERVICE_SSL_FIELDS, handshakes)
+
+
 WRITERS = {
     "tc3": write_flows,
     "tc5_auth": write_signins,
@@ -986,6 +1182,10 @@ WRITERS = {
     "tc2_arp": write_arp,
     "tc2_auth": write_radius_auth,
     "tc5_session": write_radius_accounting,
+    "tc4": write_packets,
+    "tc3_dhcp": write_kea,
+    "tc7_host_inventory": write_osquery,
+    "tc7_service": write_service,
 }
 
 
@@ -1069,6 +1269,18 @@ def normalize_all(root: str = HERE) -> dict[str, pd.DataFrame]:
             collector_schemas.radius_auth(at("tc2_auth", "radius-auth.detail"), PROFILES["tc2_auth"], SWITCH_SITES),
         "tc5_session":
             collector_schemas.radius_accounting(at("tc5_session", "radius-acct.detail"), PROFILES["tc5_session"]),
+        "tc4":
+            collector_schemas.packets(at("tc4", "tc4.pcap"), PROFILES["tc4"]),
+        "tc3_dhcp":
+            collector_schemas.kea_leases(at("tc3_dhcp", "kea-dhcp4.log"), PROFILES["tc3_dhcp"]),
+        "tc7_host_inventory":
+            collector_schemas.osquery_inventory(at("tc7_host_inventory", "osqueryd.results.log"),
+                                                PROFILES["tc7_host_inventory"],
+                                                REPORT_VALID_SECONDS),
+        "tc7_service":
+            collector_schemas.zeek_service(at("tc7_service", "conn.log"),
+                                           at("tc7_service", "ssl.log"),
+                                           PROFILES["tc7_service"]),
     }
 
 

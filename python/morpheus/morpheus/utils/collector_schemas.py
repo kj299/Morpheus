@@ -69,6 +69,7 @@ import hashlib
 import ipaddress
 import json
 import math
+import re
 import struct
 import typing
 from xml.etree import ElementTree
@@ -1152,6 +1153,380 @@ def radius_accounting_schema(profile: CollectorProfile) -> DataFrameInputSchema:
     ] + tail)
 
 
+IP_PROTOCOLS = {6: "tcp", 17: "udp"}
+"""The IP protocol numbers a packet record names."""
+
+TCP_OPTIONS = {0: "eol", 1: "nop", 2: "mss", 3: "ws", 4: "sok", 5: "sack", 8: "ts"}
+"""TCP option kinds (RFC 9293, 7323, 2018) by the names `tcp_options_order` writes them in."""
+
+TCP_SYN = 0x02
+TCP_ACK = 0x10
+
+KEA_MESSAGES = {"DHCP4_LEASE_ALLOC": "ack", "DHCP4_RELEASE": "release", "DHCP4_DECLINE": "decline"}
+"""The Kea DHCPv4 server's log codes for what it granted, released and had declined, as the contract writes them."""
+
+KEA_LINE = re.compile(r"^(?P<time>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}) +\w+ +\[[^\]]*\] (?P<code>DHCP4_\w+) "
+                      r"\[hwtype=\d+ (?P<mac>[0-9a-f:]+)\][^:]*: (?:lease (?P<lease_ip>[\d.]+) has been allocated "
+                      r"for (?P<seconds>\d+) seconds|address (?P<released>[\d.]+) .*)$")
+
+
+def _tcp_options(data: bytes) -> tuple[list[str], typing.Optional[int]]:
+    (names, mss, offset) = ([], None, 0)
+
+    while (offset < len(data)):
+        kind = data[offset]
+        names.append(TCP_OPTIONS.get(kind, str(kind)))
+
+        if (kind == 0):
+            break
+
+        if (kind == 1):
+            offset += 1
+            continue
+
+        length = data[offset + 1] if offset + 1 < len(data) else 0
+
+        if (kind == 2 and length == 4):
+            mss = int.from_bytes(data[offset + 2:offset + 4], "big")
+
+        offset += max(length, 2)
+
+    return (names, mss)
+
+
+def read_packets(path: str) -> pd.DataFrame:
+    """
+    Every IPv4 TCP and UDP packet in a capture, read with `morpheus.utils.ipfix.read_frames`.
+
+    The payload length is the IP datagram's, less its headers, so a capture that snapped each frame short reads
+    the length the packet had.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        One row per packet in capture order: `received_ns`, the addresses and ports, `protocol` (the number),
+        `flags`, `window` and `options` (the option names in order, comma separated) for TCP, `mss`, `data_len`.
+    """
+    rows = []
+
+    for (received_ns, frame) in ipfix.read_frames(path):
+        (ethertype, offset) = (int.from_bytes(frame[12:14], "big"), 14)
+
+        if (ethertype == ipfix.ETHERTYPE_VLAN):
+            (ethertype, offset) = (int.from_bytes(frame[16:18], "big"), 18)
+
+        if (ethertype != ipfix.ETHERTYPE_IPV4 or len(frame) < offset + 20):
+            continue
+
+        header = (frame[offset] & 0x0F) * 4
+        (total, protocol) = (int.from_bytes(frame[offset + 2:offset + 4], "big"), frame[offset + 9])
+        transport = offset + header
+
+        if (protocol not in IP_PROTOCOLS or len(frame) < transport + 8):
+            continue
+
+        row = {
+            "received_ns": received_ns,
+            "src": str(ipaddress.IPv4Address(frame[offset + 12:offset + 16])),
+            "dst": str(ipaddress.IPv4Address(frame[offset + 16:offset + 20])),
+            "sport": int.from_bytes(frame[transport:transport + 2], "big"),
+            "dport": int.from_bytes(frame[transport + 2:transport + 4], "big"),
+            "protocol": protocol,
+            "flags": None,
+            "window": None,
+            "options": None,
+            "mss": None,
+        }
+
+        if (protocol == 6):
+            length = (frame[transport + 12] >> 4) * 4
+            (names, mss) = _tcp_options(frame[transport + 20:transport + length])
+            row.update({
+                "flags": frame[transport + 13],
+                "window": int.from_bytes(frame[transport + 14:transport + 16], "big"),
+                "options": ",".join(names) if names else None,
+                "mss": mss,
+                "data_len": total - header - length,
+            })
+        else:
+            row["data_len"] = total - header - 8
+
+        rows.append(row)
+
+    return pd.DataFrame(rows,
+                        columns=[
+                            "received_ns",
+                            "src",
+                            "dst",
+                            "sport",
+                            "dport",
+                            "protocol",
+                            "flags",
+                            "window",
+                            "options",
+                            "mss",
+                            "data_len"
+                        ])
+
+
+def packet_schema(profile: CollectorProfile) -> DataFrameInputSchema:
+    """
+    `tc4` from the packets of a capture, as `read_packets` reads them.
+
+    The three fingerprint columns are one fingerprint, as `TC4FlowStage` reads them: they are written for a client
+    `SYN` (`SYN` without `ACK`) that carries options, and null otherwise. A `SYN` crafted with no options, as a
+    scanner's raw socket writes it, still has a window, but no stack wrote it to fingerprint.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+
+    def captured(df: pd.DataFrame) -> pd.Series:
+        return pd.to_numeric(df["received_ns"]).astype("Int64")
+
+    def fingerprinted(df: pd.DataFrame) -> pd.Series:
+        return pd.Series([
+            not _missing(flags) and int(flags) & (TCP_SYN | TCP_ACK) == TCP_SYN and not _missing(options)
+            for (flags, options) in zip(df["flags"], df["options"])
+        ],
+                         index=df.index)
+
+    def fingerprint(name: str, source: str, dtype: str) -> CustomColumn:
+        return _derived(
+            name,
+            dtype, lambda df: pd.Series([
+                value if keep and not _missing(value) else None for (keep, value) in zip(fingerprinted(df), df[source])
+            ], index=df.index, dtype=dtype))
+
+    (head, tail) = _envelope(
+        profile,
+        captured, lambda df: _joined(df, [
+            _text("src", "src"), ":", _count("sport", "sport"), "=", _text("dst", "dst"), ":", _count("dport", "dport")
+        ]))
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("src_ip", "src"),
+        _count("src_port", "sport"),
+        _text("dst_ip", "dst"),
+        _count("dst_port", "dport"),
+        _through("protocol", "protocol", lambda value: IP_PROTOCOLS.get(int(value), value)),
+        _count("tcp_flags", "flags"),
+        _count("data_len", "data_len"),
+        fingerprint("tcp_options_order", "options", "object"),
+        fingerprint("tcp_mss", "mss", "Int64"),
+        fingerprint("tcp_window_initial", "window", "Int64"),
+    ] + tail)
+
+
+def read_kea(path: str) -> pd.DataFrame:
+    """
+    The leases a Kea DHCPv4 server's log records: each `DHCP4_LEASE_ALLOC`, with the lease time it granted, and
+    each `DHCP4_RELEASE` and `DHCP4_DECLINE`, from lines in Kea's default layout, the time in UTC.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        One row per such line in file order: `time` (ns), `code`, `mac`, `ip` and `lease_seconds` (null but for an
+        allocation). Every other line is skipped.
+    """
+    rows = []
+
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            match = KEA_LINE.match(line.rstrip("\n"))
+
+            if (match is None):
+                continue
+
+            rows.append({
+                "time": pd.Timestamp(match["time"], tz="UTC").value,
+                "code": match["code"],
+                "mac": match["mac"],
+                "ip": match["lease_ip"] or match["released"],
+                "lease_seconds": None if match["seconds"] is None else int(match["seconds"]),
+            })
+
+    return pd.DataFrame(rows, columns=["time", "code", "mac", "ip", "lease_seconds"])
+
+
+def kea_schema(profile: CollectorProfile) -> DataFrameInputSchema:
+    """
+    `tc3_dhcp` from a Kea DHCPv4 server's lease log, as `read_kea` reads it.
+
+    An allocation is the server's acknowledgement, whether of a new lease or a renewal. Kea's lease log does not
+    write the relay's option 82, so `switch_id` and `port_id` are null from it; a deployment that needs them reads
+    the server's packet log or its lease database's `relay_agent_info`.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+
+    def when(df: pd.DataFrame) -> pd.Series:
+        return pd.to_numeric(df["time"]).astype("Int64")
+
+    (head, tail) = _envelope(
+        profile,
+        when, lambda df: _joined(df, [_text("ip", "ip"), ">", _text("mac", "mac"), "@"]) + pd.Series(
+            [str(value) for value in when(df)], index=df.index))
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("ip", "ip"),
+        _text("mac", "mac"),
+        _text("dhcp_message", "code", KEA_MESSAGES),
+        _count("lease_seconds", "lease_seconds"),
+        _text("switch_id", "switch_id"),
+        _text("port_id", "port_id"),
+    ] + tail)
+
+
+def read_osquery(path: str) -> pd.DataFrame:
+    """
+    The interfaces in osquery's scheduled-query results log, one JSON object per line: each snapshot's rows, or a
+    differential result's `columns` where its `action` is `added`.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        One row per interface in file order: `unixTime`, `hostIdentifier`, `interface` and `mac`.
+    """
+    rows = []
+
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if (not line.strip()):
+                continue
+
+            result = json.loads(line)
+            reported = result.get("snapshot") if result.get("action") == "snapshot" else (
+                [result["columns"]] if result.get("action") == "added" else [])
+
+            for interface in reported:
+                rows.append({
+                    "unixTime": result["unixTime"],
+                    "hostIdentifier": result["hostIdentifier"],
+                    "interface": interface.get("interface"),
+                    "mac": interface.get("mac"),
+                })
+
+    return pd.DataFrame(rows, columns=["unixTime", "hostIdentifier", "interface", "mac"])
+
+
+def osquery_inventory_schema(profile: CollectorProfile, report_valid_seconds: int) -> DataFrameInputSchema:
+    """
+    `tc7_host_inventory` from osquery's `interface_details` results, as `read_osquery` reads them.
+
+    The machine is the agent's `hostIdentifier`, configured as its hostname. How long a report stands is the
+    deployment's schedule, which no result carries, so it is given.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+    report_valid_seconds : int
+        How long one report stands: the query's interval and the misses the deployment tolerates.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    event_time = _whole_seconds("unixTime")
+    (head, tail) = _envelope(
+        profile,
+        event_time,
+        lambda df: _joined(df, [_text("mac", "mac"), "@"]) + pd.Series([str(value)
+                                                                        for value in event_time(df)], index=df.index))
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("mac", "mac"),
+        _text("hostname", "hostIdentifier"),
+        _constant("report_valid_seconds", report_valid_seconds),
+    ] + tail)
+
+
+def join_conn_ssl(conn: pd.DataFrame, ssl: pd.DataFrame) -> pd.DataFrame:
+    """
+    Each Zeek `conn.log` connection that `ssl.log` holds a handshake for, with its `server_name` and `ja4`, joined
+    on `uid`.
+
+    Parameters
+    ----------
+    conn, ssl : `pandas.DataFrame`
+        As `morpheus.parsers.zeek.parse` reads them.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        Those `conn` rows in their own order, with `server_name` and `ja4`.
+    """
+    handshakes = ssl.drop_duplicates("uid").set_index("uid")
+    joined = conn[conn["uid"].isin(handshakes.index)].reset_index(drop=True)
+
+    for column in ("server_name", "ja4"):
+        joined[column] = joined["uid"].map(handshakes[column]).values if column in handshakes.columns else None
+
+    return joined
+
+
+def zeek_service_schema(profile: CollectorProfile) -> DataFrameInputSchema:
+    """
+    `tc7_service` from Zeek `conn.log` joined to `ssl.log` by `join_conn_ssl`.
+
+    `bytes_total` is `orig_bytes` and `resp_bytes` together. The origin names the `service` as its client asked for
+    it: by its `server_name` where the handshake had one, otherwise by its address.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    sni = _text("sni", "server_name")
+
+    def origin(df: pd.DataFrame) -> pd.Series:
+        names = _text_values(df["server_name"]) if "server_name" in df.columns else [None] * len(df)
+
+        return pd.Series([
+            f"{client}->{name or server}:{port}@{when}"
+            for (client, name, server, port, when) in zip(_text_values(df["id.orig_h"]), names, _text_values(
+                df["id.resp_h"]), pd.to_numeric(df["id.resp_p"]).astype("Int64"), _zeek_time(df))
+        ],
+                         index=df.index,
+                         dtype=object)
+
+    def total(df: pd.DataFrame) -> pd.Series:
+        return pd.to_numeric(df["orig_bytes"]).astype("Int64") + pd.to_numeric(df["resp_bytes"]).astype("Int64")
+
+    (head, tail) = _envelope(profile, _zeek_time, origin)
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("src_ip", "id.orig_h"),
+        _text("dst_ip", "id.resp_h"),
+        _count("dst_port", "id.resp_p"),
+        sni,
+        _derived("bytes_total", "Int64", total),
+        _text("ja4_client", "ja4"),
+    ] + tail)
+
+
 def read_zeek(path: str) -> pd.DataFrame:
     """A Zeek ASCII log, through `morpheus.parsers.zeek.parse`."""
     return zeek.parse(path, df_type="pandas")
@@ -1379,3 +1754,23 @@ def radius_accounting(path: str, profile: CollectorProfile) -> pd.DataFrame:
     entries = [entry for entry in read_radius_detail(path) if "Acct-Status-Type" in entry]
 
     return normalize(pd.DataFrame(entries), radius_accounting_schema(profile))
+
+
+def packets(path: str, profile: CollectorProfile) -> pd.DataFrame:
+    """`tc4` records from a packet capture."""
+    return normalize(read_packets(path), packet_schema(profile))
+
+
+def kea_leases(path: str, profile: CollectorProfile) -> pd.DataFrame:
+    """`tc3_dhcp` records from a Kea DHCPv4 server's log."""
+    return normalize(read_kea(path), kea_schema(profile))
+
+
+def osquery_inventory(path: str, profile: CollectorProfile, report_valid_seconds: int) -> pd.DataFrame:
+    """`tc7_host_inventory` records from osquery's results log."""
+    return normalize(read_osquery(path), osquery_inventory_schema(profile, report_valid_seconds))
+
+
+def zeek_service(conn_path: str, ssl_path: str, profile: CollectorProfile) -> pd.DataFrame:
+    """`tc7_service` records from a Zeek `conn.log` and its `ssl.log`."""
+    return normalize(join_conn_ssl(read_zeek(conn_path), read_zeek(ssl_path)), zeek_service_schema(profile))

@@ -540,9 +540,10 @@ def test_the_arp_reader_takes_a_tagged_frame_and_skips_what_is_not_arp(tmp_path)
 
 
 SEGMENT_CHECKS = {
-    "network": ["tc3"],
+    "network": ["tc3", "tc3_dhcp", "tc7_host_inventory"],
+    "transport": ["tc4"],
     "session": ["tc5_auth"],
-    "application": ["tc7_http", "tc7_dns"],
+    "application": ["tc7_http", "tc7_dns", "tc7_service"],
     "saas": ["tc7_saas"],
     "endpoint": ["tc7_endpoint"],
 }
