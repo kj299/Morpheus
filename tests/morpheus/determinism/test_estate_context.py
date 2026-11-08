@@ -56,6 +56,9 @@ ESTATE_LITERALS = {
 }
 """What an estate is written down as. A composition's string constants name columns, classes, sourcetypes and rules."""
 
+BUILDS_CONTEXT = {"context": "it turns the identity provider's, inventory's and CMDB's records into the stores"}
+"""The compositions that take no context, each with the reason: every other one that runs a pipeline takes it."""
+
 VERSION_WRITERS = {"make_version", "Version", "snapshot_changes"}
 """What writes a context version down; a composition rebuilds stores from records it is given (`from_records`)."""
 
@@ -149,11 +152,14 @@ def _context_parameters() -> dict:
 def test_every_composition_that_enriches_takes_its_context_with_no_default():
     parameters = _context_parameters()
 
-    assert {
+    runs = {
         f"{name}.run_pipeline"
-        for name in ("network", "transport", "session", "presentation", "application", "saas", "endpoint", "host_score",
-                     "telemetry", "estate", "lineage", "campaign")
-    } <= set(parameters)
+        for name in _composition_modules()
+        if hasattr(importlib.import_module(f"morpheus.compositions.{name}"), "run_pipeline")
+    }
+
+    assert len(runs) > len(BUILDS_CONTEXT)
+    assert runs - {f"{name}.run_pipeline" for name in BUILDS_CONTEXT} <= set(parameters)
 
     for (name, parameter) in parameters.items():
         assert parameter.kind == inspect.Parameter.KEYWORD_ONLY, name
@@ -253,9 +259,11 @@ def test_render_is_what_write_directory_writes(tmp_path):
     assert {path.name: path.read_text(encoding="utf-8") for path in tmp_path.iterdir()} == context.render()
 
 
-@pytest.mark.parametrize(
-    "corpus",
-    ["network", "transport", "session", "presentation", "application", "saas", "endpoint", "host_score", "telemetry"])
+SEGMENTS_WITH_CONTEXT = sorted(path.parent.name for path in (EXAMPLE / "samples").glob("*/context"))
+"""Every segment whose sample carries the context its runner enriches with."""
+
+
+@pytest.mark.parametrize("corpus", SEGMENTS_WITH_CONTEXT)
 def test_a_segment_corpus_context_survives_its_files(corpus: str, tmp_path):
     from corpora import merged  # pylint: disable=import-outside-toplevel
 

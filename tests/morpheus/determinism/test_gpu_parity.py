@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Whether every one of the thirteen composed pipelines produces the same output in GPU mode as in CPU mode.
+Whether every composed pipeline produces the same output in GPU mode as in CPU mode.
 
 Every stage declares support for both execution modes, and the `gpu_mode` variants of the stage tests assert that
 per stage. None of them composes a pipeline. Both determinism harnesses built their configuration in CPU mode and
@@ -49,7 +49,6 @@ the one test whose list of corpora is the list of composed pipelines, which
 `test_the_parity_list_is_every_composed_pipeline` keeps true.
 """
 
-import glob
 import importlib
 import os
 import sys
@@ -65,25 +64,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import lineage_pipeline as lp  # noqa: E402
+import run_golden  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 LINEAGE_GOLDEN = os.path.join(HERE, "golden_lineage_expected.csv")
 
-CORPORA = ("application",
-           "campaign",
-           "context",
-           "endpoint",
-           "estate",
-           "host_score",
-           "lineage",
-           "network",
-           "presentation",
-           "saas",
-           "session",
-           "telemetry",
-           "transport")
-"""Every composed pipeline, by the stem its corpus module and golden share."""
+CORPORA = run_golden.CORPORA
+"""Every composed pipeline, by the stem its corpus module and golden share: every golden file beside this one."""
 
 
 def _every_difference(rendered: str, golden_text: str) -> list[str]:
@@ -165,17 +153,6 @@ def _reaches_golden(corpus_name: str, execution_mode) -> None:
     _matches_golden(execution_mode,
                     importlib.import_module(f"{corpus_name}_pipeline"),
                     os.path.join(HERE, f"golden_{corpus_name}_expected.csv"))
-
-
-@pytest.mark.cpu_mode
-def test_the_parity_list_is_every_composed_pipeline():
-    # A corpus added without being named here would be compared only through its own harness, which is how nine of
-    # them went uncompared by this file while it read as the statement of parity.
-    on_disk = sorted(
-        os.path.basename(path)[len("golden_"):-len("_expected.csv")]
-        for path in glob.glob(os.path.join(HERE, "golden_*_expected.csv")))
-
-    assert list(CORPORA) == on_disk
 
 
 @pytest.mark.cpu_mode

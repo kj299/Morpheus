@@ -14,7 +14,7 @@
 """
 The week-long layer 5 corpus, and the composed session pipeline, for the determinism harness.
 
-The layer 1 and 2 harness proved that fourteen stages in a row reach the answer a golden file holds. This module
+The layer 1 and 2 harness proved that a long run of stages reaches the answer a golden file holds. This module
 does the same for layer 5: the seven TC-5 stages are composed here, and every layer 5 saved search in `RULES` is
 asserted against this corpus.
 

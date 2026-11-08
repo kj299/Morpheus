@@ -44,6 +44,7 @@ EXPECTED = os.path.join(VALIDATE, "expected_results.json")
 VALIDATION = os.path.join(VALIDATE, "VALIDATION.md")
 VALIDATION_PROPS = os.path.join(VALIDATE, "validation_app", "local", "props.conf")
 APP_PROPS = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "TA-morpheus-lineage", "default", "props.conf")
+APP_SAVED_SEARCHES = APP_PROPS.replace("props.conf", "savedsearches.conf")
 
 
 @pytest.fixture(name="runner", scope="module")
@@ -537,7 +538,7 @@ def test_the_sixth_run_differs_from_what_is_written_only_where_the_network_objec
         **BEFORE_THE_LEASES,
         **BEFORE_THE_NETWORK_OBJECTS
     }
-    assert len(run["searches"]) == 52 and len(expected) == 87
+    assert len(run["searches"]) == 52 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 198
 
 
@@ -577,7 +578,7 @@ def test_the_seventh_run_differs_from_what_is_written_only_where_the_platform_ar
         **BEFORE_THE_LEASES,
         **BEFORE_THE_PLATFORM
     }
-    assert len(run["searches"]) == 62 and len(expected) == 87
+    assert len(run["searches"]) == 62 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -608,7 +609,7 @@ def test_the_eighth_run_differs_from_what_is_written_only_where_the_leases_arriv
         **_present(BEFORE_THE_SERVICES, run),
         **BEFORE_THE_LEASES,
     }
-    assert len(run["searches"]) == 66 and len(expected) == 87
+    assert len(run["searches"]) == 66 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -638,7 +639,7 @@ def test_the_ninth_run_differs_from_what_is_written_only_where_the_services_arri
         **_present(BEFORE_THE_DEVICES, run),
         **BEFORE_THE_SERVICES
     }
-    assert len(run["searches"]) == 72 and len(expected) == 87
+    assert len(run["searches"]) == 72 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 209
 
 
@@ -665,7 +666,7 @@ def test_the_tenth_run_differs_from_what_is_written_only_where_the_devices_arriv
     assert differing == {
         **_present(BEFORE_THE_DESK_SPOOF, run), **_present(BEFORE_THE_TRAJECTORIES, run), **BEFORE_THE_DEVICES
     }
-    assert len(run["searches"]) == 75 and len(expected) == 87
+    assert len(run["searches"]) == 75 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 213
 
 
@@ -704,7 +705,7 @@ def test_the_eleventh_run_differs_from_what_is_written_only_where_the_host_segme
     }
 
     assert differing == {**BEFORE_THE_DESK_SPOOF, **BEFORE_THE_HOSTS}
-    assert len(run["searches"]) == 78 and len(expected) == 87
+    assert len(run["searches"]) == 78 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 221
 
 
@@ -730,7 +731,7 @@ def test_the_twelfth_run_differs_from_what_is_written_only_where_the_trajectory_
     }
 
     assert differing == {**BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES, **BEFORE_THE_DESK_SPOOF, **BEFORE_THE_TRAJECTORIES}
-    assert len(run["searches"]) == 80 and len(expected) == 87
+    assert len(run["searches"]) == 80 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 224
     assert {row["rule_id"] for row in run["checks"]["host_watchlist"]} == {"R-P-L3-009"}
 
@@ -757,7 +758,7 @@ def test_the_thirteenth_run_differs_from_what_is_written_only_where_the_desk_spo
     }
 
     assert differing == {**BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES, **BEFORE_THE_DESK_SPOOF}
-    assert len(run["searches"]) == 82 and len(expected) == 87
+    assert len(run["searches"]) == 82 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 233
     assert {
         row["total_risk"]: int(row["count"])
@@ -788,7 +789,7 @@ def test_the_fourteenth_run_differs_from_what_is_written_only_where_the_http_and
     }
 
     assert differing == BEFORE_THE_HTTP_AND_PROCESS_TRAJECTORIES
-    assert len(run["searches"]) == 83 and len(expected) == 87
+    assert len(run["searches"]) == 83 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert set(expected) - set(run["searches"]) == {
         "R-P-L7-010 - Path count trajectory",
         "R-P-L7-011 - Process breadth trajectory",
@@ -829,7 +830,7 @@ def test_the_fifteenth_run_differs_from_what_is_written_only_by_the_stage_counts
     }
 
     assert differing == BEFORE_THE_REQUEST_BODIES
-    assert len(run["searches"]) == 85 and len(expected) == 87
+    assert len(run["searches"]) == 85 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert set(expected) - set(run["searches"]) == {
         "Pipeline health - stage counts", "R-B-L7-003 - Sensitive data in transit"
     }
@@ -856,6 +857,6 @@ def test_the_sixteenth_run_differs_from_what_is_written_only_where_the_request_b
     }
 
     assert differing == BEFORE_THE_REQUEST_BODIES
-    assert len(run["searches"]) == 86 and len(expected) == 87
+    assert len(run["searches"]) == 86 and len(expected) == len(splunk_conf.stanzas(APP_SAVED_SEARCHES))
     assert set(expected) - set(run["searches"]) == {"R-B-L7-003 - Sensitive data in transit"}
     assert run["checks"]["risk_records"]["written"] == run["checks"]["risk_records"]["indexed"] == 242

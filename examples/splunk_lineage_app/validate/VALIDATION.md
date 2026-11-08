@@ -160,7 +160,7 @@ SPLUNK_PASSWORD='choose-one' examples/splunk_lineage_app/validate/run_search_hea
 
 It starts the container, waits for it to report healthy, and runs [`run_search_head.py`](./run_search_head.py)
 inside it under Splunk's own interpreter. That indexes every file in `sample_events/`, makes the two checks
-below, dispatches all eighty-seven searches in the order this document prescribes, and writes
+below, dispatches every search the app ships in the order this document prescribes, and writes
 `search_head_results.json` beside this file: the Splunk version, the date, what was indexed, a row count per
 search, how many risk records the detections wrote and the index holds, and the risk on every chain that spans
 three layers. Commit it; `tests/morpheus/determinism/test_search_head_run.py` compares it with

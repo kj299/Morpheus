@@ -33,6 +33,7 @@ import typing
 import pandas as pd
 import pytest
 
+from _utils.number_words import from_words
 from morpheus.messages import MessageMeta
 from morpheus.pipeline.checkpoint_mixin import CheckpointMixin
 from morpheus.utils.stage_checkpoint import CheckpointDirectory
@@ -279,22 +280,6 @@ GUIDE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      "guides",
                      "11_predictive_behavioral_analytics_osi.md")
 
-NUMBER_WORDS = {
-    "twenty": 20,
-    "twenty-one": 21,
-    "twenty-two": 22,
-    "twenty-three": 23,
-    "thirty-seven": 37,
-    "thirty-eight": 38,
-    "thirty-nine": 39,
-    "forty": 40,
-    "forty-one": 41,
-    "forty-two": 42,
-    "forty-three": 43,
-    "forty-four": 44,
-    "forty-five": 45,
-}
-
 
 def test_the_guide_counts_the_trackers_and_stages_that_remember():
     # The Part 6 row states both numbers; a stage or tracker added without a snapshot would leave it claiming more
@@ -322,5 +307,5 @@ def test_the_guide_counts_the_trackers_and_stages_that_remember():
             with open(os.path.join(utils_dir, file_name), encoding="utf-8") as handle:
                 tracker_count += len(re.findall(r"^class \w+\(StateMixin\):", handle.read(), re.MULTILINE))
 
-    assert NUMBER_WORDS.get(trackers.group(1)) == tracker_count
-    assert NUMBER_WORDS.get(stages.group(1)) == len(stateful)
+    assert from_words(trackers.group(1)) == tracker_count
+    assert from_words(stages.group(1)) == len(stateful)

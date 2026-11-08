@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,109 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,111 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -98,7 +98,8 @@ modules of `morpheus.compositions`, fifteen of the corpora beside the examples a
 apart) and the fifteen section 4.5b added (the estate context module and its test, the CMDB's corpus and the twelve
 context files beside the segments' samples) and the seven section 4.6a added (the `.conf` reader, the golden driver,
 the harnesses' golden helpers and its test, the stage tests' frame helpers and shared samples, and the corpora's
-record helpers), less the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
+record helpers) and the two section 4.6b added (the number-word reader and the test that holds the counts), less
+the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
 4.6a replaced with one.
@@ -107,7 +108,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and 
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 470 |
+| `keep` | 472 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -466,7 +467,17 @@ that replaces it. Each item says how to know it is done.
 7. **Derive what is counted by hand.** Stage counts, rule counts, golden file lists and number words in prose drift
    every time something is added; this audit found them in tests, docstrings, README files and the Splunk app's comments. Tests should read the count from the source of
    truth, and prose should say "every" rather than a number where it can. Done when no test keeps a hand list of
-   files a glob could find.
+   files a glob could find. *Built under plan section 4.6b:* the two tests that named every composed corpus by hand
+   -- one checking its list against the disk rather than reading it -- read the corpora from the golden files, and
+   the context tests read the enriching segments from their samples and the compositions from the package. The
+   search, sourcetype and lookup-job counts that tests stated as numbers (87, 20, 13, 9, 8) are read from the app's
+   `.conf` files and `siem_sourcetypes`. Eight readers of a count a document spells out -- two parsers and six
+   tables of the words written so far, one of them eighty-seven entries long -- are one, `tests/_utils/number_words.py`.
+   Prose that stated the size of something that grows says "every" now: a README said fifty-seven stages when
+   sixty-two shipped, and a docstring said nineteen sourcetype stanzas when there were twenty. Records of a past
+   run keep the numbers they recorded. `test_derived_counts.py` reads every test the fork wrote and finds no literal
+   listing a whole collection a glob finds, or all of one but one -- the corpora, segments, compositions, input
+   classes, sourcetypes, indexes and saved searches -- and no table of number words.
 8. **A base class for the telemetry stages, with an event-clock guard.** The stateful stages of TC-3 to TC-7 repeat
    the same column checks, state hooks and null-preserving assignments, and only `TC5SessionStage` refuses an event time far
    in the future. One base class carries the guard for all of them. Done when one far-future row cannot expire every
