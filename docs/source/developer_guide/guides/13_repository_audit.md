@@ -502,7 +502,17 @@ that replaces it. Each item says how to know it is done.
     lock from the dependency file, or make the lock the only definition. Done when one regeneration produces both.
 12. **Real-format fixtures for layers 1, 2 and 5, and one input-sample convention.** Layers 6 and 7 have them; the
     rest are synthetic only, and the input samples spell `schema_version` and `origin_hash` differently by class.
-    Done when every class has a real-format fixture and the input contract test enforces one convention.
+    Done when every class has a real-format fixture and the input contract test enforces one convention. *Built
+    under plan section 4.7a:* the convention. Every class's `schema_version` is `<class>.v<major>`, the contract's
+    own example and what ten of the seventeen enveloped classes already wrote; the layer 1, 2 and 5 classes and the
+    lineage corpus wrote `TC-N/1.0.0`. Every `origin_hash` is the source's own identifier, readable: the GUID an
+    identity provider gives a sign-in or session record, otherwise what the source observed the record as -- a port's
+    poll as `device/port@time`, a MAC table entry as `switch/port/mac@time`, an accounting record as `session:action`.
+    Six classes had written a hex digest the corpus invented and the device poller a counter. The seeded draw the
+    digests came from is still taken, so every other value in those corpora keeps the stream it was planted with:
+    the same plants, the same findings, new lineage identifiers. `test_input_contracts.py` holds every sample to the
+    form and refuses a bare digest. The goldens, samples, fixtures and sample events regenerated, and the search-head
+    run was recorded again over them. The fixtures for the fourteen classes without one follow in 4.7b and 4.7c.
 13. **Compose `EdgeEmitStage` and `PipelineHealthStage` in a runner.** Both are built and tested, and no runner uses
     them. Done when a segment runner emits both streams.
 14. **Documentation the fork owns.** A contributor guide and a getting-started page for the fork's CPU path, the
