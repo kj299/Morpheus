@@ -86,8 +86,9 @@ on 2026-10-26 a run over the events the desk spoof and the network inventory add
 all eighty-three, on 2026-10-28 a run over the events the HTTP and process trajectories added returned what was then
 written for all eighty-five, on 2026-10-31 a run over the events plan section 3.7 regenerated returned what was then
 written for all eighty-six, every risk record carrying its rule's `thresholds_hash`, on 2026-11-01 a run over the
-events plan section 4.1 regenerated returned what was then written for all eighty-seven, and on 2026-11-08 a run over
-the events plan section 4.7a regenerated returned what is written for all eighty-seven the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
+events plan section 4.1 regenerated returned what was then written for all eighty-seven, on 2026-11-08 a run over
+the events plan section 4.7a regenerated returned what was then written for all eighty-seven, and a run that day over
+the events plan section 4.7b regenerated returned what is written for all eighty-seven the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
 scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
 What remains design rather than a running system: one of the sixty rules as a detection (R-B-L4-001, whose

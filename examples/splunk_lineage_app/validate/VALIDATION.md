@@ -149,12 +149,19 @@ that the index holds exactly those rows -- 245 -- before the searches that read 
 leaker's three bodies, a government identifier, a password and a cloud key, and not the ordinary client's three
 forms; the summary grew by the six requests, to 9036 rows.
 
-The eighteenth, `search_head_results.json` beside this file, was made on 2026-11-08 on the same install, its indexes
+The eighteenth, kept in `search_head_runs/` too, was made on 2026-11-08 on the same install, its indexes
 and KV store emptied first, over the events regenerated for plan section 4.7a, which give every input class one
 envelope convention and so give every record a new lineage identifier. It returned what is written for all
 eighty-seven over 25,639 indexed events, and the detections wrote 245 risk records, the same rows on the same chains:
 the tapped desk's chain still sums to 135 and the flooding host's to 55. It is the first run whose runner read the
 app's `.conf` files through `splunk_conf` mounted on its own, since Splunk's interpreter has no Morpheus.
+
+The nineteenth, `search_head_results.json` beside this file, was made later on 2026-11-08 on the same install, its
+indexes and KV store emptied first, over the events regenerated for plan section 4.7b, in which a renamed port's
+polls are named in `origin_hash` by the name the device reported, so 26 layer 1 records have new lineage
+identifiers. It returned the same rows as the eighteenth for all eighty-seven searches over the same 25,639
+indexed events and 245 risk records; only the dispatch window and the measured time drift, which read the wall
+clock, differ.
 
 ## Running it
 

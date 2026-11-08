@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,112 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,119 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -99,7 +99,8 @@ apart) and the fifteen section 4.5b added (the estate context module and its tes
 context files beside the segments' samples) and the seven section 4.6a added (the `.conf` reader, the golden driver,
 the harnesses' golden helpers and its test, the stage tests' frame helpers and shared samples, and the corpora's
 record helpers) and the two section 4.6b added (the number-word reader and the test that holds the counts) and the one section 4.7a added (the search-head
-run it superseded, kept as history), less
+run it superseded, kept as history) and the seven section 4.7b added (six fixture files for the layer 1, 2 and 5
+classes and the search-head run it superseded), less
 the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
@@ -109,7 +110,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and 
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 473 |
+| `keep` | 480 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -523,7 +524,8 @@ that replaces it. Each item says how to know it is done.
     and no syslog rate, a capture numbers nothing and so cannot show the three ARP records the sensor lost, and the
     identity provider's own session records are another feed than RADIUS. Building it found the corpus naming a
     renamed port's polls by the old name in `origin_hash`, which no poller could; the origin is now the name the
-    device reported, which moved 26 lineage identifiers in the telemetry and estate goldens. The fixtures for the
+    device reported, which moved 26 lineage identifiers in the telemetry and estate goldens; the search-head run recorded over the
+    regenerated events returned the same rows for every search. The fixtures for the
     eight classes still without one follow in 4.7c.
 13. **Compose `EdgeEmitStage` and `PipelineHealthStage` in a runner.** Both are built and tested, and no runner uses
     them. Done when a segment runner emits both streams.
