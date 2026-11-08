@@ -13,7 +13,7 @@
 # limitations under the License.
 """
 The normalize step of the per-layer pattern for real feeds: one `DataFrameInputSchema` per input class read here, at
-layers 1, 2, 5, 6 and 7, from the format a deployment already writes to the columns the stages read.
+every layer, from the format a deployment already writes to the columns the stages read.
 
 Each schema is built from `column_info` primitives and applied with `process_dataframe`, as the guide's per-layer
 pattern says, and produces exactly the class's columns from `examples/behavioral_analytics/input_contracts.json`
@@ -36,6 +36,13 @@ and the universal envelope:
 - `tc2_arp`: the ARP packets in a packet capture.
 - `tc2_auth`: a FreeRADIUS detail file of 802.1X Access-Requests (`auth_log`) and the replies (`reply_log`).
 - `tc5_session`: a FreeRADIUS detail file of accounting Starts and Stops.
+- `tc4`: the TCP and UDP packets in a packet capture.
+- `tc3_dhcp`: a Kea DHCPv4 server's lease log.
+- `tc7_host_inventory`: osquery's scheduled `interface_details` results.
+- `tc7_service`: Zeek `conn.log` joined to `ssl.log` on the connection's `uid`.
+- `tc0_identity`: a Workday report of worker events merged with Entra ID's group-membership audit records.
+- `tc0_asset` and `tc0_application`: ServiceNow's `sys_audit` history of CMDB items, folded into versions.
+- `tc0_network`: NetBox's object changelog.
 
 Zeek logs are read with {py:func}`morpheus.parsers.zeek.parse`.
 
@@ -45,7 +52,9 @@ content rule cannot fire on a Zeek-only feed; a feed with an inspecting proxy su
 provider has no on-premises target computer, so `target_host` is null from the Entra ID schema. No MIB a switch
 answers holds a hash of its running configuration or a rate of its syslog, so `running_config_hash` and
 `syslog_rate` are null from SNMP. A packet capture numbers nothing, so the ARP schema's `collector_seq` cannot show a
-record its sensor numbered and never delivered. No format here
+record its sensor numbered and never delivered. A CMDB's audit history and NetBox's changelog keep when a change
+was entered and not when it took effect, and so does Entra ID's audit log for a group membership, so `valid_from`
+is null from them; Workday's report keeps both. Kea's lease log does not write the relay's option 82. No format here
 records when the collector read a line, so `observed_time` is the record's own time and the collection lag reads
 zero; a collector that keeps its read time passes it as `observed_column`. The collector's own facts --
 identity, contract version, tenant, clock discipline, sampling -- are a `CollectorProfile`, because no record
@@ -1527,6 +1536,443 @@ def zeek_service_schema(profile: CollectorProfile) -> DataFrameInputSchema:
     ] + tail)
 
 
+SERVICENOW_CRITICALITY = {
+    "1 - most critical": "high",
+    "2 - somewhat critical": "medium",
+    "3 - less critical": "low",
+    "4 - not critical": "none"
+}
+"""ServiceNow's `business_criticality` choices as the contract writes them."""
+
+SERVICENOW_RETIRED = "7"
+"""The `install_status` of a retired configuration item: the CMDB's way of saying a machine or service is gone."""
+
+SERVICENOW_ASSET_ROLES = {"cmdb_ci_server": "server", "cmdb_ci_pc_hardware": "workstation"}
+"""A machine's CMDB class as the role the contract names it by."""
+
+SERVICENOW_APPLICATIONS = ("cmdb_ci_appl", )
+
+NETBOX_KINDS = {"dcim.device": "device", "ipam.vlan": "vlan", "dcim.interface": "port"}
+"""NetBox's object types for what `tc0_network` describes."""
+
+WORKDAY_RETRACTIONS = frozenset({"End Contingent Worker Contract"})
+"""The Workday business processes after which the worker is no longer in the directory's population."""
+
+ENTRA_GROUP_CHANGES = {"Add member to group": "assert", "Remove member from group": "retract"}
+"""Entra ID's audit activities for group membership, as the change each records."""
+
+
+def _utc(value: typing.Any) -> typing.Optional[int]:
+    if (_missing(value) or value == ""):
+        return None
+
+    return pd.Timestamp(pd.to_datetime(value, utc=True)).value
+
+
+def _context_columns(tenant_id: str) -> tuple[list, list]:
+    """A context record's sequence before its class's columns, and its clocks, change and tenant after."""
+    head = [
+        _derived("source_seq", "Int64", lambda df: pd.Series(range(len(df)), index=df.index, dtype="Int64")),
+    ]
+    tail = [
+        _derived("valid_from",
+                 "Int64",
+                 lambda df: pd.Series([_utc(value) for value in df["valid_from"]], index=df.index, dtype="Int64")),
+        _derived("valid_to",
+                 "Int64",
+                 lambda df: pd.Series([_utc(value) for value in df["valid_to"]], index=df.index, dtype="Int64")),
+        _derived("recorded_at",
+                 "Int64",
+                 lambda df: pd.Series([_utc(value) for value in df["recorded_at"]], index=df.index, dtype="Int64")),
+        _derived(
+            "change",
+            "object", lambda df: pd.Series(["retract" if gone else "assert"
+                                            for gone in df["retracted"]], index=df.index, dtype=object)),
+        _constant("tenant_id", tenant_id),
+    ]
+
+    return (head, tail)
+
+
+def read_servicenow(path: str) -> list[dict]:
+    """The records of a ServiceNow Table API response, `{"result": [...]}`, as written."""
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)["result"]
+
+
+def fold_cmdb_audit(audit: list[dict], users: list[dict], groups: list[dict],
+                    tables: typing.Iterable[str]) -> pd.DataFrame:
+    """
+    Each version of the configuration items in `tables`, folded from ServiceNow's `sys_audit` history.
+
+    An audit row is one field's change; the rows of one item that share a `record_checkpoint` are one update, and
+    the item after it is one version. Reference fields hold a `sys_id`, so `assigned_to` is named by the user's
+    `email` and `support_group` by the group's `name`. A version that sets `install_status` to retired is the item
+    leaving the CMDB, with what it was.
+
+    Parameters
+    ----------
+    audit : list of dict
+        `sys_audit` rows, in the order the CMDB wrote them.
+    users, groups : list of dict
+        `sys_user` and `sys_user_group` records.
+    tables : iterable of str
+        The CMDB classes to fold.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        One row per version in order: the item's fields as of that version, `tablename`, `recorded_at` (the
+        update's `sys_created_on`), `retracted`, and the `valid_from` and `valid_to` the CMDB does not keep, null.
+    """
+    (emails, names) = ({
+        user["sys_id"]: user.get("email")
+        for user in users
+    }, {
+        group["sys_id"]: group.get("name")
+        for group in groups
+    })
+    wanted = set(tables)
+    (items, rows, last) = ({}, [], None)
+
+    for change in audit:
+        if (change["tablename"] not in wanted):
+            continue
+
+        key = (change["documentkey"], change["record_checkpoint"])
+        item = items.setdefault(change["documentkey"], {})
+        item[change["fieldname"]] = change["newvalue"]
+
+        if (key != last):
+            rows.append({"tablename": change["tablename"], "recorded_at": change["sys_created_on"], "key": key})
+            last = key
+
+        rows[-1]["state"] = dict(item)
+        rows[-1]["retracted"] = (change["fieldname"] == "install_status" and change["newvalue"] == SERVICENOW_RETIRED
+                                 or rows[-1].get("retracted", False))
+
+    return pd.DataFrame([{
+        "tablename": row["tablename"],
+        **row["state"],
+        "assigned_to": emails.get(row["state"].get("assigned_to")),
+        "support_group": names.get(row["state"].get("support_group")),
+        "recorded_at": row["recorded_at"],
+        "retracted": row["retracted"],
+        "valid_from": None,
+        "valid_to": None,
+    } for row in rows])
+
+
+def servicenow_asset_schema(tenant_id: str) -> DataFrameInputSchema:
+    """
+    `tc0_asset` from ServiceNow CMDB versions of servers and workstations, folded by `fold_cmdb_audit`.
+
+    The CMDB keeps when a change was entered, not when it took effect, so `valid_from` is null from it; a change
+    entered late reads as entered. The machine's role is its CMDB class; `peer_group` and `data_classification`
+    are the estate's custom fields `u_peer_group` and `u_data_classification`; the operating system's family is
+    `os`, lower-cased.
+
+    Parameters
+    ----------
+    tenant_id : str
+        The CMDB's tenant.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    (head, tail) = _context_columns(tenant_id)
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("hostname", "name"),
+        _text("owner", "assigned_to"),
+        _text("owning_team", "support_group"),
+        _text("criticality", "business_criticality", SERVICENOW_CRITICALITY),
+        _text("data_classification", "u_data_classification"),
+        _text("peer_group", "u_peer_group"),
+        _text("device_role", "tablename", SERVICENOW_ASSET_ROLES),
+        _through("os_family", "os", str.lower),
+        _text("os_version", "os_version"),
+    ] + tail)
+
+
+def servicenow_application_schema(tenant_id: str) -> DataFrameInputSchema:
+    """
+    `tc0_application` from ServiceNow CMDB versions of applications, folded by `fold_cmdb_audit`.
+
+    As for assets, `valid_from` is null from the CMDB. The address and port are the application's `ip_address`
+    and `tcp_port`; the account it runs as and its data classification are the custom fields `u_service_account`
+    and `u_data_classification`.
+
+    Parameters
+    ----------
+    tenant_id : str
+        The CMDB's tenant.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    (head, tail) = _context_columns(tenant_id)
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("server_address", "ip_address"),
+        _count("server_port", "tcp_port"),
+        _text("name", "name"),
+        _text("owning_team", "support_group"),
+        _text("service_account", "u_service_account"),
+        _text("criticality", "business_criticality", SERVICENOW_CRITICALITY),
+        _text("data_classification", "u_data_classification"),
+    ] + tail)
+
+
+def read_netbox_changes(path: str) -> list[dict]:
+    """The object changes of a NetBox `/api/core/object-changes/` response, oldest first, as written."""
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)["results"]
+
+
+def fold_netbox_changes(changes: list[dict]) -> pd.DataFrame:
+    """
+    Each change NetBox's changelog holds to a device, a VLAN or an interface, with what it refers to named.
+
+    A change's `postchange_data` (its `prechange_data` for a deletion) refers to other objects by id, so every
+    object the log creates is kept, and a device's site, role and tenant are named by their slugs, an interface's
+    device by its name. An interface has no tenant; its owner is its device's.
+
+    Parameters
+    ----------
+    changes : list of dict
+        NetBox object changes, oldest first.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        One row per change to the three kinds, in order: `object_kind`, the site, device, port and VLAN, the
+        description, role, tenant and custom fields, `recorded_at` (the change's `time`), `retracted`, and the
+        `valid_from` and `valid_to` NetBox does not keep, null.
+    """
+    objects: dict = {}
+    rows = []
+
+    def slug(kind: str, identifier: typing.Any) -> typing.Optional[str]:
+        return objects.get((kind, identifier), {}).get("slug")
+
+    for change in changes:
+        kind = change["changed_object_type"]
+        deleted = change["action"]["value"] == "delete"
+        data = change["prechange_data"] if deleted else change["postchange_data"]
+        objects[(kind, change["changed_object_id"])] = data
+
+        if (kind not in NETBOX_KINDS):
+            continue
+
+        device = objects.get(("dcim.device", data.get("device")), {}) if kind == "dcim.interface" else data
+        fields = data.get("custom_fields") or {}
+        rows.append({
+            "object_kind":
+                NETBOX_KINDS[kind],
+            "site":
+                slug("dcim.site", device.get("site")),
+            "device":
+                device.get("name") if kind != "ipam.vlan" else None,
+            "port":
+                data.get("name") if kind == "dcim.interface" else None,
+            "vid":
+                data.get("vid"),
+            "commissioning_rx_dbm":
+                fields.get("commissioning_rx_dbm"),
+            "designation":
+                data.get("description") if kind == "dcim.interface" else
+                (data.get("name") if kind == "ipam.vlan" else None),
+            "role":
+                slug("dcim.devicerole", data.get("role")) if kind == "dcim.device" else None,
+            "tenant":
+                slug("tenancy.tenant", device.get("tenant") if kind == "dcim.interface" else data.get("tenant")),
+            "owning_team":
+                fields.get("owning_team"),
+            "criticality":
+                fields.get("criticality"),
+            "recorded_at":
+                change["time"],
+            "retracted":
+                deleted,
+            "valid_from":
+                None,
+            "valid_to":
+                None,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def netbox_network_schema(tenant_id: str) -> DataFrameInputSchema:
+    """
+    `tc0_network` from NetBox's changelog, folded by `fold_netbox_changes`.
+
+    The changelog keeps when a change was made, not when it took effect, so `valid_from` is null from it. A
+    port's designation is its interface's `description`, a VLAN's its `name`; the owner is the tenant's slug; the
+    commissioning level, the owning team and the criticality are the estate's custom fields.
+
+    Parameters
+    ----------
+    tenant_id : str
+        The inventory's tenant.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    (head, tail) = _context_columns(tenant_id)
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("object_kind", "object_kind"),
+        _text("site_id", "site"),
+        _text("device_id", "device"),
+        _text("port_id", "port"),
+        _count("vlan_id", "vid"),
+        _number("commissioning_rx_dbm", "commissioning_rx_dbm"),
+        _text("designation", "designation"),
+        _text("device_role", "role"),
+        _text("owner", "tenant"),
+        _text("owning_team", "owning_team"),
+        _text("criticality", "criticality"),
+    ] + tail)
+
+
+def read_workday(path: str) -> list[dict]:
+    """The rows of a Workday report-as-a-service JSON response, `{"Report_Entry": [...]}`, as written."""
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)["Report_Entry"]
+
+
+def read_entra_audit(path: str) -> list[dict]:
+    """Entra ID audit records as Azure Monitor exports them, one JSON object per line, each record's `properties`."""
+    with open(path, encoding="utf-8") as handle:
+        records = [json.loads(line) for line in handle if line.strip()]
+
+    return [record.get("properties", record) for record in records]
+
+
+def _quoted(value: typing.Any) -> typing.Optional[str]:
+    # Entra ID writes a modified property's values as JSON text: a group's name arrives as "\"finance-users\"".
+    return None if _missing(value) else json.loads(value)
+
+
+def merge_identity(workers: list[dict], audit: list[dict]) -> pd.DataFrame:
+    """
+    The directory's changes to principals from two sources, as one stream ordered by when each was entered.
+
+    A principal's profile is the HR system's: a Workday report of worker events, each with the moment it took
+    effect and the moment it was entered, the worker's organization, manager, worker type and status, and the two
+    fields the report calculates from the directory, the account's type and privilege. A group membership is the
+    directory's: Entra ID's `Add member to group` and `Remove member from group` audit records, which say when they
+    were made and not when they took effect. The stream is ordered by entry time, a change with none last, and at
+    one moment the HR system's change before the directory's, as the directory provisions from it.
+
+    Parameters
+    ----------
+    workers : list of dict
+        Workday report rows, in entry order.
+    audit : list of dict
+        Entra ID audit records' `properties`, in the order logged.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        One row per change: the report's fields or the group's name, `valid_from`, `valid_to`, `recorded_at` and
+        `retracted`.
+    """
+    rows = []
+
+    for worker in workers:
+        status = (worker.get("Worker_Status") or "").lower()
+        rows.append({
+            "user_principal":
+                worker.get("Worker_Email"),
+            "department":
+                worker.get("Supervisory_Organization"),
+            "manager":
+                worker.get("Manager_Email"),
+            "employment_status":
+                "terminated" if status == "terminated" else
+                ("contractor" if worker.get("Worker_Type") == "Contingent Worker" else status or None),
+            "account_type": (worker.get("Account_Type") or "").lower() or None,
+            "privilege_level": (worker.get("Privilege_Level") or "").lower() or None,
+            "group_name":
+                None,
+            "valid_from":
+                worker.get("Effective_Moment"),
+            "valid_to":
+                None,
+            "recorded_at":
+                worker.get("Entry_Moment"),
+            "retracted":
+                worker.get("Business_Process_Type") in WORKDAY_RETRACTIONS,
+            "source":
+                0,
+        })
+
+    for record in audit:
+        if (record.get("activityDisplayName") not in ENTRA_GROUP_CHANGES or record.get("result") != "success"):
+            continue
+
+        user = next(target for target in record["targetResources"] if target.get("type") == "User")
+        named = {prop["displayName"]: prop for prop in user.get("modifiedProperties", [])}["Group.DisplayName"]
+        retract = ENTRA_GROUP_CHANGES[record["activityDisplayName"]] == "retract"
+        rows.append({
+            "user_principal": user.get("userPrincipalName"),
+            "department": None,
+            "manager": None,
+            "employment_status": None,
+            "account_type": None,
+            "privilege_level": None,
+            "group_name": _quoted(named["oldValue"] if retract else named["newValue"]),
+            "valid_from": None,
+            "valid_to": None,
+            "recorded_at": record.get("activityDateTime"),
+            "retracted": retract,
+            "source": 1,
+        })
+
+    rows.sort(key=lambda row: (_utc(row["recorded_at"]) is None, _utc(row["recorded_at"]) or 0, row["source"]))
+
+    return pd.DataFrame(rows).drop(columns=["source"])
+
+
+def workday_entra_identity_schema(tenant_id: str) -> DataFrameInputSchema:
+    """
+    `tc0_identity` from Workday worker events and Entra ID group membership, merged by `merge_identity`.
+
+    A profile carries both of the HR system's clocks; a group membership only the directory's entry time, so its
+    `valid_from` and `valid_to` are null.
+
+    Parameters
+    ----------
+    tenant_id : str
+        The directory's tenant.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    (head, tail) = _context_columns(tenant_id)
+
+    return DataFrameInputSchema(column_info=head + [
+        _through("user_principal", "user_principal", str.lower),
+        _text("department", "department"),
+        _through("manager", "manager", str.lower),
+        _text("employment_status", "employment_status"),
+        _text("account_type", "account_type"),
+        _text("privilege_level", "privilege_level"),
+        _text("group_name", "group_name"),
+    ] + tail)
+
+
 def read_zeek(path: str) -> pd.DataFrame:
     """A Zeek ASCII log, through `morpheus.parsers.zeek.parse`."""
     return zeek.parse(path, df_type="pandas")
@@ -1774,3 +2220,34 @@ def osquery_inventory(path: str, profile: CollectorProfile, report_valid_seconds
 def zeek_service(conn_path: str, ssl_path: str, profile: CollectorProfile) -> pd.DataFrame:
     """`tc7_service` records from a Zeek `conn.log` and its `ssl.log`."""
     return normalize(join_conn_ssl(read_zeek(conn_path), read_zeek(ssl_path)), zeek_service_schema(profile))
+
+
+def servicenow_assets(audit_path: str, users_path: str, groups_path: str, tenant_id: str) -> pd.DataFrame:
+    """`tc0_asset` records from ServiceNow's `sys_audit`, `sys_user` and `sys_user_group`."""
+    versions = fold_cmdb_audit(read_servicenow(audit_path),
+                               read_servicenow(users_path),
+                               read_servicenow(groups_path),
+                               SERVICENOW_ASSET_ROLES)
+
+    return normalize(versions, servicenow_asset_schema(tenant_id))
+
+
+def servicenow_applications(audit_path: str, users_path: str, groups_path: str, tenant_id: str) -> pd.DataFrame:
+    """`tc0_application` records from ServiceNow's `sys_audit`, `sys_user` and `sys_user_group`."""
+    versions = fold_cmdb_audit(read_servicenow(audit_path),
+                               read_servicenow(users_path),
+                               read_servicenow(groups_path),
+                               SERVICENOW_APPLICATIONS)
+
+    return normalize(versions, servicenow_application_schema(tenant_id))
+
+
+def netbox_network(path: str, tenant_id: str) -> pd.DataFrame:
+    """`tc0_network` records from NetBox's changelog."""
+    return normalize(fold_netbox_changes(read_netbox_changes(path)), netbox_network_schema(tenant_id))
+
+
+def workday_entra_identity(workday_path: str, audit_path: str, tenant_id: str) -> pd.DataFrame:
+    """`tc0_identity` records from a Workday worker-event report and Entra ID's audit log."""
+    return normalize(merge_identity(read_workday(workday_path), read_entra_audit(audit_path)),
+                     workday_entra_identity_schema(tenant_id))

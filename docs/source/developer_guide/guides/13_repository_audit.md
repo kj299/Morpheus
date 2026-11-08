@@ -525,8 +525,18 @@ that replaces it. Each item says how to know it is done.
     identity provider's own session records are another feed than RADIUS. Building it found the corpus naming a
     renamed port's polls by the old name in `origin_hash`, which no poller could; the origin is now the name the
     device reported, which moved 26 lineage identifiers in the telemetry and estate goldens; the search-head run recorded over the
-    regenerated events returned the same rows for every search. The fixtures for the
-    eight classes still without one follow in 4.7c.
+    regenerated events returned the same rows for every search. *Built under plan section
+    4.7c:* real-format fixtures for the last eight classes, so every class the contract names has one. The four
+    event classes are a capture of TCP packets (`tc4`, the SYN fingerprint read as `TC4FlowStage` reads it, for a
+    client SYN that carries options), a Kea DHCPv4 lease log (`tc3_dhcp`), osquery's `interface_details`
+    snapshots (`tc7_host_inventory`) and Zeek `conn.log` joined to `ssl.log` (`tc7_service`); the network,
+    transport and application segments run over them write what they write from the samples. The four context
+    classes are the sources' change logs: a Workday report of worker events, which keeps when each took effect and
+    when it was entered, merged by entry time with Entra ID's group-membership audit records (`tc0_identity`);
+    ServiceNow's `sys_audit` history folded into versions of each CMDB item (`tc0_asset`, `tc0_application`); and
+    NetBox's object changelog (`tc0_network`). ServiceNow, NetBox and Entra ID keep only when a change was
+    entered, so `valid_from` is named in the test as not carried by them. NetBox has to record a device before its
+    ports, so the corpus's network inventory now does too, which renumbered that inventory's `source_seq`.
 13. **Compose `EdgeEmitStage` and `PipelineHealthStage` in a runner.** Both are built and tested, and no runner uses
     them. Done when a segment runner emits both streams.
 14. **Documentation the fork owns.** A contributor guide and a getting-started page for the fork's CPU path, the

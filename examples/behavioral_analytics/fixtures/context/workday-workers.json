@@ -1,0 +1,134 @@
+{
+ "Report_Entry": [
+  {
+   "Worker_Email": "alice@example.com",
+   "Business_Process_Type": "Hire",
+   "Effective_Moment": "1970-01-01T00:00:00.000Z",
+   "Entry_Moment": "1970-01-01T06:00:00.000Z",
+   "Supervisory_Organization": "Finance",
+   "Manager_Email": "frank@example.com",
+   "Worker_Type": "Employee",
+   "Worker_Status": "Active",
+   "Account_Type": "Human",
+   "Privilege_Level": "Elevated"
+  },
+  {
+   "Worker_Email": "bob@example.com",
+   "Business_Process_Type": "Hire",
+   "Effective_Moment": "1970-01-01T00:00:00.000Z",
+   "Entry_Moment": "1970-01-01T06:00:00.000Z",
+   "Supervisory_Organization": "Engineering",
+   "Manager_Email": "grace@example.com",
+   "Worker_Type": "Employee",
+   "Worker_Status": "Active",
+   "Account_Type": "Human",
+   "Privilege_Level": "Standard"
+  },
+  {
+   "Worker_Email": "carol@example.com",
+   "Business_Process_Type": "Hire",
+   "Effective_Moment": "1970-01-01T00:00:00.000Z",
+   "Entry_Moment": "1970-01-01T06:00:00.000Z",
+   "Supervisory_Organization": "Sales",
+   "Manager_Email": "heidi@example.com",
+   "Worker_Type": "Employee",
+   "Worker_Status": "Active",
+   "Account_Type": "Human",
+   "Privilege_Level": "Standard"
+  },
+  {
+   "Worker_Email": "dave@example.com",
+   "Business_Process_Type": "Hire",
+   "Effective_Moment": "1970-01-01T00:00:00.000Z",
+   "Entry_Moment": "1970-01-01T06:00:00.000Z",
+   "Supervisory_Organization": "Finance",
+   "Manager_Email": "frank@example.com",
+   "Worker_Type": "Employee",
+   "Worker_Status": "Active",
+   "Account_Type": "Human",
+   "Privilege_Level": "Standard"
+  },
+  {
+   "Worker_Email": "erin@example.com",
+   "Business_Process_Type": "Hire",
+   "Effective_Moment": "1970-01-01T00:00:00.000Z",
+   "Entry_Moment": "1970-01-01T06:00:00.000Z",
+   "Supervisory_Organization": "Engineering",
+   "Manager_Email": "grace@example.com",
+   "Worker_Type": "Contingent Worker",
+   "Worker_Status": "Active",
+   "Account_Type": "Human",
+   "Privilege_Level": "Standard"
+  },
+  {
+   "Worker_Email": "svc-reports@example.com",
+   "Business_Process_Type": "Hire",
+   "Effective_Moment": "1970-01-01T00:00:00.000Z",
+   "Entry_Moment": "1970-01-01T06:00:00.000Z",
+   "Supervisory_Organization": "Engineering",
+   "Manager_Email": "grace@example.com",
+   "Worker_Type": "Employee",
+   "Worker_Status": "Active",
+   "Account_Type": "Service",
+   "Privilege_Level": "Elevated"
+  },
+  {
+   "Worker_Email": "bob@example.com",
+   "Business_Process_Type": "Change Job",
+   "Effective_Moment": "1970-01-11T00:00:00.000Z",
+   "Entry_Moment": "1970-01-11T09:00:00.000Z",
+   "Supervisory_Organization": "Finance",
+   "Manager_Email": "frank@example.com",
+   "Worker_Type": "Employee",
+   "Worker_Status": "Active",
+   "Account_Type": "Human",
+   "Privilege_Level": "Standard"
+  },
+  {
+   "Worker_Email": "erin@example.com",
+   "Business_Process_Type": "End Contingent Worker Contract",
+   "Effective_Moment": "1970-01-16T06:00:00.000Z",
+   "Entry_Moment": "1970-01-16T06:00:00.000Z",
+   "Supervisory_Organization": "Engineering",
+   "Manager_Email": "grace@example.com",
+   "Worker_Type": "Contingent Worker",
+   "Worker_Status": "Active",
+   "Account_Type": "Human",
+   "Privilege_Level": "Standard"
+  },
+  {
+   "Worker_Email": "dave@example.com",
+   "Business_Process_Type": "Terminate Employee",
+   "Effective_Moment": "1970-01-13T00:00:00.000Z",
+   "Entry_Moment": "1970-01-19T09:00:00.000Z",
+   "Supervisory_Organization": "Finance",
+   "Manager_Email": "frank@example.com",
+   "Worker_Type": "Employee",
+   "Worker_Status": "Terminated",
+   "Account_Type": "Human",
+   "Privilege_Level": "Standard"
+  },
+  {
+   "Worker_Email": "carol@example.com",
+   "Business_Process_Type": "Change Job",
+   "Effective_Moment": "1970-01-01T00:00:00.000Z",
+   "Entry_Moment": "1970-01-21T09:00:00.000Z",
+   "Supervisory_Organization": "Marketing",
+   "Manager_Email": "heidi@example.com",
+   "Worker_Type": "Employee",
+   "Worker_Status": "Active",
+   "Account_Type": "Human",
+   "Privilege_Level": "Standard"
+  },
+  {
+   "Worker_Email": "frank@example.com",
+   "Business_Process_Type": "Hire",
+   "Effective_Moment": "1970-01-01T00:00:00.000Z",
+   "Supervisory_Organization": "Finance",
+   "Worker_Type": "Employee",
+   "Worker_Status": "Active",
+   "Account_Type": "Human",
+   "Privilege_Level": "Standard"
+  }
+ ]
+}
