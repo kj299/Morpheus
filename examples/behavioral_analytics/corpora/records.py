@@ -19,6 +19,8 @@ the same way; each carried its own copy of the rule until the copies became a se
 """
 
 import random
+import typing
+import uuid
 
 from morpheus.utils.binding_table import NS_PER_SECOND
 
@@ -41,11 +43,29 @@ def envelope(rows: list, collector: str, schema: str, origin: str, when: int) ->
     }
 
 
-def seeded_envelope(rng: random.Random, collector: str, schema: str, seq: int) -> dict:
-    """The envelope of a record whose origin is drawn from the corpus's seeded generator."""
+SELF_NAMED = None
+"""The `origin` of a record its source names itself: an identity provider's sign-in or session record, which carries
+an identifier of its own."""
+
+RECORD_NAMESPACE = uuid.UUID("7d3c9a52-1f0e-4b6d-8a2c-5e4f3b2a1d09")
+"""Where the identifier of a self-named record is derived from, so it is a GUID as the provider writes one."""
+
+
+def seeded_envelope(rng: random.Random, collector: str, schema: str, seq: int, origin: typing.Optional[str]) -> dict:
+    """
+    The envelope of a record from a corpus drawing its values from a seeded generator.
+
+    `origin_hash` is what identifies the record at its source, as the contract says: `origin`, what the source
+    observed it as (a port's poll, a MAC table entry, a session's start), or, for a record its source names itself
+    (`SELF_NAMED`), the identifier the source gives it, a GUID drawn from the generator. The draw is taken either way:
+    it is where the corpora's identifiers came from before the input samples took one convention (plan section
+    4.7a), and every value drawn after it keeps the stream it was planted with.
+    """
+    bits = rng.getrandbits(64)
+
     return {
         "collector_id": collector,
         "schema_version": schema,
-        "origin_hash": f"{rng.getrandbits(64):016x}",
+        "origin_hash": str(uuid.uuid5(RECORD_NAMESPACE, f"{collector}:{bits:016x}")) if origin is None else origin,
         "collector_seq": seq,
     }

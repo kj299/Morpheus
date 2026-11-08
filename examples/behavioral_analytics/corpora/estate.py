@@ -116,7 +116,7 @@ def _build_desk_auth(rng: random.Random) -> pd.DataFrame:
     rows = []
 
     for (seq, event) in enumerate(events, start=1):
-        rows.append({**event, **tp._envelope(rng, "idp", "TC-5/1.0.0", seq)})  # pylint: disable=protected-access
+        rows.append({**event, **tp._envelope(rng, "idp", "tc5_auth.v1", seq, None)})  # pylint: disable=protected-access
 
     return pd.DataFrame(rows)
 

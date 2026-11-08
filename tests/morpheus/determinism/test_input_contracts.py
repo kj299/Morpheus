@@ -26,6 +26,7 @@ now.
 import importlib
 import json
 import os
+import re
 import sys
 
 import pytest
@@ -131,6 +132,70 @@ def test_an_optional_column_is_one_some_builder_omits(builders: dict):
                 assert column["name"] not in everywhere, f"{class_name}.{column['name']} is sent by every builder"
 
 
+SCHEMA_VERSION = re.compile(r"(?P<class>\w+)\.v(?P<major>\d+)")
+"""`<class>.v<major>`: the one form every class's `schema_version` takes (plan section 4.7a)."""
+
+DIGEST = re.compile(r"[0-9a-f]{12,}")
+"""A bare lowercase hex digest: an identifier the collector invented rather than the one its source gives."""
+
+
+def envelope_offences(class_name: str, record: dict) -> list[str]:
+    """What is wrong with a record's envelope against the one convention, or nothing."""
+    offences = []
+    version = SCHEMA_VERSION.fullmatch(str(record.get("schema_version")))
+
+    if (version is None or version.group("class") != class_name):
+        offences.append(f"schema_version {record.get('schema_version')!r} is not {class_name}.v<major>")
+
+    origin = record.get("origin_hash")
+
+    if (not isinstance(origin, str) or origin == "" or DIGEST.fullmatch(origin)):
+        offences.append(f"origin_hash {origin!r} is not the source's own identifier")
+
+    return offences
+
+
+def test_every_sample_follows_the_one_envelope_convention():
+    found = {}
+
+    for path in sorted(samples.SAMPLES.glob("*/*.jsonlines")):
+        class_name = samples.contract_class(path.stem)
+
+        if (class_name is None or not CONTRACTS["classes"][class_name]["envelope"]):
+            continue
+
+        with open(path, encoding="utf-8") as handle:
+            for (line_number, line) in enumerate(handle, start=1):
+                for offence in envelope_offences(class_name, json.loads(line)):
+                    found.setdefault(f"{path.parent.name}/{path.name}", []).append(f"line {line_number}: {offence}")
+
+    assert {name: offences[:3] for (name, offences) in found.items()} == {}
+
+
+@pytest.mark.parametrize("record,expected",
+                         [({
+                             "schema_version": "TC-1/1.0.0", "origin_hash": "port@1"
+                         }, "schema_version"), ({
+                             "schema_version": "tc3.v1", "origin_hash": "port@1"
+                         }, "schema_version"),
+                          ({
+                              "schema_version": "tc1.v1", "origin_hash": "5a26e75489d75e6e"
+                          }, "origin_hash"), ({
+                              "schema_version": "tc1.v1", "origin_hash": None
+                          }, "origin_hash")])
+def test_the_convention_check_sees_each_departure(record: dict, expected: str):
+    offences = envelope_offences("tc1", record)
+
+    assert len(offences) == 1 and offences[0].startswith(expected)
+
+
+def test_the_convention_admits_a_guid_and_an_observation():
+    assert envelope_offences("tc5_auth", {
+        "schema_version": "tc5_auth.v1", "origin_hash": "0b0f7a7e-5f43-5a7e-9a6c-2f4f8a1d3c55"
+    }) == []
+    assert envelope_offences("tc1", {"schema_version": "tc1.v1", "origin_hash": "sw1/Gi1/0/1@60000000000"}) == []
+
+
 def test_every_sample_value_has_its_contract_type():
     for path in sorted(samples.SAMPLES.glob("*/*.jsonlines")):
         class_name = samples.contract_class(path.stem)
@@ -179,7 +244,6 @@ def test_the_contract_document_is_rendered_from_the_contract():
 def test_the_documents_count_the_classes_the_contract_holds():
     # Three documents say how many input classes there are, and the retrospective's own figure was already six
     # behind when this was written.
-    import re  # pylint: disable=import-outside-toplevel
 
     root = os.path.join(HERE, "..", "..", "..")
     documents = [

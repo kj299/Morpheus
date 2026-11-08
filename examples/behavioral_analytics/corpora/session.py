@@ -24,6 +24,7 @@ import random
 import typing
 
 import pandas as pd
+from corpora.records import SELF_NAMED
 from corpora.records import seeded_envelope as _envelope
 
 from morpheus.compositions import envelope as universal_envelope
@@ -420,7 +421,7 @@ def _build_auth(rng: random.Random) -> pd.DataFrame:
     rows = []
 
     for (seq, event) in enumerate(events, start=1):
-        rows.append({**event, **_envelope(rng, "idp", "TC-5/1.0.0", seq)})
+        rows.append({**event, **_envelope(rng, "idp", "tc5_auth.v1", seq, SELF_NAMED)})
 
     return pd.DataFrame(rows)
 
@@ -472,7 +473,7 @@ def _build_sessions(rng: random.Random) -> pd.DataFrame:
             "session_action": action,
             "session_start": None,
             "session_end": None,
-            **_envelope(rng, "radius-accounting", "TC-5/1.0.0", seq),
+            **_envelope(rng, "radius-accounting", "tc5_session.v1", seq, f"{session_id}:{action}"),
         })
 
     # The identity provider's own session records, one per session with both ends in it, from a collector of its
@@ -488,7 +489,7 @@ def _build_sessions(rng: random.Random) -> pd.DataFrame:
             "session_action": "session",
             "session_start": at(day, start_hour) * NS_PER_SECOND,
             "session_end": at(day, end_hour) * NS_PER_SECOND,
-            **_envelope(rng, "idp-sessions", "TC-5/1.0.0", seq),
+            **_envelope(rng, "idp-sessions", "tc5_session.v1", seq, SELF_NAMED),
         })
 
     frame = pd.DataFrame(rows).sort_values(["event_time", "collector_id", "collector_seq"], kind="mergesort")

@@ -43,7 +43,7 @@ def delivered(observed: list) -> list:
 def records(count: int = 2, **overrides) -> dict:
     """A complete envelope on every row; an override replaces one field's column."""
     payload = {
-        "schema_version": ["TC-1/1.0.0"] * count,
+        "schema_version": ["tc1.v1"] * count,
         "collector_id": ["snmp-poller"] * count,
         "collector_seq": list(range(count)),
         "observed_time": [index * SECOND_NS for index in range(count)],
