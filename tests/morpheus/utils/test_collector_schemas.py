@@ -14,13 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Seven real-format fixtures, normalized, are the committed samples; and a segment run over them writes what it
-writes from the samples.
+Real-format fixtures, normalized, are the committed samples; and a segment run over them writes what it writes from
+the samples.
 
-`examples/behavioral_analytics/fixtures/make_fixtures.py` renders the samples of seven input classes as the feeds
-write them -- IPFIX in a packet capture, Entra ID sign-in records, Zeek `ssl.log`/`x509.log`, `http.log` and
-`dns.log`, unified audit log records and Sysmon events -- carrying only what each format carries. Reading them back
-through
+`examples/behavioral_analytics/fixtures/make_fixtures.py` renders the samples of every class in its `CLASSES` as
+the feeds write them -- IPFIX in a packet capture, Entra ID sign-in records, Zeek `ssl.log`/`x509.log`, `http.log` and
+`dns.log`, unified audit log records, Sysmon events, Telegraf's SNMP metrics and MAC notification traps, an ARP
+capture and FreeRADIUS detail files -- carrying only what each format carries. Reading them back through
 `FlowRecordNormalizeStage` and the `collector_schemas` schemas has to give the samples column for column, except
 what a format cannot carry, which is named here and has to be null rather than invented.
 """
@@ -32,12 +32,14 @@ import os
 import pathlib
 import re
 import shutil
+import struct
 import sys
 
 import pandas as pd
 import pytest
 
 from morpheus.utils import collector_schemas
+from morpheus.utils import ipfix
 from morpheus.utils.collector_schemas import CollectorProfile
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
@@ -52,8 +54,20 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "examples", "upstream_reuse"))
 # pylint: disable=wrong-import-position
 import make_fixtures  # noqa: E402
 
-NOT_IN_THE_FORMAT = {"tc6": ("content_type_declared", "content_type_detected")}
-"""Columns a format cannot carry: what an inspecting proxy saw inside a TLS session is not in Zeek's logs."""
+NOT_IN_THE_FORMAT = {
+    "tc6": ("content_type_declared", "content_type_detected"),
+    "tc1_device": ("running_config_hash", "syslog_rate"),
+}
+"""Columns a format cannot carry: what an inspecting proxy saw inside a TLS session is not in Zeek's logs, and no
+MIB a switch answers holds a hash of its configuration or the rate of its syslog."""
+
+NUMBERED_BY_THE_READER = {"tc2_arp"}
+"""Classes whose format numbers nothing, so `collector_seq` is the reader's count in file order: a capture does not
+show the three records the ARP sensor numbered and never delivered, which its own sequence skips."""
+
+OTHER_FEEDS = {"tc5_session": ("idp-sessions", )}
+"""Collectors of a class whose records are another feed's than the fixture's: the identity provider's session
+records, each with both ends in it, are not RADIUS accounting."""
 
 
 def _plain(value):
@@ -87,7 +101,10 @@ def test_the_committed_fixtures_are_what_the_samples_render_to(tmp_path):
 @pytest.mark.parametrize("telemetry_class", sorted(make_fixtures.CLASSES))
 def test_a_normalized_fixture_is_its_sample(telemetry_class: str, normalized: dict):
     segment = make_fixtures.CLASSES[telemetry_class][0]
-    sample = make_fixtures.sample(segment, telemetry_class)
+    sample = [
+        row for row in make_fixtures.sample(segment, telemetry_class)
+        if row["collector_id"] not in OTHER_FEEDS.get(telemetry_class, ())
+    ]
     columns = list(sample[0])
     frame = normalized[telemetry_class]
     missing = NOT_IN_THE_FORMAT.get(telemetry_class, ())
@@ -95,6 +112,13 @@ def test_a_normalized_fixture_is_its_sample(telemetry_class: str, normalized: di
         column: (None if column in missing else _plain(row.get(column)))
         for column in columns
     } for row in sample]
+
+    if (telemetry_class in NUMBERED_BY_THE_READER):
+        first = make_fixtures.PROFILES[telemetry_class].first_seq
+        assert any(row["collector_seq"] != first + index for (index, row) in enumerate(expected))
+
+        for (index, row) in enumerate(expected):
+            row["collector_seq"] = first + index
 
     assert _records(frame, columns) == expected
     # Whatever the schema writes beyond the sample's columns is an optional column the sample omits; it is null.
@@ -286,6 +310,233 @@ def test_a_process_whose_image_load_was_not_logged_has_no_signature_status():
     ])
 
     assert collector_schemas.join_image_signatures(events)["SignatureStatus"].tolist() == [None]
+
+
+def _telegraf(path: pathlib.Path, records: list[dict]) -> str:
+    path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+
+    return str(path)
+
+
+def test_a_port_with_no_neighbour_and_an_unknown_state_is_read_as_it_is(tmp_path):
+    tags = {"agent_host": "192.0.2.9", "sysName": "sw9", "sysLocation": "lab"}
+    port = {**tags, "ifIndex": "7", "ifName": "Gi1/0/7"}
+    counters = {
+        "ifOperStatus": 9,
+        "ifHighSpeed": 1000,
+        "ifLastChange": 5,
+        "ifHCInOctets": 1,
+        "ifHCOutOctets": 2,
+        "ifInDiscards": 0,
+        "ifOutDiscards": 0,
+        "dot3StatsFCSErrors": 0,
+        "dot3StatsSymbolErrors": 0,
+    }
+    optic = {
+        "entPhysicalSerialNum": "S",
+        "entPhysicalDescr": "1000BASE-SX",
+        "txPower": -5125,
+        "rxPower": -61,
+        "entSensorPrecision": 2
+    }
+    path = _telegraf(tmp_path / "snmp.jsonlines",
+                     [
+                         {
+                             "name": "snmp", "tags": tags, "fields": {
+                                 "sysUpTime": 100
+                             }, "timestamp": 60
+                         },
+                         {
+                             "name": "interface", "tags": port, "fields": counters, "timestamp": 60
+                         },
+                         {
+                             "name": "transceiver", "tags": port, "fields": optic, "timestamp": 60
+                         },
+                     ])
+
+    row = collector_schemas.snmp_ports(path, CollectorProfile("c", "tc1.v1", "corp")).iloc[0]
+
+    assert (row["oper_status"], row["link_speed_bps"], row["uptime"]) == ("9", 1_000_000_000, 100)
+    assert (row["optical_tx_dbm"], row["optical_rx_dbm"]) == (-51.25, -0.61)
+    assert row["lldp_neighbor_chassis_id"] is None and row["lldp_neighbor_port_id"] is None
+    assert (row["origin_hash"], row["event_time"]) == ("sw9/Gi1/0/7@60000000000", 60_000_000_000)
+
+
+def test_a_mac_notification_names_the_port_its_agent_last_mapped(tmp_path):
+    agent = {"agent_host": "192.0.2.9"}
+    learnt = "01" + "000a" + "aabbcc000009" + "0002" + "00"
+    path = _telegraf(tmp_path / "mac.jsonlines",
+                     [
+                         {
+                             "name": "ifXTable",
+                             "tags": {
+                                 **agent, "ifIndex": "17"
+                             },
+                             "fields": {
+                                 "ifName": "Gi1/0/17"
+                             },
+                             "timestamp": 0
+                         },
+                         {
+                             "name": "bridge_port",
+                             "tags": {
+                                 **agent, "index": "2"
+                             },
+                             "fields": {
+                                 "dot1dBasePortIfIndex": 17
+                             },
+                             "timestamp": 0
+                         },
+                         {
+                             "name": "fdb",
+                             "tags": {
+                                 **agent, "sysName": "sw9", "sysLocation": "lab", "index": "10.170.187.204.0.0.1"
+                             },
+                             "fields": {
+                                 "dot1qTpFdbPort": 2, "dot1qTpFdbStatus": 3
+                             },
+                             "timestamp": 0
+                         },
+                         {
+                             "name": "snmp_trap",
+                             "tags": {
+                                 "source": "192.0.2.9", "name": "cmnMacChangedNotification"
+                             },
+                             "fields": {
+                                 "cmnHistMacChangedMsg": learnt
+                             },
+                             "timestamp": 5
+                         },
+                         {
+                             "name": "snmp_trap",
+                             "tags": {
+                                 "source": "192.0.2.8", "name": "cmnMacChangedNotification"
+                             },
+                             "fields": {
+                                 "cmnHistMacChangedMsg": learnt
+                             },
+                             "timestamp": 6
+                         },
+                     ])
+
+    frame = collector_schemas.fdb_entries(path, CollectorProfile("c", "tc2_mac.v1", "corp"))
+
+    assert _records(frame, ["switch_id", "port_id", "vlan_id", "mac_address", "mac_action"]) == [
+        {
+            "switch_id": "sw9",
+            "port_id": "Gi1/0/17",
+            "vlan_id": 10,
+            "mac_address": "aa:bb:cc:00:00:01",
+            "mac_action": None
+        },
+        {
+            "switch_id": "sw9",
+            "port_id": "Gi1/0/17",
+            "vlan_id": 10,
+            "mac_address": "aa:bb:cc:00:00:09",
+            "mac_action": "added"
+        },
+        # An agent no walk has answered for: the address and VLAN are the trap's, the switch and port unknown.
+        {
+            "switch_id": None,
+            "port_id": None,
+            "vlan_id": 10,
+            "mac_address": "aa:bb:cc:00:00:09",
+            "mac_action": "added"
+        },
+    ]
+
+
+def _detail(path: pathlib.Path, entries: list[list[tuple[str, str]]]) -> str:
+    text = "".join("Thu Jan  1 00:00:00 1970\n" + "".join(f"\t{name} = {value}\n" for (name, value) in entry) + "\n"
+                   for entry in entries)
+    path.write_text(text, encoding="utf-8")
+
+    return str(path)
+
+
+def _request(user: str, port: str, mac: str, eap: str, when: int) -> list[tuple[str, str]]:
+    return [("Packet-Type", "Access-Request"), ("User-Name", f'"{user}"'), ("NAS-Identifier", '"sw9"'),
+            ("NAS-Port-Id", f'"{port}"'), ("Calling-Station-Id", f'"{mac}"'), ("EAP-Message", eap),
+            ("Timestamp", str(when))]
+
+
+def test_an_8021x_reply_is_paired_with_the_request_it_answers_not_the_user_s_last(tmp_path):
+    identity = "0x0201000801626e63"
+    final = "0x020900061900"
+    path = _detail(tmp_path / "auth.detail",
+                   [
+                       _request("bench", "GigabitEthernet1/0/1", "AA-BB-CC-00-00-01", identity, 10),
+                       _request("bench", "TenGigabitEthernet1/1/2", "AA-BB-CC-00-00-02", identity, 11),
+                       [("Packet-Type", "Access-Challenge"), ("User-Name", '"bench"'), ("Timestamp", "12")],
+                       _request("bench", "GigabitEthernet1/0/1", "AA-BB-CC-00-00-01", final, 13),
+                       _request("bench", "TenGigabitEthernet1/1/2", "AA-BB-CC-00-00-02", final, 14),
+                       [("Packet-Type", "Access-Reject"), ("User-Name", '"bench"'), ("Timestamp", "14")],
+                       [("Packet-Type", "Access-Accept"), ("User-Name", '"bench"'), ("Timestamp", "13")],
+                   ])
+
+    frame = collector_schemas.radius_auth(path, CollectorProfile("c", "tc2_auth.v1", "corp"), {"sw9": "lab"})
+
+    assert _records(frame, ["event_time", "site_id", "port_id", "mac_address", "dot1x_result"]) == [
+        {
+            "event_time": 10 * 10**9,
+            "site_id": "lab",
+            "port_id": "Gi1/0/1",
+            "mac_address": "aa:bb:cc:00:00:01",
+            "dot1x_result": "started"
+        },
+        {
+            "event_time": 11 * 10**9,
+            "site_id": "lab",
+            "port_id": "Te1/1/2",
+            "mac_address": "aa:bb:cc:00:00:02",
+            "dot1x_result": "started"
+        },
+        {
+            "event_time": 14 * 10**9,
+            "site_id": "lab",
+            "port_id": "Te1/1/2",
+            "mac_address": "aa:bb:cc:00:00:02",
+            "dot1x_result": "failure"
+        },
+        {
+            "event_time": 13 * 10**9,
+            "site_id": "lab",
+            "port_id": "Gi1/0/1",
+            "mac_address": "aa:bb:cc:00:00:01",
+            "dot1x_result": "success"
+        },
+    ]
+
+
+def test_an_interim_update_passes_through_and_a_session_time_is_not_a_start(tmp_path):
+    path = _detail(tmp_path / "acct.detail",
+                   [[("Acct-Status-Type", status), ("Acct-Session-Id", '"s1"'), ("User-Name", '"a@example.com"'),
+                     ("Event-Timestamp", '"Jan  2 1970 00:00:00 UTC"'), ("Acct-Session-Time", "60")]
+                    for status in ("Interim-Update", "Stop")] + [[("Packet-Type", "Access-Request")]])
+
+    frame = collector_schemas.radius_accounting(path, CollectorProfile("c", "tc5_session.v1", "corp"))
+
+    assert frame["session_action"].tolist() == ["Interim-Update", "end"]
+    assert frame["event_time"].tolist() == [86400 * 10**9] * 2
+    assert frame["session_start"].isna().all() and frame["source_ip"].isna().all()
+
+
+def test_the_arp_reader_takes_a_tagged_frame_and_skips_what_is_not_arp(tmp_path):
+    body = struct.pack("!HHBBH", 1, 0x0800, 6, 4, 2) + bytes.fromhex("aabbcc000001") + bytes([10, 0, 0, 1])
+    body += bytes.fromhex("aabbcc000002") + bytes([10, 0, 0, 2])
+    tagged = bytes(6) + bytes.fromhex("aabbcc000001") + bytes.fromhex("8100000a0806") + body
+    ipfix.write_frames(str(tmp_path / "arp.pcap"), [(1000, bytes(12) + b"\x08\x00" + bytes(20)), (2000, tagged)])
+
+    frame = collector_schemas.arp_packets(str(tmp_path / "arp.pcap"), CollectorProfile("c", "tc2_arp.v1", "corp"))
+
+    assert _records(frame, ["event_time", "arp_sender_ip", "arp_sender_mac", "arp_target_ip", "arp_operation"]) == [{
+        "event_time": 2000,
+        "arp_sender_ip": "10.0.0.1",
+        "arp_sender_mac": "aa:bb:cc:00:00:01",
+        "arp_target_ip": "10.0.0.2",
+        "arp_operation": "reply"
+    }]
 
 
 SEGMENT_CHECKS = {

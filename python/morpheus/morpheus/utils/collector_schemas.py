@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-The normalize step of the per-layer pattern for six real feeds: one `DataFrameInputSchema` per layer 5, 6 and 7
-sub-class, from the format a deployment already writes to the columns the stages read.
+The normalize step of the per-layer pattern for real feeds: one `DataFrameInputSchema` per input class read here, at
+layers 1, 2, 5, 6 and 7, from the format a deployment already writes to the columns the stages read.
 
 Each schema is built from `column_info` primitives and applied with `process_dataframe`, as the guide's per-layer
 pattern says, and produces exactly the class's columns from `examples/behavioral_analytics/input_contracts.json`
@@ -27,13 +27,25 @@ and the universal envelope:
 - `tc7_saas`: Microsoft 365 `UnifiedAuditLog` records, as the Management Activity API returns them.
 - `tc7_endpoint`: Windows System Monitor (Sysmon) event 1, joined to the event 7 that loaded the process's own
   image for its signature status, as `wevtutil qe /f:xml` renders them.
+- `tc1` and `tc1_device`: what a Telegraf `inputs.snmp` agent writes through its JSON serializer, one measurement per
+  table it walks -- the `snmp` scalars, `interface` (IF-MIB, EtherLike-MIB), `transceiver` (ENTITY-MIB,
+  CISCO-ENTITY-SENSOR-MIB), `lldp` (LLDP-MIB) and `bgp_peer` (BGP4-MIB) -- joined back into one record per port
+  and one per device each poll.
+- `tc2_mac`: the same agent's walk of Q-BRIDGE-MIB's forwarding table, with the BRIDGE-MIB and IF-MIB tables that
+  name its bridge ports, and the CISCO-MAC-NOTIFICATION-MIB traps its `inputs.snmp_trap` listener receives.
+- `tc2_arp`: the ARP packets in a packet capture.
+- `tc2_auth`: a FreeRADIUS detail file of 802.1X Access-Requests (`auth_log`) and the replies (`reply_log`).
+- `tc5_session`: a FreeRADIUS detail file of accounting Starts and Stops.
 
 Zeek logs are read with {py:func}`morpheus.parsers.zeek.parse`.
 
 **What a format cannot say, the schema does not invent.** Zeek sees a TLS handshake, not what an inspecting proxy
 saw inside it, so `content_type_declared` and `content_type_detected` are null from the Zeek schema and the layer 6
 content rule cannot fire on a Zeek-only feed; a feed with an inspecting proxy supplies them. A cloud identity
-provider has no on-premises target computer, so `target_host` is null from the Entra ID schema. No format here
+provider has no on-premises target computer, so `target_host` is null from the Entra ID schema. No MIB a switch
+answers holds a hash of its running configuration or a rate of its syslog, so `running_config_hash` and
+`syslog_rate` are null from SNMP. A packet capture numbers nothing, so the ARP schema's `collector_seq` cannot show a
+record its sensor numbered and never delivered. No format here
 records when the collector read a line, so `observed_time` is the record's own time and the collection lag reads
 zero; a collector that keeps its read time passes it as `observed_column`. The collector's own facts --
 identity, contract version, tenant, clock discipline, sampling -- are a `CollectorProfile`, because no record
@@ -42,7 +54,9 @@ carries them, and `collector_seq` numbers the records in file order from the pro
 **Vocabulary is mapped where the format's differs and passed through where it does not.** Zeek writes `TLSv13`
 and OpenSSL's `self signed certificate`; the stages read `TLSv1.3` and `self-signed`. Entra ID writes an error code,
 `multiFactorAuthentication` and `primaryRefreshToken`; the stages read `success` or `failure`, a boolean and
-`refresh`. A value the map does not know is passed through as it is, so a new one reaches the SIEM visibly rather
+`refresh`. SNMP writes `ifOperStatus` as a number, a MAC notification its operation as a byte, ARP an opcode,
+RADIUS `Access-Accept` and `Stop`, and a switch's `NAS-Port-Id` the interface's long name. A value the map does not
+know is passed through as it is, so a new one reaches the SIEM visibly rather
 than as a null.
 
 `origin_hash` is built the way the corpus builders build it for each class, so a normalized record is, to the
@@ -52,14 +66,17 @@ that is the origin.
 
 import dataclasses
 import hashlib
+import ipaddress
 import json
 import math
+import struct
 import typing
 from xml.etree import ElementTree
 
 import pandas as pd
 
 from morpheus.parsers import zeek
+from morpheus.utils import ipfix
 from morpheus.utils.column_info import ColumnInfo
 from morpheus.utils.column_info import CustomColumn
 from morpheus.utils.column_info import DataFrameInputSchema
@@ -119,6 +136,8 @@ ENTRA_PASSWORD_METHOD = "Password"
 """The `authenticationDetails` step that is the first factor; every other step is a second one."""
 
 SYSMON_NAMESPACE = "{http://schemas.microsoft.com/win/2004/08/events/event}"
+
+ETHERTYPE_ARP = 0x0806
 
 
 @dataclasses.dataclass(frozen=True)
@@ -469,20 +488,6 @@ def entra_signin_schema(profile: CollectorProfile) -> DataFrameInputSchema:
     def created(df: pd.DataFrame) -> pd.Series:
         return pd.to_datetime(df[fields["event_time"]], utc=True).astype("int64").astype("Int64")
 
-    def coordinate(name: str) -> CustomColumn:
-        source = fields[name]
-
-        def column(df: pd.DataFrame) -> pd.Series:
-            if (source not in df.columns):
-                return pd.Series([None] * len(df), index=df.index, dtype="Float64")
-
-            return pd.to_numeric(df[source]).astype("Float64")
-
-        return CustomColumn(name=name,
-                            dtype="Float64",
-                            process_column_fn=column,
-                            input_column_types={source: "Float64"})
-
     def mfa_result(df: pd.DataFrame) -> pd.Series:
         source = fields["mfa_result"]
         values = df[source] if source in df.columns else [None] * len(df)
@@ -501,8 +506,8 @@ def entra_signin_schema(profile: CollectorProfile) -> DataFrameInputSchema:
         _through("source_country", fields["source_country"], str.lower),
         _through("source_region", fields["source_region"], _place),
         _through("source_city", fields["source_city"], _place),
-        coordinate("source_latitude"),
-        coordinate("source_longitude"),
+        _number("source_latitude", fields["source_latitude"]),
+        _number("source_longitude", fields["source_longitude"]),
         _through("source_asn", fields["source_asn"], lambda number: f"as{int(float(number))}"),
         _text("device_id", fields["device_id"]),
         _through("mfa_used", fields["mfa_used"], lambda value: ENTRA_MFA_REQUIREMENTS.get(value), dtype="boolean"),
@@ -621,6 +626,532 @@ def join_image_signatures(events: pd.DataFrame) -> pd.DataFrame:
     return starts
 
 
+def _number(name: str, source: str) -> CustomColumn:
+    """A nullable float column read from `source`."""
+
+    def column(df: pd.DataFrame) -> pd.Series:
+        if (source not in df.columns):
+            return pd.Series([None] * len(df), index=df.index, dtype="Float64")
+
+        return pd.to_numeric(df[source]).astype("Float64")
+
+    return CustomColumn(name=name, dtype="Float64", process_column_fn=column, input_column_types={source: "Float64"})
+
+
+def _null_count(name: str) -> CustomColumn:
+    return _derived(name, "Int64", lambda df: pd.Series([None] * len(df), index=df.index, dtype="Int64"))
+
+
+def _whole_seconds(source: str) -> typing.Callable[[pd.DataFrame], pd.Series]:
+
+    def column(df: pd.DataFrame) -> pd.Series:
+        return pd.to_numeric(df[source]).astype("Int64") * 1_000_000_000
+
+    return column
+
+
+SNMP_OPER_STATUS = {1: "up", 2: "down", 3: "testing", 4: "unknown", 5: "dormant", 6: "notPresent", 7: "lowerLayerDown"}
+"""IF-MIB `ifOperStatus` as the contract writes it."""
+
+BGP_ESTABLISHED = 6
+"""BGP4-MIB `bgpPeerState` for a session that is up."""
+
+MAC_NOTIFICATION_OPERATIONS = {1: "added", 2: "removed"}
+"""CISCO-MAC-NOTIFICATION-MIB's operation byte in `cmnHistMacChangedMsg`: an address learnt, or one removed."""
+
+ARP_OPERATIONS = {1: "request", 2: "reply"}
+"""The ARP opcode (RFC 826) as the contract writes it."""
+
+RADIUS_OUTCOMES = {"Access-Accept": "success", "Access-Reject": "failure"}
+"""The reply that ends an 802.1X exchange, as the contract writes it."""
+
+RADIUS_ACCOUNTING_ACTIONS = {"Start": "start", "Stop": "end"}
+"""`Acct-Status-Type` as the contract's start-and-end vocabulary writes it; an `Interim-Update` passes through."""
+
+INTERFACE_ABBREVIATIONS = {
+    "HundredGigE": "Hu",
+    "FortyGigabitEthernet": "Fo",
+    "TwentyFiveGigE": "Twe",
+    "TenGigabitEthernet": "Te",
+    "GigabitEthernet": "Gi",
+    "FastEthernet": "Fa",
+}
+"""The long interface names a switch sends in `NAS-Port-Id`, to the short ones its `ifName` reports."""
+
+EAP_RESPONSE = 2
+EAP_IDENTITY = 1
+
+
+def _scale(value: typing.Any, precision: typing.Any) -> typing.Optional[float]:
+    if (_missing(value)):
+        return None
+
+    return int(value) / 10**int(precision)
+
+
+def _snmp_key(record: dict) -> tuple:
+    return (record["tags"]["agent_host"], record["timestamp"])
+
+
+def join_snmp_ports(records: list[dict]) -> pd.DataFrame:
+    """
+    One row per `interface` record of a Telegraf SNMP feed, with the poll's `sysUpTime` and the port's transceiver
+    and LLDP neighbour beside it.
+
+    Telegraf writes one measurement per table it walks, so a port's poll is four records with the same agent and
+    timestamp: the `snmp` scalars, its `interface` row (IF-MIB and EtherLike-MIB, tagged `ifIndex` and `ifName`),
+    its `transceiver` row (ENTITY-MIB and CISCO-ENTITY-SENSOR-MIB, joined to the port by Telegraf's secondary
+    index) and its `lldp` row (LLDP-MIB, whose local port number these switches give as the `ifIndex`). A port
+    with no neighbour that poll has no `lldp` row, and its neighbour columns are null.
+
+    Parameters
+    ----------
+    records : list of dict
+        As `read_telegraf` reads them.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        The `interface` records in their own order, tags and fields as columns.
+    """
+    scalars = {_snmp_key(record): record["fields"] for record in records if record["name"] == "snmp"}
+    by_port = {
+        (record["name"], ) + _snmp_key(record) + (record["tags"]["ifIndex"], ): record["fields"]
+        for record in records if record["name"] in ("transceiver", "lldp")
+    }
+    rows = []
+
+    for record in records:
+        if (record["name"] != "interface"):
+            continue
+
+        key = _snmp_key(record) + (record["tags"]["ifIndex"], )
+        rows.append({
+            "timestamp": record["timestamp"],
+            **record["tags"],
+            "sysUpTime": scalars.get(_snmp_key(record), {}).get("sysUpTime"),
+            **record["fields"],
+            **by_port.get(("transceiver", ) + key, {}),
+            **by_port.get(("lldp", ) + key, {}),
+        })
+
+    return pd.DataFrame(rows)
+
+
+def join_snmp_devices(records: list[dict]) -> pd.DataFrame:
+    """
+    One row per `snmp` record of a Telegraf SNMP feed, with the number of its BGP peers established that poll.
+
+    Parameters
+    ----------
+    records : list of dict
+        As `read_telegraf` reads them.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        The `snmp` records in their own order, tags and fields as columns, and `bgp_established`, counted from the
+        poll's `bgp_peer` records (BGP4-MIB `bgpPeerTable`).
+    """
+    established: dict = {}
+
+    for record in records:
+        if (record["name"] == "bgp_peer" and record["fields"].get("bgpPeerState") == BGP_ESTABLISHED):
+            established[_snmp_key(record)] = established.get(_snmp_key(record), 0) + 1
+
+    return pd.DataFrame([{
+        "timestamp": record["timestamp"],
+        **record["tags"],
+        **record["fields"],
+        "bgp_established": established.get(_snmp_key(record), 0),
+    } for record in records if record["name"] == "snmp"])
+
+
+def _mac(octets: typing.Sequence[int]) -> str:
+    return ":".join(f"{octet:02x}" for octet in octets)
+
+
+def join_fdb_ports(records: list[dict]) -> pd.DataFrame:
+    """
+    One row per forwarding-table entry and per MAC notification in a Telegraf SNMP feed, each with its port's name.
+
+    An entry is a `fdb` record (Q-BRIDGE-MIB `dot1qTpFdbTable`), whose index is the VLAN and the address's six
+    octets and whose `dot1qTpFdbPort` is a bridge port. A notification is a `snmp_trap` record of
+    CISCO-MAC-NOTIFICATION-MIB's `cmnMacChangedNotification`, whose `cmnHistMacChangedMsg` packs the operation,
+    the VLAN, the address and the bridge port. A bridge port is named through the poll's `bridge_port` records
+    (BRIDGE-MIB `dot1dBasePortIfIndex`) and `ifXTable` records (IF-MIB `ifName`), the latest the agent answered;
+    a trap names its agent by address only, so its switch and site are the ones that agent's last poll was tagged
+    with.
+
+    Parameters
+    ----------
+    records : list of dict
+        As `read_telegraf` reads them.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        In file order: `timestamp`, `sysName`, `sysLocation`, `ifName`, `vlan`, `mac` and `operation`, the last
+        null for a table entry.
+    """
+    interfaces: dict = {}
+    bridge_ports: dict = {}
+    agents: dict = {}
+    rows = []
+
+    def port(agent: str, bridge_port: int) -> typing.Optional[str]:
+        if_index = bridge_ports.get((agent, bridge_port))
+
+        return None if if_index is None else interfaces.get((agent, if_index))
+
+    for record in records:
+        tags = record["tags"]
+
+        if (record["name"] == "ifXTable"):
+            interfaces[(tags["agent_host"], int(tags["ifIndex"]))] = record["fields"]["ifName"]
+        elif (record["name"] == "bridge_port"):
+            bridge_ports[(tags["agent_host"], int(tags["index"]))] = record["fields"]["dot1dBasePortIfIndex"]
+        elif (record["name"] == "fdb"):
+            agents[tags["agent_host"]] = (tags.get("sysName"), tags.get("sysLocation"))
+            (vlan, *octets) = (int(part) for part in tags["index"].split("."))
+            rows.append({
+                "timestamp": record["timestamp"],
+                "sysName": tags.get("sysName"),
+                "sysLocation": tags.get("sysLocation"),
+                "ifName": port(tags["agent_host"], record["fields"]["dot1qTpFdbPort"]),
+                "vlan": vlan,
+                "mac": _mac(octets),
+                "operation": None,
+            })
+        elif (record["name"] == "snmp_trap" and tags.get("name") == "cmnMacChangedNotification"):
+            message = bytes.fromhex(record["fields"]["cmnHistMacChangedMsg"])
+            (sys_name, location) = agents.get(tags["source"], (None, None))
+            rows.append({
+                "timestamp": record["timestamp"],
+                "sysName": sys_name,
+                "sysLocation": location,
+                "ifName": port(tags["source"], int.from_bytes(message[9:11], "big")),
+                "vlan": int.from_bytes(message[1:3], "big"),
+                "mac": _mac(message[3:9]),
+                "operation": MAC_NOTIFICATION_OPERATIONS.get(message[0], str(message[0])),
+            })
+
+    return pd.DataFrame(rows)
+
+
+def _eap(value: typing.Any) -> typing.Optional[bytes]:
+    if (_missing(value) or not str(value).startswith("0x")):
+        return None
+
+    return bytes.fromhex(str(value)[2:])
+
+
+def join_radius_replies(entries: list[dict]) -> pd.DataFrame:
+    """
+    The steps of each 802.1X exchange in a FreeRADIUS detail file of requests (`auth_log`) and replies
+    (`reply_log`).
+
+    An exchange starts with the Access-Request whose EAP-Message is the supplicant's EAP-Response/Identity, and
+    ends with the Access-Accept or Access-Reject the server sent. A reply carries the `User-Name` the EAP module
+    puts in it but not the port or the address; the detail module stamps both a request and its reply with
+    `Timestamp`, when the server received the request, so the reply's port and address are its request's: the
+    request with the same `User-Name` and `Timestamp`. The rounds of the exchange between the two are not steps.
+
+    Parameters
+    ----------
+    entries : list of dict
+        As `read_radius_detail` reads them.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        One row per step in file order: the request's attributes, the reply's `Packet-Type` as `outcome` (null for
+        the start), and `Timestamp`.
+    """
+    requests: dict = {}
+    rows = []
+
+    for entry in entries:
+        kind = entry.get("Packet-Type")
+
+        if (kind == "Access-Request"):
+            requests[(entry.get("User-Name"), entry.get("Timestamp"))] = entry
+            eap = _eap(entry.get("EAP-Message"))
+
+            if (eap is not None and len(eap) > 4 and eap[0] == EAP_RESPONSE and eap[4] == EAP_IDENTITY):
+                rows.append({**entry, "outcome": None})
+        elif (kind in RADIUS_OUTCOMES):
+            request = requests.get((entry.get("User-Name"), entry.get("Timestamp")), {})
+            rows.append({**request, "Timestamp": entry.get("Timestamp"), "outcome": kind})
+
+    return pd.DataFrame(rows)
+
+
+def _interface_name(value: str) -> str:
+    for (long_name, short_name) in INTERFACE_ABBREVIATIONS.items():
+        if (value.startswith(long_name)):
+            return short_name + value[len(long_name):]
+
+    return value
+
+
+def _station_mac(value: str) -> str:
+    return value.lower().replace("-", ":")
+
+
+def _event_timestamp(df: pd.DataFrame) -> pd.Series:
+    # The detail module writes an `Event-Timestamp` as the date in UTC, `Jan  1 1970 00:00:00 UTC`.
+    return pd.Series([
+        pd.Timestamp(pd.to_datetime(" ".join(str(value).split()), format="%b %d %Y %H:%M:%S UTC", utc=True)).value
+        for value in df["Event-Timestamp"]
+    ],
+                     index=df.index,
+                     dtype="Int64")
+
+
+def snmp_port_schema(profile: CollectorProfile) -> DataFrameInputSchema:
+    """
+    `tc1` from a Telegraf SNMP feed's port polls, joined by `join_snmp_ports`.
+
+    The site is `sysLocation` and the device `sysName`, both tagged on every record; `uptime` and
+    `if_last_change` are TimeTicks as the device reports them; `link_speed_bps` is `ifHighSpeed`, in Mb/s; the
+    optical powers are CISCO-ENTITY-SENSOR-MIB values scaled by their `entSensorPrecision`; `crc_errors` is
+    EtherLike-MIB's `dot3StatsFCSErrors`. Telegraf's JSON timestamp is the poll's, in seconds.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    event_time = _whole_seconds("timestamp")
+
+    def optical(name: str, source: str) -> CustomColumn:
+        return _derived(
+            name,
+            "Float64", lambda df: pd.Series(
+                [_scale(value, precision)
+                 for (value, precision) in zip(df[source], df["entSensorPrecision"])], index=df.index, dtype="Float64"))
+
+    (head, tail) = _envelope(
+        profile,
+        event_time, lambda df: _joined(df, [_text("sysName", "sysName"), "/", _text("ifName", "ifName"), "@"]) + pd.
+        Series([str(value) for value in event_time(df)], index=df.index))
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("site_id", "sysLocation"),
+        _text("device_id", "sysName"),
+        _text("port_id", "ifName"),
+        _count("if_index", "ifIndex"),
+        _count("uptime", "sysUpTime"),
+        _count("if_last_change", "ifLastChange"),
+        _through("oper_status", "ifOperStatus", lambda value: SNMP_OPER_STATUS.get(int(value), value)),
+        _derived("link_speed_bps", "Int64", lambda df: pd.to_numeric(df["ifHighSpeed"]).astype("Int64") * 1_000_000),
+        optical("optical_tx_dbm", "txPower"),
+        optical("optical_rx_dbm", "rxPower"),
+        _text("transceiver_serial", "entPhysicalSerialNum"),
+        _text("transceiver_type", "entPhysicalDescr"),
+        _text("lldp_neighbor_chassis_id", "lldpRemChassisId"),
+        _text("lldp_neighbor_port_id", "lldpRemPortId"),
+        _count("crc_errors", "dot3StatsFCSErrors"),
+        _count("symbol_errors", "dot3StatsSymbolErrors"),
+        _count("input_discards", "ifInDiscards"),
+        _count("output_discards", "ifOutDiscards"),
+        _count("if_hc_in_octets", "ifHCInOctets"),
+        _count("if_hc_out_octets", "ifHCOutOctets"),
+    ] + tail)
+
+
+def snmp_device_schema(profile: CollectorProfile) -> DataFrameInputSchema:
+    """
+    `tc1_device` from a Telegraf SNMP feed's scalars, joined by `join_snmp_devices`.
+
+    `cpu_util` is CISCO-PROCESS-MIB's `cpmCPUTotal5minRev`, a percentage, as a fraction; `mem_util` is
+    CISCO-MEMORY-POOL-MIB's used bytes over used and free; `route_count` is IP-FORWARD-MIB's
+    `inetCidrRouteNumber`. No MIB a switch answers gives a hash of its running configuration or a rate of the
+    syslog messages it sends -- CISCO-CONFIG-MAN-MIB says when the configuration last changed, not what it is --
+    so `running_config_hash` and `syslog_rate` are null from SNMP; a configuration archive and a syslog
+    collector supply them.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    event_time = _whole_seconds("timestamp")
+
+    def memory(df: pd.DataFrame) -> pd.Series:
+        used = pd.to_numeric(df["ciscoMemoryPoolUsed"]).astype("Float64")
+
+        return used / (used + pd.to_numeric(df["ciscoMemoryPoolFree"]).astype("Float64"))
+
+    (head, tail) = _envelope(
+        profile,
+        event_time, lambda df: _joined(df, [_text("sysName", "sysName"), "@"]) + pd.Series(
+            [str(value) for value in event_time(df)], index=df.index))
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("site_id", "sysLocation"),
+        _text("device_id", "sysName"),
+        _count("sys_uptime", "sysUpTime"),
+        _text("running_config_hash", "running_config_hash"),
+        _derived("cpu_util", "Float64", lambda df: pd.to_numeric(df["cpmCPUTotal5minRev"]).astype("Float64") / 100),
+        _derived("mem_util", "Float64", memory),
+        _count("route_count", "inetCidrRouteNumber"),
+        _count("bgp_peer_count", "bgp_established"),
+        _number("syslog_rate", "syslog_rate"),
+    ] + tail)
+
+
+def fdb_schema(profile: CollectorProfile) -> DataFrameInputSchema:
+    """
+    `tc2_mac` from a Telegraf SNMP feed's forwarding tables and MAC notifications, joined by `join_fdb_ports`.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    event_time = _whole_seconds("timestamp")
+    (head, tail) = _envelope(
+        profile,
+        event_time, lambda df: _joined(df, [
+            _text("sysName", "sysName"), "/", _text("ifName", "ifName"), "/", _text("mac", "mac"), "@"
+        ]) + pd.Series([str(value) for value in event_time(df)], index=df.index))
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("mac_address", "mac"),
+        _text("site_id", "sysLocation"),
+        _text("switch_id", "sysName"),
+        _text("port_id", "ifName"),
+        _count("vlan_id", "vlan"),
+        _text("mac_action", "operation"),
+    ] + tail)
+
+
+def arp_schema(profile: CollectorProfile) -> DataFrameInputSchema:
+    """
+    `tc2_arp` from the ARP packets of a capture, as `read_arp` reads them.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+
+    def captured(df: pd.DataFrame) -> pd.Series:
+        return pd.to_numeric(df["received_ns"]).astype("Int64")
+
+    (head, tail) = _envelope(
+        profile,
+        captured, lambda df: _joined(df, [_text("spa", "spa"), ">", _text("sha", "sha"), "?", _text("tpa", "tpa"), "@"])
+        + pd.Series([str(value) for value in captured(df)], index=df.index))
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("arp_sender_ip", "spa"),
+        _text("arp_sender_mac", "sha"),
+        _text("arp_target_ip", "tpa"),
+        _through("arp_operation", "operation", lambda value: ARP_OPERATIONS.get(int(value), value)),
+    ] + tail)
+
+
+def radius_auth_schema(profile: CollectorProfile, sites: dict) -> DataFrameInputSchema:
+    """
+    `tc2_auth` from a FreeRADIUS detail file of 802.1X requests and replies, joined by `join_radius_replies`.
+
+    The switch is `NAS-Identifier` and its site is the deployment's, since RADIUS carries no location; the port
+    is `NAS-Port-Id` under the short name the switch's `ifName` gives it; the address is `Calling-Station-Id`
+    with colons, lower case.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+    sites : dict
+        `NAS-Identifier` to site, as the deployment's inventory gives it.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    event_time = _whole_seconds("Timestamp")
+    port = _through("port_id", "NAS-Port-Id", _interface_name)
+    mac = _through("mac_address", "Calling-Station-Id", _station_mac)
+
+    def result(df: pd.DataFrame) -> pd.Series:
+        return pd.Series(
+            ["started" if _missing(value) else RADIUS_OUTCOMES.get(value, value) for value in df["outcome"]],
+            index=df.index,
+            dtype=object)
+
+    (head, tail) = _envelope(
+        profile,
+        event_time, lambda df: _joined(df, [_text("switch", "NAS-Identifier"), "/", port, "/", mac, "@"]) + pd.Series(
+            [str(value) for value in event_time(df)], index=df.index))
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("site_id", "NAS-Identifier", sites),
+        _text("switch_id", "NAS-Identifier"),
+        port,
+        mac,
+        _text("dot1x_identity", "User-Name"),
+        _derived("dot1x_result", "object", result),
+    ] + tail)
+
+
+def radius_accounting_schema(profile: CollectorProfile) -> DataFrameInputSchema:
+    """
+    `tc5_session` from a FreeRADIUS detail file of accounting requests.
+
+    Each Start and Stop is one record, in the contract's start-and-end vocabulary, timed by `Event-Timestamp`,
+    when the NAS says it happened. A Stop's `Acct-Session-Time` is not read as the session's start: the stage
+    pairs the start and end records, and a Stop whose Start was lost has to read as one.
+
+    Parameters
+    ----------
+    profile : `CollectorProfile`
+        The collector's own facts.
+
+    Returns
+    -------
+    `morpheus.utils.column_info.DataFrameInputSchema`
+        The schema.
+    """
+    action = _text("session_action", "Acct-Status-Type", RADIUS_ACCOUNTING_ACTIONS)
+    (head, tail) = _envelope(profile,
+                             _event_timestamp,
+                             lambda df: _joined(df, [_text("session", "Acct-Session-Id"), ":", action]))
+
+    return DataFrameInputSchema(column_info=head + [
+        _text("session_id", "Acct-Session-Id"),
+        _text("user_principal", "User-Name"),
+        action,
+        _text("source_ip", "Framed-IP-Address"),
+        _null_count("session_start"),
+        _null_count("session_end"),
+    ] + tail)
+
+
 def read_zeek(path: str) -> pd.DataFrame:
     """A Zeek ASCII log, through `morpheus.parsers.zeek.parse`."""
     return zeek.parse(path, df_type="pandas")
@@ -683,6 +1214,106 @@ def read_sysmon(path: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def read_telegraf(path: str) -> list[dict]:
+    """
+    Metrics as Telegraf's JSON serializer writes them, one object per line: `name`, `tags`, `fields` and
+    `timestamp`, the last in seconds, Telegraf's default `json_timestamp_units`.
+    """
+    with open(path, encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def read_arp(path: str) -> pd.DataFrame:
+    """
+    Every ARP packet over Ethernet and IPv4 in a capture, read with `morpheus.utils.ipfix.read_frames`.
+
+    Returns
+    -------
+    `pandas.DataFrame`
+        One row per packet in capture order: `received_ns`, `operation` (the opcode), `sha`, `spa`, `tha`, `tpa`.
+    """
+    rows = []
+
+    for (received_ns, frame) in ipfix.read_frames(path):
+        offset = 14
+        ethertype = int.from_bytes(frame[12:14], "big")
+
+        if (ethertype == ipfix.ETHERTYPE_VLAN):
+            (ethertype, offset) = (int.from_bytes(frame[16:18], "big"), 18)
+
+        if (ethertype != ETHERTYPE_ARP or len(frame) < offset + 28):
+            continue
+
+        (hardware, protocol, hardware_length, protocol_length, operation) = struct.unpack_from("!HHBBH", frame, offset)
+
+        if ((hardware, protocol, hardware_length, protocol_length) != (1, ipfix.ETHERTYPE_IPV4, 6, 4)):
+            continue
+
+        body = frame[offset + 8:offset + 28]
+        rows.append({
+            "received_ns": received_ns,
+            "operation": operation,
+            "sha": _mac(body[0:6]),
+            "spa": str(ipaddress.IPv4Address(body[6:10])),
+            "tha": _mac(body[10:16]),
+            "tpa": str(ipaddress.IPv4Address(body[16:20])),
+        })
+
+    return pd.DataFrame(rows, columns=["received_ns", "operation", "sha", "spa", "tha", "tpa"])
+
+
+def _radius_value(text: str) -> str:
+    text = text.strip()
+
+    if (len(text) >= 2 and text[0] == text[-1] == '"'):
+        return text[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+
+    return text
+
+
+def read_radius_detail(path: str) -> list[dict]:
+    """
+    The entries of a FreeRADIUS detail file: each a date line, then one tab-indented `Attribute = value` per line,
+    then a blank line.
+
+    Returns
+    -------
+    list of dict
+        Each entry's attributes by name, quotes removed, in file order; an attribute written twice keeps its last
+        value.
+    """
+    entries = []
+    entry: typing.Optional[dict] = None
+
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if (not line.strip()):
+                if (entry is not None):
+                    entries.append(entry)
+
+                entry = None
+            elif (line[0] not in " \t"):
+                entry = {}
+            elif (entry is not None and "=" in line):
+                (name, value) = line.split("=", 1)
+                entry[name.strip()] = _radius_value(value)
+
+    if (entry is not None):
+        entries.append(entry)
+
+    return entries
+
+
+def merge_collectors(frames: typing.Sequence[pd.DataFrame]) -> pd.DataFrame:
+    """
+    One class's records from several collectors as one stream: by event time, then collector, then each
+    collector's own sequence, the order the corpus builders write a class that two collectors feed.
+    """
+    merged = pd.concat(list(frames), ignore_index=True)
+
+    return merged.sort_values(["event_time", "collector_id", "collector_seq"], kind="mergesort").reset_index(drop=True)
+
+
 def normalize(frame: pd.DataFrame, schema: DataFrameInputSchema) -> pd.DataFrame:
     """Apply a schema with `process_dataframe`, which the per-layer pattern names for this step."""
     return process_dataframe(frame, schema)
@@ -716,3 +1347,35 @@ def entra_signin(path: str, profile: CollectorProfile) -> pd.DataFrame:
 def sysmon_process(path: str, profile: CollectorProfile) -> pd.DataFrame:
     """`tc7_endpoint` records from Sysmon events 1 and 7."""
     return normalize(join_image_signatures(read_sysmon(path)), sysmon_process_schema(profile))
+
+
+def snmp_ports(path: str, profile: CollectorProfile) -> pd.DataFrame:
+    """`tc1` records from a Telegraf SNMP feed."""
+    return normalize(join_snmp_ports(read_telegraf(path)), snmp_port_schema(profile))
+
+
+def snmp_devices(path: str, profile: CollectorProfile) -> pd.DataFrame:
+    """`tc1_device` records from a Telegraf SNMP feed."""
+    return normalize(join_snmp_devices(read_telegraf(path)), snmp_device_schema(profile))
+
+
+def fdb_entries(path: str, profile: CollectorProfile) -> pd.DataFrame:
+    """`tc2_mac` records from a Telegraf SNMP feed of forwarding tables and MAC notifications."""
+    return normalize(join_fdb_ports(read_telegraf(path)), fdb_schema(profile))
+
+
+def arp_packets(path: str, profile: CollectorProfile) -> pd.DataFrame:
+    """`tc2_arp` records from a packet capture."""
+    return normalize(read_arp(path), arp_schema(profile))
+
+
+def radius_auth(path: str, profile: CollectorProfile, sites: dict) -> pd.DataFrame:
+    """`tc2_auth` records from a FreeRADIUS detail file of 802.1X requests and replies."""
+    return normalize(join_radius_replies(read_radius_detail(path)), radius_auth_schema(profile, sites))
+
+
+def radius_accounting(path: str, profile: CollectorProfile) -> pd.DataFrame:
+    """`tc5_session` records from a FreeRADIUS detail file of accounting requests."""
+    entries = [entry for entry in read_radius_detail(path) if "Acct-Status-Type" in entry]
+
+    return normalize(pd.DataFrame(entries), radius_accounting_schema(profile))

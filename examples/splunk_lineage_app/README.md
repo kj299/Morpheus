@@ -427,7 +427,9 @@ section 4.1 shipped R-B-L7-003 over request bodies, and a seventeenth, on 2026-1
 indexes and KV store emptied first, indexed all 25,639 events, returned what was then written for all eighty-seven --
 R-B-L7-003 the leaker's three bodies -- and held the 245 risk records the detections returned. An eighteenth, on
 2026-11-08 over the events plan section 4.7a regenerated under one envelope convention, every lineage identifier new,
-returned what is written for all eighty-seven and held the same 245.
+returned what was then written for all eighty-seven and held the same 245. A nineteenth, later that day over the
+events plan section 4.7b regenerated, 26 layer 1 lineage identifiers moved, returned the same rows for all
+eighty-seven and held the same 245.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

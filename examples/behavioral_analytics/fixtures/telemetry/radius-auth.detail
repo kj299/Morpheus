@@ -1,0 +1,2464 @@
+Thu Jan  1 00:01:00 1970
+	Packet-Type = Access-Request
+	User-Name = "alice-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/1"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-01"
+	EAP-Message = 0x0201000d01616c6963652d7773
+	Timestamp = 60
+
+Thu Jan  1 00:01:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 60
+
+Thu Jan  1 00:01:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 60
+
+Thu Jan  1 00:01:03 1970
+	Packet-Type = Access-Request
+	User-Name = "alice-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/1"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-01"
+	EAP-Message = 0x020900061900
+	State = 0x345a329f3ad8eb46a43cb1980880a572
+	Timestamp = 63
+
+Thu Jan  1 00:01:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "alice-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 63
+
+Thu Jan  1 00:01:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xe8f637d9c163553f8db54b6fbc317007
+	Timestamp = 63
+
+Thu Jan  1 00:01:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 63
+
+Thu Jan  1 00:01:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xd87c6d1f64a2a9eda396f813a648a129
+	Timestamp = 64
+
+Thu Jan  1 00:01:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 64
+
+Thu Jan  1 00:01:07 1970
+	Packet-Type = Access-Request
+	User-Name = "bob-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/2"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-02"
+	EAP-Message = 0x0201000b01626f622d7773
+	Timestamp = 67
+
+Thu Jan  1 00:01:11 1970
+	Packet-Type = Access-Request
+	User-Name = "bob-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/2"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-02"
+	EAP-Message = 0x020900061900
+	State = 0xcebd07c422a5b20b0e2fcd4871736cc9
+	Timestamp = 71
+
+Thu Jan  1 00:01:11 1970
+	Packet-Type = Access-Accept
+	User-Name = "bob-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 71
+
+Thu Jan  1 00:01:14 1970
+	Packet-Type = Access-Request
+	User-Name = "carol-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/3"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-03"
+	EAP-Message = 0x0201000d016361726f6c2d7773
+	Timestamp = 74
+
+Thu Jan  1 00:01:19 1970
+	Packet-Type = Access-Request
+	User-Name = "carol-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/3"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-03"
+	EAP-Message = 0x020900061900
+	State = 0x72c0ae777a94a6dd9c0070b322a112de
+	Timestamp = 79
+
+Thu Jan  1 00:01:19 1970
+	Packet-Type = Access-Accept
+	User-Name = "carol-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 79
+
+Thu Jan  1 00:03:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 180
+
+Thu Jan  1 00:03:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 180
+
+Thu Jan  1 00:03:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x80bab1ef30655de20aa9efe8f8d0cd7c
+	Timestamp = 183
+
+Thu Jan  1 00:03:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 183
+
+Thu Jan  1 00:03:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x3e3f9c4fcc4a3f3c3635ef61730f25be
+	Timestamp = 184
+
+Thu Jan  1 00:03:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 184
+
+Thu Jan  1 00:05:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 300
+
+Thu Jan  1 00:05:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 300
+
+Thu Jan  1 00:05:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x5b918948ec42711d9c5dc13cb05ce415
+	Timestamp = 303
+
+Thu Jan  1 00:05:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 303
+
+Thu Jan  1 00:05:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x9ecadf476d892b0cff1645013a144c42
+	Timestamp = 304
+
+Thu Jan  1 00:05:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 304
+
+Thu Jan  1 00:07:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 420
+
+Thu Jan  1 00:07:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 420
+
+Thu Jan  1 00:07:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x261f5c273061fe0246a2461d1201fa0c
+	Timestamp = 423
+
+Thu Jan  1 00:07:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 423
+
+Thu Jan  1 00:07:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x417881d8e01dabfe0203c61c9f026fa3
+	Timestamp = 424
+
+Thu Jan  1 00:07:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 424
+
+Thu Jan  1 00:09:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 540
+
+Thu Jan  1 00:09:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 540
+
+Thu Jan  1 00:09:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x3f7df8aa46ebea9a11d0a91e0d5b6ab5
+	Timestamp = 543
+
+Thu Jan  1 00:09:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 543
+
+Thu Jan  1 00:09:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x1e6cc8e96a851a3a8fd4fe387925f331
+	Timestamp = 544
+
+Thu Jan  1 00:09:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 544
+
+Thu Jan  1 00:11:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 660
+
+Thu Jan  1 00:11:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 660
+
+Thu Jan  1 00:11:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xc12b4cd95cd45e25191303c2046d833c
+	Timestamp = 663
+
+Thu Jan  1 00:11:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 663
+
+Thu Jan  1 00:11:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xa4eacf0ff60ba879fedf90c6ac577279
+	Timestamp = 664
+
+Thu Jan  1 00:11:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 664
+
+Thu Jan  1 00:13:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 780
+
+Thu Jan  1 00:13:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 780
+
+Thu Jan  1 00:13:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x7654be7176083266656978fc98bf541b
+	Timestamp = 783
+
+Thu Jan  1 00:13:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 783
+
+Thu Jan  1 00:13:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xb879526b5437dd244393877c574e8d52
+	Timestamp = 784
+
+Thu Jan  1 00:13:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 784
+
+Thu Jan  1 00:15:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 900
+
+Thu Jan  1 00:15:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 900
+
+Thu Jan  1 00:15:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x82d10275392f8e42671355c872fae336
+	Timestamp = 903
+
+Thu Jan  1 00:15:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 903
+
+Thu Jan  1 00:15:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x50714772048b2d052c41ee2e24bc4600
+	Timestamp = 904
+
+Thu Jan  1 00:15:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 904
+
+Thu Jan  1 00:16:00 1970
+	Packet-Type = Access-Request
+	User-Name = "alice-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/1"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-01"
+	EAP-Message = 0x0201000d01616c6963652d7773
+	Timestamp = 960
+
+Thu Jan  1 00:16:03 1970
+	Packet-Type = Access-Request
+	User-Name = "alice-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/1"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-01"
+	EAP-Message = 0x020900061900
+	State = 0x50bd44bb3a21425189437f8b5835a3ad
+	Timestamp = 963
+
+Thu Jan  1 00:16:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "alice-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 963
+
+Thu Jan  1 00:16:07 1970
+	Packet-Type = Access-Request
+	User-Name = "bob-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/2"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-02"
+	EAP-Message = 0x0201000b01626f622d7773
+	Timestamp = 967
+
+Thu Jan  1 00:16:11 1970
+	Packet-Type = Access-Request
+	User-Name = "bob-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/2"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-02"
+	EAP-Message = 0x020900061900
+	State = 0xf136fba2ea6b696b1aace29f1209932e
+	Timestamp = 971
+
+Thu Jan  1 00:16:11 1970
+	Packet-Type = Access-Accept
+	User-Name = "bob-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 971
+
+Thu Jan  1 00:16:14 1970
+	Packet-Type = Access-Request
+	User-Name = "carol-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/3"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-03"
+	EAP-Message = 0x0201000d016361726f6c2d7773
+	Timestamp = 974
+
+Thu Jan  1 00:16:19 1970
+	Packet-Type = Access-Request
+	User-Name = "carol-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/3"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-03"
+	EAP-Message = 0x020900061900
+	State = 0x63ee39c8df3f21a57b32a747dcea1d22
+	Timestamp = 979
+
+Thu Jan  1 00:16:19 1970
+	Packet-Type = Access-Accept
+	User-Name = "carol-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 979
+
+Thu Jan  1 00:17:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 1020
+
+Thu Jan  1 00:17:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 1020
+
+Thu Jan  1 00:17:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x80262c48aecd61026c37c7843d2b11d7
+	Timestamp = 1023
+
+Thu Jan  1 00:17:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1023
+
+Thu Jan  1 00:17:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xf71e8e49c9d06776504bc01c42e8482b
+	Timestamp = 1024
+
+Thu Jan  1 00:17:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1024
+
+Thu Jan  1 00:19:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 1140
+
+Thu Jan  1 00:19:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 1140
+
+Thu Jan  1 00:19:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x12304e96db6f7a1ea6c6803a50cff784
+	Timestamp = 1143
+
+Thu Jan  1 00:19:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1143
+
+Thu Jan  1 00:19:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xab565d86b689ae5639c216b0b9839899
+	Timestamp = 1144
+
+Thu Jan  1 00:19:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1144
+
+Thu Jan  1 00:20:00 1970
+	Packet-Type = Access-Request
+	User-Name = "phone-4021"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/4"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-05"
+	EAP-Message = 0x0201000f0170686f6e652d34303231
+	Timestamp = 1200
+
+Thu Jan  1 00:20:01 1970
+	Packet-Type = Access-Request
+	User-Name = "desk-4021"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/4"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-06"
+	EAP-Message = 0x0201000e016465736b2d34303231
+	Timestamp = 1201
+
+Thu Jan  1 00:20:11 1970
+	Packet-Type = Access-Request
+	User-Name = "desk-4021"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/4"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-06"
+	EAP-Message = 0x020900061900
+	State = 0x6cb7c9141ed588ac708d4867e8639080
+	Timestamp = 1211
+
+Thu Jan  1 00:20:11 1970
+	Packet-Type = Access-Accept
+	User-Name = "desk-4021"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1211
+
+Thu Jan  1 00:20:12 1970
+	Packet-Type = Access-Request
+	User-Name = "phone-4021"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/4"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-05"
+	EAP-Message = 0x020900061900
+	State = 0xb04fb153d050ce9305d48a1fe9b9f0ae
+	Timestamp = 1212
+
+Thu Jan  1 00:20:12 1970
+	Packet-Type = Access-Accept
+	User-Name = "phone-4021"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1212
+
+Thu Jan  1 00:21:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 1260
+
+Thu Jan  1 00:21:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 1260
+
+Thu Jan  1 00:21:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xeaf2f6a67e5e4c1313ac4ee75c6c3a29
+	Timestamp = 1263
+
+Thu Jan  1 00:21:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1263
+
+Thu Jan  1 00:21:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x8992422ddb1fcf5cacd07171a540fbcd
+	Timestamp = 1264
+
+Thu Jan  1 00:21:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1264
+
+Thu Jan  1 00:23:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 1380
+
+Thu Jan  1 00:23:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 1380
+
+Thu Jan  1 00:23:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xb1bc41c59231ed6b85aeade81a37e02d
+	Timestamp = 1383
+
+Thu Jan  1 00:23:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1383
+
+Thu Jan  1 00:23:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x0eed84c62003bf2015fa8064ee30729a
+	Timestamp = 1384
+
+Thu Jan  1 00:23:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1384
+
+Thu Jan  1 00:25:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 1500
+
+Thu Jan  1 00:25:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 1500
+
+Thu Jan  1 00:25:00 1970
+	Packet-Type = Access-Request
+	User-Name = "unknown-supplicant"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/2"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "DE-AD-BE-EF-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x2b8f1c1442c1a2df1ff47e570722579d
+	Timestamp = 1500
+
+Thu Jan  1 00:25:00 1970
+	Packet-Type = Access-Accept
+	User-Name = "unknown-supplicant"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1500
+
+Thu Jan  1 00:25:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xf24d9cddf18abe4c1da61f6c4045c7f9
+	Timestamp = 1503
+
+Thu Jan  1 00:25:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1503
+
+Thu Jan  1 00:25:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x7cecd7b9554d8bb6a15ce312606a0339
+	Timestamp = 1504
+
+Thu Jan  1 00:25:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1504
+
+Thu Jan  1 00:27:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 1620
+
+Thu Jan  1 00:27:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 1620
+
+Thu Jan  1 00:27:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xb88a1e51fc75416fa9dcc9d2d5cac2a6
+	Timestamp = 1623
+
+Thu Jan  1 00:27:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1623
+
+Thu Jan  1 00:27:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xfac16fa294fed1835274dac708bbb045
+	Timestamp = 1624
+
+Thu Jan  1 00:27:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1624
+
+Thu Jan  1 00:29:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 1740
+
+Thu Jan  1 00:29:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 1740
+
+Thu Jan  1 00:29:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xec129dad03f22f80a1abdcfe08a6f9e7
+	Timestamp = 1743
+
+Thu Jan  1 00:29:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1743
+
+Thu Jan  1 00:29:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x4f5b557d23facf95bde84d9d31161ec1
+	Timestamp = 1744
+
+Thu Jan  1 00:29:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1744
+
+Thu Jan  1 00:31:00 1970
+	Packet-Type = Access-Request
+	User-Name = "alice-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/1"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-01"
+	EAP-Message = 0x0201000d01616c6963652d7773
+	Timestamp = 1860
+
+Thu Jan  1 00:31:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 1860
+
+Thu Jan  1 00:31:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 1860
+
+Thu Jan  1 00:31:03 1970
+	Packet-Type = Access-Request
+	User-Name = "alice-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/1"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-01"
+	EAP-Message = 0x020900061900
+	State = 0xb9baa2df34ad957658b1574c916eca8e
+	Timestamp = 1863
+
+Thu Jan  1 00:31:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "alice-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1863
+
+Thu Jan  1 00:31:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x2d433e4c37f0a7b3fffe2865b1678c6b
+	Timestamp = 1863
+
+Thu Jan  1 00:31:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1863
+
+Thu Jan  1 00:31:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xdcb22a84b0a248a811c50e5d3f35e2c1
+	Timestamp = 1864
+
+Thu Jan  1 00:31:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1864
+
+Thu Jan  1 00:31:07 1970
+	Packet-Type = Access-Request
+	User-Name = "bob-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/2"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-02"
+	EAP-Message = 0x0201000b01626f622d7773
+	Timestamp = 1867
+
+Thu Jan  1 00:31:11 1970
+	Packet-Type = Access-Request
+	User-Name = "bob-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/2"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-02"
+	EAP-Message = 0x020900061900
+	State = 0x34ee0f42c387893d708c0ac24cfa86c0
+	Timestamp = 1871
+
+Thu Jan  1 00:31:11 1970
+	Packet-Type = Access-Accept
+	User-Name = "bob-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1871
+
+Thu Jan  1 00:31:14 1970
+	Packet-Type = Access-Request
+	User-Name = "carol-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/3"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-03"
+	EAP-Message = 0x0201000d016361726f6c2d7773
+	Timestamp = 1874
+
+Thu Jan  1 00:31:19 1970
+	Packet-Type = Access-Request
+	User-Name = "carol-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/3"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-03"
+	EAP-Message = 0x020900061900
+	State = 0x0b05212f44b74d966b31b3804eebd875
+	Timestamp = 1879
+
+Thu Jan  1 00:31:19 1970
+	Packet-Type = Access-Accept
+	User-Name = "carol-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1879
+
+Thu Jan  1 00:33:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 1980
+
+Thu Jan  1 00:33:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 1980
+
+Thu Jan  1 00:33:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x1fbb704bfefe6eb507ced7d0f8d6f10b
+	Timestamp = 1983
+
+Thu Jan  1 00:33:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1983
+
+Thu Jan  1 00:33:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x0cf62ce838796bdc382d54806b233996
+	Timestamp = 1984
+
+Thu Jan  1 00:33:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 1984
+
+Thu Jan  1 00:35:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2100
+
+Thu Jan  1 00:35:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 2100
+
+Thu Jan  1 00:35:00 1970
+	Packet-Type = Access-Request
+	User-Name = "aa:bb:cc:00:00:07"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/5"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-07"
+	EAP-Message = 0x020100160161613a62623a63633a30303a30303a3037
+	Timestamp = 2100
+
+Thu Jan  1 00:35:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x624cdaca6cca5e8f1e5be7a345374b13
+	Timestamp = 2103
+
+Thu Jan  1 00:35:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2103
+
+Thu Jan  1 00:35:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xa07171ad9ab6ec7dfce1a6a376d803d8
+	Timestamp = 2104
+
+Thu Jan  1 00:35:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2104
+
+Thu Jan  1 00:35:10 1970
+	Packet-Type = Access-Request
+	User-Name = "unknown-supplicant"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/5"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "DE-AD-BE-EF-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xf50ecfeb1fd0081cee49c1c4bb6258c4
+	Timestamp = 2110
+
+Thu Jan  1 00:35:10 1970
+	Packet-Type = Access-Accept
+	User-Name = "unknown-supplicant"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2110
+
+Thu Jan  1 00:35:20 1970
+	Packet-Type = Access-Request
+	User-Name = "aa:bb:cc:00:00:07"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/5"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-07"
+	EAP-Message = 0x020900061900
+	State = 0xa0f54f2967de5b4fc02414e0c8cfd5a1
+	Timestamp = 2120
+
+Thu Jan  1 00:35:20 1970
+	Packet-Type = Access-Accept
+	User-Name = "aa:bb:cc:00:00:07"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2120
+
+Thu Jan  1 00:37:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2220
+
+Thu Jan  1 00:37:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 2220
+
+Thu Jan  1 00:37:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xb5213bb015b1ff238fafc8d25f40bd02
+	Timestamp = 2223
+
+Thu Jan  1 00:37:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2223
+
+Thu Jan  1 00:37:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x7c8afb09f5aac6b8e15d767ae8a0b6b2
+	Timestamp = 2224
+
+Thu Jan  1 00:37:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2224
+
+Thu Jan  1 00:39:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2340
+
+Thu Jan  1 00:39:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 2340
+
+Thu Jan  1 00:39:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x3ca9963a247a371e0ffe994ec4979e7c
+	Timestamp = 2343
+
+Thu Jan  1 00:39:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2343
+
+Thu Jan  1 00:39:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x2bee38d06647149b9e2d643a89162430
+	Timestamp = 2344
+
+Thu Jan  1 00:39:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2344
+
+Thu Jan  1 00:41:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2460
+
+Thu Jan  1 00:41:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 2460
+
+Thu Jan  1 00:41:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x54e047fe87a3062d61e67de66457083e
+	Timestamp = 2463
+
+Thu Jan  1 00:41:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2463
+
+Thu Jan  1 00:41:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x300d33180393a7e98bb868b71477e00e
+	Timestamp = 2464
+
+Thu Jan  1 00:41:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2464
+
+Thu Jan  1 00:43:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2580
+
+Thu Jan  1 00:43:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 2580
+
+Thu Jan  1 00:43:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x911f5573bc3988afe8f1e6084f099177
+	Timestamp = 2583
+
+Thu Jan  1 00:43:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2583
+
+Thu Jan  1 00:43:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x600f4124869c6b83db0b3fdeecb822d2
+	Timestamp = 2584
+
+Thu Jan  1 00:43:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2584
+
+Thu Jan  1 00:45:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2700
+
+Thu Jan  1 00:45:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 2700
+
+Thu Jan  1 00:45:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xd02b55234af3f903c06e388f2f7bb6ab
+	Timestamp = 2704
+
+Thu Jan  1 00:45:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2704
+
+Thu Jan  1 00:45:08 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2708
+
+Thu Jan  1 00:45:16 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2716
+
+Thu Jan  1 00:45:25 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xee5aa1b12b8b01f109a54567a2b750e1
+	Timestamp = 2725
+
+Thu Jan  1 00:45:25 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2725
+
+Thu Jan  1 00:46:00 1970
+	Packet-Type = Access-Request
+	User-Name = "alice-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/1"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-01"
+	EAP-Message = 0x0201000d01616c6963652d7773
+	Timestamp = 2760
+
+Thu Jan  1 00:46:03 1970
+	Packet-Type = Access-Request
+	User-Name = "alice-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/1"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-01"
+	EAP-Message = 0x020900061900
+	State = 0xf45726fd08e749c73c77726b75076c6d
+	Timestamp = 2763
+
+Thu Jan  1 00:46:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "alice-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2763
+
+Thu Jan  1 00:46:07 1970
+	Packet-Type = Access-Request
+	User-Name = "bob-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/2"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-02"
+	EAP-Message = 0x0201000b01626f622d7773
+	Timestamp = 2767
+
+Thu Jan  1 00:46:11 1970
+	Packet-Type = Access-Request
+	User-Name = "bob-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/2"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-02"
+	EAP-Message = 0x020900061900
+	State = 0xc43bedb77ef2c7871511cdcdf8827511
+	Timestamp = 2771
+
+Thu Jan  1 00:46:11 1970
+	Packet-Type = Access-Accept
+	User-Name = "bob-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2771
+
+Thu Jan  1 00:46:14 1970
+	Packet-Type = Access-Request
+	User-Name = "carol-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/3"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-03"
+	EAP-Message = 0x0201000d016361726f6c2d7773
+	Timestamp = 2774
+
+Thu Jan  1 00:46:19 1970
+	Packet-Type = Access-Request
+	User-Name = "carol-ws"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/3"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-00-03"
+	EAP-Message = 0x020900061900
+	State = 0x007cfba097e3e09b863fa8287de0f640
+	Timestamp = 2779
+
+Thu Jan  1 00:46:19 1970
+	Packet-Type = Access-Accept
+	User-Name = "carol-ws"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2779
+
+Thu Jan  1 00:47:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2820
+
+Thu Jan  1 00:47:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 2820
+
+Thu Jan  1 00:47:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x8e3d6d7b2d27bf0b5404b64d6a65fe79
+	Timestamp = 2823
+
+Thu Jan  1 00:47:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2823
+
+Thu Jan  1 00:47:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0xde740ceb6bfefb386212b156d3c97a82
+	Timestamp = 2824
+
+Thu Jan  1 00:47:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2824
+
+Thu Jan  1 00:49:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 2940
+
+Thu Jan  1 00:49:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 2940
+
+Thu Jan  1 00:49:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x3200da34f01be4e2cf84149791bdd1ab
+	Timestamp = 2940
+
+Thu Jan  1 00:49:00 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2940
+
+Thu Jan  1 00:49:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xb3eb291bd4069043f1203c875ba39f5c
+	Timestamp = 2943
+
+Thu Jan  1 00:49:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 2943
+
+Thu Jan  1 00:51:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 3060
+
+Thu Jan  1 00:51:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 3060
+
+Thu Jan  1 00:51:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xcd84cb02b294af9b4e8e9c2b838dd379
+	Timestamp = 3063
+
+Thu Jan  1 00:51:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3063
+
+Thu Jan  1 00:51:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x5dd4691d2f05c6b339ae11166f1a9dbe
+	Timestamp = 3064
+
+Thu Jan  1 00:51:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3064
+
+Thu Jan  1 00:53:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 3180
+
+Thu Jan  1 00:53:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 3180
+
+Thu Jan  1 00:53:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x2977a64f2c77c8cdee1303e0135c1716
+	Timestamp = 3183
+
+Thu Jan  1 00:53:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3183
+
+Thu Jan  1 00:53:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x185edd9a9c5df277d61c03f28ab302c0
+	Timestamp = 3184
+
+Thu Jan  1 00:53:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3184
+
+Thu Jan  1 00:55:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 3300
+
+Thu Jan  1 00:55:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 3300
+
+Thu Jan  1 00:55:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x78e7fa62ff7b0befba3828fe9ffdbbf3
+	Timestamp = 3303
+
+Thu Jan  1 00:55:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3303
+
+Thu Jan  1 00:55:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x5ca24cf6d73e9eddbe35dc57f242c624
+	Timestamp = 3304
+
+Thu Jan  1 00:55:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3304
+
+Thu Jan  1 00:57:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 3420
+
+Thu Jan  1 00:57:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 3420
+
+Thu Jan  1 00:57:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0x6872baeceae4487baff1d75a9b1bf3c3
+	Timestamp = 3423
+
+Thu Jan  1 00:57:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3423
+
+Thu Jan  1 00:57:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x88da68b19b863f8c365a4663cd6421e1
+	Timestamp = 3424
+
+Thu Jan  1 00:57:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3424
+
+Thu Jan  1 00:59:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x0201000d0162656e63682d3031
+	Timestamp = 3540
+
+Thu Jan  1 00:59:00 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x0201000d0162656e63682d3032
+	Timestamp = 3540
+
+Thu Jan  1 00:59:03 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-01"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/19"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-01"
+	EAP-Message = 0x020900061900
+	State = 0xa7b639523e3d64ccb2a6c33c0bb3b132
+	Timestamp = 3543
+
+Thu Jan  1 00:59:03 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-01"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3543
+
+Thu Jan  1 00:59:04 1970
+	Packet-Type = Access-Request
+	User-Name = "bench-02"
+	NAS-IP-Address = 192.0.2.21
+	NAS-Identifier = "sw1"
+	NAS-Port-Id = "GigabitEthernet1/0/20"
+	NAS-Port-Type = Ethernet
+	Service-Type = Framed-User
+	Calling-Station-Id = "AA-BB-CC-00-01-02"
+	EAP-Message = 0x020900061900
+	State = 0x641388dab8e6045ebfe18d8f73e8cd70
+	Timestamp = 3544
+
+Thu Jan  1 00:59:04 1970
+	Packet-Type = Access-Accept
+	User-Name = "bench-02"
+	EAP-Message = 0x03090004
+	Message-Authenticator = 0x00000000000000000000000000000000
+	Timestamp = 3544
+
