@@ -598,7 +598,8 @@ def _build_layer_1(rng: random.Random, extra: random.Random) -> pd.DataFrame:
                 "lldp_neighbor_chassis_id": chassis,
                 "lldp_neighbor_port_id": neighbour_port,
                 **counters[(device, port)],
-                **_envelope(draw, "snmp-poller", "tc1.v1", seq, f"{device}/{port}@{minute * 60 * NS_PER_SECOND}"),
+                # What the poller observed the poll as: the name the device reported for the port that minute.
+                **_envelope(draw, "snmp-poller", "tc1.v1", seq, f"{device}/{reported_port}@{time_s * NS_PER_SECOND}"),
             })
 
     # The DMZ poller. Fixed values rather than draws, so planting it moves nothing else; it carries its own clock
