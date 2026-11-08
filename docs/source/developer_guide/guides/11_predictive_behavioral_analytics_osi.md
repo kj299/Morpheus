@@ -64,7 +64,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
 That is sixty-two stages and fifty-four supporting
-modules, covered by 2,762 distinct tests, itemized in
+modules, covered by 2,765 distinct tests, itemized in
 [Part 6](#provided). Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
@@ -85,8 +85,9 @@ over the events the daily drift over the TLS and DNS columns added returned what
 on 2026-10-26 a run over the events the desk spoof and the network inventory added returned what was then written for
 all eighty-three, on 2026-10-28 a run over the events the HTTP and process trajectories added returned what was then
 written for all eighty-five, on 2026-10-31 a run over the events plan section 3.7 regenerated returned what was then
-written for all eighty-six, every risk record carrying its rule's `thresholds_hash`, and on 2026-11-01 a run over the
-events plan section 4.1 regenerated returned what is written for all eighty-seven the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
+written for all eighty-six, every risk record carrying its rule's `thresholds_hash`, on 2026-11-01 a run over the
+events plan section 4.1 regenerated returned what was then written for all eighty-seven, and on 2026-11-08 a run over
+the events plan section 4.7a regenerated returned what is written for all eighty-seven the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
 scores what all of that adds up to for each class of entity on a network, and lists what it does not.
 
 What remains design rather than a running system: one of the sixty rules as a detection (R-B-L4-001, whose

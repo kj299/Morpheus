@@ -598,7 +598,7 @@ def _build_layer_1(rng: random.Random, extra: random.Random) -> pd.DataFrame:
                 "lldp_neighbor_chassis_id": chassis,
                 "lldp_neighbor_port_id": neighbour_port,
                 **counters[(device, port)],
-                **_envelope(draw, "snmp-poller", "TC-1/1.0.0", seq),
+                **_envelope(draw, "snmp-poller", "tc1.v1", seq, f"{device}/{port}@{minute * 60 * NS_PER_SECOND}"),
             })
 
     # The DMZ poller. Fixed values rather than draws, so planting it moves nothing else; it carries its own clock
@@ -627,8 +627,8 @@ def _build_layer_1(rng: random.Random, extra: random.Random) -> pd.DataFrame:
             "if_hc_in_octets": 10**12,
             "if_hc_out_octets": 10**12,
             "collector_id": QUARANTINED_POLLER,
-            "schema_version": "TC-1/1.0.0",
-            "origin_hash": f"{QUARANTINED_POLLER}-{index:04d}",
+            "schema_version": "tc1.v1",
+            "origin_hash": f"{QUARANTINED_SWITCH}/{QUARANTINED_PORT}@{minute * 60 * NS_PER_SECOND}",
             "collector_seq": index,
             "clock_source": "ntp_undisciplined",
             "clock_offset_ms": QUARANTINED_OFFSET_MS,
@@ -690,15 +690,25 @@ def _build_devices() -> pd.DataFrame:
                 "bgp_peer_count": (BGP_PEERS_AFTER if dropped else BGP_PEERS_BEFORE) if routed else 0,
                 "syslog_rate": round(1.0 + 0.1 * ((minute + index) % 5), 1),
                 "collector_id": DEVICE_POLLER,
-                "schema_version": "TC-1/1.0.0",
-                "origin_hash": f"{DEVICE_POLLER}-device-{seq:05d}",
+                "schema_version": "tc1_device.v1",
+                "origin_hash": f"{device}@{minute * 60 * NS_PER_SECOND}",
                 "collector_seq": seq,
             })
 
     return pd.DataFrame(rows)
 
 
-def _mac_row(time_s: int, mac: str, switch: str, port: str, vlan: int, envelope: dict, action: str = None) -> dict:
+def _mac_row(time_s: int,
+             mac: str,
+             switch: str,
+             port: str,
+             vlan: int,
+             rng: random.Random,
+             seq: int,
+             action: str = None) -> dict:
+    """One MAC table entry, which the walk identifies by the switch, port and address it found it on, and when."""
+    envelope = _envelope(rng, "mac-table", "tc2_mac.v1", seq, f"{switch}/{port}/{mac}@{time_s * NS_PER_SECOND}")
+
     return {
         "event_time": time_s * NS_PER_SECOND,
         "mac_address": mac,
@@ -732,7 +742,7 @@ def _build_mac_snapshots(rng: random.Random, extra: random.Random) -> pd.DataFra
 
         for (mac, port) in entries:
             seq += 1
-            rows.append(_mac_row(time_s, mac, SWITCH, port, VLAN, _envelope(rng, "mac-table", "TC-2/1.0.0", seq)))
+            rows.append(_mac_row(time_s, mac, SWITCH, port, VLAN, rng, seq))
 
         # The same walk of the same switch, reaching the entries planted since: the printer until it is unplugged,
         # the guest while they are here, and the camera VLAN, whose vendor mix the single-board computer changes.
@@ -752,7 +762,7 @@ def _build_mac_snapshots(rng: random.Random, extra: random.Random) -> pd.DataFra
 
         for (mac, port, vlan) in added:
             seq += 1
-            rows.append(_mac_row(time_s, mac, SWITCH, port, vlan, _envelope(extra, "mac-table", "TC-2/1.0.0", seq)))
+            rows.append(_mac_row(time_s, mac, SWITCH, port, vlan, extra, seq))
 
         # The poller reaches the peer switch a couple of seconds after the first, which is what makes the spoof
         # below `displaced` with a small gap rather than a `conflict`. Emitted here, inside the same snapshot, so
@@ -761,25 +771,13 @@ def _build_mac_snapshots(rng: random.Random, extra: random.Random) -> pd.DataFra
         for (mac, port) in ([(ROAM_MAC, PEER_PORTS[2] if time_s >= ROAM_AT_SECONDS else PEER_PORTS[1])] +
                             ([(MAC_B, PEER_PORTS[0])] if time_s == CROSS_SPOOF_AT_SECONDS else [])):
             seq += 1
-            rows.append(
-                _mac_row(time_s + SWEEP_OFFSET_SECONDS,
-                         mac,
-                         PEER_SWITCH,
-                         port,
-                         VLAN,
-                         _envelope(rng, "mac-table", "TC-2/1.0.0", seq)))
+            rows.append(_mac_row(time_s + SWEEP_OFFSET_SECONDS, mac, PEER_SWITCH, port, VLAN, rng, seq))
 
         # The guest's laptop leaves between two walks, and the switch says so: a MAC notification of the removal.
         if (time_s < GUEST_LEAVES_AT_SECONDS < time_s + PERIOD_SECONDS):
             seq += 1
             rows.append(
-                _mac_row(GUEST_LEAVES_AT_SECONDS,
-                         GUEST_MAC,
-                         SWITCH,
-                         GUEST_PORT,
-                         VLAN,
-                         _envelope(extra, "mac-table", "TC-2/1.0.0", seq),
-                         action="removed"))
+                _mac_row(GUEST_LEAVES_AT_SECONDS, GUEST_MAC, SWITCH, GUEST_PORT, VLAN, extra, seq, action="removed"))
 
     return pd.DataFrame(rows)
 
@@ -820,12 +818,21 @@ def _build_arp(rng: random.Random) -> pd.DataFrame:
         # The records numbered and never delivered: every number from the loss onward is three further on.
         seq += LOST_ARP_RECORDS if time_s >= ARP_LOSS_AT_SECONDS else 0
         rows.append({
-            "event_time": time_s * NS_PER_SECOND,
-            "arp_sender_ip": sender_ip,
-            "arp_sender_mac": sender_mac,
-            "arp_target_ip": target_ip,
-            "arp_operation": operation,
-            **_envelope(rng, "arp-sensor", "TC-2/1.0.0", seq),
+            "event_time":
+                time_s * NS_PER_SECOND,
+            "arp_sender_ip":
+                sender_ip,
+            "arp_sender_mac":
+                sender_mac,
+            "arp_target_ip":
+                target_ip,
+            "arp_operation":
+                operation,
+            **_envelope(rng,
+                        "arp-sensor",
+                        "tc2_arp.v1",
+                        seq,
+                        f"{sender_ip}>{sender_mac}?{target_ip}@{time_s * NS_PER_SECOND}"),
         })
 
     return pd.DataFrame(rows)
@@ -892,18 +899,29 @@ def _build_auth(rng: random.Random, extra: random.Random) -> pd.DataFrame:
 
     for (seq, (time_s, port, result, supplicant)) in enumerate(events, start=1):
         rows.append({
-            "event_time": time_s * NS_PER_SECOND,
-            "site_id": SITE,
-            "switch_id": SWITCH,
-            "port_id": port,
-            "mac_address": supplicant,
+            "event_time":
+                time_s * NS_PER_SECOND,
+            "site_id":
+                SITE,
+            "switch_id":
+                SWITCH,
+            "port_id":
+                port,
+            "mac_address":
+                supplicant,
             # The identity half of the supplicant. R-D-L2-005 names it on the alert, and the stage prefers it to
             # the MAC when both are present, so a corpus without one leaves both the fallback and the alert's
             # identity column uncovered.
-            "dot1x_identity": IDENTITIES.get(supplicant, BENCH_IDENTITIES.get(supplicant, supplicant)),
-            "dot1x_result": result,
+            "dot1x_identity":
+                IDENTITIES.get(supplicant, BENCH_IDENTITIES.get(supplicant, supplicant)),
+            "dot1x_result":
+                result,
             # The benches came later, and draw from the second generator so the rows before them keep theirs.
-            **_envelope(extra if supplicant in BENCH_IDENTITIES else rng, "radius", "TC-2/1.0.0", seq),
+            **_envelope(extra if supplicant in BENCH_IDENTITIES else rng,
+                        "radius",
+                        "tc2_auth.v1",
+                        seq,
+                        f"{SWITCH}/{port}/{supplicant}@{time_s * NS_PER_SECOND}"),
         })
 
     return pd.DataFrame(rows)

@@ -804,7 +804,7 @@ def _build_port_polls(rows: list):
             last_change_cs = (BOOT_UPTIME_CS + (_intrusion_time(index) + 20 * NS_PER_SECOND - start) //
                               (NS_PER_SECOND // 100)) if changed else 10 * 100
             octets[port] += 300 * 4_000_000 // 8
-            record = _envelope(rows, PORT_POLLER, "TC-1/1.0.0", f"{port}@{when}", when)
+            record = _envelope(rows, PORT_POLLER, "tc1.v1", f"{SITE_SWITCHES[HQ]}/{port}", when)
             record.update({
                 "site_id": HQ,
                 "device_id": SITE_SWITCHES[HQ],

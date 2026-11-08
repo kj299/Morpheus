@@ -33,15 +33,15 @@
       "name": "schema_version",
       "type": "string",
       "unit": "",
-      "source": "The collector's own contract version",
-      "notes": "For example tc3.v1."
+      "source": "The collector's own contract version, as `<class>.v<major>`",
+      "notes": "For example tc3.v1 or tc5_auth.v1: the class the record is held to and the major version of its contract. test_input_contracts.py holds every sample to the form."
     },
     {
       "name": "origin_hash",
       "type": "string",
       "unit": "",
-      "source": "What identifies the record at its source",
-      "notes": "Anything stable the source gives: a flow tuple and its start, a log record's own identifier. Hashed with the three fields above into `lineage_id`."
+      "source": "What identifies the record at its source, as the source gives it",
+      "notes": "The source's own identifier, readable: a record's own ID where the source names its records (a sign-in's GUID), otherwise what the source observed it as -- a flow's two ends and start, a port's poll (`device/port@time`), a MAC table entry (`switch/port/mac@time`), a session's accounting record (`session:action`). Never a digest the collector invents: the lineage stamp hashes it with the three fields above into `lineage_id`, and an analyst tracing a lineage back reads it. test_input_contracts.py refuses a bare hex digest."
     },
     {
       "name": "clock_source",

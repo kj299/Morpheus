@@ -1,10 +1,10 @@
 {
   "splunk_version": "Splunk 10.2.8 (build 981c2d735e4d)",
-  "at": "2026-11-01T00:27:12.404558+00:00",
-  "timestamp_shift_weeks": 2956,
+  "at": "2026-11-08T00:41:40.026940+00:00",
+  "timestamp_shift_weeks": 2957,
   "dispatch_window": {
-    "earliest": 1787702400,
-    "latest": 1793496297
+    "earliest": 1788307200,
+    "latest": 1794101962
   },
   "indexed": {
     "binding:bucketed": 3000,
@@ -52,8 +52,8 @@
   "checks": {
     "time_drift_seconds": [
       {
-        "max_drift": "-4944310.000000",
-        "min_drift": "-5703910.000000"
+        "max_drift": "-4945173.000000",
+        "min_drift": "-5704773.000000"
       }
     ],
     "binding_tables": [

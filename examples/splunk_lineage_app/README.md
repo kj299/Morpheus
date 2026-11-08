@@ -424,8 +424,10 @@ its own user rather than in the container, indexed the same 25,632 events, retur
 eighty-six -- the new search its five classes -- and held the same 242 risk records, every one of them carrying the
 `thresholds_hash` its rule's `rule_metadata` row holds. It is kept in `validate/search_head_runs/` too, because plan
 section 4.1 shipped R-B-L7-003 over request bodies, and a seventeenth, on 2026-11-01 on the same install with its
-indexes and KV store emptied first, indexed all 25,639 events, returned what is written for all eighty-seven --
-R-B-L7-003 the leaker's three bodies -- and held the 245 risk records the detections returned.
+indexes and KV store emptied first, indexed all 25,639 events, returned what was then written for all eighty-seven --
+R-B-L7-003 the leaker's three bodies -- and held the 245 risk records the detections returned. An eighteenth, on
+2026-11-08 over the events plan section 4.7a regenerated under one envelope convention, every lineage identifier new,
+returned what is written for all eighty-seven and held the same 245.
 
 One wrinkle from that validation worth knowing when testing by hand: the sourcetypes declare
 `KV_MODE = json`, so events seeded with `| collect` in its default stash rendering extract no fields

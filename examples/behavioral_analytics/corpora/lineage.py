@@ -57,6 +57,18 @@ def build_binding_table() -> BindingTable:
                                        end_column="bind_end")
 
 
+def _origin(rng: random.Random, src_ip: str, dst_ip: str, time_s: float) -> str:
+    """
+    What identifies a flow at the exporter: its two ends and when it started.
+
+    The generator's draw is taken all the same: the corpus's identifiers were drawn from it before the input samples
+    took one convention (plan section 4.7a), and every value drawn after it keeps the stream it was planted with.
+    """
+    rng.getrandbits(64)
+
+    return f"{src_ip}->{dst_ip}@{int(time_s * NS_PER_SECOND)}"
+
+
 def build_corpus() -> pd.DataFrame:
     """
     Build the fixed input corpus, one row per network flow observation.
@@ -76,8 +88,8 @@ def build_corpus() -> pd.DataFrame:
             "src_port": rng.randrange(1024, 65535),
             "dest_port": 443,
             "collector_id": collector,
-            "schema_version": "TC-3/1.0.0",
-            "origin_hash": f"{rng.getrandbits(64):016x}",
+            "schema_version": "tc3.v1",
+            "origin_hash": _origin(rng, src_ip, dst_ip, time_s),
         })
 
     # Normal traffic: three entities active through windows 0, 1, and 2 ([0, 300), [300, 600), [600, 900) seconds).

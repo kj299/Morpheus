@@ -57,7 +57,7 @@ ORGANIZATIONS = {"4f5e2b0a-3c1d-4e8f-9a7b-6c5d4e3f2a10": "corp", "9b8a7c6d-5e4f-
 
 PROFILES = {
     "tc3": CollectorProfile("netflow-01", "tc3.v1", "corp", "ntp_disciplined", 17),
-    "tc5_auth": CollectorProfile("idp", "TC-5/1.0.0", "corp", "ntp_disciplined", -4, first_seq=1),
+    "tc5_auth": CollectorProfile("idp", "tc5_auth.v1", "corp", "ntp_disciplined", -4, first_seq=1),
     "tc6": CollectorProfile("tls-inspect-01", "tc6.v1", "corp", "ptp", -18),
     "tc7_http": CollectorProfile("proxy-01", "tc7_http.v1", "corp", "ntp_disciplined", -15),
     "tc7_dns": CollectorProfile("resolver-01", "tc7_dns.v1", "corp", "ntp_disciplined", 8),
