@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,131 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,136 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -101,7 +101,8 @@ the harnesses' golden helpers and its test, the stage tests' frame helpers and s
 record helpers) and the two section 4.6b added (the number-word reader and the test that holds the counts) and the one section 4.7a added (the search-head
 run it superseded, kept as history) and the seven section 4.7b added (six fixture files for the layer 1, 2 and 5
 classes and the search-head run it superseded) and the twelve section 4.7c added (eleven fixture files for the last
-eight classes and the search-head run it superseded), less
+eight classes and the search-head run it superseded) and the five section 4.8a added (the GPU verdict report, the
+throughput benchmark, their tests and the throughput baseline), less
 the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
@@ -111,7 +112,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and 
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 492 |
+| `keep` | 497 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -498,7 +499,13 @@ that replaces it. Each item says how to know it is done.
 9. **Exercise the GPU path end to end in CI, or say on every run that it was not.** The runners force the CPU, and
    the C++ file source ignores the parser arguments the Python one honors. Add a GPU job when a runner exists, and
    until then make the conformance artifact's date part of the CI summary. Done when the GPU verdict is never older
-   than the code it describes without saying so.
+   than the code it describes without saying so. *Built under plan section 4.8a:* every CI run says it.
+   `ci/scripts/gpu_verdict.py` reads the newest conformance artifact and counts the commits since it that changed
+   the GPU path -- the package and every test file the tiers run -- and puts the verdict, its date and device and
+   that count in the run's summary, with a warning when the count is not zero or the history cannot reach the
+   verdict. The conformance report now records the commit it ran at, so the count is exact from the next GPU run
+   on; until then it counts from the artifact's time. Its first run said the GPU verdict of 2026-10-09 is 80
+   GPU-path commits old. The GPU job waits for a runner with a card.
 10. **Build and test what stays in C++.** No CI tier builds the C++ tests, and the CUDA utilities carry an
     architecture workaround. Done when the kept C++ tests run in a tier.
 11. **One environment definition.** `dependencies.yaml` and the CPU lock disagree on channels and pins. Generate the
@@ -545,7 +552,15 @@ that replaces it. Each item says how to know it is done.
     model inventory page, and the docs build, Vale and lint in the fork's CI. Done when a pull request that breaks the
     docs build fails CI.
 15. **A throughput baseline.** No benchmark measures the telemetry and lineage stages. Done when a benchmark tier
-    records rows per second per stage and a change that halves it is visible.
+    records rows per second per stage and a change that halves it is visible. *Built under plan section 4.8a:*
+    `ci/scripts/stage_throughput.py` runs every segment runner over its samples three times, times each telemetry
+    and lineage stage's `on_data` (each layer 3 to 7 stage as itself, though it inherits the method), and keeps the
+    fastest. A fixed pandas workload is timed in the same run, and throughput is rows per second times its
+    seconds, so it moves with the stage and not with the runner. `fork-cpu.yaml` runs it after the tiers and puts
+    the table in the run's summary; a stage measured for at least 10 ms that falls below half of
+    `ci/artifacts/stage_throughput_baseline.json` is a warning. Two runs here differed by at most a quarter, so a
+    halving stands well clear of the noise. It warns rather than fails, because a slower runner is not a slower
+    stage, and normalizing is an estimate.
 16. **Keep the fork's CI on.** No fork CI run was recorded from 2026-10-12 to 2026-10-24, because Actions was disabled
     for the repository, and the pull requests merged in that time were not checked by CI. Actions was re-enabled on
     2026-10-24 and the CPU tiers ran again on the audit branch. Done when every pull request shows a CPU tier result.

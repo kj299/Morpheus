@@ -73,7 +73,7 @@ def _artifact(root, at, commit=None, verdict="passed"):
         report["commit"] = commit
 
     (root / "ci" / "artifacts" / "gpu_conformance-2026-10-02T0000Z.json").write_text(json.dumps(report),
-                                                                                       encoding="utf-8")
+                                                                                     encoding="utf-8")
 
 
 def _commit(root, path, when):
@@ -85,9 +85,8 @@ def _commit(root, path, when):
 def test_the_gpu_path_is_the_package_and_the_tiers_test_files(tmp_path):
     root = _repository(tmp_path)
 
-    assert gpu_verdict.gpu_path(str(root)) == [
-        "python/morpheus/morpheus", "ci/scripts/gpu_conformance.sh", "tests/test_a.py"
-    ]
+    assert gpu_verdict.gpu_path(
+        str(root)) == ["python/morpheus/morpheus", "ci/scripts/gpu_conformance.sh", "tests/test_a.py"]
 
 
 def test_a_verdict_no_gpu_path_commit_follows_describes_the_code(tmp_path):
@@ -111,8 +110,8 @@ def test_a_gpu_path_commit_after_the_verdict_is_named(tmp_path):
     verdict = gpu_verdict.read(str(root))
     (summary, warning) = gpu_verdict.render(verdict)
 
-    assert [line.split(" ", 1)[1] for line in verdict.changed] == ["change tests/test_a.py",
-                                                                   "change python/morpheus/morpheus/stage.py"]
+    assert [line.split(" ", 1)[1]
+            for line in verdict.changed] == ["change tests/test_a.py", "change python/morpheus/morpheus/stage.py"]
     assert "2 commits since have changed the GPU path" in summary
     assert "unverified" in warning
 

@@ -80,8 +80,8 @@ def calibrate(repeats: int = 5) -> float:
     return best
 
 
-def measured_classes() -> list[type]:
-    """Every class in the measured packages that defines its own `on_data`."""
+def stage_classes() -> list[type]:
+    """Every class the measured packages define that has an `on_data`, its own or inherited."""
     classes = []
 
     for package_name in MEASURED_PACKAGES:
@@ -91,10 +91,15 @@ def measured_classes() -> list[type]:
             module = importlib.import_module(f"{package_name}.{info.name}")
 
             for value in vars(module).values():
-                if (isinstance(value, type) and value.__module__ == module.__name__ and "on_data" in vars(value)):
+                if (isinstance(value, type) and value.__module__ == module.__name__ and hasattr(value, "on_data")):
                     classes.append(value)
 
     return sorted(classes, key=lambda cls: cls.__name__)
+
+
+def measured_classes() -> list[type]:
+    """The stage classes that define `on_data` themselves: the ones whose method is wrapped."""
+    return [cls for cls in stage_classes() if "on_data" in vars(cls)]
 
 
 def rows_in(message: typing.Any) -> int:
@@ -237,7 +242,7 @@ def render(current: dict, comparison: typing.Optional[dict]) -> str:
 
     if (comparison is not None):
         for (label, names) in (("New since the baseline", comparison["new"]), ("Gone since the baseline",
-                                                                                comparison["gone"])):
+                                                                               comparison["gone"])):
             if (names):
                 lines += ["", f"{label}: " + ", ".join(f"`{name}`" for name in names)]
 
@@ -256,10 +261,10 @@ def main(argv: typing.Optional[list] = None) -> int:
     root = pathlib.Path(arguments.root)
     unit = calibrate()
     current = {
-        "unit_seconds": unit,
-        "stages": throughput(measure(root / "examples" / "behavioral_analytics", arguments.segments,
-                                     arguments.repeats),
-                             unit)
+        "unit_seconds":
+            unit,
+        "stages":
+            throughput(measure(root / "examples" / "behavioral_analytics", arguments.segments, arguments.repeats), unit)
     }
 
     for path in [arguments.output] + ([str(root / BASELINE)] if arguments.write else []):

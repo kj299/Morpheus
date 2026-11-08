@@ -26,10 +26,6 @@ import json
 import os
 import time
 
-import pandas as pd
-
-from morpheus.messages import MessageMeta
-
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 MODULE_PATH = os.path.join(REPO_ROOT, "ci", "scripts", "stage_throughput.py")
 
@@ -43,6 +39,12 @@ def _load():
 
 
 stage_throughput = _load()
+
+
+class _Message:
+    """What the benchmark reads of a message: its row count, as a `MessageMeta` gives it."""
+
+    count = 5
 
 
 class _Base:
@@ -63,7 +65,7 @@ class _Overrides(_Base):
 
 
 def test_a_stage_is_measured_as_itself_and_a_call_to_its_base_once():
-    message = MessageMeta(pd.DataFrame({"a": range(5)}))
+    message = _Message()
     original = vars(_Base)["on_data"]
     totals: dict = {}
 
@@ -71,7 +73,10 @@ def test_a_stage_is_measured_as_itself_and_a_call_to_its_base_once():
         _Inherits().on_data(message)
         _Overrides().on_data(message)
 
-    assert {name: (entry["rows"], entry["calls"]) for (name, entry) in totals.items()} == {
+    assert {
+        name: (entry["rows"], entry["calls"])
+        for (name, entry) in totals.items()
+    } == {
         "_Inherits": (5, 1), "_Overrides": (5, 1)
     }
     assert vars(_Base)["on_data"] is original
@@ -127,9 +132,9 @@ def test_the_baseline_names_every_stage_the_segments_run():
     with open(os.path.join(REPO_ROOT, stage_throughput.BASELINE), encoding="utf-8") as handle:
         baseline = json.load(handle)
 
-    measured = {cls.__name__ for cls in stage_throughput.measured_classes()}
+    measured = {cls.__name__ for cls in stage_throughput.stage_classes()}
 
     assert baseline["unit_seconds"] > 0
     assert set(baseline["stages"]) <= measured
-    assert {"LineageStampStage", "EnvelopeStampStage", "TC1NormalizeStage", "TC3BaselineStage"} <= set(
-        baseline["stages"])
+    assert {"LineageStampStage", "EnvelopeStampStage", "TC1NormalizeStage",
+            "TC3BaselineStage"} <= set(baseline["stages"])
