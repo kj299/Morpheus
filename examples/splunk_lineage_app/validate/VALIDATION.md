@@ -141,13 +141,20 @@ counts` returns its five classes. Every risk record carries the `thresholds_hash
 over `behavior_risk` after the run found all 242 equal to their rule's entry in `rule_metadata`, over the sixty rules
 that fired.
 
-The seventeenth, `search_head_results.json` beside this file, was made on 2026-11-01 on the same install, its indexes
+The seventeenth, kept in `search_head_runs/` too, was made on 2026-11-01 on the same install, its indexes
 and KV store emptied first so that nothing the sixteenth indexed was counted again, over the events regenerated for
 plan section 4.1, which give the HTTP class its request bodies and R-B-L7-003 the leaker to find. It returned what is
 written for all eighty-seven over 25,639 indexed events, and the detections wrote 245 risk records, so the run checks
 that the index holds exactly those rows -- 245 -- before the searches that read them run. R-B-L7-003 returns the
 leaker's three bodies, a government identifier, a password and a cloud key, and not the ordinary client's three
 forms; the summary grew by the six requests, to 9036 rows.
+
+The eighteenth, `search_head_results.json` beside this file, was made on 2026-11-08 on the same install, its indexes
+and KV store emptied first, over the events regenerated for plan section 4.7a, which give every input class one
+envelope convention and so give every record a new lineage identifier. It returned what is written for all
+eighty-seven over 25,639 indexed events, and the detections wrote 245 risk records, the same rows on the same chains:
+the tapped desk's chain still sums to 135 and the flooding host's to 55. It is the first run whose runner read the
+app's `.conf` files through `splunk_conf` mounted on its own, since Splunk's interpreter has no Morpheus.
 
 ## Running it
 
