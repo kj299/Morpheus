@@ -391,7 +391,9 @@ def _network_record(kind: str, valid_from_ns: int, recorded_ns: int, **values) -
 
 
 def _build_network_context() -> pd.DataFrame:
-    """The network inventory: every recorded port at its commissioning level, every device and both VLANs.
+    """The network inventory: every device, both VLANs and every recorded port at its commissioning level.
+
+    A device is recorded before its ports, as an inventory has to record what a port belongs to before the port.
 
     The replaced optic on `MAINTENANCE_PORT` was recommissioned when it went in, at the level it was measured at,
     which is a second version of the port's record from the minute of the swap. The substituted optic on
@@ -399,6 +401,28 @@ def _build_network_context() -> pd.DataFrame:
     """
     commissioned = INVENTORY_RECORDED_NS
     rows = []
+
+    for device in DEVICES:
+        rows.append(
+            _network_record(DEVICE_KIND,
+                            commissioned,
+                            commissioned,
+                            device_id=device,
+                            device_role=DEVICE_ROLES[device],
+                            owner="netops",
+                            owning_team="network-engineering",
+                            criticality="high" if device == ROUTER else "medium"))
+
+    for (vlan, designation) in sorted(VLAN_DESIGNATIONS.items()):
+        rows.append(
+            _network_record(VLAN_KIND,
+                            commissioned,
+                            commissioned,
+                            vlan_id=vlan,
+                            designation=designation,
+                            owner="facilities" if designation == "cameras" else "it-desktop",
+                            criticality="medium"))
+
     ports = [(SWITCH, port) for port in PORTS + [MAINTENANCE_PORT]]
     ports += [(SWITCH, port) for port in (FLAPPER_PORT, ERROR_PORT, VOLUME_PORT, REPATCH_PORT, INLINE_PORT)]
     ports += [(REBOOTING_SWITCH, port) for port in REBOOT_PORTS]
@@ -427,27 +451,6 @@ def _build_network_context() -> pd.DataFrame:
                         designation="access",
                         owner="netops",
                         criticality="medium"))
-
-    for device in DEVICES:
-        rows.append(
-            _network_record(DEVICE_KIND,
-                            commissioned,
-                            commissioned,
-                            device_id=device,
-                            device_role=DEVICE_ROLES[device],
-                            owner="netops",
-                            owning_team="network-engineering",
-                            criticality="high" if device == ROUTER else "medium"))
-
-    for (vlan, designation) in sorted(VLAN_DESIGNATIONS.items()):
-        rows.append(
-            _network_record(VLAN_KIND,
-                            commissioned,
-                            commissioned,
-                            vlan_id=vlan,
-                            designation=designation,
-                            owner="facilities" if designation == "cameras" else "it-desktop",
-                            criticality="medium"))
 
     frame = pd.DataFrame(rows)
     frame[bitemporal.VALID_TO] = frame[bitemporal.VALID_TO].astype("Int64")

@@ -19,8 +19,9 @@ the samples.
 
 `examples/behavioral_analytics/fixtures/make_fixtures.py` renders the samples of every class in its `CLASSES` as
 the feeds write them -- IPFIX in a packet capture, Entra ID sign-in records, Zeek `ssl.log`/`x509.log`, `http.log` and
-`dns.log`, unified audit log records, Sysmon events, Telegraf's SNMP metrics and MAC notification traps, an ARP
-capture and FreeRADIUS detail files -- carrying only what each format carries. Reading them back through
+`dns.log`, unified audit log records, Sysmon events, Telegraf's SNMP metrics and MAC notification traps, ARP and TCP
+captures, FreeRADIUS detail files, a Kea lease log, osquery results, Zeek `conn.log`, a Workday report, Entra ID's
+audit log, ServiceNow's CMDB history and NetBox's changelog -- carrying only what each format carries. Reading them back through
 `FlowRecordNormalizeStage` and the `collector_schemas` schemas has to give the samples column for column, except
 what a format cannot carry, which is named here and has to be null rather than invented.
 """
@@ -57,9 +58,17 @@ import make_fixtures  # noqa: E402
 NOT_IN_THE_FORMAT = {
     "tc6": ("content_type_declared", "content_type_detected"),
     "tc1_device": ("running_config_hash", "syslog_rate"),
+    "tc0_asset": ("valid_from", ),
+    "tc0_application": ("valid_from", ),
+    "tc0_network": ("valid_from", ),
 }
 """Columns a format cannot carry: what an inspecting proxy saw inside a TLS session is not in Zeek's logs, and no
-MIB a switch answers holds a hash of its configuration or the rate of its syslog."""
+MIB a switch answers holds a hash of its configuration or the rate of its syslog, and a CMDB's history and NetBox's
+changelog keep when a change was entered, not when it took effect."""
+
+NOT_IN_THE_FORMAT_WHERE = {"tc0_identity": ("group_name", ("valid_from", "valid_to"))}
+"""Columns a format cannot carry on some of a class's records, named by the column that marks them: a group
+membership comes from the directory's audit log, which says when it was made and not when it held."""
 
 NUMBERED_BY_THE_READER = {"tc2_arp"}
 """Classes whose format numbers nothing, so `collector_seq` is the reader's count in file order: a capture does not
@@ -103,15 +112,17 @@ def test_a_normalized_fixture_is_its_sample(telemetry_class: str, normalized: di
     segment = make_fixtures.CLASSES[telemetry_class][0]
     sample = [
         row for row in make_fixtures.sample(segment, telemetry_class)
-        if row["collector_id"] not in OTHER_FEEDS.get(telemetry_class, ())
+        if row.get("collector_id") not in OTHER_FEEDS.get(telemetry_class, ())
     ]
     columns = list(sample[0])
     frame = normalized[telemetry_class]
     missing = NOT_IN_THE_FORMAT.get(telemetry_class, ())
+    (marker, missing_where) = NOT_IN_THE_FORMAT_WHERE.get(telemetry_class, (None, ()))
+    marked = [marker is not None and row.get(marker) is not None for row in sample]
     expected = [{
-        column: (None if column in missing else _plain(row.get(column)))
+        column: (None if column in missing or (is_marked and column in missing_where) else _plain(row.get(column)))
         for column in columns
-    } for row in sample]
+    } for (row, is_marked) in zip(sample, marked)]
 
     if (telemetry_class in NUMBERED_BY_THE_READER):
         first = make_fixtures.PROFILES[telemetry_class].first_seq
@@ -130,17 +141,23 @@ def test_a_normalized_fixture_is_its_sample(telemetry_class: str, normalized: di
         assert frame[column].isna().all()
         assert any(row[column] is not None for row in sample), column
 
+    for column in missing_where:
+        assert frame[column][marked].isna().all()
+        assert any(row[column] is not None for (row, is_marked) in zip(sample, marked) if is_marked), column
+
 
 def test_every_class_column_the_contract_names_is_written(normalized: dict):
     with open(os.path.join(EXAMPLE, "input_contracts.json"), encoding="utf-8") as handle:
         contract = json.load(handle)
 
-    envelope = [column["name"] for column in contract["envelope"]]
+    envelope = {column["name"] for column in contract["envelope"]}
 
     for (telemetry_class, frame) in normalized.items():
         named = [column["name"] for column in contract["classes"][telemetry_class]["columns"]]
 
-        assert set(frame.columns) == set(named) | set(envelope), telemetry_class
+        enveloped = envelope if contract["classes"][telemetry_class]["envelope"] else set()
+
+        assert set(frame.columns) == set(named) | enveloped, telemetry_class
 
 
 def test_the_query_string_is_stripped_and_vocabulary_mapped(normalized: dict):
@@ -539,10 +556,285 @@ def test_the_arp_reader_takes_a_tagged_frame_and_skips_what_is_not_arp(tmp_path)
     }]
 
 
+def test_only_a_client_syn_with_options_is_fingerprinted(tmp_path):
+
+    def frame(flags: int, options: bytes, protocol: int = 6) -> bytes:
+        transport = (struct.pack("!HHIIBBHHH", 1000, 443, 0, 0, (20 + len(options)) // 4 << 4, flags, 512, 0, 0) +
+                     options if protocol == 6 else struct.pack("!HHHH", 1000, 53, 12, 0) + b"abcd")
+        ip = struct.pack("!BBHHHBBH4s4s",
+                         0x45,
+                         0,
+                         20 + len(transport),
+                         0,
+                         0,
+                         64,
+                         protocol,
+                         0,
+                         bytes([10, 0, 0, 1]),
+                         bytes([10, 0, 0, 2]))
+        return bytes(12) + b"\x08\x00" + ip + transport
+
+    mss = b"\x02\x04\x05\xb4"
+    ipfix.write_frames(str(tmp_path / "p.pcap"),
+                       [(1000, frame(0x02, mss)), (2000, frame(0x12, mss)), (3000, frame(0x02, b"")),
+                        (4000, frame(0, b"", protocol=17))])
+
+    rows = _records(collector_schemas.packets(str(tmp_path / "p.pcap"), CollectorProfile("c", "tc4.v1", "corp")),
+                    ["protocol", "tcp_flags", "data_len", "tcp_options_order", "tcp_mss", "tcp_window_initial"])
+
+    assert rows == [
+        {
+            "protocol": "tcp",
+            "tcp_flags": 2,
+            "data_len": 0,
+            "tcp_options_order": "mss",
+            "tcp_mss": 1460,
+            "tcp_window_initial": 512
+        },
+        {
+            "protocol": "tcp",
+            "tcp_flags": 18,
+            "data_len": 0,
+            "tcp_options_order": None,
+            "tcp_mss": None,
+            "tcp_window_initial": None
+        },
+        {
+            "protocol": "tcp",
+            "tcp_flags": 2,
+            "data_len": 0,
+            "tcp_options_order": None,
+            "tcp_mss": None,
+            "tcp_window_initial": None
+        },
+        {
+            "protocol": "udp",
+            "tcp_flags": None,
+            "data_len": 4,
+            "tcp_options_order": None,
+            "tcp_mss": None,
+            "tcp_window_initial": None
+        },
+    ]
+
+
+def test_a_kea_release_is_read_and_its_other_lines_are_not(tmp_path):
+    path = tmp_path / "kea.log"
+    path.write_text(
+        "1970-01-01 00:00:01.500 INFO  [kea-dhcp4.dhcp4/1.2] DHCP4_STARTED Kea DHCPv4 server version 2.6.1 started\n"
+        "1970-01-01 00:00:02.000 INFO  [kea-dhcp4.leases/1.2] DHCP4_LEASE_ALLOC [hwtype=1 aa:bb:cc:00:00:01], "
+        "cid=[no info], tid=0x1: lease 10.0.0.5 has been allocated for 3600 seconds\n"
+        "1970-01-01 00:00:09.250 INFO  [kea-dhcp4.leases/1.2] DHCP4_RELEASE [hwtype=1 aa:bb:cc:00:00:01], "
+        "cid=[no info], tid=0x2: address 10.0.0.5 was released properly.\n",
+        encoding="utf-8")
+
+    frame = collector_schemas.kea_leases(str(path), CollectorProfile("c", "tc3_dhcp.v1", "corp"))
+
+    assert _records(frame, ["event_time", "ip", "dhcp_message", "lease_seconds"]) == [
+        {
+            "event_time": 2 * 10**9, "ip": "10.0.0.5", "dhcp_message": "ack", "lease_seconds": 3600
+        },
+        {
+            "event_time": 9_250_000_000, "ip": "10.0.0.5", "dhcp_message": "release", "lease_seconds": None
+        },
+    ]
+
+
+def test_osquery_s_added_rows_are_reports_and_its_removed_rows_are_not(tmp_path):
+    lines = [{
+        "action": "added", "hostIdentifier": "WS-1", "unixTime": 5, "columns": {
+            "interface": "en0", "mac": "m1"
+        }
+    }, {
+        "action": "removed", "hostIdentifier": "WS-1", "unixTime": 6, "columns": {
+            "interface": "en0", "mac": "m1"
+        }
+    }]
+    (tmp_path / "results.log").write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+    frame = collector_schemas.osquery_inventory(str(tmp_path / "results.log"),
+                                                CollectorProfile("c", "tc7_host_inventory.v1", "corp"),
+                                                60)
+
+    assert _records(frame, ["event_time", "mac", "hostname", "report_valid_seconds"]) == [{
+        "event_time": 5 * 10**9, "mac": "m1", "hostname": "WS-1", "report_valid_seconds": 60
+    }]
+
+
+def test_a_connection_with_no_handshake_is_not_a_service_record():
+    conn = pd.DataFrame({"uid": ["C1", "C2"], "orig_bytes": [1, 2], "resp_bytes": [3, 4]})
+    ssl = pd.DataFrame({"uid": ["C2"], "server_name": ["a.example"], "ja4": ["t13"]})
+
+    joined = collector_schemas.join_conn_ssl(conn, ssl)
+
+    assert (joined["uid"].tolist(), joined["server_name"].tolist()) == (["C2"], ["a.example"])
+
+
+def test_a_cmdb_version_is_one_checkpoint_and_a_retirement_retracts_it():
+    audit = [{
+        "tablename": "cmdb_ci_server",
+        "documentkey": "d",
+        "fieldname": name,
+        "newvalue": value,
+        "record_checkpoint": checkpoint,
+        "sys_created_on": when
+    } for (name, value, checkpoint, when) in [("name", "db", "0", "1970-01-01 00:00:01"), (
+        "assigned_to", "u-gone", "0", "1970-01-01 00:00:01"), ("os", "Linux", "1", "1970-01-01 00:00:05"),
+                                              ("install_status", "7", "2", "1970-01-01 00:00:09")]] + [{
+                                                  "tablename": "cmdb_ci_appl",
+                                                  "documentkey": "a",
+                                                  "fieldname": "name",
+                                                  "newvalue": "app",
+                                                  "record_checkpoint": "0",
+                                                  "sys_created_on": "1970-01-01 00:00:02"
+                                              }]
+
+    frame = collector_schemas.normalize(collector_schemas.fold_cmdb_audit(audit, [], [], ["cmdb_ci_server"]),
+                                        collector_schemas.servicenow_asset_schema("corp"))
+
+    assert _records(frame, ["source_seq", "hostname", "owner", "os_family", "recorded_at", "change"]) == [
+        {
+            "source_seq": 0,
+            "hostname": "db",
+            "owner": None,
+            "os_family": None,
+            "recorded_at": 10**9,
+            "change": "assert"
+        },
+        {
+            "source_seq": 1,
+            "hostname": "db",
+            "owner": None,
+            "os_family": "linux",
+            "recorded_at": 5 * 10**9,
+            "change": "assert"
+        },
+        {
+            "source_seq": 2,
+            "hostname": "db",
+            "owner": None,
+            "os_family": "linux",
+            "recorded_at": 9 * 10**9,
+            "change": "retract"
+        },
+    ]
+
+
+def test_a_deleted_netbox_interface_retracts_what_it_was_and_takes_its_device_s_owner():
+
+    def change(action: str, kind: str, identifier: int, data: dict) -> dict:
+        return {
+            "time": "1970-01-01T00:00:01.000000Z",
+            "action": {
+                "value": action
+            },
+            "changed_object_type": kind,
+            "changed_object_id": identifier,
+            "prechange_data": data if action == "delete" else None,
+            "postchange_data": None if action == "delete" else data
+        }
+
+    port = {"name": "Gi1/0/1", "device": 1, "description": "access", "custom_fields": {"criticality": "low"}}
+    changes = [
+        change("create", "dcim.site", 1, {"slug": "lab"}),
+        change("create", "tenancy.tenant", 1, {"slug": "ops"}),
+        change("create", "dcim.device", 1, {
+            "name": "sw9", "site": 1, "tenant": 1
+        }),
+        change("create", "dcim.interface", 1, port),
+        change("delete", "dcim.interface", 1, port)
+    ]
+
+    frame = collector_schemas.normalize(collector_schemas.fold_netbox_changes(changes),
+                                        collector_schemas.netbox_network_schema("corp"))
+
+    assert _records(frame, ["object_kind", "site_id", "device_id", "port_id", "owner", "change"])[1:] == [
+        {
+            "object_kind": "port",
+            "site_id": "lab",
+            "device_id": "sw9",
+            "port_id": "Gi1/0/1",
+            "owner": "ops",
+            "change": "assert"
+        },
+        {
+            "object_kind": "port",
+            "site_id": "lab",
+            "device_id": "sw9",
+            "port_id": "Gi1/0/1",
+            "owner": "ops",
+            "change": "retract"
+        },
+    ]
+
+
+def test_identity_is_ordered_by_entry_hr_first_and_an_unentered_change_last():
+    workers = [{
+        "Worker_Email": "B@example.com", "Effective_Moment": "1970-01-01T00:00:00.000Z", "Worker_Status": "Active"
+    },
+               {
+                   "Worker_Email": "a@example.com",
+                   "Effective_Moment": "1970-01-01T00:00:00.000Z",
+                   "Entry_Moment": "1970-01-01T00:00:10.000Z",
+                   "Worker_Type": "Contingent Worker",
+                   "Worker_Status": "Active",
+                   "Business_Process_Type": "End Contingent Worker Contract"
+               }]
+    audit = [{
+        "activityDisplayName":
+            "Remove member from group",
+        "result":
+            "success",
+        "activityDateTime":
+            "1970-01-01T00:00:10Z",
+        "targetResources": [{
+            "type": "User",
+            "userPrincipalName": "a@example.com",
+            "modifiedProperties": [{
+                "displayName": "Group.DisplayName", "oldValue": "\"eng\"", "newValue": None
+            }]
+        }]
+    },
+             {
+                 "activityDisplayName": "Update user",
+                 "result": "success",
+                 "activityDateTime": "1970-01-01T00:00:01Z",
+                 "targetResources": []
+             }]
+
+    frame = collector_schemas.normalize(collector_schemas.merge_identity(workers, audit),
+                                        collector_schemas.workday_entra_identity_schema("corp"))
+
+    assert _records(frame, ["user_principal", "employment_status", "group_name", "recorded_at", "change"]) == [
+        {
+            "user_principal": "a@example.com",
+            "employment_status": "contractor",
+            "group_name": None,
+            "recorded_at": 10**10,
+            "change": "retract"
+        },
+        {
+            "user_principal": "a@example.com",
+            "employment_status": None,
+            "group_name": "eng",
+            "recorded_at": 10**10,
+            "change": "retract"
+        },
+        {
+            "user_principal": "b@example.com",
+            "employment_status": "active",
+            "group_name": None,
+            "recorded_at": None,
+            "change": "assert"
+        },
+    ]
+
+
 SEGMENT_CHECKS = {
-    "network": ["tc3"],
+    "network": ["tc3", "tc3_dhcp", "tc7_host_inventory"],
+    "transport": ["tc4"],
     "session": ["tc5_auth"],
-    "application": ["tc7_http", "tc7_dns"],
+    "application": ["tc7_http", "tc7_dns", "tc7_service"],
     "saas": ["tc7_saas"],
     "endpoint": ["tc7_endpoint"],
 }

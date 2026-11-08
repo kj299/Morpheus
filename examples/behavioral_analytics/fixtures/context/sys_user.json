@@ -1,0 +1,24 @@
+{
+ "result": [
+  {
+   "sys_id": "4cdc6eaab5bc5634a1f8ab0e713b365b",
+   "user_name": "grace",
+   "email": "grace@example.com"
+  },
+  {
+   "sys_id": "26437bf8df6c5a9db4dc92af27386c00",
+   "user_name": "frank",
+   "email": "frank@example.com"
+  },
+  {
+   "sys_id": "3cc3bb998ce95f8bbe05fa78d8739bca",
+   "user_name": "alice",
+   "email": "alice@example.com"
+  },
+  {
+   "sys_id": "20e280e366e157a7a0a7b96b2ebf32df",
+   "user_name": "bob",
+   "email": "bob@example.com"
+  }
+ ]
+}

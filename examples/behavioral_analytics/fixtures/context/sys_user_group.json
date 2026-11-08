@@ -1,0 +1,24 @@
+{
+ "result": [
+  {
+   "sys_id": "72b7525ecc6f5cf7b6d4fd98a4cd2d98",
+   "name": "eng-platform"
+  },
+  {
+   "sys_id": "8854af9b8db95841a2d25128a84e4b0f",
+   "name": "finance-it"
+  },
+  {
+   "sys_id": "48e5aa3239205293a1acc685cef04feb",
+   "name": "eng-it"
+  },
+  {
+   "sys_id": "081fdf0716c55419b9e6249946dfde96",
+   "name": "finance-apps"
+  },
+  {
+   "sys_id": "ba89ea378bca5886b271f9e253c06b6e",
+   "name": "analytics"
+  }
+ ]
+}

@@ -20,8 +20,10 @@ Each fixture is the same records as `../samples/<segment>/<class>.jsonlines`, wr
 them: a packet capture of IPFIX from three routers, Entra ID sign-in records as Azure Monitor exports them, Zeek
 `ssl.log` and `x509.log`, `http.log` and `dns.log`, unified audit log records, Sysmon events as `wevtutil`
 renders them, what two Telegraf SNMP pollers write of their ports and devices, a forwarding-table walk with its
-MAC notification traps, a capture of ARP packets, and FreeRADIUS detail files of 802.1X exchanges and of VPN
-accounting. Only what the format carries is written; a collector's own facts are the `PROFILES` below.
+MAC notification traps, a capture of ARP packets, FreeRADIUS detail files of 802.1X exchanges and of VPN
+accounting, a capture of TCP packets, a Kea lease log, osquery's interface results, Zeek `conn.log` beside
+`ssl.log`, a Workday worker report with Entra ID's audit log, ServiceNow's CMDB audit history and NetBox's
+changelog. Only what the format carries is written; a collector's own facts are the `PROFILES` below.
 `normalize_all()` reads them back with `FlowRecordNormalizeStage` and the schemas in
 `morpheus.utils.collector_schemas`, and `tests/morpheus/utils/test_collector_schemas.py` holds the result to the
 samples, and the segments run over it to what they write from the samples.
@@ -72,6 +74,10 @@ PROFILES = {
     "tc2_arp": CollectorProfile("arp-sensor", "tc2_arp.v1", "corp", "ntp_disciplined", 16, first_seq=1),
     "tc2_auth": CollectorProfile("radius", "tc2_auth.v1", "corp", "ntp_disciplined", 0, first_seq=1),
     "tc5_session": CollectorProfile("radius-accounting", "tc5_session.v1", "corp", "ntp_disciplined", -3, first_seq=1),
+    "tc4": CollectorProfile("pcap-01", "tc4.v1", "corp", "ptp", 12),
+    "tc3_dhcp": CollectorProfile("dhcp-01", "tc3_dhcp.v1", "corp", "ntp_disciplined", -10),
+    "tc7_host_inventory": CollectorProfile("edr-inventory", "tc7_host_inventory.v1", "corp", "ntp_disciplined", -9),
+    "tc7_service": CollectorProfile("lb-01", "tc7_service.v1", "corp", "ntp_disciplined", 19),
 }
 """What each collector says about itself, which its records do not."""
 
@@ -93,6 +99,14 @@ CLASSES = {
     "tc2_arp": ("telemetry", ["arp.pcap"]),
     "tc2_auth": ("telemetry", ["radius-auth.detail"]),
     "tc5_session": ("session", ["radius-acct.detail"]),
+    "tc4": ("transport", ["tc4.pcap"]),
+    "tc3_dhcp": ("network", ["kea-dhcp4.log"]),
+    "tc7_host_inventory": ("network", ["osqueryd.results.log"]),
+    "tc7_service": ("application", ["conn.log", "ssl.log"]),
+    "tc0_identity": ("context", ["workday-workers.json", "entra-audit.jsonlines"]),
+    "tc0_asset": ("context", ["sys_audit.json", "sys_user.json", "sys_user_group.json"]),
+    "tc0_application": ("context", ["sys_audit.json", "sys_user.json", "sys_user_group.json"]),
+    "tc0_network": ("telemetry", ["netbox-changelog.json"]),
 }
 """Each class's segment and the files its fixture is."""
 
@@ -972,6 +986,537 @@ def write_radius_accounting(directory: str):
         handle.write("".join(entries))
 
 
+TCP_OPTION_BYTES = {"nop": b"\x01", "sok": b"\x04\x02", "ts": b"\x08\x0a" + bytes(8)}
+"""The options a stack's SYN carries that hold no value the corpus names; `mss` and `ws` are written with theirs."""
+
+WINDOW_SCALE = 8
+CRAFTED_SYN_WINDOW = 1024
+"""The window a scanner's raw socket writes into a SYN it crafts without options."""
+
+ESTABLISHED_WINDOW = 502
+"""The scaled window every packet after the handshake carries."""
+
+DHCP_SERVER_PID = "1201.139975612345088"
+OSQUERY_INTERFACE = "eth0"
+REPORT_VALID_SECONDS = 90000
+"""How long the inventory's report stands: the deployment's schedule, which osquery's results do not carry."""
+
+CONN_FIELDS = [("ts", "time"), ("uid", "string"), ("id.orig_h", "addr"), ("id.orig_p", "port"), ("id.resp_h", "addr"),
+               ("id.resp_p", "port"), ("proto", "enum"), ("service", "string"), ("duration", "interval"),
+               ("orig_bytes", "count"), ("resp_bytes", "count"), ("conn_state", "string"), ("history", "string")]
+SERVICE_SSL_FIELDS = [("ts", "time"), ("uid", "string"), ("id.orig_h", "addr"), ("id.orig_p", "port"),
+                      ("id.resp_h", "addr"), ("id.resp_p", "port"), ("version", "string"), ("server_name", "string"),
+                      ("established", "bool"), ("ja4", "string")]
+
+
+def _tcp_options(order: str, mss: int) -> bytes:
+    options = b""
+
+    for name in order.split(","):
+        if (name == "mss"):
+            options += b"\x02\x04" + mss.to_bytes(2, "big")
+        elif (name == "ws"):
+            options += b"\x03\x03" + bytes([WINDOW_SCALE])
+        else:
+            options += TCP_OPTION_BYTES[name]
+
+    if (len(options) % 4 != 0):
+        raise ValueError(f"the options {order} are not a whole number of 32-bit words")
+
+    return options
+
+
+def write_packets(directory: str):
+    """
+    `tc4.pcap`: every packet the capture point saw, as Ethernet frames of IPv4 and TCP.
+
+    A SYN a stack sent carries the stack's options, MSS and window; a SYN crafted without options carries a raw
+    socket's window; every other packet the established window. The payload is zeros of the sample's length.
+    """
+    frames = []
+
+    for row in sample("transport", "tc4"):
+        if (row["protocol"] != "tcp"):
+            raise ValueError(f"{row['origin_hash']} is not TCP")
+
+        options = b"" if row["tcp_options_order"] is None else _tcp_options(row["tcp_options_order"], row["tcp_mss"])
+        window = row["tcp_window_initial"] if row["tcp_window_initial"] is not None else (
+            CRAFTED_SYN_WINDOW if row["tcp_flags"] & collector_schemas.TCP_SYN else ESTABLISHED_WINDOW)
+        sequence = int(_digest("seq", row["collector_seq"], length=8), 16)
+        tcp = struct.pack("!HHIIBBHHH",
+                          row["src_port"],
+                          row["dst_port"],
+                          sequence,
+                          0, (20 + len(options)) // 4 << 4,
+                          row["tcp_flags"],
+                          window,
+                          0,
+                          0) + options
+        payload = bytes(row["data_len"])
+        ip = struct.pack("!BBHHHBBH4s4s",
+                         0x45,
+                         0,
+                         20 + len(tcp) + len(payload),
+                         row["collector_seq"] & 0xFFFF,
+                         0,
+                         64,
+                         6,
+                         0,
+                         ipaddress.IPv4Address(row["src_ip"]).packed,
+                         ipaddress.IPv4Address(row["dst_ip"]).packed)
+
+        if (row["event_time"] % 1000 != 0):
+            raise ValueError("a capture's timestamp carries microseconds")
+
+        frames.append((row["event_time"],
+                       b"\x02\x00\x00\x00\x00\x02\x02\x00\x00\x00\x00\x01" + ipfix.ETHERTYPE_IPV4.to_bytes(2, "big") +
+                       ip + tcp + payload))
+
+    ipfix.write_frames(os.path.join(directory, "tc4.pcap"), frames)
+
+
+def _kea_time(when_ns: int) -> str:
+    if (when_ns % 1_000_000 != 0):
+        raise ValueError("Kea's log writes the time to the millisecond")
+
+    stamp = pd.Timestamp(when_ns, unit="ns", tz="UTC")
+
+    return stamp.strftime("%Y-%m-%d %H:%M:%S.") + f"{stamp.microsecond // 1000:03d}"
+
+
+def write_kea(directory: str):
+    """`kea-dhcp4.log`: the leases the DHCP server granted, as Kea's `kea-dhcp4.leases` logger writes them."""
+    lines = []
+
+    for row in sample("network", "tc3_dhcp"):
+        if (row["dhcp_message"] != "ack" or row.get("switch_id") is not None):
+            raise ValueError(f"{row['origin_hash']} is not an acknowledgement Kea's lease log can write")
+
+        lines.append(f"{_kea_time(row['event_time'])} INFO  [kea-dhcp4.leases/{DHCP_SERVER_PID}] DHCP4_LEASE_ALLOC "
+                     f"[hwtype=1 {row['mac']}], cid=[no info], tid=0x{_digest('tid', row['origin_hash'], length=8)}: "
+                     f"lease {row['ip']} has been allocated for {row['lease_seconds']} seconds")
+
+    with open(os.path.join(directory, "kea-dhcp4.log"), "w", encoding="utf-8") as handle:
+        handle.write("".join(line + "\n" for line in lines))
+
+
+def write_osquery(directory: str):
+    """`osqueryd.results.log`: each agent's `interface_details` snapshot, one result per report."""
+    lines = []
+
+    for (counter, row) in enumerate(sample("network", "tc7_host_inventory")):
+        if (row["report_valid_seconds"] != REPORT_VALID_SECONDS):
+            raise ValueError(f"{row['origin_hash']} stands for another schedule than the deployment's")
+
+        seconds = _poll_seconds(row["event_time"])
+        stamp = pd.Timestamp(seconds, unit="s", tz="UTC")
+        lines.append(
+            json.dumps({
+                "snapshot": [{
+                    "interface": OSQUERY_INTERFACE, "mac": row["mac"], "type": "6", "mtu": "1500", "enabled": "1"
+                }],
+                "action": "snapshot",
+                "name": "pack/inventory/interface_details",
+                "hostIdentifier": row["hostname"],
+                "calendarTime": f"{stamp:%a %b} {stamp.day:2d} {stamp:%H:%M:%S %Y} UTC",
+                "unixTime": seconds,
+                "epoch": 0,
+                "counter": counter,
+                "numerics": False,
+            }))
+
+    with open(os.path.join(directory, "osqueryd.results.log"), "w", encoding="utf-8") as handle:
+        handle.write("".join(line + "\n" for line in lines))
+
+
+def write_service(directory: str):
+    """
+    `conn.log` and `ssl.log`: each connection to a `service` the sensor saw, and its handshake, joined on `uid`.
+
+    The bytes are split between the two directions; the schema adds them back.
+    """
+    (connections, handshakes) = ([], [])
+
+    for row in sample("application", "tc7_service"):
+        uid = "C" + _digest("service", row["origin_hash"])
+        port = _port("service", row["origin_hash"])
+        when = _seconds(row["event_time"])
+        sent = row["bytes_total"] // 4
+        connections.append([
+            when,
+            uid,
+            row["src_ip"],
+            port,
+            row["dst_ip"],
+            row["dst_port"],
+            "tcp",
+            "ssl",
+            "1.000000",
+            sent,
+            row["bytes_total"] - sent,
+            "SF",
+            "ShADadFf"
+        ])
+        handshakes.append([
+            when,
+            uid,
+            row["src_ip"],
+            port,
+            row["dst_ip"],
+            row["dst_port"],
+            "TLSv13",
+            row["sni"],
+            "T",
+            row["ja4_client"]
+        ])
+
+    _zeek_log(os.path.join(directory, "conn.log"), "conn", CONN_FIELDS, connections)
+    _zeek_log(os.path.join(directory, "ssl.log"), "ssl", SERVICE_SSL_FIELDS, handshakes)
+
+
+CONTEXT_TENANT = "corp"
+"""The tenant every context source belongs to: its own configuration, which no record carries."""
+
+CRITICALITY_CHOICES = {value: key for (key, value) in collector_schemas.SERVICENOW_CRITICALITY.items()}
+ASSET_TABLES = {value: key for (key, value) in collector_schemas.SERVICENOW_ASSET_ROLES.items()}
+OPERATING_SYSTEMS = {"linux": "Linux", "windows": "Windows", "macos": "macOS"}
+"""The CMDB's `os` for each family the corpus names; the schema reads the family as `os` lower-cased."""
+
+SERVICENOW_INSTALLED = "1"
+NETBOX_USER = "netbox-sync"
+
+
+def _sys_id(*parts: typing.Any) -> str:
+    return uuid.uuid5(uuid.NAMESPACE_URL, "servicenow:" + ":".join(str(part) for part in parts)).hex
+
+
+def _servicenow_time(when_ns: int) -> str:
+    return pd.Timestamp(_poll_seconds(when_ns), unit="s", tz="UTC").strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _no_effective_time(row: dict, what: str):
+    if (row["valid_to"] is not None):
+        raise ValueError(f"{what} {row['source_seq']} ends at a time {what}'s source cannot write")
+
+
+def write_cmdb(directory: str):
+    """
+    `sys_audit.json`, `sys_user.json` and `sys_user_group.json`: the CMDB's history of its servers, workstations
+    and applications, as ServiceNow's Table API returns it, and the users and groups its references name.
+
+    An item's first version audits every field it was created with; each later one only what changed; a retirement
+    sets `install_status` to retired. The time each change took effect is not written: the CMDB does not keep it.
+    """
+    versions = [("asset", row) for row in sample("context", "tc0_asset")]
+    versions += [("application", row) for row in sample("context", "tc0_application")]
+    versions.sort(key=lambda version: version[1]["recorded_at"])
+    (users, groups, items, audit) = ({}, {}, {}, [])
+
+    for (kind, row) in versions:
+        _no_effective_time(row, f"tc0_{kind}")
+        group = groups.setdefault(row["owning_team"], _sys_id("group", row["owning_team"]))
+
+        if (kind == "asset"):
+            (key, table) = (row["hostname"], ASSET_TABLES[row["device_role"]])
+            owner = users.setdefault(row["owner"], _sys_id("user", row["owner"]))
+            fields = {
+                "name": row["hostname"],
+                "assigned_to": owner,
+                "support_group": group,
+                "business_criticality": CRITICALITY_CHOICES[row["criticality"]],
+                "u_data_classification": row["data_classification"],
+                "u_peer_group": row["peer_group"],
+                "os": OPERATING_SYSTEMS[row["os_family"]],
+                "os_version": row["os_version"],
+                "install_status": SERVICENOW_INSTALLED,
+            }
+        else:
+            (key, table) = (row["name"], collector_schemas.SERVICENOW_APPLICATIONS[0])
+            fields = {
+                "name": row["name"],
+                "ip_address": row["server_address"],
+                "tcp_port": str(row["server_port"]),
+                "support_group": group,
+                "u_service_account": row["service_account"],
+                "business_criticality": CRITICALITY_CHOICES[row["criticality"]],
+                "u_data_classification": row["data_classification"],
+                "install_status": SERVICENOW_INSTALLED,
+            }
+
+        if (row["change"] == "retract"):
+            fields["install_status"] = collector_schemas.SERVICENOW_RETIRED
+
+        (checkpoint, previous) = items.get(key, (-1, {}))
+        changed = {name: value for (name, value) in fields.items() if previous.get(name) != value}
+
+        if (not changed):
+            raise ValueError(f"tc0_{kind} {row['source_seq']} changes nothing the CMDB would audit")
+
+        document = _sys_id("ci", table, key)
+
+        for (name, value) in changed.items():
+            audit.append({
+                "sys_id": _sys_id("audit", document, checkpoint + 1, name),
+                "tablename": table,
+                "documentkey": document,
+                "fieldname": name,
+                "oldvalue": previous.get(name, ""),
+                "newvalue": value,
+                "record_checkpoint": str(checkpoint + 1),
+                "sys_created_on": _servicenow_time(row["recorded_at"]),
+                "sys_created_by": "discovery" if checkpoint < 0 else "cmdb-steward",
+            })
+
+        items[key] = (checkpoint + 1, fields)
+
+    tables = {
+        "sys_audit.json": audit,
+        "sys_user.json": [{
+            "sys_id": sys_id, "user_name": email.split("@")[0], "email": email
+        } for (email, sys_id) in users.items()],
+        "sys_user_group.json": [{
+            "sys_id": sys_id, "name": name
+        } for (name, sys_id) in groups.items()],
+    }
+
+    for (name, records) in tables.items():
+        with open(os.path.join(directory, name), "w", encoding="utf-8") as handle:
+            json.dump({"result": records}, handle, indent=1)
+            handle.write("\n")
+
+
+def _netbox_time(when_ns: int) -> str:
+    stamp = pd.Timestamp(when_ns, unit="ns", tz="UTC")
+
+    return stamp.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def write_netbox(directory: str):
+    """
+    `netbox-changelog.json`: NetBox's object changes, oldest first, as `/api/core/object-changes/` returns them.
+
+    The site, the device roles and the tenants are created first, then each device, VLAN and interface the
+    inventory records, an interface that is recorded again as an update. When a change took effect is not written:
+    the changelog does not keep it.
+    """
+    rows = sample("telemetry", "tc0_network")
+    first = min(row["recorded_at"] for row in rows)
+    (results, ids, devices) = ([], {}, {})
+
+    def change(kind: str, key: typing.Any, data: dict, when_ns: int, representation: str):
+        created = (kind, key) not in ids
+        identifier = ids.setdefault((kind, key), sum(1 for (other, _) in ids if other == kind) + 1)
+        results.append({
+            "id": len(results) + 1,
+            "time": _netbox_time(when_ns),
+            "user_name": NETBOX_USER,
+            "request_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"netbox:{len(results)}")),
+            "action": {
+                "value": "create", "label": "Created"
+            } if created else {
+                "value": "update", "label": "Updated"
+            },
+            "changed_object_type": kind,
+            "changed_object_id": identifier,
+            "object_repr": representation,
+            "prechange_data": None if created else results[-1]["postchange_data"],
+            "postchange_data": {
+                "id": identifier, **data
+            },
+        })
+
+        return identifier
+
+    sites = sorted({row["site_id"] for row in rows})
+    roles = sorted({row["device_role"] for row in rows if row["device_role"] is not None})
+    tenants = sorted({row["owner"] for row in rows})
+
+    for site in sites:
+        change("dcim.site", site, {"name": site.upper(), "slug": site}, first, site.upper())
+
+    for role in roles:
+        change("dcim.devicerole", role, {"name": role, "slug": role}, first, role)
+
+    for tenant in tenants:
+        change("tenancy.tenant", tenant, {"name": tenant, "slug": tenant}, first, tenant)
+
+    for row in rows:
+        _no_effective_time(row, "tc0_network")
+        site = ids[("dcim.site", row["site_id"])]
+
+        if (row["object_kind"] == "device"):
+            devices[row["device_id"]] = row
+            change(
+                "dcim.device",
+                row["device_id"],
+                {
+                    "name": row["device_id"],
+                    "site": site,
+                    "role": ids[("dcim.devicerole", row["device_role"])],
+                    "tenant": ids[("tenancy.tenant", row["owner"])],
+                    "custom_fields": {
+                        "owning_team": row["owning_team"], "criticality": row["criticality"]
+                    },
+                },
+                row["recorded_at"],
+                row["device_id"])
+        elif (row["object_kind"] == "vlan"):
+            change(
+                "ipam.vlan", (row["site_id"], row["vlan_id"]),
+                {
+                    "vid": row["vlan_id"],
+                    "name": row["designation"],
+                    "site": site,
+                    "tenant": ids[("tenancy.tenant", row["owner"])],
+                    "custom_fields": {
+                        "criticality": row["criticality"]
+                    },
+                },
+                row["recorded_at"],
+                row["designation"])
+        else:
+            device = devices.get(row["device_id"])
+
+            if (device is None or device["owner"] != row["owner"] or row["owning_team"] is not None):
+                raise ValueError(f"port {row['source_seq']} is not owned as its device is, which NetBox cannot say")
+
+            change(
+                "dcim.interface", (row["device_id"], row["port_id"]),
+                {
+                    "name": row["port_id"],
+                    "device": ids[("dcim.device", row["device_id"])],
+                    "description": row["designation"],
+                    "custom_fields": {
+                        "commissioning_rx_dbm": row["commissioning_rx_dbm"], "criticality": row["criticality"]
+                    },
+                },
+                row["recorded_at"],
+                row["port_id"])
+
+    with open(os.path.join(directory, "netbox-changelog.json"), "w", encoding="utf-8") as handle:
+        json.dump({"count": len(results), "next": None, "previous": None, "results": results}, handle, indent=1)
+        handle.write("\n")
+
+
+def _iso_moment(when_ns: int) -> str:
+    stamp = pd.Timestamp(when_ns, unit="ns", tz="UTC")
+
+    return stamp.strftime("%Y-%m-%dT%H:%M:%S.") + f"{stamp.microsecond // 1000:03d}Z"
+
+
+def write_identity(directory: str):
+    """
+    `workday-workers.json` and `entra-audit.jsonlines`: the HR system's worker events, as a Workday
+    report-as-a-service returns them, and the directory's group membership changes, as Azure Monitor exports
+    Entra ID's audit log.
+
+    A worker event carries when it took effect and when it was entered, and an event with no entry moment is
+    written without one, as found. A group change carries only when it was made.
+    """
+    (workers, audit, seen) = ([], [], set())
+
+    for row in sample("context", "tc0_identity"):
+        principal = row["user_principal"]
+
+        if (row["group_name"] is None):
+            _no_effective_time(row, "tc0_identity")
+
+            if (row["change"] == "retract" and row["employment_status"] != "contractor"):
+                raise ValueError(f"tc0_identity {row['source_seq']} retracts a worker Workday cannot end that way")
+
+            process = ("End Contingent Worker Contract" if row["change"] == "retract" else "Terminate Employee"
+                       if row["employment_status"] == "terminated" else "Change Job" if principal in seen else "Hire")
+            seen.add(principal)
+            worker = {
+                "Worker_Email": principal,
+                "Business_Process_Type": process,
+                "Effective_Moment": _iso_moment(row["valid_from"]),
+                "Entry_Moment": None if row["recorded_at"] is None else _iso_moment(row["recorded_at"]),
+                "Supervisory_Organization": row["department"],
+                "Manager_Email": row["manager"],
+                "Worker_Type": "Contingent Worker" if row["employment_status"] == "contractor" else "Employee",
+                "Worker_Status": "Terminated" if row["employment_status"] == "terminated" else "Active",
+                "Account_Type": row["account_type"].capitalize(),
+                "Privilege_Level": row["privilege_level"].capitalize(),
+            }
+            # A report omits a field the worker has no value for.
+            workers.append({name: value for (name, value) in worker.items() if value is not None})
+            continue
+
+        if (row["recorded_at"] is None):
+            raise ValueError(f"tc0_identity {row['source_seq']} is a group change with no time it was made")
+
+        activity = "Remove member from group" if row["change"] == "retract" else "Add member to group"
+        quoted = json.dumps(row["group_name"])
+        made = _iso_moment(row["recorded_at"])
+        correlation = str(uuid.uuid5(uuid.NAMESPACE_URL, f"entra-audit:{row['source_seq']}"))
+        properties = {
+            "id":
+                f"Directory_{correlation}",
+            "category":
+                "GroupManagement",
+            "correlationId":
+                correlation,
+            "result":
+                "success",
+            "resultReason":
+                "",
+            "activityDisplayName":
+                activity,
+            "activityDateTime":
+                made,
+            "loggedByService":
+                "Core Directory",
+            "operationType":
+                "Assign" if row["change"] == "assert" else "Unassign",
+            "initiatedBy": {
+                "app": {
+                    "displayName": "Workday to Microsoft Entra ID user provisioning"
+                }
+            },
+            "targetResources": [{
+                "id":
+                    str(uuid.uuid5(uuid.NAMESPACE_URL, f"entra-user:{principal}")),
+                "displayName":
+                    None,
+                "type":
+                    "User",
+                "userPrincipalName":
+                    principal,
+                "modifiedProperties": [{
+                    "displayName": "Group.ObjectID",
+                    "oldValue": None if row["change"] == "assert" else json.dumps(_sys_id("group", row["group_name"])),
+                    "newValue": json.dumps(_sys_id("group", row["group_name"])) if row["change"] == "assert" else None,
+                },
+                                       {
+                                           "displayName": "Group.DisplayName",
+                                           "oldValue": None if row["change"] == "assert" else quoted,
+                                           "newValue": quoted if row["change"] == "assert" else None,
+                                       }],
+            }],
+        }
+        audit.append({
+            "time": made,
+            "resourceId": f"/tenants/{ENTRA_TENANT}/providers/Microsoft.aadiam",
+            "operationName": activity,
+            "operationVersion": "1.0",
+            "category": "AuditLogs",
+            "tenantId": ENTRA_TENANT,
+            "resultSignature": "None",
+            "durationMs": 0,
+            "correlationId": correlation,
+            "Level": 4,
+            "properties": properties,
+        })
+
+    with open(os.path.join(directory, "workday-workers.json"), "w", encoding="utf-8") as handle:
+        json.dump({"Report_Entry": workers}, handle, indent=1)
+        handle.write("\n")
+
+    with open(os.path.join(directory, "entra-audit.jsonlines"), "w", encoding="utf-8") as handle:
+        handle.write("".join(json.dumps(record) + "\n" for record in audit))
+
+
 WRITERS = {
     "tc3": write_flows,
     "tc5_auth": write_signins,
@@ -986,6 +1531,14 @@ WRITERS = {
     "tc2_arp": write_arp,
     "tc2_auth": write_radius_auth,
     "tc5_session": write_radius_accounting,
+    "tc4": write_packets,
+    "tc3_dhcp": write_kea,
+    "tc7_host_inventory": write_osquery,
+    "tc7_service": write_service,
+    "tc0_identity": write_identity,
+    "tc0_asset": write_cmdb,
+    "tc0_application": write_cmdb,
+    "tc0_network": write_netbox,
 }
 
 
@@ -1069,6 +1622,30 @@ def normalize_all(root: str = HERE) -> dict[str, pd.DataFrame]:
             collector_schemas.radius_auth(at("tc2_auth", "radius-auth.detail"), PROFILES["tc2_auth"], SWITCH_SITES),
         "tc5_session":
             collector_schemas.radius_accounting(at("tc5_session", "radius-acct.detail"), PROFILES["tc5_session"]),
+        "tc4":
+            collector_schemas.packets(at("tc4", "tc4.pcap"), PROFILES["tc4"]),
+        "tc3_dhcp":
+            collector_schemas.kea_leases(at("tc3_dhcp", "kea-dhcp4.log"), PROFILES["tc3_dhcp"]),
+        "tc7_host_inventory":
+            collector_schemas.osquery_inventory(at("tc7_host_inventory", "osqueryd.results.log"),
+                                                PROFILES["tc7_host_inventory"],
+                                                REPORT_VALID_SECONDS),
+        "tc7_service":
+            collector_schemas.zeek_service(at("tc7_service", "conn.log"),
+                                           at("tc7_service", "ssl.log"),
+                                           PROFILES["tc7_service"]),
+        "tc0_identity":
+            collector_schemas.workday_entra_identity(at("tc0_identity", "workday-workers.json"),
+                                                     at("tc0_identity", "entra-audit.jsonlines"),
+                                                     CONTEXT_TENANT),
+        "tc0_asset":
+            collector_schemas.servicenow_assets(*(at("tc0_asset", name) for name in CLASSES["tc0_asset"][1]),
+                                                CONTEXT_TENANT),
+        "tc0_application":
+            collector_schemas.servicenow_applications(
+                *(at("tc0_application", name) for name in CLASSES["tc0_application"][1]), CONTEXT_TENANT),
+        "tc0_network":
+            collector_schemas.netbox_network(at("tc0_network", "netbox-changelog.json"), CONTEXT_TENANT),
     }
 
 

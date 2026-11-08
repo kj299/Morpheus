@@ -240,6 +240,14 @@ renders and reads them back:
 | `tc2_arp` | `telemetry/arp.pcap`, the ARP packets the sensor saw | `collector_schemas.arp_packets` |
 | `tc2_auth` | `telemetry/radius-auth.detail`, FreeRADIUS `auth_log` and `reply_log` entries | `collector_schemas.radius_auth` |
 | `tc5_session` | `session/radius-acct.detail`, FreeRADIUS accounting Starts and Stops | `collector_schemas.radius_accounting` |
+| `tc4` | `transport/tc4.pcap`, every TCP packet the capture point saw | `collector_schemas.packets` |
+| `tc3_dhcp` | `network/kea-dhcp4.log`, a Kea DHCPv4 server's lease log | `collector_schemas.kea_leases` |
+| `tc7_host_inventory` | `network/osqueryd.results.log`, osquery's `interface_details` snapshots | `collector_schemas.osquery_inventory` |
+| `tc7_service` | `application/conn.log` and `ssl.log` (Zeek) | `collector_schemas.zeek_service` |
+| `tc0_identity` | `context/workday-workers.json` and `entra-audit.jsonlines`, Workday worker events and Entra ID group changes | `collector_schemas.workday_entra_identity` |
+| `tc0_asset` | `context/sys_audit.json`, `sys_user.json` and `sys_user_group.json`, ServiceNow's CMDB history | `collector_schemas.servicenow_assets` |
+| `tc0_application` | the same ServiceNow files | `collector_schemas.servicenow_applications` |
+| `tc0_network` | `telemetry/netbox-changelog.json`, NetBox's object changelog | `collector_schemas.netbox_network` |
 
 A fixture carries only what its format carries. The collector's own facts -- its identity, contract version,
 tenant, clock discipline and sampling -- are a `CollectorProfile`, the exporters' names are an inventory the stage
@@ -249,8 +257,10 @@ and endpoint segments over them to the same files the samples give, byte for byt
 session, so the two content types an inspecting proxy reports are null from the Zeek schema, and the
 presentation segment's content rule needs a feed that supplies them. SNMP holds no hash of a device's
 configuration and no syslog rate, so those two `tc1_device` columns are null from it; a capture numbers nothing, so
-the ARP fixture cannot show the three records the sensor numbered and lost; and the identity provider's own
-session records are another feed than RADIUS accounting, and not in its fixture.
+the ARP fixture cannot show the three records the sensor numbered and lost; the identity provider's own
+session records are another feed than RADIUS accounting, and not in its fixture; and ServiceNow, NetBox and Entra
+ID keep when a change was entered and not when it took effect, so the backdated changes in the context samples
+read as entered from them, their `valid_from` null, while Workday's report carries both clocks.
 
 # R-D-L2-004, end to end
 

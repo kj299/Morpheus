@@ -1,0 +1,615 @@
+{
+ "count": 26,
+ "next": null,
+ "previous": null,
+ "results": [
+  {
+   "id": 1,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "2edfeeca-1d22-589c-82f0-dc7b01dd4c91",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.site",
+   "changed_object_id": 1,
+   "object_repr": "HQ",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 1,
+    "name": "HQ",
+    "slug": "hq"
+   }
+  },
+  {
+   "id": 2,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "1cde4d00-c0cc-59ce-a09b-d01068021b42",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.devicerole",
+   "changed_object_id": 1,
+   "object_repr": "access-switch",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 1,
+    "name": "access-switch",
+    "slug": "access-switch"
+   }
+  },
+  {
+   "id": 3,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "ad5e9365-c282-542b-8c32-6625dc191e64",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.devicerole",
+   "changed_object_id": 2,
+   "object_repr": "router",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 2,
+    "name": "router",
+    "slug": "router"
+   }
+  },
+  {
+   "id": 4,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "fb1d67c7-bf89-5a70-a97a-2e61fec21b02",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "tenancy.tenant",
+   "changed_object_id": 1,
+   "object_repr": "facilities",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 1,
+    "name": "facilities",
+    "slug": "facilities"
+   }
+  },
+  {
+   "id": 5,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "ade56b7b-d008-57e6-8da9-7f5bc2983323",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "tenancy.tenant",
+   "changed_object_id": 2,
+   "object_repr": "it-desktop",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 2,
+    "name": "it-desktop",
+    "slug": "it-desktop"
+   }
+  },
+  {
+   "id": 6,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "b1b8ec94-a221-5fca-9d17-6adf21243af7",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "tenancy.tenant",
+   "changed_object_id": 3,
+   "object_repr": "netops",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 3,
+    "name": "netops",
+    "slug": "netops"
+   }
+  },
+  {
+   "id": 7,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "38cde972-f499-526a-a238-5f4183582cb8",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.device",
+   "changed_object_id": 1,
+   "object_repr": "sw1",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 1,
+    "name": "sw1",
+    "site": 1,
+    "role": 1,
+    "tenant": 3,
+    "custom_fields": {
+     "owning_team": "network-engineering",
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 8,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "7773dcda-5d71-573d-b973-348263ea7fed",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.device",
+   "changed_object_id": 2,
+   "object_repr": "sw2",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 2,
+    "name": "sw2",
+    "site": 1,
+    "role": 1,
+    "tenant": 3,
+    "custom_fields": {
+     "owning_team": "network-engineering",
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 9,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "46270c5c-2710-5e09-8a36-1244bb81a741",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.device",
+   "changed_object_id": 3,
+   "object_repr": "sw3",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 3,
+    "name": "sw3",
+    "site": 1,
+    "role": 1,
+    "tenant": 3,
+    "custom_fields": {
+     "owning_team": "network-engineering",
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 10,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "26c595d4-7d2f-5a65-8b93-9d4aae07522c",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.device",
+   "changed_object_id": 4,
+   "object_repr": "sw5",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 4,
+    "name": "sw5",
+    "site": 1,
+    "role": 1,
+    "tenant": 3,
+    "custom_fields": {
+     "owning_team": "network-engineering",
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 11,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "f15b5eb6-0ccf-579f-8e2b-3c5d2d646a45",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.device",
+   "changed_object_id": 5,
+   "object_repr": "rtr1",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 5,
+    "name": "rtr1",
+    "site": 1,
+    "role": 2,
+    "tenant": 3,
+    "custom_fields": {
+     "owning_team": "network-engineering",
+     "criticality": "high"
+    }
+   }
+  },
+  {
+   "id": 12,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "69745ede-5e37-5e52-9531-69175e5c0b93",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "ipam.vlan",
+   "changed_object_id": 1,
+   "object_repr": "desks",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 1,
+    "vid": 10,
+    "name": "desks",
+    "site": 1,
+    "tenant": 2,
+    "custom_fields": {
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 13,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "3071d913-9c0f-501f-ac25-2173e6755534",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "ipam.vlan",
+   "changed_object_id": 2,
+   "object_repr": "cameras",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 2,
+    "vid": 20,
+    "name": "cameras",
+    "site": 1,
+    "tenant": 1,
+    "custom_fields": {
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 14,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "da5ecc34-0699-50c9-b94d-c74a33ce6a3d",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 1,
+   "object_repr": "Gi1/0/1",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 1,
+    "name": "Gi1/0/1",
+    "device": 1,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 15,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "9dd95483-fad9-57e6-808e-de037ca10496",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 2,
+   "object_repr": "Gi1/0/11",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 2,
+    "name": "Gi1/0/11",
+    "device": 1,
+    "description": "uplink",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "high"
+    }
+   }
+  },
+  {
+   "id": 16,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "af3fb19f-787a-5cfa-ac86-38c2d99633f7",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 3,
+   "object_repr": "Gi1/0/12",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 3,
+    "name": "Gi1/0/12",
+    "device": 1,
+    "description": "uplink",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "high"
+    }
+   }
+  },
+  {
+   "id": 17,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "9ece08f7-9a0f-5986-8985-dc0b277b6f74",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 4,
+   "object_repr": "Gi1/0/2",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 4,
+    "name": "Gi1/0/2",
+    "device": 1,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 18,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "e3223fd8-77bc-5439-8777-57c313c6de5b",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 5,
+   "object_repr": "Gi1/0/3",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 5,
+    "name": "Gi1/0/3",
+    "device": 1,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 19,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "31b84767-eece-5a7d-8882-94da04b60053",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 6,
+   "object_repr": "Gi1/0/6",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 6,
+    "name": "Gi1/0/6",
+    "device": 1,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 20,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "74534c4f-6f54-5fa4-8465-61657c273168",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 7,
+   "object_repr": "Gi1/0/7",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 7,
+    "name": "Gi1/0/7",
+    "device": 1,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 21,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "35093bde-892b-565d-805c-f54c7c4075bf",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 8,
+   "object_repr": "Gi1/0/8",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 8,
+    "name": "Gi1/0/8",
+    "device": 1,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 22,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "370f0a02-fe71-50bd-a258-48a9e9783655",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 9,
+   "object_repr": "Gi1/0/9",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 9,
+    "name": "Gi1/0/9",
+    "device": 1,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 23,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "c042f962-8c63-5e95-b5c7-0485597d52a0",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 10,
+   "object_repr": "Gi1/0/1",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 10,
+    "name": "Gi1/0/1",
+    "device": 2,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 24,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "8c8ff5b8-08e8-5b11-89db-a67d1f711edc",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 11,
+   "object_repr": "Gi1/0/2",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 11,
+    "name": "Gi1/0/2",
+    "device": 2,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 25,
+   "time": "1970-01-01T00:00:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "9ee2c60e-e7c9-5f1f-af56-cb40507c8b47",
+   "action": {
+    "value": "create",
+    "label": "Created"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 12,
+   "object_repr": "Gi1/0/3",
+   "prechange_data": null,
+   "postchange_data": {
+    "id": 12,
+    "name": "Gi1/0/3",
+    "device": 2,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  },
+  {
+   "id": 26,
+   "time": "1970-01-01T00:46:00.000000Z",
+   "user_name": "netbox-sync",
+   "request_id": "28067535-6e7f-5101-954a-f522b61e9ffe",
+   "action": {
+    "value": "update",
+    "label": "Updated"
+   },
+   "changed_object_type": "dcim.interface",
+   "changed_object_id": 6,
+   "object_repr": "Gi1/0/6",
+   "prechange_data": {
+    "id": 12,
+    "name": "Gi1/0/3",
+    "device": 2,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   },
+   "postchange_data": {
+    "id": 6,
+    "name": "Gi1/0/6",
+    "device": 1,
+    "description": "access",
+    "custom_fields": {
+     "commissioning_rx_dbm": -7.0,
+     "criticality": "medium"
+    }
+   }
+  }
+ ]
+}
