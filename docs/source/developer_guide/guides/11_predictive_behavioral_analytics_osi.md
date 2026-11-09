@@ -17,17 +17,120 @@ limitations under the License.
 
 # Predictive Behavioral Analytics Across OSI Layers 1-7
 
-This document has two halves.
+This guide describes how this fork of Morpheus watches a network from the cable up to the application, learns what
+normal looks like at each level, and connects the evidence from every level into one account of one machine or one
+person that a Security Information and Event Management (SIEM) system, Splunk, can search. It starts with the idea
+in plain terms, then explains how to read the rest, and only then goes into the code, the data each layer needs, the
+detection rules, the Splunk configuration and the controls that keep the output reproducible.
 
-The first half is a structured analysis of the Morpheus codebase, conducted in three passes: the execution
-model, the behavioral analytics substrate, and the determinism and I/O boundaries.
+## In plain terms
 
-The second half applies that analysis to a concrete enterprise problem: building predictive behavioral
-analytics that spans all seven layers of the OSI stack, feeds a SIEM, and produces output a detection
-engineer can reproduce and defend.
+### The problem
 
-Every claim about Morpheus below is anchored to a file path in this repository. Where a capability does not
-exist and must be built, the document says so explicitly rather than implying the SDK already covers it.
+An intrusion rarely stays at one level of the network. Someone who splices a tap into a cable, impersonates the
+network's gateway, signs in from an unusual place and then copies data out leaves a trace at each step, but each
+trace lands in a different tool: the switches see ports and cables, a flow collector sees which addresses talk to
+which, the identity provider sees sign-ins, and a web proxy sees requests. Each tool sees only its own slice.
+
+Joining the slices is usually left to an analyst, matching IP addresses and timestamps by hand. That breaks in
+ordinary ways. An address is handed to a different machine an hour later, two collectors' clocks disagree by a few
+seconds, and a join that looked right on Monday gives a different answer when it is run again on Friday.
+
+### What this fork builds
+
+Three things, on top of the streaming engine and models that upstream Morpheus already provides:
+
+1. **A view of normal behaviour for each thing on the network.** For every port, machine, user and service, the
+   pipelines learn what is usual and score how far each new observation departs from it.
+2. **A thread through the layers.** Every record gets stable identifiers, so the cable, the hardware (MAC)
+   address, the IP address, the sign-in session and the web request that belong to one machine or one person can
+   be followed in the SIEM as a single chain rather than re-joined by guesswork.
+3. **Output that can be reproduced.** The same input always gives the same scores, identifiers and alerts, so an
+   alert raised today can be re-derived and defended months later, for example in front of an auditor.
+
+### What each layer contributes
+
+The Open Systems Interconnection (OSI) model divides networking into seven layers. Each layer below is a separate
+input to the system, with its own collector, its own features and its own detection rules. Part 2 calls each of these
+a *telemetry class*, written TC-1 to TC-7.
+
+| Layer | What is observed | Typical source | An example of something wrong |
+|---|---|---|---|
+| 1 Physical | Link state, optical light levels, error counters on each switch port | SNMP polls of switches | A tap spliced into a fibre makes the port lose light |
+| 2 Data link | Which hardware address is on which port, ARP, 802.1X port sign-in | Switch MAC tables, ARP sensors, RADIUS | A device claims to be the gateway |
+| 3 Network | Which IP addresses talk to which, how much and how often | NetFlow or IPFIX | A host calls out to the same outside address every few minutes |
+| 4 Transport | Individual TCP packets and their ports | Packet capture | One source tries sixty ports in a minute |
+| 5 Session | Sign-ins and sessions | Identity provider, VPN | One account signs in from two continents within an hour |
+| 6 Presentation | Encrypted-connection handshakes and certificates | Zeek | An internal service presents a self-signed certificate |
+| 7 Application | Web requests, DNS lookups, SaaS activity, processes | Proxy, DNS, SaaS audit log, EDR | Data leaves the network hidden in DNS lookups |
+
+A further input, *context* (TC-0), says what everything is: who owns a machine, which department a person is in,
+how critical an application is. It comes from the HR system, the directory, the CMDB and the network inventory, and
+it lets a detection treat a finance server differently from a test laptop.
+
+### What "predictive" means here
+
+It does not mean forecasting attacks. It means watching trends rather than single events: a score that keeps rising
+over consecutive windows, a measurement projected to cross a limit before it does, and a sequence of smaller warnings
+across layers (a scan, then an unusual sign-in, then unusual data access) that precedes the attacker's objective.
+The section [On the word "predictive"](#summary) below states exactly how far that claim goes and where it is still
+a hypothesis.
+
+### How the pieces fit together
+
+```text
+ Collectors (not part of Morpheus)    Morpheus pipelines, one per layer group        Splunk
+ ---------------------------------    -------------------------------------------    ---------------------------
+ switches, flow exporters,      -->   1 read and normalize each record          -->  one index per layer
+ identity provider, proxies,          2 stamp it with stable identifiers              lookups that link the layers
+ sensors, HR and CMDB                 3 group it into time windows                   saved searches (the rules)
+                                      4 compute features and score them              chain assembly: risk summed
+                                      5 send it to the SIEM                           across layers per entity
+```
+
+Each record goes through the same five steps in Morpheus. The identifiers stamped in step 2 are what make the
+cross-layer chain possible: Splunk uses them, together with time-bounded lookups such as "which machine held this IP
+address at this moment", to follow one entity from layer 1 to layer 7. Part 1 shows the architecture in full and
+Part 4 shows the Splunk side down to its configuration files.
+
+### A worked example
+
+The repository's own test data includes this case. Someone taps the fibre to a desk. At layer 1 the port's received
+light drops, and the rule R-D-L1-002 raises a risk score of 50 on that port. Shortly afterwards the workstation on that
+port starts claiming the gateway's address, and at layer 2 the rule R-D-L2-003 raises 55. Neither score on its own is
+alarming. Because both records carry identifiers that lead to the same port, Splunk's chain assembly search adds them
+up on one chain, and the combined score is what an analyst sees. Without the shared identifiers they would be two
+unrelated low-priority events in two different indexes.
+
+## How to read this guide
+
+You do not need to read it in order. Pick the part that matches what you are doing:
+
+| Part | What it covers | Read it if you |
+|---|---|---|
+| [Summary](#summary) | The four design decisions that matter most, and what is built versus still design | want the short version |
+| [Part 0: Codebase Analysis](#part-0-codebase-analysis) | How Morpheus works inside, and which of its parts this design reuses | will change the code |
+| [Part 1: Reference Architecture](#part-1-reference-architecture-for-layers-1-7) | The deployment's shape and the pipeline every layer follows | are designing a deployment |
+| [Part 2: Telemetry Class Requirements](#part-2-telemetry-class-requirements) | Exactly what each layer's collector must send | are connecting a data source |
+| [Part 3: Detection Rule Recommendations](#part-3-detection-rule-recommendations) | Every detection rule, what it looks for and its thresholds | write or tune detections |
+| [Part 4: Chaining Lineage in Splunk](#part-4-chaining-layer-1-7-lineage-in-splunk) | The identifiers, the Splunk configuration, and how to follow a chain | run the SIEM side |
+| [Part 5: Preserving Determinism](#part-5-preserving-determinism-in-the-output) | Thirteen controls that keep the output reproducible | need results you can defend later |
+| [Part 6: Gaps and Build List](#part-6-gaps-and-build-list) | What is built, what is not, and what to build next | want the project's status |
+| [Appendix: Verification history](#appendix-verification-history) | Every GPU and Splunk validation run, and what each one found | want the evidence behind the status |
+
+Terms used throughout:
+
+- **Entity**: the thing being watched and scored: a switch port, a machine, a user, a service.
+- **Telemetry class (TC-0 to TC-7)**: one kind of input record. TC-1 is layer 1 and so on; TC-0 is context.
+- **Window**: a fixed slice of time, such as ten minutes, over which features are computed.
+- **Binding**: a mapping that holds for a period, such as "this IP address belonged to this hardware address from
+  09:00 to 17:00". Bindings are how one layer's identifier is translated into the next.
+- **Lineage identifier and chain**: the stable identifiers each record carries, and the linked sequence of records
+  across layers that they produce for one entity.
+- **Community ID**: a standard hash of a connection's addresses and ports, shared with tools such as Zeek and
+  Suricata, so a connection can be matched across tools exactly.
+- **Golden file**: a recorded output that a test compares a fresh run against, byte for byte, to prove the output has
+  not changed.
 
 ## Summary
 
@@ -53,285 +156,25 @@ identifier ladder, the deterministic identifiers, `community_id`, the binding ta
 and
 [If the SIEM is not Splunk](#if-the-siem-is-not-splunk) says what a port would have to change.
 
-**What is verified versus designed.** This document was written before any of it was built, and the
-boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
-resolution, window sealing), feature stages for every telemetry class from TC-0 to TC-7, the layer 5
-scoring path with a learned model per principal in the model's slot, a host feature frame scored by a
-learned model per peer group, control 8's total order, and control 13's seven
-checks over thirteen composed corpora, which ran in CPU mode in the fork's own CI on every push and pull
-request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, through pull requests #87 to
-#99, for a cause the repository does not show -- and in GPU mode on one card, where the twelve that existed then
-matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
-card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
-That is sixty-two stages and fifty-four supporting
-modules, covered by 2,777 distinct tests, itemized in
-[Part 6](#provided). Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of
-them chained. The Community ID implementation was checked against the reference implementation
-against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
-functional
-pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
-([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)); that pass covered
-the seven searches then present. On 2026-10-05 all forty-eight ran on Splunk 10.2.8 over the pipeline's own
-sample events: forty-six returned what the written expectation said, and the two that did not found a defect in
-the wire format rather than in a search -- null fields sent as `null`, which Splunk compared as values -- now
-repaired. On 2026-10-09 the run over the repaired events returned what was written for all forty-eight, and on
-2026-10-10 a run over step 9's events returned what was then written for all fifty-two, a run later that day
-over step 10's returned what was then written for all sixty-two, and a run that night over step 11's
-returned what was then written for all sixty-six. On 2026-10-15 a run over step 12's returned what was then written
-for all seventy-two, on 2026-10-16 a run over step 13's returned what was then written for all seventy-five, and on
-2026-10-17 a run over step 15's returned what was then written for all seventy-eight, on 2026-10-22 a run over
-the events the host segment's sourcetype added returned what was then written for all eighty, on 2026-10-23 a run
-over the events the daily drift over the TLS and DNS columns added returned what was then written for all eighty-two,
-on 2026-10-26 a run over the events the desk spoof and the network inventory added returned what was then written for
-all eighty-three, on 2026-10-28 a run over the events the HTTP and process trajectories added returned what was then
-written for all eighty-five, on 2026-10-31 a run over the events plan section 3.7 regenerated returned what was then
-written for all eighty-six, every risk record carrying its rule's `thresholds_hash`, on 2026-11-01 a run over the
-events plan section 4.1 regenerated returned what was then written for all eighty-seven, on 2026-11-08 a run over
-the events plan section 4.7a regenerated returned what was then written for all eighty-seven, a run that day over
-the events plan section 4.7b regenerated returned what was then written for all eighty-seven, and a run that evening
-over the events plan section 4.7c regenerated returned what is written for all eighty-seven the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
-scores what all of that adds up to for each class of entity on a network, and lists what it does not.
+**What is built and what is still design.** The guide was written before any of it was built. Most of it now runs:
 
-What remains design rather than a running system: one of the sixty rules as a detection (R-B-L4-001, whose
-booster scores every flow but which no saved search reads, because it scores every flow in the corpus above its
-threshold), the
-hysteresis half of control 9 (its suppression half ships on every detection), controls 10 and 11 as code, the sharding router's wiring, and clock
-correction, since `clock_source` and `clock_offset_ms` are schema that nothing produces or checks. Layer 5
-is the case to state precisely: **each principal has a learned model of their own, hosts share one per peer group, and nothing else is scored.**
-`mean_abs_z` and `max_abs_z` are produced by
-{py:class}`~morpheus.stages.telemetry.tc5_score_stage.TC5ScoreStage` from a per-principal
-`morpheus.models.dfencoder` autoencoder, trained once on the session corpus's fortnight of ordinary habits and
-committed as plain numbers under `examples/layer5_model/models/`; CI scores them with a NumPy forward pass,
-since it has no Torch, and the manifest pins each principal to a digest of their model's numbers and declares
-where training ended, so the fortnight's rows are never scored by the models fitted to them. A joiner with no
-fortnight is scored against a population fallback fitted on the same fortnight, and says so on every row.
-R-B-L5-001 and R-B-L5-002 read only rows a principal's own model scored, and return their first rows: the
-afternoon one account is used from Amsterdam, and the week's other planted departures. The drift trajectory
-that is this document's flagship predictive claim is built and tested --
-{py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` reports the velocity, the
-acceleration, the length of the rising run and its total rise in the principal's own standard deviations
--- against those learned scores. The scores are not calibrated, which is the first thing the model rules
-taught: a feature the fortnight never varied scores any change in the thousands. Hosts have one per peer group since step 8's second half, which no rule reads yet. Given no score column at all it carries a null in every drift column and says so once in the log.
-Everything else at this layer is built: the session assembly and the six feature stages run under
-control 13's seven checks against a week-long corpus, the five deterministic rules and R-B-L5-005's
-per-principal session-duration baseline ship as saved searches with their predicates asserted against that
-corpus, and `morpheus:score:l5` is a produced sourcetype.
-Controls 1, 2, 4 and 12 now ship as code, ahead of the model
-that will consume them. Control 9 is a partial exception, since `determinism.quantize_value` ships but
-the hysteresis half of it does not. Control 3 has now been measured, on the one machine with a card:
-`examples/layer5_model/run_model.py` sets `CUBLAS_WORKSPACE_CONFIG` before Torch is imported, enables
-`torch.use_deterministic_algorithms`, trains a per-principal autoencoder on the layer 5 corpus and checks
-the double run and the batch sweep, and then runs the composed pipeline with those models in the scoring
-slot. On 2026-10-03 at 23:53 UTC, with `torch==2.4.0+cu124` on an RTX 5000 Ada, **all four checks
-passed**: the double run was identical and the scores invariant across batch sizes 1, 8 and 64 for all
-five principals, and the composed pipeline returned the same 105 scores twice and again under the
-batch-split sweep. That repeats the first passing run, on 2026-09-19 at 23:17 UTC, on the tree after the
-layer 5 rules and context landed, with the same row counts per principal and the same
-`pipeline_mean_abs_z_max` of 2.3823. Had any of them failed, R-P-L5-006 -- a rule about a score rising by fractions of a
-standard deviation -- would have been measuring the model's own jitter rather than a principal's
-behaviour, and every threshold tuned against those scores would have been tuned against noise. The
-fourth check did fail on its first run, and that is written up where the adapter is described.
+| Area | Status |
+|---|---|
+| Lineage substrate: stable identifiers, Community ID, binding resolution, window sealing | Built |
+| Feature stages for every telemetry class from TC-0 to TC-7 | Built |
+| Layer 5 scoring: a learned model for each user, a fallback for users with no history | Built |
+| Host scoring: a learned model for each peer group of machines | Built; no rule reads it yet |
+| Detection rules from Part 3 | Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of them chained across layers |
+| Real-feed readers for every input class, from SNMP to the CMDB | Built, each tested against its sample |
+| Reproducibility checks (control 13) over every composed pipeline | Built; run in CPU mode on every push, and in GPU mode on one machine |
+| Rule R-B-L4-001 as a detection | Design: its model scores every flow in the corpus above its threshold |
+| Hysteresis half of control 9, controls 10 and 11 as code, the sharding router's wiring | Design |
+| Clock correction from `clock_source` and `clock_offset_ms` | Design: nothing produces or checks those fields |
 
-What that establishes is reproducibility of the scoring path and nothing more. A week of five principals
-is far too little data to train an autoencoder that detects anything, nothing in this document claims it
-does, and the artifact says so in a field of its own so the caveat travels with the numbers. What the
-pipeline publishes as `mean_abs_z` in its golden is still the reference scorer's arithmetic; the model
-occupies that slot only in the runner, which is what the fourth check measures. On a machine
-without Torch or without a card the runner exits non-zero and writes a failed verdict rather than
-reporting on a model it never trained, and both refusals are tested by shadowing Torch with a stub rather
-than by depending on its absence -- which is a distinction that cost a passing test the moment Torch was
-installed. Thresholds are placeholders unless marked otherwise.
-
-One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
-nowhere else. On 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada
-Generation Laptop GPU (compute capability 8.9, driver 596.58) under WSL2, giving 226 passed, 2 failed, 55
-skipped. Both failures are upstream Morpheus tests rather than anything added here. The suite was re-run
-on 2026-09-06 with the parity repairs described below in place, giving 231 passed, 2 failed, 55 skipped --
-the same two upstream failures, and five more passes for the guards those repairs added.
-
-Later on 2026-09-06, at 17:32 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the
-artifact it exists to produce. It then took four repairs to that runner before an artifact could be
-believed, and each of the four is recorded below, because each produced a verdict that read `passed`
-while measuring less than it claimed. A fifth, found in October, misreported where a failing run had died
-rather than passing one that had failed, and it is recorded with the run that found it.
-
-**The run that stands is 2026-10-09 at 22:17 UTC**, on the same card under driver 596.71, over tiers
-that are total: the marked tier 760 collected and 760 passed; the tier carrying no mode marker 1,971
-collected, 1,970 passed and 1 skipped. Nothing failed in either, both exited cleanly, and both counts
-reconcile exactly against what pytest collected. The skip is the test for a sourcetype nothing produces,
-which has no cases left because every sourcetype now has one; the six skips of the September verdict were
-all of that kind. It ran on step 6's tree, so the four golden files that gained `resolution_methods`, and the
-resolver code that writes the column, matched on a card for the first time; the run at 15:20 UTC that morning,
-759 and 1,959 collected, was the same check before them, and passed the same way.
-
-The run of 2026-10-04 at 03:56 UTC was the first in which every composed pipeline this fork has took
-part: all twelve, eight of them on a card for the first time, 750 and 1,925 collected, and it passed the
-same way. Each of the twelve golden checks ran in GPU mode and matched the golden the CPU path generated,
-through the canonical rendering with floats quantized to four places, so the cross-mode question is
-answered for every corpus. `test_gpu_parity.py` compared three corpora on that run; it was then
-parametrized over all twelve, and the nine variants that added passed on the card at 15:20 UTC on
-2026-10-09 and again in the run that stands. The estate harness was the one that mattered most in September, when it first ran on a card: a
-chain is a Merkle root over its members in order, the estate seals five classes together over their
-union, and the ordering and hashing of that union is exactly the arithmetic this project has seen diverge
-between host and device before.
-
-The counts reconcile rather than being taken on trust. On that day the same two tiers collected 760 and 1,961 on
-a machine with no card -- the marked tier identical to the device, the unmarked one exactly ten short of it,
-the offset every run so far has shown. A tier that differed by some other number would mean a file had
-fallen out of a list, which is the defect two of the repairs below were for.
-
-That was all forty-six stages then shipped and all twelve composed pipelines, control 13's checks, the stage parameter
-liveness registry, the first-detection corpus and the Splunk validation package, in GPU mode. What a
-device run does not reach, in these harnesses as before, is the assertions marked `cpu_mode`: the estate's
-nineteen include the ladder itself and both its negative controls, and they are CPU statements by
-construction rather than by omission. What it is not is a measurement of the model. The conformance tiers
-score through stubs, deliberately, so that they need no card-trained weights to run; the autoencoder
-behind the adapter is what `run_model.py` measures, and that verdict is separate.
-
-It took two failed runs to reach, and both failures were the parity defect described below, recurring.
-The first, on 2026-10-03 at 23:52 UTC, had 21 of 750 tests fail and 8 raise errors: `TC3ReachStage` iterated a cuDF
-series, which a device series refuses; eight of the new corpora collected with a plain `to_pandas`, so
-their integer columns widened to float in the concatenation; and `sort_for_cumulative_features` crossed to
-the host the same way. It also exposed a fifth runner defect, a parser that read on past pytest's progress
-lines into its failure report and named a test as where a finished run had died; the parser now stops at
-the first section header. The second, on 2026-10-04 after those repairs, failed three golden checks, and
-there the device was right and the golden wrong: the repair had used the library's host-frame helper,
-which leaves a host frame alone, so the CPU path still widened sixteen columns across three golden files --
-`404.0` where the device wrote `404`. The collectors now apply the integer rule in both modes, which is
-the rule this guide already states below, and every cell that changed in the regenerated golden files is a
-numerically equal integer.
-
-The verdict it supersedes, 2026-09-20 at 12:23 UTC, was 455 of 455 and 935 of 941 over the twenty-six
-stages and four composed pipelines (lineage, telemetry, session, estate) that existed then, and it first
-carried `torch==2.4.0+cu124` beside the RAPIDS stack, which answered a question the earlier ones could not:
-the two coexist in one process, and adding Torch does not disturb cuDF.
-
-Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
-less than it claimed. The runner selected from a list that was not total: two files were outside it from
-the start and the five TC-5 stage files joined them, so the layer 5 work went unmeasured while the
-verdict read clean. Then the counter read streamed output with a pattern that stopped at the first
-space, so fifteen tests whose parametrized identifiers contain one ran, passed, went uncounted, and the
-last of them was named as where the run had died. The tiers are now kept total by a test that identifies
-this fork's files by their copyright header, and the counts are reconciled against what pytest
-collected, so a total that does not add up is a failed verdict rather than a quiet one. A better pattern
-was not the repair; the reconciliation is, because a counter that can silently drop a test is
-untrustworthy however carefully its pattern is written.
-
-A third narrowing surfaced afterwards, with the same shape and one further lesson. The marked tier named
-the whole `tests/morpheus/determinism` directory, which reads as complete and is not: `-m gpu_mode`
-selects the 29 tests in the five files carrying a mode marker, and the other six files carry none, so
-320 of that directory's 349 tests were deselected on every GPU run this repository has rendered a
-verdict from, the 353 above included. The totality test could not have caught it, because it exempted
-the directory from the marker check on the grounds that a directory has no markers to check -- excusing
-the one entry that most needed checking. Directory entries are gone, every entry is a file, nothing is
-exempt, and that change alone grew the tier carrying no mode marker from 508 tests to 890. What the 353 covered it still
-covers, control 13 included; what it never covered now runs. The general form is worth stating once: an
-entry that cannot be checked is not a covered entry, and the check that excuses what it cannot inspect
-is the check that will go stale.
-
-The fourth defect was in the counting rather than the selection, and it is the one that best argues for
-the reconciliation. The first run over total tiers parsed zero of 379: pytest puts a test's outcome on
-the line after its identifier when the identifier does not fit the terminal, and every identifier in the
-marked tier carries a `[gpu_mode]` suffix, so on a narrow terminal all of them wrapped. Fixing that, the
-same run parsed 378 of 379 -- while pytest's own summary said 379 passed. Three of those tests spawn
-subprocesses, and a subprocess's pytest output lands in the parent's log. Two names were therefore counted
-twice while the three tests they displaced went unattributed. An off-by-one is what it looked like; two
-independent errors of opposite sign is what it was.
-
-Adding up the streamed lines had been the default for three revisions and was the wrong one. It is what a
-run that *died* needs, and a crashed run is the only case it was ever needed for: a run that finishes has
-already been counted, by pytest, in a line it prints for the purpose. That tally is the authority now and
-the line-by-line reading is the fallback. Trusting it does not weaken the check, because the tally is
-authoritative about what pytest ran and not about what it was asked to run -- the gap between those two
-being the entire thing under watch. It is still reconciled against the collected list, and the artifact
-now names what went unaccounted rather than only counting it.
-
-The wider upstream tier skipped itself, because that checkout's `tests/tests_data` fixtures were
-unfetched Git LFS pointers. Nothing here is a claim about the upstream suite on a GPU, and the limit
-none of it moves is the one worth repeating: one card, and the GPU tiers are not CI. The other limit that used to sit
-here -- that per-stage runs say nothing about the determinism controls -- has since been closed, and how
-is the subject of the next few paragraphs.
-
-That second limit is the more interesting one. Those 203 variants are per-stage unit tests, and a stage
-computing correctly on a device frame is not the same claim as fourteen of them in a row reaching the
-answer the golden records -- which is what control 13 asserts. Both harnesses built for CPU and nothing else, so the six
-checks had never seen a GPU and no per-stage run could change that. They now build for either mode, and
-`test_gpu_parity.py` runs the same corpus through the same composed pipelines in GPU mode and compares
-against the same golden, byte for byte for the telemetry side.
-
-It failed on the first run, which is the point of having written it. The composed telemetry pipeline
-produced `arp_count_in_window = 3.0` where the CPU golden holds `3`, while every one of the 203 per-stage
-variants passed. Nothing raised, and no stage was at fault: cuDF's `to_pandas` cannot represent a gap
-inside an integer column, so it widens the column to float64 and writes NaN. Every windowed count in this
-fork is null on the rows belonging to other telemetry classes, so the widening reaches most of the
-integer columns rather than an unlucky few.
-
-The conversion is not where it happens, which is what made a first repair miss entirely. A telemetry
-class's frame carries only its own columns, so collecting the classes means filling this one with gaps
-for every other class's rows, and what pandas fills with depends on the type it starts from.
-`assign_nullable_int_column` gives the CPU path an `Int64` that admits a gap, and it survives the fill.
-`to_pandas` gives a plain integer type whenever that particular frame has no gaps of its own, and such a
-column cannot hold one, so the fill widens it to float64 and every count in it grows a decimal point.
-
-The repair is therefore not a better conversion; it is refusing to let the concatenation choose. Integer
-columns are carried in a type that admits a gap, in both execution modes, before anything is joined -- which is what the
-CPU path already did by accident of `assign_nullable_int_column`, and what the GPU path now does
-deliberately. Columns of every other kind are untouched, and a negative control asserts that an optical
-power reading of `3.0` stays a float. Applying it in both modes rather than only in GPU mode is the
-point: a rule one mode follows and the other does not is the defect restated.
-
-That fixed one column and left seven: `auth_attempts`, `link_flaps`, `link_flaps_in_window`, and the four
-interface counter deltas. The fill was not widening them, because they were float64 before the fill ever
-saw them. `WindowSealStage` does its buffering on the host -- it converts each batch, holds fragments per
-window, concatenates them when a window seals, and converts the result back -- and a device integer column
-holding a gap cannot make the outbound leg as an integer. It returned to the device as a float, and what
-reached the collection was already lost.
-
-What identified it was a column that was fine. `arp_count_in_window` and `link_flaps_in_window` are
-written by the same helper on the same line shape, so what separates them cannot be the assignment; the
-ARP denominator simply has a value on every row, and an integer column with no gaps survives the
-conversion intact. The confirming detail was the binding class, the one telemetry class that skips
-sealing: its own gap-bearing integer columns, `bind_end` and `bind_gap_ns`, are the only ones the parity
-check never flagged. The sealer names the host type that admits a gap on the way across, so the frame
-returns to the device holding the type it left with, and the host path -- which never lost the type -- is
-left alone rather than coerced to meet it.
-
-It changes the CPU rendering too, and for the better. Fourteen columns lost a trailing `.0` in the
-golden -- `event_time`, `window_id`, `collector_seq`, `uptime`, the interface counters -- and every
-change in the regenerated file is that and nothing else. An event time was never a decimal. The lineage
-pipeline agreed across modes throughout and was never affected.
-
-**The obvious repair is wrong, and that is worth writing down because the reasoning for it is sound.**
-Asking the conversion for types that can hold a gap looks like the fix: it yields pandas `Int64`,
-`Float64` and `boolean`, which is what the CPU path produces natively, so the two modes ought to agree by
-construction. It was tried and measured on the same GPU, and it turned three failures into nine. The
-request does not only affect integer columns; it changes how every gap returns to the host, so object
-columns begin yielding `pandas.NA` where they yielded `None`, and every piece of stage code testing
-`value is None` stops recognising a missing value. The failures spread across the ARP, auth,
-binding-resolver and lineage-stamp stages, all of them null-handling tests. A conversion more correct in
-isolation was less correct for the code that reads it.
-
-On 2026-09-06, on the same laptop GPU, both composed pipelines ran in GPU mode against the same corpus and
-matched the same golden records. That settled the golden check, and the rest of control 13 followed it
-across. Check 1 is a property of the corpus builder and has no execution mode; checks 2 through 6 -- the
-double run, the cross-restart, the golden, the batch-split sweep, and the permutation check with its
-negative control -- now run against both composed pipelines in either mode. Fifteen GPU variants where
-there had been two, all passing.
-
-Two of them were worth being nervous about, and neither broke. The cross-restart check is the only one
-that cannot share a process with the test that asks for it, since a fresh interpreter is the whole point,
-so the mode has to travel on the driver's command line and four more CUDA contexts get built from
-nothing. And the `CompareDataFrameStage` form of the golden check feeds a host golden to a stage that
-does its own conversion back to the host -- the conversion behind both defects above, on a path neither
-repair touches.
-
-Control 13 is therefore verified in both execution modes. It remains one card, and the GPU half is not CI.
-
-Reproducing it requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1` under WSL2. Without that variable, Numba's
-default driver bindings read back an invalid CUDA context from the WSL driver shim: `cuCtxGetDevice`
-returns a garbage device number, and the run dies with `CUDA_ERROR_INVALID_CONTEXT` or a segmentation
-fault inside `libcuda`. Every `column_assign` helper and every stage was verified to work in isolation
-before that cause was found, so the symptom presents as a defect in this code and is not one.
+Two limits apply to everything built. GPU execution has been measured on one machine only and is not part of CI.
+And the layer 5 models were trained on one week of five test users: that proves the scoring path is reproducible,
+not that it detects anything in a real estate. The [verification history](#appendix-verification-history) gives
+every run and count behind this table.
 
 **On the word "predictive."** Three of the four mechanisms in Part 1 are forward-looking in a defensible
 sense: trajectory features over reconstruction error, forecast residual from `TimeSeriesStage`, and
@@ -342,8 +185,13 @@ establish it, and a deployment should validate the lead time against its own his
 anyone promises prediction to a stakeholder. Absent that validation, what is described here is anomaly
 detection with a forward-looking read on its trend.
 
+Every claim about Morpheus in the parts that follow is anchored to a file path in this repository. Where a
+capability does not exist and must be built, the guide says so rather than implying the SDK already covers it.
+
 **Contents**
 
+- [In plain terms](#in-plain-terms)
+- [How to read this guide](#how-to-read-this-guide)
 - [Summary](#summary)
 - [Part 0: Codebase Analysis](#part-0-codebase-analysis)
   - [Pass 1: Structure, Execution Model, and Type System](#pass-1-structure-execution-model-and-type-system)
@@ -356,6 +204,7 @@ detection with a forward-looking read on its trend.
 - [Part 4: Chaining Layer 1-7 Lineage in Splunk](#part-4-chaining-layer-1-7-lineage-in-splunk)
 - [Part 5: Preserving Determinism in the Output](#part-5-preserving-determinism-in-the-output)
 - [Part 6: Gaps and Build List](#part-6-gaps-and-build-list)
+- [Appendix: Verification history](#appendix-verification-history)
 
 ---
 
@@ -4984,3 +4833,292 @@ this order:
 
 Apply the D1 and D2 determinism controls from the start. Retrofitting determinism onto a running
 detection pipeline means re-tuning every threshold, because the scores will move.
+
+---
+
+## Appendix: Verification history
+
+What follows is the record behind the status table in the [Summary](#summary): every GPU conformance run, every
+Splunk validation run, the model reproducibility checks, and the defects each of them found. It is kept in full
+because several runs reported a pass while measuring less than they claimed, and how each was caught is part of
+the evidence.
+
+**What is verified versus designed.** This document was written before any of it was built, and the
+boundary has moved since. What now runs: the lineage substrate (identifiers, Community ID, binding
+resolution, window sealing), feature stages for every telemetry class from TC-0 to TC-7, the layer 5
+scoring path with a learned model per principal in the model's slot, a host feature frame scored by a
+learned model per peer group, control 8's total order, and control 13's seven
+checks over thirteen composed corpora, which ran in CPU mode in the fork's own CI on every push and pull
+request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, through pull requests #87 to
+#99, for a cause the repository does not show -- and in GPU mode on one card, where the twelve that existed then
+matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
+card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
+That is sixty-two stages and fifty-four supporting
+modules, covered by 2,777 distinct tests, itemized in
+[Part 6](#provided). Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of
+them chained. The Community ID implementation was checked against the reference implementation
+against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
+functional
+pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
+([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)); that pass covered
+the seven searches then present. On 2026-10-05 all forty-eight ran on Splunk 10.2.8 over the pipeline's own
+sample events: forty-six returned what the written expectation said, and the two that did not found a defect in
+the wire format rather than in a search -- null fields sent as `null`, which Splunk compared as values -- now
+repaired. On 2026-10-09 the run over the repaired events returned what was written for all forty-eight, and on
+2026-10-10 a run over step 9's events returned what was then written for all fifty-two, a run later that day
+over step 10's returned what was then written for all sixty-two, and a run that night over step 11's
+returned what was then written for all sixty-six. On 2026-10-15 a run over step 12's returned what was then written
+for all seventy-two, on 2026-10-16 a run over step 13's returned what was then written for all seventy-five, and on
+2026-10-17 a run over step 15's returned what was then written for all seventy-eight, on 2026-10-22 a run over
+the events the host segment's sourcetype added returned what was then written for all eighty, on 2026-10-23 a run
+over the events the daily drift over the TLS and DNS columns added returned what was then written for all eighty-two,
+on 2026-10-26 a run over the events the desk spoof and the network inventory added returned what was then written for
+all eighty-three, on 2026-10-28 a run over the events the HTTP and process trajectories added returned what was then
+written for all eighty-five, on 2026-10-31 a run over the events plan section 3.7 regenerated returned what was then
+written for all eighty-six, every risk record carrying its rule's `thresholds_hash`, on 2026-11-01 a run over the
+events plan section 4.1 regenerated returned what was then written for all eighty-seven, on 2026-11-08 a run over
+the events plan section 4.7a regenerated returned what was then written for all eighty-seven, a run that day over
+the events plan section 4.7b regenerated returned what was then written for all eighty-seven, and a run that evening
+over the events plan section 4.7c regenerated returned what is written for all eighty-seven the app now ships. [The retrospective](./12_behavioral_analytics_retrospective.md)
+scores what all of that adds up to for each class of entity on a network, and lists what it does not.
+
+What remains design rather than a running system: one of the sixty rules as a detection (R-B-L4-001, whose
+booster scores every flow but which no saved search reads, because it scores every flow in the corpus above its
+threshold), the
+hysteresis half of control 9 (its suppression half ships on every detection), controls 10 and 11 as code, the sharding router's wiring, and clock
+correction, since `clock_source` and `clock_offset_ms` are schema that nothing produces or checks. Layer 5
+is the case to state precisely: **each principal has a learned model of their own, hosts share one per peer group, and nothing else is scored.**
+`mean_abs_z` and `max_abs_z` are produced by
+{py:class}`~morpheus.stages.telemetry.tc5_score_stage.TC5ScoreStage` from a per-principal
+`morpheus.models.dfencoder` autoencoder, trained once on the session corpus's fortnight of ordinary habits and
+committed as plain numbers under `examples/layer5_model/models/`; CI scores them with a NumPy forward pass,
+since it has no Torch, and the manifest pins each principal to a digest of their model's numbers and declares
+where training ended, so the fortnight's rows are never scored by the models fitted to them. A joiner with no
+fortnight is scored against a population fallback fitted on the same fortnight, and says so on every row.
+R-B-L5-001 and R-B-L5-002 read only rows a principal's own model scored, and return their first rows: the
+afternoon one account is used from Amsterdam, and the week's other planted departures. The drift trajectory
+that is this document's flagship predictive claim is built and tested --
+{py:class}`~morpheus.stages.telemetry.tc5_drift_stage.TC5DriftStage` reports the velocity, the
+acceleration, the length of the rising run and its total rise in the principal's own standard deviations
+-- against those learned scores. The scores are not calibrated, which is the first thing the model rules
+taught: a feature the fortnight never varied scores any change in the thousands. Hosts have one per peer group since step 8's second half, which no rule reads yet. Given no score column at all it carries a null in every drift column and says so once in the log.
+Everything else at this layer is built: the session assembly and the six feature stages run under
+control 13's seven checks against a week-long corpus, the five deterministic rules and R-B-L5-005's
+per-principal session-duration baseline ship as saved searches with their predicates asserted against that
+corpus, and `morpheus:score:l5` is a produced sourcetype.
+Controls 1, 2, 4 and 12 now ship as code, ahead of the model
+that will consume them. Control 9 is a partial exception, since `determinism.quantize_value` ships but
+the hysteresis half of it does not. Control 3 has now been measured, on the one machine with a card:
+`examples/layer5_model/run_model.py` sets `CUBLAS_WORKSPACE_CONFIG` before Torch is imported, enables
+`torch.use_deterministic_algorithms`, trains a per-principal autoencoder on the layer 5 corpus and checks
+the double run and the batch sweep, and then runs the composed pipeline with those models in the scoring
+slot. On 2026-10-03 at 23:53 UTC, with `torch==2.4.0+cu124` on an RTX 5000 Ada, **all four checks
+passed**: the double run was identical and the scores invariant across batch sizes 1, 8 and 64 for all
+five principals, and the composed pipeline returned the same 105 scores twice and again under the
+batch-split sweep. That repeats the first passing run, on 2026-09-19 at 23:17 UTC, on the tree after the
+layer 5 rules and context landed, with the same row counts per principal and the same
+`pipeline_mean_abs_z_max` of 2.3823. Had any of them failed, R-P-L5-006 -- a rule about a score rising by fractions of a
+standard deviation -- would have been measuring the model's own jitter rather than a principal's
+behaviour, and every threshold tuned against those scores would have been tuned against noise. The
+fourth check did fail on its first run, and that is written up where the adapter is described.
+
+What that establishes is reproducibility of the scoring path and nothing more. A week of five principals
+is far too little data to train an autoencoder that detects anything, nothing in this document claims it
+does, and the artifact says so in a field of its own so the caveat travels with the numbers. What the
+pipeline publishes as `mean_abs_z` in its golden is still the reference scorer's arithmetic; the model
+occupies that slot only in the runner, which is what the fourth check measures. On a machine
+without Torch or without a card the runner exits non-zero and writes a failed verdict rather than
+reporting on a model it never trained, and both refusals are tested by shadowing Torch with a stub rather
+than by depending on its absence -- which is a distinction that cost a passing test the moment Torch was
+installed. Thresholds are placeholders unless marked otherwise.
+
+One caveat cuts across everything shipped: GPU execution mode has been measured on one machine and
+nowhere else. On 2026-09-05 the 203 `gpu_mode` variants ran for the first time, on an NVIDIA RTX 5000 Ada
+Generation Laptop GPU (compute capability 8.9, driver 596.58) under WSL2, giving 226 passed, 2 failed, 55
+skipped. Both failures are upstream Morpheus tests rather than anything added here. The suite was re-run
+on 2026-09-06 with the parity repairs described below in place, giving 231 passed, 2 failed, 55 skipped --
+the same two upstream failures, and five more passes for the guards those repairs added.
+
+Later on 2026-09-06, at 17:32 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card and wrote the
+artifact it exists to produce. It then took four repairs to that runner before an artifact could be
+believed, and each of the four is recorded below, because each produced a verdict that read `passed`
+while measuring less than it claimed. A fifth, found in October, misreported where a failing run had died
+rather than passing one that had failed, and it is recorded with the run that found it.
+
+**The run that stands is 2026-10-09 at 22:17 UTC**, on the same card under driver 596.71, over tiers
+that are total: the marked tier 760 collected and 760 passed; the tier carrying no mode marker 1,971
+collected, 1,970 passed and 1 skipped. Nothing failed in either, both exited cleanly, and both counts
+reconcile exactly against what pytest collected. The skip is the test for a sourcetype nothing produces,
+which has no cases left because every sourcetype now has one; the six skips of the September verdict were
+all of that kind. It ran on step 6's tree, so the four golden files that gained `resolution_methods`, and the
+resolver code that writes the column, matched on a card for the first time; the run at 15:20 UTC that morning,
+759 and 1,959 collected, was the same check before them, and passed the same way.
+
+The run of 2026-10-04 at 03:56 UTC was the first in which every composed pipeline this fork has took
+part: all twelve, eight of them on a card for the first time, 750 and 1,925 collected, and it passed the
+same way. Each of the twelve golden checks ran in GPU mode and matched the golden the CPU path generated,
+through the canonical rendering with floats quantized to four places, so the cross-mode question is
+answered for every corpus. `test_gpu_parity.py` compared three corpora on that run; it was then
+parametrized over all twelve, and the nine variants that added passed on the card at 15:20 UTC on
+2026-10-09 and again in the run that stands. The estate harness was the one that mattered most in September, when it first ran on a card: a
+chain is a Merkle root over its members in order, the estate seals five classes together over their
+union, and the ordering and hashing of that union is exactly the arithmetic this project has seen diverge
+between host and device before.
+
+The counts reconcile rather than being taken on trust. On that day the same two tiers collected 760 and 1,961 on
+a machine with no card -- the marked tier identical to the device, the unmarked one exactly ten short of it,
+the offset every run so far has shown. A tier that differed by some other number would mean a file had
+fallen out of a list, which is the defect two of the repairs below were for.
+
+That was all forty-six stages then shipped and all twelve composed pipelines, control 13's checks, the stage parameter
+liveness registry, the first-detection corpus and the Splunk validation package, in GPU mode. What a
+device run does not reach, in these harnesses as before, is the assertions marked `cpu_mode`: the estate's
+nineteen include the ladder itself and both its negative controls, and they are CPU statements by
+construction rather than by omission. What it is not is a measurement of the model. The conformance tiers
+score through stubs, deliberately, so that they need no card-trained weights to run; the autoencoder
+behind the adapter is what `run_model.py` measures, and that verdict is separate.
+
+It took two failed runs to reach, and both failures were the parity defect described below, recurring.
+The first, on 2026-10-03 at 23:52 UTC, had 21 of 750 tests fail and 8 raise errors: `TC3ReachStage` iterated a cuDF
+series, which a device series refuses; eight of the new corpora collected with a plain `to_pandas`, so
+their integer columns widened to float in the concatenation; and `sort_for_cumulative_features` crossed to
+the host the same way. It also exposed a fifth runner defect, a parser that read on past pytest's progress
+lines into its failure report and named a test as where a finished run had died; the parser now stops at
+the first section header. The second, on 2026-10-04 after those repairs, failed three golden checks, and
+there the device was right and the golden wrong: the repair had used the library's host-frame helper,
+which leaves a host frame alone, so the CPU path still widened sixteen columns across three golden files --
+`404.0` where the device wrote `404`. The collectors now apply the integer rule in both modes, which is
+the rule this guide already states below, and every cell that changed in the regenerated golden files is a
+numerically equal integer.
+
+The verdict it supersedes, 2026-09-20 at 12:23 UTC, was 455 of 455 and 935 of 941 over the twenty-six
+stages and four composed pipelines (lineage, telemetry, session, estate) that existed then, and it first
+carried `torch==2.4.0+cu124` beside the RAPIDS stack, which answered a question the earlier ones could not:
+the two coexist in one process, and adding Torch does not disturb cuDF.
+
+Both repairs are worth recording, because both produced an artifact that said "passed" while measuring
+less than it claimed. The runner selected from a list that was not total: two files were outside it from
+the start and the five TC-5 stage files joined them, so the layer 5 work went unmeasured while the
+verdict read clean. Then the counter read streamed output with a pattern that stopped at the first
+space, so fifteen tests whose parametrized identifiers contain one ran, passed, went uncounted, and the
+last of them was named as where the run had died. The tiers are now kept total by a test that identifies
+this fork's files by their copyright header, and the counts are reconciled against what pytest
+collected, so a total that does not add up is a failed verdict rather than a quiet one. A better pattern
+was not the repair; the reconciliation is, because a counter that can silently drop a test is
+untrustworthy however carefully its pattern is written.
+
+A third narrowing surfaced afterwards, with the same shape and one further lesson. The marked tier named
+the whole `tests/morpheus/determinism` directory, which reads as complete and is not: `-m gpu_mode`
+selects the 29 tests in the five files carrying a mode marker, and the other six files carry none, so
+320 of that directory's 349 tests were deselected on every GPU run this repository has rendered a
+verdict from, the 353 above included. The totality test could not have caught it, because it exempted
+the directory from the marker check on the grounds that a directory has no markers to check -- excusing
+the one entry that most needed checking. Directory entries are gone, every entry is a file, nothing is
+exempt, and that change alone grew the tier carrying no mode marker from 508 tests to 890. What the 353 covered it still
+covers, control 13 included; what it never covered now runs. The general form is worth stating once: an
+entry that cannot be checked is not a covered entry, and the check that excuses what it cannot inspect
+is the check that will go stale.
+
+The fourth defect was in the counting rather than the selection, and it is the one that best argues for
+the reconciliation. The first run over total tiers parsed zero of 379: pytest puts a test's outcome on
+the line after its identifier when the identifier does not fit the terminal, and every identifier in the
+marked tier carries a `[gpu_mode]` suffix, so on a narrow terminal all of them wrapped. Fixing that, the
+same run parsed 378 of 379 -- while pytest's own summary said 379 passed. Three of those tests spawn
+subprocesses, and a subprocess's pytest output lands in the parent's log. Two names were therefore counted
+twice while the three tests they displaced went unattributed. An off-by-one is what it looked like; two
+independent errors of opposite sign is what it was.
+
+Adding up the streamed lines had been the default for three revisions and was the wrong one. It is what a
+run that *died* needs, and a crashed run is the only case it was ever needed for: a run that finishes has
+already been counted, by pytest, in a line it prints for the purpose. That tally is the authority now and
+the line-by-line reading is the fallback. Trusting it does not weaken the check, because the tally is
+authoritative about what pytest ran and not about what it was asked to run -- the gap between those two
+being the entire thing under watch. It is still reconciled against the collected list, and the artifact
+now names what went unaccounted rather than only counting it.
+
+The wider upstream tier skipped itself, because that checkout's `tests/tests_data` fixtures were
+unfetched Git LFS pointers. Nothing here is a claim about the upstream suite on a GPU, and the limit
+none of it moves is the one worth repeating: one card, and the GPU tiers are not CI. The other limit that used to sit
+here -- that per-stage runs say nothing about the determinism controls -- has since been closed, and how
+is the subject of the next few paragraphs.
+
+That second limit is the more interesting one. Those 203 variants are per-stage unit tests, and a stage
+computing correctly on a device frame is not the same claim as fourteen of them in a row reaching the
+answer the golden records -- which is what control 13 asserts. Both harnesses built for CPU and nothing else, so the six
+checks had never seen a GPU and no per-stage run could change that. They now build for either mode, and
+`test_gpu_parity.py` runs the same corpus through the same composed pipelines in GPU mode and compares
+against the same golden, byte for byte for the telemetry side.
+
+It failed on the first run, which is the point of having written it. The composed telemetry pipeline
+produced `arp_count_in_window = 3.0` where the CPU golden holds `3`, while every one of the 203 per-stage
+variants passed. Nothing raised, and no stage was at fault: cuDF's `to_pandas` cannot represent a gap
+inside an integer column, so it widens the column to float64 and writes NaN. Every windowed count in this
+fork is null on the rows belonging to other telemetry classes, so the widening reaches most of the
+integer columns rather than an unlucky few.
+
+The conversion is not where it happens, which is what made a first repair miss entirely. A telemetry
+class's frame carries only its own columns, so collecting the classes means filling this one with gaps
+for every other class's rows, and what pandas fills with depends on the type it starts from.
+`assign_nullable_int_column` gives the CPU path an `Int64` that admits a gap, and it survives the fill.
+`to_pandas` gives a plain integer type whenever that particular frame has no gaps of its own, and such a
+column cannot hold one, so the fill widens it to float64 and every count in it grows a decimal point.
+
+The repair is therefore not a better conversion; it is refusing to let the concatenation choose. Integer
+columns are carried in a type that admits a gap, in both execution modes, before anything is joined -- which is what the
+CPU path already did by accident of `assign_nullable_int_column`, and what the GPU path now does
+deliberately. Columns of every other kind are untouched, and a negative control asserts that an optical
+power reading of `3.0` stays a float. Applying it in both modes rather than only in GPU mode is the
+point: a rule one mode follows and the other does not is the defect restated.
+
+That fixed one column and left seven: `auth_attempts`, `link_flaps`, `link_flaps_in_window`, and the four
+interface counter deltas. The fill was not widening them, because they were float64 before the fill ever
+saw them. `WindowSealStage` does its buffering on the host -- it converts each batch, holds fragments per
+window, concatenates them when a window seals, and converts the result back -- and a device integer column
+holding a gap cannot make the outbound leg as an integer. It returned to the device as a float, and what
+reached the collection was already lost.
+
+What identified it was a column that was fine. `arp_count_in_window` and `link_flaps_in_window` are
+written by the same helper on the same line shape, so what separates them cannot be the assignment; the
+ARP denominator simply has a value on every row, and an integer column with no gaps survives the
+conversion intact. The confirming detail was the binding class, the one telemetry class that skips
+sealing: its own gap-bearing integer columns, `bind_end` and `bind_gap_ns`, are the only ones the parity
+check never flagged. The sealer names the host type that admits a gap on the way across, so the frame
+returns to the device holding the type it left with, and the host path -- which never lost the type -- is
+left alone rather than coerced to meet it.
+
+It changes the CPU rendering too, and for the better. Fourteen columns lost a trailing `.0` in the
+golden -- `event_time`, `window_id`, `collector_seq`, `uptime`, the interface counters -- and every
+change in the regenerated file is that and nothing else. An event time was never a decimal. The lineage
+pipeline agreed across modes throughout and was never affected.
+
+**The obvious repair is wrong, and that is worth writing down because the reasoning for it is sound.**
+Asking the conversion for types that can hold a gap looks like the fix: it yields pandas `Int64`,
+`Float64` and `boolean`, which is what the CPU path produces natively, so the two modes ought to agree by
+construction. It was tried and measured on the same GPU, and it turned three failures into nine. The
+request does not only affect integer columns; it changes how every gap returns to the host, so object
+columns begin yielding `pandas.NA` where they yielded `None`, and every piece of stage code testing
+`value is None` stops recognising a missing value. The failures spread across the ARP, auth,
+binding-resolver and lineage-stamp stages, all of them null-handling tests. A conversion more correct in
+isolation was less correct for the code that reads it.
+
+On 2026-09-06, on the same laptop GPU, both composed pipelines ran in GPU mode against the same corpus and
+matched the same golden records. That settled the golden check, and the rest of control 13 followed it
+across. Check 1 is a property of the corpus builder and has no execution mode; checks 2 through 6 -- the
+double run, the cross-restart, the golden, the batch-split sweep, and the permutation check with its
+negative control -- now run against both composed pipelines in either mode. Fifteen GPU variants where
+there had been two, all passing.
+
+Two of them were worth being nervous about, and neither broke. The cross-restart check is the only one
+that cannot share a process with the test that asks for it, since a fresh interpreter is the whole point,
+so the mode has to travel on the driver's command line and four more CUDA contexts get built from
+nothing. And the `CompareDataFrameStage` form of the golden check feeds a host golden to a stage that
+does its own conversion back to the host -- the conversion behind both defects above, on a path neither
+repair touches.
+
+Control 13 is therefore verified in both execution modes. It remains one card, and the GPU half is not CI.
+
+Reproducing it requires `NUMBA_CUDA_USE_NVIDIA_BINDING=1` under WSL2. Without that variable, Numba's
+default driver bindings read back an invalid CUDA context from the WSL driver shim: `cuCtxGetDevice`
+returns a garbage device number, and the run dies with `CUDA_ERROR_INVALID_CONTEXT` or a segmentation
+fault inside `libcuda`. Every `column_assign` helper and every stage was verified to work in isolation
+before that cause was found, so the symptom presents as a defect in this code and is not one.
