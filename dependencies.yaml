@@ -457,11 +457,18 @@ dependencies:
     common:
       - output_types: [conda]
         packages:
+          # libarrow 15.0.2, which morpheus-core 25.06 brings, links libgflags.so.2.2, and its metadata admits the
+          # gflags 2.3 the channel now solves to; without this pin pyarrow does not import.
+          - gflags=2.2
           - morpheus-core=25.06
           - onnxruntime # the SID model, scored on the CPU from models/inventory
+          # Arrow as the tiers were verified with it. cudf 25.02 admits newer, and the solver takes 17 once gflags is
+          # pinned; hold it until the tiers have been run and the goldens checked against a newer one on purpose.
+          - pyarrow=15.0
           - pylint
           - pytest
           - pytest-asyncio
+          - pytest-benchmark # pyproject.toml's pytest options pass --benchmark-disable
           - python=3.12
           - xgboost # the abp-pcap-xgb booster, scored on the CPU from models/inventory
           - yapf

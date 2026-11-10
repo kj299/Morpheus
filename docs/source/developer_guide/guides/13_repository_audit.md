@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,136 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,139 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -102,7 +102,8 @@ record helpers) and the two section 4.6b added (the number-word reader and the t
 run it superseded, kept as history) and the seven section 4.7b added (six fixture files for the layer 1, 2 and 5
 classes and the search-head run it superseded) and the twelve section 4.7c added (eleven fixture files for the last
 eight classes and the search-head run it superseded) and the five section 4.8a added (the GPU verdict report, the
-throughput benchmark, their tests and the throughput baseline), less
+throughput benchmark, their tests and the throughput baseline) and the three section 4.8b added (the lock's
+generator, the environment request it solves and their test), less
 the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
@@ -112,7 +113,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and 
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 497 |
+| `keep` | 500 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -510,6 +511,17 @@ that replaces it. Each item says how to know it is done.
     architecture workaround. Done when the kept C++ tests run in a tier.
 11. **One environment definition.** `dependencies.yaml` and the CPU lock disagree on channels and pins. Generate the
     lock from the dependency file, or make the lock the only definition. Done when one regeneration produces both.
+    *Built under plan section 4.8b:* the dependency file is the definition. Its `cpu-test` file key lists what the
+    environment asks for, and `ci/scripts/cpu_env/make_lock.py` runs `rapids-dependency-file-generator`, which writes
+    the request `conda/environments/cpu-test_arch-x86_64.yaml` with the repository's own channels, then solves the
+    request with micromamba and writes the lock, the request's SHA-256 in its header. `test_cpu_lock.py` holds the
+    three to each other without solving anything, so a request changed without a new lock fails a test. The first
+    regeneration found three things the old lock had held only by the accident of when it was solved: the channel
+    now solves `gflags` to 2.3, which the Arrow that `morpheus-core` 25.06 brings cannot load; with `gflags` pinned
+    the solver moves Arrow from 15 to 17; and `pytest-benchmark`, whose option `pyproject.toml` passes to every
+    run, is no longer brought in by anything. All three are now written in the definition, with their reasons. The
+    regenerated lock keeps `morpheus-core`, cuDF, MRC, pandas, NumPy, pytest and Arrow at the versions the old one
+    held, and the full tiers were run in the environment it installs before it was committed.
 12. **Real-format fixtures for layers 1, 2 and 5, and one input-sample convention.** Layers 6 and 7 have them; the
     rest are synthetic only, and the input samples spell `schema_version` and `origin_hash` differently by class.
     Done when every class has a real-format fixture and the input contract test enforces one convention. *Built

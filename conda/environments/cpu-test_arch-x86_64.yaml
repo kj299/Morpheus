@@ -9,11 +9,14 @@ channels:
 - nvidia/label/dev
 - pytorch
 dependencies:
+- gflags=2.2
 - morpheus-core=25.06
 - onnxruntime
+- pyarrow=15.0
 - pylint
 - pytest
 - pytest-asyncio
+- pytest-benchmark
 - python=3.12
 - xgboost
 - yapf
