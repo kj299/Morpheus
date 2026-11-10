@@ -13,12 +13,10 @@
 
 from . import common
 from . import messages
-from . import modules
 from . import stages
 
 __all__ = [
     "common",
     "messages",
-    "modules",
     "stages",
 ]

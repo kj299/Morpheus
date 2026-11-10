@@ -143,19 +143,18 @@ TARGETS=(
 # that carries `cpu_mode` stays on the CPU there, by the marker's own meaning: the tier runs the file on the device,
 # not every test in it.
 UNMARKED=(
-    tests/morpheus/determinism/test_nothing_imports_tests.py
-    tests/morpheus/determinism/test_estate_context.py
-    tests/morpheus/determinism/test_one_definition.py
+    tests/morpheus/determinism/test_clock_skew_experiment.py
     tests/morpheus/determinism/test_cpu_lock.py
     tests/morpheus/determinism/test_derived_counts.py
-    tests/morpheus/stages/test_kafka_source_provenance.py
-    tests/morpheus/stages/test_partition_merge_stage.py
-    tests/morpheus/determinism/test_clock_skew_experiment.py
     tests/morpheus/determinism/test_end_to_end_mac_spoof.py
+    tests/morpheus/determinism/test_estate_context.py
+    tests/morpheus/determinism/test_feature_coverage.py
     tests/morpheus/determinism/test_first_detections.py
     tests/morpheus/determinism/test_host_identity_harness.py
     tests/morpheus/determinism/test_input_contracts.py
     tests/morpheus/determinism/test_layer5_model_runner.py
+    tests/morpheus/determinism/test_nothing_imports_tests.py
+    tests/morpheus/determinism/test_one_definition.py
     tests/morpheus/determinism/test_readme_inventory.py
     tests/morpheus/determinism/test_repository_audit.py
     tests/morpheus/determinism/test_representation_invariance.py
@@ -164,66 +163,68 @@ UNMARKED=(
     tests/morpheus/determinism/test_splunk_validation_package.py
     tests/morpheus/determinism/test_stage_parameter_liveness.py
     tests/morpheus/determinism/test_upstream_reuse.py
-    tests/morpheus/determinism/test_feature_coverage.py
     tests/morpheus/determinism/test_verdict_artifacts.py
+    tests/morpheus/stages/test_entity_frame_stage.py
+    tests/morpheus/stages/test_flow_record_normalize_stage.py
+    tests/morpheus/stages/test_kafka_source_provenance.py
     tests/morpheus/stages/test_lineage_stage_cli.py
+    tests/morpheus/stages/test_partition_merge_stage.py
     tests/morpheus/stages/test_stage_checkpoint.py
     tests/morpheus/stages/test_telemetry_base.py
     tests/morpheus/utils/test_abp_scorer.py
     tests/morpheus/utils/test_arrival_regularity.py
     tests/morpheus/utils/test_binding_closer.py
-    tests/morpheus/utils/test_cipher_strength.py
     tests/morpheus/utils/test_binding_table.py
     tests/morpheus/utils/test_bitemporal.py
     tests/morpheus/utils/test_bucket_peak.py
+    tests/morpheus/utils/test_cipher_strength.py
+    tests/morpheus/utils/test_collector_schemas.py
     tests/morpheus/utils/test_community_id.py
     tests/morpheus/utils/test_counter_delta.py
+    tests/morpheus/utils/test_cpp_tests.py
     tests/morpheus/utils/test_cyclic_histogram.py
     tests/morpheus/utils/test_determinism.py
     tests/morpheus/utils/test_determinism_envelope.py
+    tests/morpheus/utils/test_dfencoder_scorer.py
     tests/morpheus/utils/test_distinct_window.py
     tests/morpheus/utils/test_drift_trajectory.py
     tests/morpheus/utils/test_entity_key.py
     tests/morpheus/utils/test_established_value.py
     tests/morpheus/utils/test_event_clock.py
     tests/morpheus/utils/test_geo_velocity.py
-    tests/morpheus/utils/test_identity_anchor.py
     tests/morpheus/utils/test_gpu_conformance_report.py
-    tests/morpheus/utils/test_gpu_verdict.py
-    tests/morpheus/utils/test_stage_throughput.py
-    tests/morpheus/utils/test_dfencoder_scorer.py
     tests/morpheus/utils/test_gpu_conformance_targets.py
+    tests/morpheus/utils/test_gpu_verdict.py
+    tests/morpheus/utils/test_identity_anchor.py
+    tests/morpheus/utils/test_ipfix.py
     tests/morpheus/utils/test_lineage.py
-    tests/morpheus/utils/test_model_inventory.py
-    tests/morpheus/utils/test_model_manifest.py
     tests/morpheus/utils/test_lineage_cudf.py
     tests/morpheus/utils/test_link_flap.py
     tests/morpheus/utils/test_media_type.py
+    tests/morpheus/utils/test_model_inventory.py
+    tests/morpheus/utils/test_model_manifest.py
     tests/morpheus/utils/test_optical_baseline.py
     tests/morpheus/utils/test_optical_forecast.py
-    tests/morpheus/utils/test_pair_history.py
-    tests/morpheus/utils/test_query_entropy.py
-    tests/morpheus/utils/test_sid_scorer.py
-    tests/morpheus/utils/test_tcp_flags.py
-    tests/morpheus/utils/test_transfer_envelope.py
     tests/morpheus/utils/test_outcome_run.py
+    tests/morpheus/utils/test_pair_history.py
     tests/morpheus/utils/test_personal_data.py
+    tests/morpheus/utils/test_query_entropy.py
     tests/morpheus/utils/test_ratio_window.py
     tests/morpheus/utils/test_reference_data.py
     tests/morpheus/utils/test_rule_thresholds.py
     tests/morpheus/utils/test_session_timer.py
     tests/morpheus/utils/test_sharding.py
+    tests/morpheus/utils/test_sid_scorer.py
     tests/morpheus/utils/test_siem_sourcetypes.py
     tests/morpheus/utils/test_siem_wire.py
     tests/morpheus/utils/test_splunk_app_contracts.py
     tests/morpheus/utils/test_splunk_field_contracts.py
     tests/morpheus/utils/test_splunk_transport.py
-    tests/morpheus/stages/test_flow_record_normalize_stage.py
-    tests/morpheus/stages/test_entity_frame_stage.py
-    tests/morpheus/utils/test_ipfix.py
-    tests/morpheus/utils/test_collector_schemas.py
     tests/morpheus/utils/test_stack_fingerprint.py
+    tests/morpheus/utils/test_stage_throughput.py
+    tests/morpheus/utils/test_tcp_flags.py
     tests/morpheus/utils/test_tracker_state.py
+    tests/morpheus/utils/test_transfer_envelope.py
     tests/morpheus/utils/test_ttl_profile.py
     tests/morpheus/utils/test_user_agent.py
     tests/morpheus/utils/test_value_novelty.py
@@ -370,19 +371,39 @@ else
 fi
 
 echo ""
+echo "=== C++ tests ==="
+# The kept C++ core's own tests, built here from this checkout and run on the device (guide 13, plan item 10).
+# The fork's CI compiles them and runs the few that need no device; this is the only place the rest run.
+# `fork_cpp.sh` builds into its own tree and says, test by test, what ran and what did not: a suite that reads
+# tests/tests_data is named as not run on a checkout that has only the Git LFS pointers, rather than failed.
+#
+# SKIP_CPP_TESTS=1 leaves the tier out, for a machine with the runtime environment and no compilers. The artifact
+# records that it was left out, and why: a tier that did not run is said, never implied.
+CPP_RESULT=/tmp/gpu_conformance_cpp.json
+rm -f "${CPP_RESULT}"
+if [[ "${SKIP_CPP_TESTS:-0}" == "1" ]]; then
+    echo "skipped: SKIP_CPP_TESTS=1"
+    CPP_RESULT="skipped"
+    CPP_STATUS=0
+else
+    "${SCRIPT_DIR}/fork_cpp.sh" --device yes --result "${CPP_RESULT}" 2>&1 | tee /tmp/gpu_conformance_cpp.log
+    CPP_STATUS=${PIPESTATUS[0]}
+fi
+
+echo ""
 echo "=== artifact ==="
 # The reporting lives in a module beside this script rather than in a heredoc, because it has been wrong twice
 # and a parser nobody can test is a parser that will be wrong a third time. `tests/morpheus/utils/
 # test_gpu_conformance_report.py` exercises it against the log shapes that broke it.
 python "${SCRIPT_DIR}/gpu_conformance_report.py" \
     "$ARTIFACT" "$DEVICE" "$SELECTED" "$MARKED_STATUS" "$UNMARKED_SELECTED" "$UNMARKED_STATUS" \
-    "$RUN_WIDER" "$WIDER_STATUS"
+    "$RUN_WIDER" "$WIDER_STATUS" "$CPP_RESULT"
 REPORT_STATUS=$?
 
 # The report's own verdict decides, not just the exit codes. A tier can exit zero having lost tests to a parser
 # that could not read their names, and that is not a pass -- the reconciliation in the artifact is what catches
 # it, so this has to defer to the artifact rather than to the status alone.
-if [[ "${MARKED_STATUS}" -ne 0 || "${UNMARKED_STATUS}" -ne 0 || "${REPORT_STATUS}" -ne 0 ]]; then
+if [[ "${MARKED_STATUS}" -ne 0 || "${UNMARKED_STATUS}" -ne 0 || "${CPP_STATUS}" -ne 0 || "${REPORT_STATUS}" -ne 0 ]]; then
     echo ""
     echo "FAILED: see ${ARTIFACT} for what failed."
     exit 1

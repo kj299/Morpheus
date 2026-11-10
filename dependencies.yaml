@@ -196,6 +196,22 @@ files:
       - cpu_test
       - docs
 
+  # The fork's C++ build environment: what compiling the kept C++ core and its tests needs, with the CUDA toolkit
+  # from conda and no device. make_lock.py solves it into ci/scripts/cpu_env/linux-64-build.lock, which the C++ job
+  # of .github/workflows/fork-cpu.yaml installs.
+  # Includes: build_cpp_build, build_cpp_host, cpu_build, cudatoolkit-dev, python
+  cpu-build:
+    output: conda
+    matrix:
+      cuda: ["12.8"]
+      arch: [x86_64]
+    includes:
+      - build_cpp_build
+      - build_cpp_host
+      - cpu_build
+      - cudatoolkit-dev
+      - python
+
   # Dependencies which are used during the CI "checks" stage. Does not output any files.
   checks:
     output: none
@@ -495,6 +511,19 @@ dependencies:
           - graphviz # exhale's Doxygen run draws its diagrams with dot
           - numpydoc
           - vale
+
+  # What the fork's C++ build pins beyond the upstream build lists.
+  cpu_build:
+    common:
+      - output_types: [conda]
+        packages:
+          # `build_cpp_build` asks for 2.28 or newer, and the channel now solves that to 2.39, whose libc carries a
+          # `.relr.dyn` section the binutils 2.36 that gxx 12.1 brings cannot read: the compiler check fails at
+          # link. Hold the sysroot at the version the compiler was released against.
+          # libarrow, which libcudf brings, links libgflags.so.2.2 and its metadata admits the 2.3 the channel now
+          # solves to, as in `cpu_test`; without this pin the tests that start an interpreter cannot import cudf.
+          - gflags=2.2
+          - sysroot_linux-64=2.28
 
   morpheus_core_pip:
     common:

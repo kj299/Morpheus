@@ -155,3 +155,32 @@ jobs:
         shell: bash -el {0}
         run: ci/scripts/fork_docs.sh
 
+  # The kept C++ core and its tests, built from the fork's sources (guide 13, plan item 10). The other jobs install
+  # the upstream package and lay the fork's Python over it, so they never compile the fork's C++. This one does,
+  # CUDA sources included, with the toolkit from conda and no device, and runs the tests that need none; the rest
+  # run on a card, as the C++ tier of ci/scripts/gpu_conformance.sh.
+  cpp:
+    name: C++ build and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # With the submodule that holds the build's CMake modules.
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Create the environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          # The compilers, the CUDA toolkit and the libraries the core is built against, pinned package by package:
+          # the cpu-build file key of dependencies.yaml, locked by ci/scripts/cpu_env/make_lock.py.
+          micromamba-version: '2.9.0-0'
+          environment-name: morpheus-build
+          environment-file: ci/scripts/cpu_env/linux-64-build.lock
+          cache-environment: true
+          init-shell: bash
+
+      - name: Build the C++ core and its tests, and run the tests that need no device
+        shell: bash -el {0}
+        run: ci/scripts/fork_cpp.sh --device no

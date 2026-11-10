@@ -33,6 +33,9 @@ The documentation job's environment is defined and locked the same way, as the `
 `linux-64-docs.lock`. Its request also asks pip for packages no conda channel carries, which an explicit list cannot
 hold, so those are written beside the lock, pinned to the versions installed, as `linux-64-docs.lock.pip.txt`.
 
+The C++ job's environment is the third: the `cpu-build` file key and `linux-64-build.lock`, the compilers, the CUDA
+toolkit and the libraries the kept C++ core and its tests are built against (guide 13, plan item 10).
+
 Run it from the repository's root, with `rapids-dependency-file-generator` and `micromamba` on the path, naming the
 environments to lock or none for every one:
 
@@ -55,6 +58,7 @@ import typing
 ENVIRONMENTS = {
     "cpu-test": os.path.join("ci", "scripts", "cpu_env", "linux-64-cpu.lock"),
     "cpu-docs": os.path.join("ci", "scripts", "cpu_env", "linux-64-docs.lock"),
+    "cpu-build": os.path.join("ci", "scripts", "cpu_env", "linux-64-build.lock"),
 }
 """Each environment `dependencies.yaml` defines for the fork's CI, by its file key, and the lock it is solved into."""
 
@@ -65,10 +69,13 @@ PIP_SUFFIX = ".pip.txt"
 """Beside a lock whose request asks pip for packages: everything pip installed, each pinned to the version installed.
 An explicit conda list cannot hold a pip package, so CI installs these after it, with `pip install --no-deps -r`."""
 
+MATRIX = {"cpu-build": "cuda-128_arch-x86_64"}
+"""A file key's matrix as the generator spells it in the request's name, where it is more than the architecture."""
+
 
 def request_path(key: str) -> str:
     """Where `rapids-dependency-file-generator` writes the request for a file key."""
-    return os.path.join("conda", "environments", f"{key}_arch-x86_64.yaml")
+    return os.path.join("conda", "environments", f"{key}_{MATRIX.get(key, 'arch-x86_64')}.yaml")
 
 
 HEADER = """\
