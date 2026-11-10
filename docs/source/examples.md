@@ -17,7 +17,7 @@ limitations under the License.
 
 # Examples
 Ensure the environment is set up by following [Getting Started with Morpheus](./getting_started.md) before running the examples below.
-* [Splunk Lineage App for Morpheus Behavioral Analytics](../../examples/splunk_lineage_app/README.md)
+* [Splunk Lineage App for Morpheus Behavioral Analytics](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/splunk_lineage_app/README.md)
 
 
 ## Environments

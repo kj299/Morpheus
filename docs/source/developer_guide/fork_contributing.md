@@ -57,7 +57,14 @@ python -m isort --settings-path pyproject.toml ${FILES}
 python -m pylint ${FILES}
 ```
 
-Lines are at most 120 characters. Every new file starts with the SPDX copyright header; copy it from a neighbouring
+CI runs the same three tools over every Python file your change adds or modifies, and you can run its script
+before you push:
+
+```bash
+ci/scripts/fork_lint.sh
+```
+
+A formatting difference or a pylint error fails it. Lines are at most 120 characters. Every new file starts with the SPDX copyright header; copy it from a neighbouring
 file.
 
 ### Tests
@@ -116,7 +123,7 @@ python tests/morpheus/determinism/run_golden.py CORPUS tests/morpheus/determinis
 ```
 
 Set `PYTHONHASHSEED=0` for these commands, as the tests do. If the sample events changed, the Splunk app's recorded
-search-head run describes the old events; [the validation notes](../../../examples/splunk_lineage_app/validate/VALIDATION.md)
+search-head run describes the old events; [the validation notes](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/splunk_lineage_app/validate/VALIDATION.md)
 explain how to run it again.
 
 ## What CI runs

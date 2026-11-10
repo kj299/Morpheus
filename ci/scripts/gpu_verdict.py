@@ -156,7 +156,7 @@ def render(verdict: Verdict) -> tuple[str, typing.Optional[str]]:
 
 
 def main(argv: typing.Optional[list] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", maxsplit=1)[0])
     parser.add_argument("--root", default=os.getcwd(), help="The repository's root.")
     arguments = parser.parse_args(argv)
 

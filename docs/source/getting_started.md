@@ -153,7 +153,7 @@ DOCKER_IMAGE_TAG="v25.10.00-runtime" ./docker/run_container_release.sh
 
 The two shipped models this fork's stages score with, the ABP flow classifier and the SID payload classifier, run on
 the CPU inside the pipeline; no inference server is involved. They are in `models/inventory`, with the digest and
-settings of each file; refer to the [model inventory](../../models/inventory/README.md). The SID model and its
+settings of each file; refer to the [model inventory](https://github.com/kj299/Morpheus/blob/branch-25.10/models/inventory/README.md). The SID model and its
 validation set are stored in Git LFS:
 ```bash
 git lfs pull --exclude="" --include="models/inventory/**"

@@ -564,7 +564,7 @@ window is satisfied, which is a deliberate choice between latency and stability.
 | 5-7 | Authentication behavior modeling | `morpheus_dfp` with Duo and Azure schemas |
 | 7 | Subword tokenization to transformer inference (removed; `morpheus.utils.wordpiece` produces the token ids on the CPU) | [`stages/preprocess/preprocess_nlp_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/preprocess/preprocess_nlp_stage.py) |
 | 7 | Named entity recognition over logs (removed) | [`examples/log_parsing/`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/log_parsing) |
-| 7 | Sensitive information detection, phishing | [`models/inventory`](../../../../models/inventory/README.md) (the SID model, moved), `models/phishing-models` |
+| 7 | Sensitive information detection, phishing | [`models/inventory`](https://github.com/kj299/Morpheus/blob/branch-25.10/models/inventory/README.md) (the SID model, moved), `models/phishing-models` |
 | Host | Process, DLL, VAD, and handle snapshots (removed) | [`stages/input/appshield_source_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/appshield_source_stage.py) |
 | SIEM | Splunk notable event regex parsing | `parsers/splunk_notable_parser.py` |
 
@@ -1420,7 +1420,7 @@ generation algorithms. `DistinctIncrementColumn` over `target_object_type` per p
 novelty. Record-count-per-operation deviation from the principal's baseline for bulk extraction. Ratio of
 `4xx` to `2xx` per client for enumeration (`5xx` is about the server and is excluded; see R-D-L7-005). User agent novelty per principal. Process ancestry
 novelty using the parent-child pair as a categorical. Upstream shipped two pretrained models usable
-here: the sensitive-information model, now in the fork's [model inventory](../../../../models/inventory/README.md), and `phishing-models`. The log parsing and
+here: the sensitive-information model, now in the fork's [model inventory](https://github.com/kj299/Morpheus/blob/branch-25.10/models/inventory/README.md), and `phishing-models`. The log parsing and
 ransomware models, and `AppShieldSourceStage`, which Part 0 named as the host-telemetry analogue, were removed
 with their use cases under the [repository audit](./13_repository_audit.md)'s ruling D1. This fork composes none
 of the rest, R-B-L7-003 reads the SID model's findings in request bodies (see Part 6), and the endpoint class reads EDR process records
@@ -1959,7 +1959,7 @@ Four of these five ship as saved searches, reading
 seeded corpus in `tests/morpheus/determinism/test_transport_harness.py` together with the case beside it
 that must stay quiet. The one that does not ship is recorded here rather than left to be discovered.
 R-B-L4-001 is the shipped `abp-pcap-xgb` model, which upstream served from a Triton endpoint. The
-[model inventory](../../../../models/inventory/README.md) holds it converted to XGBoost's JSON format beside the digest of the upstream file, and
+[model inventory](https://github.com/kj299/Morpheus/blob/branch-25.10/models/inventory/README.md) holds it converted to XGBoost's JSON format beside the digest of the upstream file, and
 {py:class}`~morpheus.stages.telemetry.tc4_abp_score_stage.TC4AbpScoreStage` scores it on the CPU over the
 thirteen features under the names it was trained on: `MODEL_FEATURES` maps each one to the column carrying it,
 so the stage builds the model's input frame from the mapping rather than from a second copy of the list. Each
@@ -2310,7 +2310,7 @@ called high, half for one called low -- and the host's owner rides on the notabl
 partway through the corpus, as an agent upgrade does, leaves one host with one history, which the harness asserts.
 R-B-L7-003 reads a model rather than a threshold:
 {py:class}`~morpheus.stages.telemetry.tc7_sid_score_stage.TC7SidScoreStage` scores R-B-L7-003's model on the CPU
-from the [model inventory](../../../../models/inventory/README.md), reading a body longer than the model's 256 tokens in windows every 64 tokens as
+from the [model inventory](https://github.com/kj299/Morpheus/blob/branch-25.10/models/inventory/README.md), reading a body longer than the model's 256 tokens in windows every 64 tokens as
 upstream recorded, and writes each label's probability, `sid_labels` and `sid_model_version`. Over the 2,000
 payloads of the validation set the model shipped with, it decides 19,982 of the 20,000 labels correctly. Under plan
 section 4.1 it runs in the HTTP class over `request_body`, the request body a content-inspecting proxy records, which
@@ -2766,7 +2766,7 @@ identifiers that no other tool in the estate will agree with, which forfeits the
 ### Splunk implementation
 
 Everything in this section ships as an installable app,
-[`examples/splunk_lineage_app`](../../../../examples/splunk_lineage_app/README.md). The stanzas
+[`examples/splunk_lineage_app`](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/splunk_lineage_app/README.md). The stanzas
 quoted below are the explanation; the app is the normative copy, and when the two disagree the app
 is what was meant to run. The app's README lists the three values that must match the Morpheus
 pipeline configuration.
@@ -3963,7 +3963,7 @@ Pass 4 measures each of these and records which the fork reuses.
   ({py:mod}`~morpheus.utils.binding_table` and
   {py:class}`~morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage`).
 - The Splunk side of Part 4 as an installable app: indexes, sourcetypes, KV Store binding lookups,
-  and the scheduled searches ([`examples/splunk_lineage_app`](../../../../examples/splunk_lineage_app/README.md)).
+  and the scheduled searches ([`examples/splunk_lineage_app`](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/splunk_lineage_app/README.md)).
 - Deterministic window sealing with a lateness horizon, revision numbering, and late-arrival flags on the
   same stream
   ({py:mod}`~morpheus.utils.window_seal` and
@@ -4127,7 +4127,7 @@ Pass 4 measures each of these and records which the fork reuses.
   flattest history the most alarming. The module is given a number per entity per window and knows nothing
   about what produced it, which is what lets the trajectory be tested without an autoencoder.
 - The model half, as a runner and now as a result (`examples/layer5_model/run_model.py`, with its
-  [README](../../../../examples/layer5_model/README.md)). It trains a per-principal autoencoder on the
+  [README](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/layer5_model/README.md)). It trains a per-principal autoencoder on the
   corpus above and checks the double run and the batch sweep -- controls 3 and 5, on the machine that has
   a card, where both passed. It measures reproducibility of the scoring path and not detection quality,
   and says so in the artifact it writes rather than only in prose. On a machine without Torch or a device
@@ -4330,14 +4330,14 @@ Pass 4 measures each of these and records which the fork reuses.
   unchecked after the host digest changed; and `--run_slow` omitted, so the cross-restart checks report skipped among
   a wall of passes. Without a device it exits non-zero saying so, because a silent skip must never read as a pass.
   It has since been run, and the verdict it rendered is the one recorded at the top of this guide.
-  [`examples/splunk_lineage_app/validate`](../../../../examples/splunk_lineage_app/validate/VALIDATION.md) does
+  [`examples/splunk_lineage_app/validate`](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/splunk_lineage_app/validate/VALIDATION.md) does
   the same for the search head: one container, sample events generated by the same `run_pipeline` the tests call
   and put through the same `SiemWireStage` a deployment would, and an expectation per saved search. **One of the
   eighty-seven searches should return nothing**, and saying which emptiness is correct is the package's main job -- an
   empty result is this app's characteristic failure, and without that list a deployment cannot tell a rule that
   is working from a rule that is broken.
 - One rule run end to end offline, from a file to bytes a SIEM parses
-  ([`examples/behavioral_analytics`](../../../../examples/behavioral_analytics/README.md)): a MAC address table
+  ([`examples/behavioral_analytics`](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/behavioral_analytics/README.md)): a MAC address table
   in, closed binding records out, with `tests/morpheus/determinism/test_end_to_end_mac_spoof.py` reading those
   bytes back off disk, stamping `_time` by applying the shipped `props.conf`'s own regex and format to the raw
   line, and evaluating R-D-L2-004's predicate against the parsed JSON rather than against a frame. Every other
@@ -4550,11 +4550,11 @@ to be is worth more to the next reader than a clean list of open ones.
 
 **How much does clock skew between nodes degrade behavioral integrity, quantitatively?** All sixty-two shipped rules are swept over ten of the thirteen pipelines: thirty-six are measured against clocks that genuinely disagree, twenty-four under a uniform shift, and the SaaS pair arrive through a corpus with a single clock and are recorded as not measured. Every join here
 is a join on time across sources that do not share a clock, and the
-[collection section](../../../../README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
+[collection section](https://github.com/kj299/Morpheus/blob/branch-25.10/README.md#clock-drift-which-is-three-problems-wearing-one-name) argues
 qualitatively that some features are far more sensitive than others -- R-C-002's `gap > 0`, as it was first
 written, inverted on sub-millisecond disagreement, impossible travel silently carries no score when two authentications
 reorder, and the MAC-in-two-places interval absorbs each switch's offset directly. **None of that has
-been measured** -- until now. [`examples/clock_skew/run_experiment.py`](../../../../examples/clock_skew/README.md)
+been measured** -- until now. [`examples/clock_skew/run_experiment.py`](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/clock_skew/README.md)
 is the experiment this paragraph asked for: spread the clocks across a window of a given width, re-run the
 composed pipelines over the same seeded corpora, and report which columns move, by how much, and at what width
 each shipped rule changes its decision. It is the shape control 13's sweeps already had, differing only in what
@@ -4638,7 +4638,7 @@ document's prediction and missed the correction.
 Step 11 built the control and ran the different experiment. Every corpus record now carries `clock_source` and
 `clock_offset_ms`, and `EnvelopeValidateStage` holds a record whose collector reports its clock more than a second
 out. The experiment runs every collector sweep twice -- uncorrected, and with each skewed collector reporting the
-offset it was given -- and the two curves are in [the experiment's README](../../../../examples/clock_skew/README.md).
+offset it was given -- and the two curves are in [the experiment's README](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/clock_skew/README.md).
 The delta is one finding. Inside the bound, quarantine costs nothing: at a second's spread no corpus holds anything
 but the DMZ poller it always holds. Beyond it, no rule ever accuses something it should not, but every rule reading a
 held collector loses everything it accused -- at ten seconds, thirteen accusations on the estate, twenty-seven on
@@ -4854,13 +4854,13 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
 card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
 That is sixty-two stages and fifty-four supporting
-modules, covered by 2,799 distinct tests, itemized in
+modules, covered by 2,801 distinct tests, itemized in
 [Part 6](#provided). Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
 functional
 pass against seeded telemetry on a live Splunk Enterprise 10.2 instance
-([how](../../../../examples/splunk_lineage_app/README.md#how-this-app-was-validated)); that pass covered
+([how](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/splunk_lineage_app/README.md#how-this-app-was-validated)); that pass covered
 the seven searches then present. On 2026-10-05 all forty-eight ran on Splunk 10.2.8 over the pipeline's own
 sample events: forty-six returned what the written expectation said, and the two that did not found a defect in
 the wire format rather than in a search -- null fields sent as `null`, which Splunk compared as values -- now

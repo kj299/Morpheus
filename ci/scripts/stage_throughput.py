@@ -250,7 +250,7 @@ def render(current: dict, comparison: typing.Optional[dict]) -> str:
 
 
 def main(argv: typing.Optional[list] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", maxsplit=1)[0])
     parser.add_argument("--root", default=os.getcwd(), help="The repository's root.")
     parser.add_argument("--segments", nargs="*", help="The segments to run; every one by default.")
     parser.add_argument("--repeats", type=int, default=3, help="Runs per segment; the fastest is kept.")

@@ -14,25 +14,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-The CPU test environment has one definition (guide 13, plan item 11).
+Each of the fork's CI environments has one definition (guide 13, plan items 11 and 14).
 
-`dependencies.yaml` and the CPU lock each named the environment's packages and channels, and disagreed. The
-`cpu-test` file key of `dependencies.yaml` is now the definition; `ci/scripts/cpu_env/make_lock.py` generates the
-request file from it and solves the request into the lock. These hold the three to each other without solving
-anything: the request is what the definition says, the lock records the request it was solved from, the lock holds
-every package the request names at the version it pins, from the channels it lists, and CI installs that lock.
+`dependencies.yaml` and the CPU lock each named the test environment's packages and channels, and disagreed. A file
+key of `dependencies.yaml` is now each environment's definition -- `cpu-test` for the test tiers, `cpu-docs` for the
+documentation job -- and `ci/scripts/cpu_env/make_lock.py` generates the request file from it and solves the request
+into the lock. These hold the three to each other, for every environment, without solving anything: the request is
+what the definition says, the lock records the request it was solved from, the lock holds every package the request
+names at the version it pins, from the channels it lists, the packages only pip carries are pinned beside it, and CI
+installs that lock.
 """
 
 import importlib.util
 import os
 import re
 
+import pytest
 import yaml
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 MODULE_PATH = os.path.join(REPO_ROOT, "ci", "scripts", "cpu_env", "make_lock.py")
 WORKFLOW = os.path.join(REPO_ROOT, ".github", "workflows", "fork-cpu.yaml")
-FILE_KEY = "cpu-test"
 PACKAGE_URL = re.compile(r"^https://conda\.anaconda\.org/(?P<channel>.+)/(?:linux-64|noarch)/"
                          r"(?P<name>.+)-(?P<version>[^-]+)-(?P<build>[^-]+)\.(?:conda|tar\.bz2)#(?P<md5>[0-9a-f]{32})$")
 
@@ -46,6 +48,7 @@ def _load():
 
 
 make_lock = _load()
+KEYS = sorted(make_lock.ENVIRONMENTS)
 
 
 def _yaml(*path: str) -> dict:
@@ -53,16 +56,16 @@ def _yaml(*path: str) -> dict:
         return yaml.safe_load(handle)
 
 
-def _lock_lines() -> list[str]:
-    with open(os.path.join(REPO_ROOT, make_lock.LOCK), encoding="utf-8") as handle:
+def _lock_lines(key: str) -> list[str]:
+    with open(os.path.join(REPO_ROOT, make_lock.ENVIRONMENTS[key]), encoding="utf-8") as handle:
         return handle.read().splitlines()
 
 
-def _locked() -> dict:
-    """Every package in the lock: name to its version and channel."""
+def _locked(key: str) -> dict:
+    """Every package in a lock: name to its version and channel."""
     found = {}
 
-    for line in _lock_lines():
+    for line in _lock_lines(key):
         if (line.startswith("https://")):
             match = PACKAGE_URL.match(line)
 
@@ -72,69 +75,112 @@ def _locked() -> dict:
     return found
 
 
-def _requested() -> list[str]:
-    """The definition's packages: every list its file key includes, as conda packages."""
+def _requested(key: str) -> tuple[list[str], list[str]]:
+    """A definition's packages: every list its file key includes, as conda packages and as pip's."""
     definition = _yaml("dependencies.yaml")
-    packages = []
+    (conda, pip) = ([], [])
 
-    for name in definition["files"][FILE_KEY]["includes"]:
+    for name in definition["files"][key]["includes"]:
         for entry in definition["dependencies"][name]["common"]:
             assert entry["output_types"] == ["conda"], name
-            packages.extend(entry["packages"])
 
-    return packages
+            for package in entry["packages"]:
+                if (isinstance(package, dict)):
+                    pip.extend(package["pip"])
+                else:
+                    conda.append(package)
+
+    return (conda, pip)
 
 
-def test_the_request_is_what_the_definition_says():
+@pytest.mark.parametrize("key", KEYS)
+def test_the_request_is_what_the_definition_says(key: str):
     definition = _yaml("dependencies.yaml")
-    request = _yaml(make_lock.REQUEST)
+    request = _yaml(make_lock.request_path(key))
+    (conda, pip) = _requested(key)
 
-    assert definition["files"][FILE_KEY]["output"] == "conda"
-    assert request["dependencies"] == sorted(_requested())
+    assert definition["files"][key]["output"] == "conda"
+    assert [package for package in request["dependencies"] if isinstance(package, str)] == sorted(set(conda))
+    assert [package["pip"] for package in request["dependencies"]
+            if isinstance(package, dict)] == ([sorted(pip)] if pip else [])
     assert request["channels"] == definition["channels"]
 
 
-def test_the_lock_records_the_request_it_was_solved_from():
-    stated = [line[len(make_lock.HASH_PREFIX):] for line in _lock_lines() if line.startswith(make_lock.HASH_PREFIX)]
+@pytest.mark.parametrize("key", KEYS)
+def test_the_lock_records_the_request_it_was_solved_from(key: str):
+    stated = [line[len(make_lock.HASH_PREFIX):] for line in _lock_lines(key) if line.startswith(make_lock.HASH_PREFIX)]
 
-    assert stated == [make_lock.request_digest(REPO_ROOT)], (
-        "the request changed without a new lock; run ci/scripts/cpu_env/make_lock.py")
+    assert stated == [make_lock.request_digest(REPO_ROOT, key)
+                      ], (f"the request changed without a new lock; run ci/scripts/cpu_env/make_lock.py {key}")
 
 
-def test_the_lock_holds_every_requested_package_at_its_pin():
-    locked = _locked()
+@pytest.mark.parametrize("key", KEYS)
+def test_the_lock_holds_every_requested_package_at_its_pin(key: str):
+    locked = _locked(key)
 
     assert len(locked) > 300
 
-    for spec in _requested():
-        (name, _, pin) = spec.partition("=")
+    for spec in _requested(key)[0]:
+        (name, pin) = re.match(r"^([A-Za-z0-9_.-]+?)(?:[<>=!].*)?$", spec).group(1), spec.partition("=")[2]
 
         assert name in locked, f"{spec} is requested and not in the lock"
-        assert pin == "" or locked[name][0] == pin or locked[name][0].startswith(pin + "."), (spec, locked[name])
+
+        if (">" not in spec and "<" not in spec and pin):
+            assert locked[name][0] == pin or locked[name][0].startswith(pin + "."), (spec, locked[name])
 
 
-def test_every_locked_package_comes_from_a_channel_the_definition_lists():
+@pytest.mark.parametrize("key", KEYS)
+def test_every_locked_package_comes_from_a_channel_the_definition_lists(key: str):
     channels = set(_yaml("dependencies.yaml")["channels"])
 
-    assert {channel for (_, channel) in _locked().values()} <= channels
+    assert {channel for (_, channel) in _locked(key).values()} <= channels
 
 
-def test_the_lock_says_it_is_generated_and_names_no_packages_of_its_own():
-    comments = [line for line in _lock_lines() if line.startswith("#")]
+@pytest.mark.parametrize("key", KEYS)
+def test_what_only_pip_carries_is_pinned_beside_the_lock(key: str):
+    requested = _requested(key)[1]
+    path = os.path.join(REPO_ROOT, make_lock.ENVIRONMENTS[key] + make_lock.PIP_SUFFIX)
+
+    if (not requested):
+        assert not os.path.exists(path)
+        return
+
+    with open(path, encoding="utf-8") as handle:
+        pinned = dict(line.split("==") for line in handle.read().split())
+
+    assert sorted(pinned) == sorted(re.split(r"[<>=!]", spec)[0] for spec in requested)
+    assert all(re.fullmatch(r"[0-9][0-9A-Za-z.]*", version) for version in pinned.values()), pinned
+
+
+@pytest.mark.parametrize("key", KEYS)
+def test_the_lock_says_it_is_generated_and_names_no_packages_of_its_own(key: str):
+    comments = [line for line in _lock_lines(key) if line.startswith("#")]
 
     assert any("GENERATED by ci/scripts/cpu_env/make_lock.py" in line for line in comments)
     # The old header carried its own `micromamba create ... python=3.12 morpheus-core=25.06 ...`: a second definition.
     assert not any("micromamba create" in line or "morpheus-core=" in line for line in comments)
 
 
-def test_ci_installs_the_lock():
+def test_ci_installs_every_lock_and_nothing_else():
     with open(WORKFLOW, encoding="utf-8") as handle:
         workflow = yaml.safe_load(handle)
 
-    steps = workflow["jobs"]["cpu-tiers"]["steps"]
+    installed = sorted(step["with"]["environment-file"] for job in workflow["jobs"].values() for step in job["steps"]
+                       if "environment-file" in step.get("with", {}))
 
-    assert [step["with"]["environment-file"] for step in steps
-            if "environment-file" in step.get("with", {})] == [make_lock.LOCK.replace(os.sep, "/")]
+    assert installed == sorted(path.replace(os.sep, "/") for path in make_lock.ENVIRONMENTS.values())
+
+
+def test_the_pip_pins_are_the_requested_packages_as_installed():
+    frozen = "exhale==0.3.7\nnvidia_sphinx_theme==0.0.9\nnumpy==1.26.4\n"
+
+    assert make_lock.pip_requests("dependencies:\n- sphinx>=8.2\n- pip:\n  - exhale>=0.3.7\n"
+                                  "  - nvidia-sphinx-theme>=0.0.7\nname: x\n") == ["exhale", "nvidia-sphinx-theme"]
+    assert make_lock.render_pip(frozen,
+                                ["exhale", "nvidia-sphinx-theme"]) == ("exhale==0.3.7\nnvidia_sphinx_theme==0.0.9\n")
+
+    with pytest.raises(ValueError, match="exhale"):
+        make_lock.render_pip("numpy==1.26.4\n", ["exhale"])
 
 
 def test_render_keeps_the_explicit_list_and_drops_the_exporter_s_preamble():

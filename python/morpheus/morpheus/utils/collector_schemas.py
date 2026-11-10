@@ -2117,7 +2117,8 @@ def read_radius_detail(path: str) -> list[dict]:
                 entry = {}
             elif (entry is not None and "=" in line):
                 (name, value) = line.split("=", 1)
-                entry[name.strip()] = _radius_value(value)
+                # The branch's own `is not None` is the guard pylint does not follow.
+                entry[name.strip()] = _radius_value(value)  # pylint: disable=unsupported-assignment-operation
 
     if (entry is not None):
         entries.append(entry)

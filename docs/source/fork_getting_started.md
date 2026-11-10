@@ -106,8 +106,8 @@ The other runners work the same way:
 | `run_host_score.py` | A per-host score across layers | `samples/host_score` |
 
 To run a pipeline over your own data, pass `--input` with a directory holding one JSON lines file per input class.
-The [behavioral analytics README](../../examples/behavioral_analytics/README.md) describes the options, and
-[the collector contract](../../examples/behavioral_analytics/collector_contract.md) describes every input class's
+The [behavioral analytics README](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/behavioral_analytics/README.md) describes the options, and
+[the collector contract](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/behavioral_analytics/collector_contract.md) describes every input class's
 columns. If your data is still in its source format, such as Zeek logs, an IPFIX capture or SNMP polls, the same
 README lists the reader for each format.
 
@@ -131,7 +131,7 @@ Add `--run_slow` to include the slow tests. To run everything the fork's CI runs
 
 - [Predictive Behavioral Analytics Across OSI Layers 1-7](./developer_guide/guides/11_predictive_behavioral_analytics_osi.md)
   explains what the pipelines do and why, starting in plain terms.
-- [The Splunk app's README](../../examples/splunk_lineage_app/README.md) covers the SIEM side: indexes, lookups
+- [The Splunk app's README](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/splunk_lineage_app/README.md) covers the SIEM side: indexes, lookups
   and the saved searches that are the detection rules.
 - [Contributing to This Fork](./developer_guide/fork_contributing.md) covers making a change and getting it
   through CI.
