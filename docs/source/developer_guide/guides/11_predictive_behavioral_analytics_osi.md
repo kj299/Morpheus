@@ -89,8 +89,8 @@ a hypothesis.
 ```
 
 Each record goes through the same five steps in Morpheus. The identifiers stamped in step 2 are what make the
-cross-layer chain possible: Splunk uses them, together with time-bounded lookups such as "which machine held this IP
-address at this moment", to follow one entity from layer 1 to layer 7. Part 1 shows the architecture in full and
+cross-layer chain possible: Splunk uses them, together with time-bounded lookups that answer questions like which machine held
+an IP address at a given moment, to follow one entity from layer 1 to layer 7. Part 1 shows the architecture in full and
 Part 4 shows the Splunk side down to its configuration files.
 
 ### A worked example
@@ -121,10 +121,10 @@ You do not need to read it in order. Pick the part that matches what you are doi
 Terms used throughout:
 
 - **Entity**: the thing being watched and scored: a switch port, a machine, a user, a service.
-- **Telemetry class (TC-0 to TC-7)**: one kind of input record. TC-1 is layer 1 and so on; TC-0 is context.
+- **Telemetry class (TC-0 to TC-7)**: one kind of input record. TC-1 is layer 1, TC-2 is layer 2, up to TC-7; TC-0 is context.
 - **Window**: a fixed slice of time, such as ten minutes, over which features are computed.
-- **Binding**: a mapping that holds for a period, such as "this IP address belonged to this hardware address from
-  09:00 to 17:00". Bindings are how one layer's identifier is translated into the next.
+- **Binding**: a mapping that holds for a period, for example that an IP address belonged to one hardware address
+  from 09:00 to 17:00. Bindings are how one layer's identifier is translated into the next.
 - **Lineage identifier and chain**: the stable identifiers each record carries, and the linked sequence of records
   across layers that they produce for one entity.
 - **Community ID**: a standard hash of a connection's addresses and ports, shared with tools such as Zeek and
@@ -4149,7 +4149,7 @@ Pass 4 measures each of these and records which the fork reuses.
   telemetry pipeline now, `binding:l1` is a produced sourcetype, and the shipped L1 refresh search has rows to
   write for the first time. The key here is the port and
   the attributes are what is in it, which is the inverse of layer 2 where the key is the mobile thing; getting
-  that backwards produces a table answering "where is this transceiver", which is not the question the ladder
+  that backwards produces a table answering "where is this transceiver," which is not the question the ladder
   asks. Two decisions are asserted rather than described. A binding ends just after its last sighting rather than
   at the poll that noticed the change, so the silence in between resolves to nothing instead of to a claim nobody
   made. And the idle timeout is days rather than the thirty minutes layer 2 uses, because a quiet MAC has left
@@ -4576,7 +4576,7 @@ and R-P-L3-005 move within a minute. **Twenty-four read inputs that all come thr
 several: every layer 5 sign-in comes through the identity provider, each application class through its own
 collector, and every packet and handshake through the one sensor and inspection point their corpora have beside
 the DHCP server and inventory feed. For them a sweep is a uniform shift, which measures boundary proximity rather
-than disagreement; all twenty-three are unmoved, the two daily trajectories over the handshakes and the queries and R-B-L7-003 among them, and R-P-L5-006 once moved, for the reason below. **Two are not
+than disagreement; all twenty-three are unmoved, the two daily trajectories over the handshakes and the queries among them, as is rule R-B-L7-003, and R-P-L5-006 once moved, for the reason below. **Two are not
 measured**: the SaaS corpus arrives through one collector, so the sweep gives that clock no offset, and the
 artifact records `"one clock"` for its rules rather than a tolerance nobody tested. Measuring them needs the
 context store's own record time per row, and measuring layers 4 and 6 as more than a shift needs what a

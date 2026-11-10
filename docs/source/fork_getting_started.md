@@ -20,11 +20,11 @@ limitations under the License.
 This page takes you from a fresh clone to a running pipeline and a passing test run on a machine with no GPU. It
 covers this fork's own work: the behavioral analytics pipelines for the seven network layers and their output for a
 Security Information and Event Management (SIEM) system. For upstream Morpheus on a GPU, with its containers and
-conda packages, see [Getting Started with Morpheus](./getting_started.md).
+Conda packages, see [Getting Started with Morpheus](./getting_started.md).
 
 ## How the CPU path works
 
-Morpheus has a compiled library that this fork does not change: everything the fork adds is Python. So there is
+Morpheus has a compiled library that this fork does not change: everything the fork adds is Python, so there is
 nothing to build. You install the released `morpheus-core` package for its compiled library, then copy this
 repository's Python sources over the installed package. That copy is called the *overlay*, and you repeat it after
 every edit to the package's sources.

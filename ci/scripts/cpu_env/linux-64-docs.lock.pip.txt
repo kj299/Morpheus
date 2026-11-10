@@ -1,0 +1,2 @@
+exhale==0.3.7
+nvidia-sphinx-theme==0.0.9.post1

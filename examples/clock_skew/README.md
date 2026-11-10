@@ -189,7 +189,7 @@ presentation corpora have three each since step 12, but every packet comes throu
 handshake through the inspection point, so three of their four layer 4 rules and five of their six layer 6 rules read
 one clock, the client stack trajectory among them: it is keyed on the address the handshake carries, and only the
 watchlist entry it writes names the machine. For these twenty-four the sweep is a uniform shift, which measures how
-close the events sit to a window edge and nothing about disagreement. All twenty-four are unchanged to a minute, R-B-L7-003 among them since plan section 4.1; R-P-L5-006 used to change at a
+close the events sit to a window edge and nothing about disagreement. All twenty-four are unchanged to a minute, including rule R-B-L7-003 since plan section 4.1; R-P-L5-006 used to change at a
 millisecond, for the reason below.
 
 **On a corpus with one clock.** The SaaS corpus arrives through the provider's audit log alone, so a collector
