@@ -76,6 +76,7 @@ Getting Started
 
 Using Morpheus
 ^^^^^^^^^^^^^^
+ * :doc:`Getting Started with This Fork on a CPU <fork_getting_started>` - From a clone to a running pipeline and passing tests with no GPU and nothing to build
  * :doc:`getting_started` - Using pre-built Docker containers, building Docker containers from source, and fetching models and datasets
  * :doc:`Morpheus Conda Packages <conda_packages>`- Using Morpheus Libraries via the pre-built Conda Packages
  * :doc:`basics/overview` - Brief overview of the command line interface
@@ -89,6 +90,7 @@ Using Morpheus
 
 Modifying Morpheus
 ^^^^^^^^^^^^^^^^^^
+ * :doc:`Contributing to This Fork <developer_guide/fork_contributing>` - Making a change to the fork and getting it through its CI
  * :doc:`developer_guide/contributing` - Covers building from source, making changes and contributing to Morpheus
 
 
@@ -97,6 +99,7 @@ Modifying Morpheus
    :maxdepth: 20
    :hidden:
 
+   fork_getting_started
    getting_started
    conda_packages
    basics/overview
@@ -112,6 +115,7 @@ Modifying Morpheus
    :hidden:
 
    developer_guide/architecture
+   developer_guide/fork_contributing
    developer_guide/contributing
 
 .. toctree::

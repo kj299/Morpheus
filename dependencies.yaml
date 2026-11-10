@@ -183,6 +183,19 @@ files:
     includes:
       - cpu_test
 
+  # The fork's documentation environment: the CPU test environment, since Sphinx imports the package to document it,
+  # and what the documentation build and its prose check run. make_lock.py solves it into
+  # ci/scripts/cpu_env/linux-64-docs.lock, which the docs job of .github/workflows/fork-cpu.yaml installs.
+  # Includes: cpu_test, docs, cpu_docs
+  cpu-docs:
+    output: conda
+    matrix:
+      arch: [x86_64]
+    includes:
+      - cpu_docs
+      - cpu_test
+      - docs
+
   # Dependencies which are used during the CI "checks" stage. Does not output any files.
   checks:
     output: none
@@ -472,6 +485,16 @@ dependencies:
           - python=3.12
           - xgboost # the abp-pcap-xgb booster, scored on the CPU from models/inventory
           - yapf
+
+  # What the fork's documentation job needs beyond the `docs` list: the extensions docs/source/conf.py loads that the
+  # GPU environments get from other lists, and Vale, which checks the prose.
+  cpu_docs:
+    common:
+      - output_types: [conda]
+        packages:
+          - graphviz # exhale's Doxygen run draws its diagrams with dot
+          - numpydoc
+          - vale
 
   morpheus_core_pip:
     common:
