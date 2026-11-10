@@ -573,8 +573,8 @@ that replaces it. Each item says how to know it is done.
     test environment -- and runs two scripts. `ci/scripts/fork_lint.sh` holds the Python a change adds or modifies
     to yapf, isort and pylint's errors. `ci/scripts/fork_docs.sh` runs Vale over every tracked document, then
     `sphinx-build` directly, since the fork compiles nothing for CMake's documentation target to depend on, and
-    fails on a build error or a link to a page or file that does not exist. Getting there took 66 terms added to
-    Vale's vocabulary, eight sentences Vale refused rewritten, and 24 links from the guides to files outside the
+    fails on a build error or a link to a page or file that does not exist. Getting there took 27 terms added to
+    Vale's vocabulary, which were 66 of its 74 errors, eight sentences Vale refused rewritten, and 24 links from the guides to files outside the
     documentation tree, which Sphinx cannot follow, written as repository URLs. The upstream configuration's other
     warnings, most from generated API pages, are counted and do not fail the build.
 15. **A throughput baseline.** No benchmark measures the telemetry and lineage stages. Done when a benchmark tier

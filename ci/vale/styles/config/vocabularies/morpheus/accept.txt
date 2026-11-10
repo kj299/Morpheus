@@ -192,10 +192,12 @@ geolocations
 Kea
 leaker
 MACs
+isort
 micromamba
 osquery
 outputlookup
 pollers?
+pylint
 postprocessing
 quantizes
 rapidsai
@@ -204,3 +206,4 @@ Telegraf
 unbucketed
 unquantized
 watchlisted
+yapf
