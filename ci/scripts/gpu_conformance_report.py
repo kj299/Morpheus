@@ -253,6 +253,38 @@ def is_clean(section: dict) -> bool:
             and section.get("died_in") is None and section.get("unaccounted", 0) == 0)
 
 
+CPP_SKIPPED = "skipped"
+CPP_LOG = "/tmp/gpu_conformance_cpp.log"
+
+
+def cpp_tier(source: str) -> dict:
+    """
+    The C++ tier's section: what `cpp_tests.py` wrote, or why there is nothing to read.
+
+    `source` is the result file `fork_cpp.sh --result` wrote, or `CPP_SKIPPED` when the run was told to leave the
+    tier out. A file that is not there is a build that failed before any test ran, and is reported as that.
+    """
+    if (source == CPP_SKIPPED):
+        return {"skipped": "SKIP_CPP_TESTS=1: the C++ tests were not built or run"}
+
+    try:
+        with open(source, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {"note": f"no result at {source}: the build failed before the tests ran; see {CPP_LOG}"}
+
+
+def cpp_is_clean(section: dict) -> bool:
+    """Whether the C++ tier holds the verdict up: it passed, or the run said outright that it was left out."""
+    if ("skipped" in section):
+        return True
+
+    counts = section.get("counts") or {}
+
+    return (section.get("exit_status") == 0 and counts.get("passed", 0) > 0 and counts.get("failed", 0) == 0
+            and not section.get("failures") and not section.get("unaccounted"))
+
+
 def _head_commit() -> typing.Optional[str]:
     result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
 
@@ -260,15 +292,22 @@ def _head_commit() -> typing.Optional[str]:
 
 
 def main() -> int:
-    if (len(sys.argv) != 9):
+    if (len(sys.argv) != 10):
         print(
             f"usage: {sys.argv[0]} ARTIFACT DEVICE MARKED_SELECTED MARKED_STATUS UNMARKED_SELECTED "
-            f"UNMARKED_STATUS RUN_WIDER WIDER_STATUS",
+            f"UNMARKED_STATUS RUN_WIDER WIDER_STATUS CPP_RESULT",
             file=sys.stderr)
         return 2
 
-    (path, device, marked_selected, marked_status, unmarked_selected, unmarked_status, run_wider,
-     wider_status) = sys.argv[1:9]
+    (path,
+     device,
+     marked_selected,
+     marked_status,
+     unmarked_selected,
+     unmarked_status,
+     run_wider,
+     wider_status,
+     cpp_result) = sys.argv[1:10]
 
     marked = tier("/tmp/gpu_conformance_marked.log",
                   int(marked_status),
@@ -279,9 +318,11 @@ def main() -> int:
                     int(unmarked_selected),
                     "/tmp/gpu_conformance_unmarked_collected.txt")
 
+    cpp = cpp_tier(cpp_result)
+
     report = {
         "verdict":
-            "passed" if (is_clean(marked) and is_clean(unmarked)) else "failed",
+            "passed" if (is_clean(marked) and is_clean(unmarked) and cpp_is_clean(cpp)) else "failed",
         "at":
             datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "device":
@@ -292,7 +333,9 @@ def main() -> int:
         "gpu_mode":
             marked,
         "unmarked_gpu_coverage":
-            unmarked,
+            unmarked,  # The kept C++ core's own tests, built from this checkout and run on the device.
+        "cpp_tests":
+            cpp,
         # Context, not verdict. Upstream stages reading upstream fixtures; a failure here is a report to make
         # upstream, not a reason to hold this fork.
         "wider_upstream_suite": (tier("/tmp/gpu_conformance_wider.log", int(wider_status)) if run_wider == "1" else {

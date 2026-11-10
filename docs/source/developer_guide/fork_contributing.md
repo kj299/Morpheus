@@ -133,10 +133,28 @@ The workflow is `.github/workflows/fork-cpu.yaml`. On every push and pull reques
 - states how old the GPU verdict is against your code, since CI itself has no GPU;
 - installs the pinned CPU environment, overlays the sources and runs the test tiers in CPU mode;
 - measures every stage's throughput against a recorded baseline and warns when a stage falls below half of it;
-- builds this documentation and checks its prose, so a broken build fails the pull request.
+- builds this documentation and checks its prose, so a broken build fails the pull request;
+- compiles the C++ core and its tests from your sources, with no GPU, and runs the C++ tests that need none.
 
 The GPU path is checked by `ci/scripts/gpu_conformance.sh` on a machine with a card. You are not expected to run
 it; the run summary says when the GPU verdict no longer describes the code.
+
+## C++
+
+The compiled core is under `python/morpheus/morpheus/_lib`, with its tests in `_lib/tests`. To build and test it as
+CI does, without a GPU:
+
+```bash
+git submodule update --init external/utilities
+micromamba create -n morpheus-build -f ci/scripts/cpu_env/linux-64-build.lock
+micromamba activate morpheus-build
+ci/scripts/fork_cpp.sh
+```
+
+The script builds into `build/fork_cpp` and prints which tests ran and which did not. Most C++ tests need a CUDA
+device; without one, the tests listed as `DEVICE_FREE` in `ci/scripts/cpp_tests.py` run and the rest are compiled
+and named. If you add a C++ test that needs no device, add its name to that list so CI runs it, and list its file
+in `_lib/tests/CMakeLists.txt`.
 
 ## Documentation
 

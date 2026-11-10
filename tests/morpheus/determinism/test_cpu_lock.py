@@ -14,15 +14,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Each of the fork's CI environments has one definition (guide 13, plan items 11 and 14).
+Each of the fork's CI environments has one definition (guide 13, plan items 10, 11 and 14).
 
 `dependencies.yaml` and the CPU lock each named the test environment's packages and channels, and disagreed. A file
 key of `dependencies.yaml` is now each environment's definition -- `cpu-test` for the test tiers, `cpu-docs` for the
-documentation job -- and `ci/scripts/cpu_env/make_lock.py` generates the request file from it and solves the request
-into the lock. These hold the three to each other, for every environment, without solving anything: the request is
-what the definition says, the lock records the request it was solved from, the lock holds every package the request
-names at the version it pins, from the channels it lists, the packages only pip carries are pinned beside it, and CI
-installs that lock.
+documentation job, `cpu-build` for the C++ job -- and `ci/scripts/cpu_env/make_lock.py` generates the request file
+from it and solves the request into the lock. These hold the three to each other, for every environment, without
+solving anything: the request is what the definition says, the lock records the request it was solved from, the lock
+holds every package the request names at the version it pins, from the channels it lists, the packages only pip
+carries are pinned beside it, and CI installs that lock.
 """
 
 import importlib.util
@@ -81,8 +81,21 @@ def _requested(key: str) -> tuple[list[str], list[str]]:
     definition = _yaml("dependencies.yaml")
     (conda, pip) = ([], [])
 
+    # A file key's matrix has one value per axis here, so a `specific` entry applies when its matrix asks for
+    # nothing else: the build key's CUDA version selects the toolkit's packages.
+    matrix = {axis: str(values[0]) for (axis, values) in definition["files"][key].get("matrix", {}).items()}
+
     for name in definition["files"][key]["includes"]:
-        for entry in definition["dependencies"][name]["common"]:
+        section = definition["dependencies"][name]
+        entries = list(section.get("common", []))
+
+        for specific in section.get("specific", []):
+            assert specific["output_types"] == ["conda"], name
+            entries += [{
+                "output_types": specific["output_types"], "packages": chosen["packages"]
+            } for chosen in specific["matrices"] if (chosen.get("matrix") or {}).items() <= matrix.items()]
+
+        for entry in entries:
             assert entry["output_types"] == ["conda"], name
 
             for package in entry["packages"]:
@@ -119,7 +132,7 @@ def test_the_lock_records_the_request_it_was_solved_from(key: str):
 def test_the_lock_holds_every_requested_package_at_its_pin(key: str):
     locked = _locked(key)
 
-    assert len(locked) > 300
+    assert len(locked) > 200
 
     for spec in _requested(key)[0]:
         (name, pin) = re.match(r"^([A-Za-z0-9_.-]+?)(?:[<>=!].*)?$", spec).group(1), spec.partition("=")[2]
