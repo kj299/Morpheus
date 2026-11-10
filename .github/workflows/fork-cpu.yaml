@@ -47,8 +47,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
+      # The whole history, so the GPU verdict below can count the commits since the last GPU run.
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # This runner has no GPU. Say so on every run, with how old the GPU verdict is against this code
+      # (guide 13, plan item 9); the step only reports, and never fails the run.
+      - name: Report the GPU verdict's age
+        run: python3 ci/scripts/gpu_verdict.py
 
       # The SID model and its validation set are the only Git LFS files the tiers read, and they live under
       # models/inventory. Everything else stays a pointer: the fork's other tests build their corpora in code. The
@@ -93,3 +101,13 @@ jobs:
           echo "${#TIERS[@]} test files"
           export PYTHONPATH="$GITHUB_WORKSPACE/ci/scripts/cpu_env${PYTHONPATH:+:$PYTHONPATH}"
           python -m pytest "${TIERS[@]}" -p gpuless -m "not gpu_mode" --run_slow -q -p no:cacheprovider
+
+      # Rows per second per telemetry and lineage stage, normalized by a calibration workload and compared with
+      # ci/artifacts/stage_throughput_baseline.json (guide 13, plan item 15). A stage below half its baseline is a
+      # warning and a row in the run's summary; the step never fails the run.
+      - name: Measure stage throughput
+        if: success() || failure()
+        shell: bash -el {0}
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE/ci/scripts/cpu_env${PYTHONPATH:+:$PYTHONPATH}"
+          python ci/scripts/stage_throughput.py --repeats 3

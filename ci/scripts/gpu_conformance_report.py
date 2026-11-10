@@ -40,6 +40,7 @@ is what said so out loud.
 import datetime
 import json
 import re
+import subprocess
 import sys
 import typing
 
@@ -252,6 +253,12 @@ def is_clean(section: dict) -> bool:
             and section.get("died_in") is None and section.get("unaccounted", 0) == 0)
 
 
+def _head_commit() -> typing.Optional[str]:
+    result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 def main() -> int:
     if (len(sys.argv) != 9):
         print(
@@ -279,6 +286,9 @@ def main() -> int:
             datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "device":
             device,
+        # What the verdict describes: `gpu_verdict.py` counts the commits after it that change the GPU path.
+        "commit":
+            _head_commit(),
         "gpu_mode":
             marked,
         "unmarked_gpu_coverage":

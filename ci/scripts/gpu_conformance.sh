@@ -188,6 +188,8 @@ UNMARKED=(
     tests/morpheus/utils/test_geo_velocity.py
     tests/morpheus/utils/test_identity_anchor.py
     tests/morpheus/utils/test_gpu_conformance_report.py
+    tests/morpheus/utils/test_gpu_verdict.py
+    tests/morpheus/utils/test_stage_throughput.py
     tests/morpheus/utils/test_dfencoder_scorer.py
     tests/morpheus/utils/test_gpu_conformance_targets.py
     tests/morpheus/utils/test_lineage.py

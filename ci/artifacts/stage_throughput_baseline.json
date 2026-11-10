@@ -1,0 +1,657 @@
+{
+ "stages": {
+  "BindingResolverStage": {
+   "calls": 19,
+   "rows": 38317,
+   "rows_per_second": 242677.62064422408,
+   "rows_per_unit": 24495.62615774047,
+   "seconds": 0.15789259800010313,
+   "segments": [
+    "application",
+    "host_score",
+    "network",
+    "presentation",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "ChainAnchorStage": {
+   "calls": 14,
+   "rows": 21150,
+   "rows_per_second": 1177535.757839701,
+   "rows_per_unit": 118859.23240404676,
+   "seconds": 0.017961237999941204,
+   "segments": [
+    "application",
+    "host_score",
+    "network",
+    "presentation",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "CollectorSequenceStage": {
+   "calls": 31,
+   "rows": 31327,
+   "rows_per_second": 401348.80461558566,
+   "rows_per_unit": 40511.73013243156,
+   "seconds": 0.07805429999973512,
+   "segments": [
+    "application",
+    "endpoint",
+    "host_score",
+    "network",
+    "presentation",
+    "saas",
+    "session",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "CommunityIdStage": {
+   "calls": 4,
+   "rows": 2124,
+   "rows_per_second": 190798.77403682278,
+   "rows_per_unit": 19259.029438949,
+   "seconds": 0.011132147000012083,
+   "segments": [
+    "network",
+    "presentation",
+    "transport"
+   ]
+  },
+  "DeterminismStampStage": {
+   "calls": 198,
+   "rows": 15262,
+   "rows_per_second": 16830.697020196076,
+   "rows_per_unit": 1698.8730196318254,
+   "seconds": 0.9067954810003584,
+   "segments": [
+    "application",
+    "context",
+    "endpoint",
+    "host_score",
+    "network",
+    "presentation",
+    "saas",
+    "session",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "EntityFrameStage": {
+   "calls": 168,
+   "rows": 15631,
+   "rows_per_second": 4921.27242994357,
+   "rows_per_unit": 496.74811111249414,
+   "seconds": 3.1762110759999587,
+   "segments": [
+    "host_score"
+   ]
+  },
+  "EnvelopeStampStage": {
+   "calls": 188,
+   "rows": 15167,
+   "rows_per_second": 40022.37136288443,
+   "rows_per_unit": 4039.816462057473,
+   "seconds": 0.37896305200109737,
+   "segments": [
+    "application",
+    "endpoint",
+    "host_score",
+    "network",
+    "presentation",
+    "saas",
+    "session",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "EnvelopeValidateStage": {
+   "calls": 29,
+   "rows": 30410,
+   "rows_per_second": 63511.56552709801,
+   "rows_per_unit": 6410.791245252215,
+   "seconds": 0.47881042999995316,
+   "segments": [
+    "application",
+    "endpoint",
+    "host_score",
+    "network",
+    "presentation",
+    "saas",
+    "session",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "LineageStampStage": {
+   "calls": 60,
+   "rows": 61737,
+   "rows_per_second": 377603.9470206097,
+   "rows_per_unit": 38114.948948936966,
+   "seconds": 0.16349670199986122,
+   "segments": [
+    "application",
+    "endpoint",
+    "host_score",
+    "network",
+    "presentation",
+    "saas",
+    "session",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "PipelineHealthStage": {
+   "calls": 16,
+   "rows": 15125,
+   "rows_per_second": 7676.024312093198,
+   "rows_per_unit": 774.8098956451392,
+   "seconds": 1.9704210649999254,
+   "segments": [
+    "application",
+    "endpoint",
+    "host_score",
+    "network",
+    "presentation",
+    "saas",
+    "session",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "TC0ApplicationStage": {
+   "calls": 1,
+   "rows": 3,
+   "rows_per_second": 1473.1235965595963,
+   "rows_per_unit": 148.69556084189676,
+   "seconds": 0.002036488999976882,
+   "segments": [
+    "context"
+   ]
+  },
+  "TC0AssetStage": {
+   "calls": 1,
+   "rows": 7,
+   "rows_per_second": 2723.8869711153243,
+   "rows_per_unit": 274.94631257408065,
+   "seconds": 0.002569857000025877,
+   "segments": [
+    "context"
+   ]
+  },
+  "TC0EnrichStage": {
+   "calls": 24,
+   "rows": 27435,
+   "rows_per_second": 109284.35200845942,
+   "rows_per_unit": 11031.04861743604,
+   "seconds": 0.2510423449999166,
+   "segments": [
+    "application",
+    "context",
+    "endpoint",
+    "host_score",
+    "network",
+    "presentation",
+    "saas",
+    "session",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "TC0IdentityStage": {
+   "calls": 1,
+   "rows": 23,
+   "rows_per_second": 9858.758284988993,
+   "rows_per_unit": 995.1327884603799,
+   "seconds": 0.0023329510000280607,
+   "segments": [
+    "context"
+   ]
+  },
+  "TC0NetworkStage": {
+   "calls": 1,
+   "rows": 20,
+   "rows_per_second": 9323.883267011232,
+   "rows_per_unit": 941.1430614854884,
+   "seconds": 0.002145028999962051,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC1BindingStage": {
+   "calls": 1,
+   "rows": 793,
+   "rows_per_second": 49896.252917180645,
+   "rows_per_unit": 5036.475777563277,
+   "seconds": 0.015892977000021347,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC1ChangeStage": {
+   "calls": 1,
+   "rows": 793,
+   "rows_per_second": 119124.49952237261,
+   "rows_per_unit": 12024.302854056452,
+   "seconds": 0.006656901000042126,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC1DeviceStage": {
+   "calls": 1,
+   "rows": 305,
+   "rows_per_second": 50540.44304318346,
+   "rows_per_unit": 5101.499657635872,
+   "seconds": 0.006034770999917782,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC1FlapStage": {
+   "calls": 1,
+   "rows": 793,
+   "rows_per_second": 99757.23642408638,
+   "rows_per_unit": 10069.39149760413,
+   "seconds": 0.007949298000085037,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC1ForecastStage": {
+   "calls": 1,
+   "rows": 793,
+   "rows_per_second": 33624.01214094109,
+   "rows_per_unit": 3393.972749285001,
+   "seconds": 0.023584335999998984,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC1NormalizeStage": {
+   "calls": 1,
+   "rows": 793,
+   "rows_per_second": 36407.41541452533,
+   "rows_per_unit": 3674.926575414305,
+   "seconds": 0.021781277000059163,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC1OpticalStage": {
+   "calls": 1,
+   "rows": 793,
+   "rows_per_second": 76443.77025663464,
+   "rows_per_unit": 7716.1545152939525,
+   "seconds": 0.01037363800003277,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC1RateStage": {
+   "calls": 1,
+   "rows": 793,
+   "rows_per_second": 47920.150646990754,
+   "rows_per_unit": 4837.01007350893,
+   "seconds": 0.016548361999980443,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC2ArpStage": {
+   "calls": 1,
+   "rows": 1225,
+   "rows_per_second": 99449.37519433482,
+   "rows_per_unit": 10038.316305864419,
+   "seconds": 0.012317824999968252,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC2AuthStage": {
+   "calls": 1,
+   "rows": 154,
+   "rows_per_second": 35082.38779890614,
+   "rows_per_unit": 3541.179668572516,
+   "seconds": 0.004389666999941255,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC2BaselineStage": {
+   "calls": 2,
+   "rows": 254,
+   "rows_per_second": 58559.52333432977,
+   "rows_per_unit": 5910.937266342293,
+   "seconds": 0.004337467000027573,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC2BindingStage": {
+   "calls": 11,
+   "rows": 1346,
+   "rows_per_second": 76238.53349169073,
+   "rows_per_unit": 7695.438130097228,
+   "seconds": 0.017655114000149297,
+   "segments": [
+    "application",
+    "host_score",
+    "network",
+    "presentation",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "TC2CardinalityStage": {
+   "calls": 1,
+   "rows": 127,
+   "rows_per_second": 23737.865184273833,
+   "rows_per_unit": 2396.0753768444138,
+   "seconds": 0.00535010200007946,
+   "segments": [
+    "telemetry"
+   ]
+  },
+  "TC3BaselineStage": {
+   "calls": 3,
+   "rows": 10138,
+   "rows_per_second": 69755.68720773056,
+   "rows_per_unit": 7041.066381320298,
+   "seconds": 0.14533582000001388,
+   "segments": [
+    "host_score",
+    "network"
+   ]
+  },
+  "TC3BeaconStage": {
+   "calls": 2,
+   "rows": 1185,
+   "rows_per_second": 51388.85425616644,
+   "rows_per_unit": 5187.137401429866,
+   "seconds": 0.02305947500002503,
+   "segments": [
+    "network"
+   ]
+  },
+  "TC3CardinalityStage": {
+   "calls": 3,
+   "rows": 10138,
+   "rows_per_second": 75076.31487411441,
+   "rows_per_unit": 7578.124993870907,
+   "seconds": 0.13503593000001501,
+   "segments": [
+    "host_score",
+    "network"
+   ]
+  },
+  "TC3ReachStage": {
+   "calls": 3,
+   "rows": 10138,
+   "rows_per_second": 111132.69893196688,
+   "rows_per_unit": 11217.618829917337,
+   "seconds": 0.09122427600004812,
+   "segments": [
+    "host_score",
+    "network"
+   ]
+  },
+  "TC3TtlStage": {
+   "calls": 2,
+   "rows": 1185,
+   "rows_per_second": 85235.60379633417,
+   "rows_per_unit": 8603.593031700428,
+   "seconds": 0.013902641000015592,
+   "segments": [
+    "network"
+   ]
+  },
+  "TC4AbpScoreStage": {
+   "calls": 1,
+   "rows": 456,
+   "rows_per_second": 106070.19241559239,
+   "rows_per_unit": 10706.614697286428,
+   "seconds": 0.004299039999978049,
+   "segments": [
+    "transport"
+   ]
+  },
+  "TC4EnvelopeStage": {
+   "calls": 1,
+   "rows": 456,
+   "rows_per_second": 48018.81832254598,
+   "rows_per_unit": 4846.969485867754,
+   "seconds": 0.009496276999925612,
+   "segments": [
+    "transport"
+   ]
+  },
+  "TC4FlowStage": {
+   "calls": 1,
+   "rows": 456,
+   "rows_per_second": 43555.30492112742,
+   "rows_per_unit": 4396.427094109654,
+   "seconds": 0.010469448000094417,
+   "segments": [
+    "transport"
+   ]
+  },
+  "TC5CadenceStage": {
+   "calls": 1,
+   "rows": 385,
+   "rows_per_second": 51615.8717335767,
+   "rows_per_unit": 5210.05230904744,
+   "seconds": 0.007458945999928801,
+   "segments": [
+    "session"
+   ]
+  },
+  "TC5DriftStage": {
+   "calls": 114,
+   "rows": 10525,
+   "rows_per_second": 15988.691752036162,
+   "rows_per_unit": 1613.8818852332768,
+   "seconds": 0.6582777480002164,
+   "segments": [
+    "application",
+    "endpoint",
+    "host_score",
+    "presentation",
+    "saas",
+    "session"
+   ]
+  },
+  "TC5NoveltyStage": {
+   "calls": 1,
+   "rows": 385,
+   "rows_per_second": 41482.03569256722,
+   "rows_per_unit": 4187.153458525381,
+   "seconds": 0.009281126000018958,
+   "segments": [
+    "session"
+   ]
+  },
+  "TC5RiskStage": {
+   "calls": 1,
+   "rows": 385,
+   "rows_per_second": 57506.125149169195,
+   "rows_per_unit": 5804.608351173122,
+   "seconds": 0.006694938999999067,
+   "segments": [
+    "session"
+   ]
+  },
+  "TC5ScoreStage": {
+   "calls": 169,
+   "rows": 1953,
+   "rows_per_second": 467.00650545945035,
+   "rows_per_unit": 47.13915004028515,
+   "seconds": 4.181954591999954,
+   "segments": [
+    "host_score",
+    "session"
+   ]
+  },
+  "TC5SessionStage": {
+   "calls": 1,
+   "rows": 52,
+   "rows_per_second": 14584.177065105343,
+   "rows_per_unit": 1472.111636238823,
+   "seconds": 0.003565508000065165,
+   "segments": [
+    "session"
+   ]
+  },
+  "TC5TravelStage": {
+   "calls": 1,
+   "rows": 385,
+   "rows_per_second": 60425.32207098879,
+   "rows_per_unit": 6099.269046658318,
+   "seconds": 0.006371500999989621,
+   "segments": [
+    "session"
+   ]
+  },
+  "TC6CertificateStage": {
+   "calls": 1,
+   "rows": 483,
+   "rows_per_second": 35448.250838053806,
+   "rows_per_unit": 3578.109502514785,
+   "seconds": 0.013625495999974646,
+   "segments": [
+    "presentation"
+   ]
+  },
+  "TC6CipherStage": {
+   "calls": 1,
+   "rows": 483,
+   "rows_per_second": 68602.2929072393,
+   "rows_per_unit": 6924.643962465604,
+   "seconds": 0.00704058100001248,
+   "segments": [
+    "presentation"
+   ]
+  },
+  "TC6ContentStage": {
+   "calls": 1,
+   "rows": 483,
+   "rows_per_second": 275218.8502672912,
+   "rows_per_unit": 27780.303967930686,
+   "seconds": 0.0017549670000107653,
+   "segments": [
+    "presentation"
+   ]
+  },
+  "TC6FingerprintStage": {
+   "calls": 2,
+   "rows": 2296,
+   "rows_per_second": 137706.79560210768,
+   "rows_per_unit": 13899.980457591875,
+   "seconds": 0.01667310600004157,
+   "segments": [
+    "host_score",
+    "presentation"
+   ]
+  },
+  "TC7DnsStage": {
+   "calls": 1,
+   "rows": 2232,
+   "rows_per_second": 32235.217260815967,
+   "rows_per_unit": 3253.789241209475,
+   "seconds": 0.06924104099999795,
+   "segments": [
+    "application"
+   ]
+  },
+  "TC7EndpointStage": {
+   "calls": 2,
+   "rows": 6268,
+   "rows_per_second": 94956.0233023923,
+   "rows_per_unit": 9584.76204796454,
+   "seconds": 0.06600950399996464,
+   "segments": [
+    "endpoint",
+    "host_score"
+   ]
+  },
+  "TC7HttpStage": {
+   "calls": 1,
+   "rows": 3121,
+   "rows_per_second": 47730.027342539186,
+   "rows_per_unit": 4817.819225266077,
+   "seconds": 0.0653886069999885,
+   "segments": [
+    "application"
+   ]
+  },
+  "TC7SaasStage": {
+   "calls": 1,
+   "rows": 1333,
+   "rows_per_second": 73809.55650494133,
+   "rows_per_unit": 7450.259724048832,
+   "seconds": 0.01805999199996222,
+   "segments": [
+    "saas"
+   ]
+  },
+  "TC7ServiceStage": {
+   "calls": 1,
+   "rows": 303,
+   "rows_per_second": 44705.52998532631,
+   "rows_per_unit": 4512.529613555341,
+   "seconds": 0.006777685000031397,
+   "segments": [
+    "application"
+   ]
+  },
+  "TC7SidScoreStage": {
+   "calls": 1,
+   "rows": 3121,
+   "rows_per_second": 18063.25773694764,
+   "rows_per_unit": 1823.2864140524268,
+   "seconds": 0.17278167900002472,
+   "segments": [
+    "application"
+   ]
+  },
+  "TotalOrderStage": {
+   "calls": 31,
+   "rows": 31327,
+   "rows_per_second": 89777.29213342743,
+   "rows_per_unit": 9062.026320007248,
+   "seconds": 0.34894124400011606,
+   "segments": [
+    "application",
+    "endpoint",
+    "host_score",
+    "network",
+    "presentation",
+    "saas",
+    "session",
+    "telemetry",
+    "transport"
+   ]
+  },
+  "WindowSealStage": {
+   "calls": 714,
+   "rows": 39713,
+   "rows_per_second": 2689.413743322153,
+   "rows_per_unit": 271.46662088174224,
+   "seconds": 14.76641520800132,
+   "segments": [
+    "application",
+    "endpoint",
+    "host_score",
+    "network",
+    "presentation",
+    "saas",
+    "session",
+    "telemetry",
+    "transport"
+   ]
+  }
+ },
+ "unit_seconds": 0.10093895799997199
+}
