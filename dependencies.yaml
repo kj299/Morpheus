@@ -171,6 +171,18 @@ files:
       - model-training-tuning
       - python
 
+  # The fork's CPU test environment: released morpheus-core for its compiled library, and what the test tiers import.
+  # ci/scripts/cpu_env/make_lock.py solves the file this generates into ci/scripts/cpu_env/linux-64-cpu.lock, the
+  # explicit package list .github/workflows/fork-cpu.yaml installs, so this is the environment's one definition.
+  # Includes: cpu_test
+  # Excludes: everything else; the fork's sources are overlaid onto the installed package, not built
+  cpu-test:
+    output: conda
+    matrix:
+      arch: [x86_64]
+    includes:
+      - cpu_test
+
   # Dependencies which are used during the CI "checks" stage. Does not output any files.
   checks:
     output: none
@@ -437,6 +449,22 @@ dependencies:
           - pip
           - pip:
               - pytest-kafka[kafka-python-ng]>=0.8,<0.9
+
+  # The CPU test environment, whole. The packages trail the branch's sources on purpose: 25.06 is the newest
+  # morpheus-core release on the nvidia channel, and it brings the cudf, mrc and pytest it was built against, so
+  # none of those is named here. Raise the pin when morpheus-core 25.10 is released, then run make_lock.py.
+  cpu_test:
+    common:
+      - output_types: [conda]
+        packages:
+          - morpheus-core=25.06
+          - onnxruntime # the SID model, scored on the CPU from models/inventory
+          - pylint
+          - pytest
+          - pytest-asyncio
+          - python=3.12
+          - xgboost # the abp-pcap-xgb booster, scored on the CPU from models/inventory
+          - yapf
 
   morpheus_core_pip:
     common:
