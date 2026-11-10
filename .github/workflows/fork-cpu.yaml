@@ -112,3 +112,46 @@ jobs:
         run: |
           export PYTHONPATH="$GITHUB_WORKSPACE/ci/scripts/cpu_env${PYTHONPATH:+:$PYTHONPATH}"
           python ci/scripts/stage_throughput.py --repeats 3
+
+  # The documentation and the lint (guide 13, plan item 14). A pull request that breaks the documentation build, links
+  # to a page that does not exist, writes prose Vale refuses, or adds Python that yapf, isort or pylint refuses fails
+  # here. The environment is the test environment plus the documentation tools, defined as the cpu-docs file key of
+  # dependencies.yaml and locked by ci/scripts/cpu_env/make_lock.py like the test environment.
+  docs-and-lint:
+    name: Docs and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # The whole history, so the lint can find where the change left its base branch.
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create the environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          micromamba-version: '2.9.0-0'
+          environment-name: morpheus-docs
+          environment-file: ci/scripts/cpu_env/linux-64-docs.lock
+          cache-environment: true
+          init-shell: bash
+
+      # An explicit conda list cannot hold a package only pip carries; make_lock.py pins those beside the lock.
+      - name: Install what only pip carries
+        shell: bash -el {0}
+        run: python -m pip install --no-deps -r ci/scripts/cpu_env/linux-64-docs.lock.pip.txt
+
+      - name: Overlay the fork's sources onto the installed package
+        shell: bash -el {0}
+        run: python ci/scripts/cpu_env/overlay_fork_sources.py "$GITHUB_WORKSPACE"
+
+      - name: Lint the Python the change adds or modifies
+        shell: bash -el {0}
+        run: ci/scripts/fork_lint.sh "origin/${{ github.base_ref || 'branch-25.10' }}"
+
+      - name: Check the prose and build the documentation
+        if: success() || failure()
+        shell: bash -el {0}
+        run: ci/scripts/fork_docs.sh
+

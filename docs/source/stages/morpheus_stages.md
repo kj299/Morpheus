@@ -37,7 +37,7 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 
 ## Input
 
-- Control Message File Source Stage {py:class}`~morpheus.stages.input.control_message_file_source_stage.ControlMessageFileSourceStage` Receives control messages from different sources specified by a list of (fsspec)[https://filesystem-spec.readthedocs.io/en/latest/api.html?highlight=open_files#fsspec.open_files] strings.
+- Control Message File Source Stage {py:class}`~morpheus.stages.input.control_message_file_source_stage.ControlMessageFileSourceStage` Receives control messages from different sources specified by a list of [`fsspec`](https://filesystem-spec.readthedocs.io/en/latest/api.html?highlight=open_files#fsspec.open_files) strings.
 - Control Message Kafka Source Stage {py:class}`~morpheus.stages.input.control_message_kafka_source_stage.ControlMessageKafkaSourceStage` Load control messages from a Kafka cluster.
 - Databricks Delta Lake Source Stage {py:class}`~morpheus.stages.input.databricks_deltalake_source_stage.DataBricksDeltaLakeSourceStage` Source stage used to load messages from a DeltaLake table.
 - File Source Stage {py:class}`~morpheus.stages.input.file_source_stage.FileSourceStage` Load messages from a file.

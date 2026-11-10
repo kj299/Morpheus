@@ -20,7 +20,7 @@ limitations under the License.
 This document records an audit of every tracked file in the repository, taken on 2026-10-23 at the commit that
 regenerated the real-format fixtures (7cd4bb7e). Each file was asked two questions: **what is its purpose**, and
 **why is it here**. Each then got one verdict on whether it serves the future of the objective the
-[README](../../../../README.md) states: behavioral analytics across all seven OSI layers, feeding a SIEM, with output
+[README](https://github.com/kj299/Morpheus/blob/branch-25.10/README.md) states: behavioral analytics across all seven OSI layers, feeding a SIEM, with output
 a detection engineer can reproduce and defend months later.
 
 The answer for most of the repository is that it was never there for this objective. The fork diverged from upstream
@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,139 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,146 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -103,7 +103,9 @@ run it superseded, kept as history) and the seven section 4.7b added (six fixtur
 classes and the search-head run it superseded) and the twelve section 4.7c added (eleven fixture files for the last
 eight classes and the search-head run it superseded) and the five section 4.8a added (the GPU verdict report, the
 throughput benchmark, their tests and the throughput baseline) and the three section 4.8b added (the lock's
-generator, the environment request it solves and their test), less
+generator, the environment request it solves and their test) and the seven section 4.8c added (the fork's
+getting-started page and contributor guide, the documentation environment's request, lock and pip pins, and the
+documentation and lint scripts), less
 the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
@@ -113,7 +115,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and 
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 500 |
+| `keep` | 507 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -562,7 +564,19 @@ that replaces it. Each item says how to know it is done.
     them. Done when a segment runner emits both streams.
 14. **Documentation the fork owns.** A contributor guide and a getting-started page for the fork's CPU path, the
     model inventory page, and the docs build, Vale and lint in the fork's CI. Done when a pull request that breaks the
-    docs build fails CI.
+    docs build fails CI. *Built under plan section 4.8c:* `docs/source/fork_getting_started.md` takes a reader
+    from a clone to a running pipeline and passing tests on a CPU, and
+    `docs/source/developer_guide/fork_contributing.md` covers the workflow, the checks, the tests that hold the
+    repository to itself and how to regenerate recorded outputs; the model inventory page already stood as
+    `models_and_datasets.md`. A `docs-and-lint` job in `fork-cpu.yaml` installs a documentation environment --
+    defined as the `cpu-docs` file key of `dependencies.yaml` and locked by `make_lock.py`, as item 11 did for the
+    test environment -- and runs two scripts. `ci/scripts/fork_lint.sh` holds the Python a change adds or modifies
+    to yapf, isort and pylint's errors. `ci/scripts/fork_docs.sh` runs Vale over every tracked document, then
+    `sphinx-build` directly, since the fork compiles nothing for CMake's documentation target to depend on, and
+    fails on a build error or a link to a page or file that does not exist. Getting there took 27 terms added to
+    Vale's vocabulary, which were 66 of its 74 errors, eight sentences Vale refused rewritten, and 24 links from the guides to files outside the
+    documentation tree, which Sphinx cannot follow, written as repository URLs. The upstream configuration's other
+    warnings, most from generated API pages, are counted and do not fail the build.
 15. **A throughput baseline.** No benchmark measures the telemetry and lineage stages. Done when a benchmark tier
     records rows per second per stage and a change that halves it is visible. *Built under plan section 4.8a:*
     `ci/scripts/stage_throughput.py` runs every segment runner over its samples three times, times each telemetry

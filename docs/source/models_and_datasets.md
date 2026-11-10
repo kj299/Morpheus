@@ -24,10 +24,10 @@ No model is resolved by name alone, and none is fitted inside the scoring path.
 
 | Model | Rule | Stage | Where it is recorded |
 | --- | --- | --- | --- |
-| `abp-pcap-xgb`, an XGBoost flow classifier over the thirteen layer 4 features | R-B-L4-001 | `TC4AbpScoreStage` | [`models/inventory`](../../models/inventory/README.md) |
-| `sid-minibert-20230424`, a BERT-mini sensitive-information model over ten labels | R-B-L7-003 | `TC7SidScoreStage` | [`models/inventory`](../../models/inventory/README.md) |
-| Per-principal `dfencoder` autoencoders over the layer 5 session features | R-B-L5-001, R-B-L5-002 | `TC5ScoreStage` | [`examples/layer5_model`](../../examples/layer5_model/README.md), `models/session_models.json` |
-| Per-peer-group `dfencoder` autoencoders over the host feature frame | R-P-L3-009 | `TC5ScoreStage` | [`examples/layer5_model`](../../examples/layer5_model/README.md), `models/host_models.json` |
+| `abp-pcap-xgb`, an XGBoost flow classifier over the thirteen layer 4 features | R-B-L4-001 | `TC4AbpScoreStage` | [`models/inventory`](https://github.com/kj299/Morpheus/blob/branch-25.10/models/inventory/README.md) |
+| `sid-minibert-20230424`, a BERT-mini sensitive-information model over ten labels | R-B-L7-003 | `TC7SidScoreStage` | [`models/inventory`](https://github.com/kj299/Morpheus/blob/branch-25.10/models/inventory/README.md) |
+| Per-principal `dfencoder` autoencoders over the layer 5 session features | R-B-L5-001, R-B-L5-002 | `TC5ScoreStage` | [`examples/layer5_model`](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/layer5_model/README.md), `models/session_models.json` |
+| Per-peer-group `dfencoder` autoencoders over the host feature frame | R-P-L3-009 | `TC5ScoreStage` | [`examples/layer5_model`](https://github.com/kj299/Morpheus/blob/branch-25.10/examples/layer5_model/README.md), `models/host_models.json` |
 
 The two inventory models come from the upstream repository at commit
 [`c6a3b56d`](https://github.com/nv-morpheus/Morpheus/tree/c6a3b56db1c77c2f375ae0833a65a7b6d2272269), where a Triton
