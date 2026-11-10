@@ -26,6 +26,7 @@ installs that lock.
 """
 
 import importlib.util
+import json
 import os
 import re
 
@@ -148,7 +149,9 @@ def test_what_only_pip_carries_is_pinned_beside_the_lock(key: str):
     with open(path, encoding="utf-8") as handle:
         pinned = dict(line.split("==") for line in handle.read().split())
 
-    assert sorted(pinned) == sorted(re.split(r"[<>=!]", spec)[0] for spec in requested)
+    normal = {name.lower().replace("_", "-") for name in pinned}
+
+    assert {re.split(r"[<>=!]", spec)[0] for spec in requested} <= normal
     assert all(re.fullmatch(r"[0-9][0-9A-Za-z.]*", version) for version in pinned.values()), pinned
 
 
@@ -171,16 +174,41 @@ def test_ci_installs_every_lock_and_nothing_else():
     assert installed == sorted(path.replace(os.sep, "/") for path in make_lock.ENVIRONMENTS.values())
 
 
-def test_the_pip_pins_are_the_requested_packages_as_installed():
-    frozen = "exhale==0.3.7\nnvidia_sphinx_theme==0.0.9\nnumpy==1.26.4\n"
+def test_the_pip_pins_are_everything_pip_installed():
+    inspected = json.dumps({
+        "installed": [
+            {
+                "metadata": {
+                    "name": "exhale", "version": "0.3.7"
+                }, "installer": "pip"
+            },
+            {
+                "metadata": {
+                    "name": "nvidia_sphinx_theme", "version": "0.0.9"
+                }, "installer": "pip"
+            },
+            # What a requested package brought with it: CI installs with --no-deps, so it has to be listed.
+            {
+                "metadata": {
+                    "name": "pydata_sphinx_theme", "version": "0.24.0"
+                }, "installer": "pip"
+            },
+            {
+                "metadata": {
+                    "name": "numpy", "version": "1.26.4"
+                }, "installer": "conda"
+            }
+        ]
+    })
 
     assert make_lock.pip_requests("dependencies:\n- sphinx>=8.2\n- pip:\n  - exhale>=0.3.7\n"
                                   "  - nvidia-sphinx-theme>=0.0.7\nname: x\n") == ["exhale", "nvidia-sphinx-theme"]
-    assert make_lock.render_pip(frozen,
-                                ["exhale", "nvidia-sphinx-theme"]) == ("exhale==0.3.7\nnvidia_sphinx_theme==0.0.9\n")
+    assert make_lock.render_pip(inspected,
+                                ["exhale", "nvidia-sphinx-theme"
+                                 ]) == ("exhale==0.3.7\nnvidia_sphinx_theme==0.0.9\npydata_sphinx_theme==0.24.0\n")
 
     with pytest.raises(ValueError, match="exhale"):
-        make_lock.render_pip("numpy==1.26.4\n", ["exhale"])
+        make_lock.render_pip(json.dumps({"installed": []}), ["exhale"])
 
 
 def test_render_keeps_the_explicit_list_and_drops_the_exporter_s_preamble():

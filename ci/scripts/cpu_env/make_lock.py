@@ -43,6 +43,7 @@ A new lock is a new environment: run what CI runs in it before committing it.
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -61,8 +62,8 @@ REQUEST = os.path.join("conda", "environments", "cpu-test_arch-x86_64.yaml")
 LOCK = ENVIRONMENTS["cpu-test"]
 HASH_PREFIX = "# request-sha256: "
 PIP_SUFFIX = ".pip.txt"
-"""Beside a lock whose request asks pip for packages: those packages, each pinned to the version installed. An
-explicit conda list cannot hold a pip package, so CI installs these after it, with `pip install --no-deps -r`."""
+"""Beside a lock whose request asks pip for packages: everything pip installed, each pinned to the version installed.
+An explicit conda list cannot hold a pip package, so CI installs these after it, with `pip install --no-deps -r`."""
 
 
 def request_path(key: str) -> str:
@@ -108,16 +109,24 @@ def pip_requests(request_text: str) -> list[str]:
     return names
 
 
-def render_pip(frozen: str, names: list[str]) -> str:
-    """The `name==version` lines of `pip freeze` output for the packages a request asks pip for."""
-    wanted = {name.replace("_", "-") for name in names}
-    lines = [line for line in frozen.splitlines() if line.split("==")[0].lower().replace("_", "-") in wanted]
-    missing = wanted - {line.split("==")[0].lower().replace("_", "-") for line in lines}
+def render_pip(inspected: str, names: list[str]) -> str:
+    """
+    The `name==version` lines of everything pip installed, from `pip inspect` output.
+
+    That is the packages the request asks pip for and what they brought with them: CI installs the list with
+    `--no-deps`, so a dependency left out of it is a dependency missing on the runner.
+    """
+    installed = {
+        entry["metadata"]["name"]: entry["metadata"]["version"]
+        for entry in json.loads(inspected)["installed"] if entry.get("installer") == "pip"
+    }
+    missing = {name.replace("_", "-") for name in names} - {name.lower().replace("_", "-") for name in installed}
 
     if (missing):
         raise ValueError(f"pip did not install {sorted(missing)}, which the request asks it for")
 
-    return "".join(line + "\n" for line in sorted(lines))
+    return "".join(f"{name}=={version}\n"
+                   for (name, version) in sorted(installed.items(), key=lambda item: item[0].lower()))
 
 
 def render(explicit: str, digest: str, key: str = "cpu-test") -> str:
@@ -167,7 +176,7 @@ def main(argv: typing.Optional[list] = None) -> int:
             prefix = arguments.keep or os.path.join(scratch, "env")
             subprocess.run([arguments.micromamba, "create", "--yes", "--prefix", prefix, "--file", request], check=True)
             explicit = _run(arguments.micromamba, "env", "export", "--prefix", prefix, "--explicit", "--md5")
-            frozen = _run(os.path.join(prefix, "bin", "python"), "-m", "pip", "list", "--format=freeze") \
+            inspected = _run(os.path.join(prefix, "bin", "python"), "-m", "pip", "inspect") \
                 if pip_names else ""
 
         lock = os.path.join(root, ENVIRONMENTS[key])
@@ -177,7 +186,7 @@ def main(argv: typing.Optional[list] = None) -> int:
 
         if (pip_names):
             with open(lock + PIP_SUFFIX, "w", encoding="utf-8") as handle:
-                handle.write(render_pip(frozen, pip_names))
+                handle.write(render_pip(inspected, pip_names))
 
         print(f"wrote {ENVIRONMENTS[key]} from {request_path(key)}")
 

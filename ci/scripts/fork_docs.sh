@@ -48,6 +48,9 @@ LOG="${BUILD_DIR}/sphinx.log"
 STATUS=${PIPESTATUS[0]}
 
 if [[ "${STATUS}" != "0" ]]; then
+    # Sphinx saves an exception's traceback to a file and prints only its name; show both, so a CI log is enough.
+    tail -n 40 "${LOG}"
+    grep -o '/tmp/sphinx-err-[^ ]*\.log' "${LOG}" | sort -u | xargs -r cat
     echo ">>>> FAILED: sphinx-build exited ${STATUS}; see ${LOG}"
     exit 1
 fi
