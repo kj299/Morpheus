@@ -81,9 +81,10 @@ jobs:
       - name: Create the environment
         uses: mamba-org/setup-micromamba@v2
         with:
-          # The environment the tests were written against, pinned package by package. A fresh solve on the runner
-          # went wrong twice in two different ways (sharded repodata missing dlpack 0.8; a libarrow build without
-          # libgflags), which is the argument for installing exactly what was verified.
+          # The environment the tests were run in, pinned package by package. Its definition is the cpu-test file key
+          # of dependencies.yaml, and ci/scripts/cpu_env/make_lock.py generates this lock from it. A fresh solve on
+          # the runner went wrong twice in two different ways (sharded repodata missing dlpack 0.8; a libarrow build
+          # without libgflags), which is the argument for installing exactly what was verified.
           micromamba-version: '2.9.0-0'
           environment-name: morpheus
           environment-file: ci/scripts/cpu_env/linux-64-cpu.lock
