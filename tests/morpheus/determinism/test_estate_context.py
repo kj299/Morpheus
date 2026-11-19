@@ -278,3 +278,47 @@ def test_a_segment_corpus_context_survives_its_files(corpus: str, tmp_path):
             assert getattr(read, kind).versions() == getattr(context, kind).versions(), kind
 
     assert read.extras == json.loads(json.dumps(dict(context.extras)))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The default context leaves the C++ mode as it found it
+# ---------------------------------------------------------------------------------------------------------------
+
+CORPORA_WITH_A_CONTEXT = sorted(path.stem for path in (EXAMPLE / "corpora").glob("*.py")
+                                if re.search(r"^def context\(", path.read_text(encoding="utf-8"), re.MULTILINE))
+"""Every corpus that defines the estate its composition runs under by default."""
+
+
+@pytest.mark.parametrize("corpus", CORPORA_WITH_A_CONTEXT)
+def test_building_a_corpus_default_context_keeps_the_cpp_mode(corpus: str):
+    # The GPU run of 2026-11-19: a configuration frozen for the GPU wants the switch on, and four corpora built
+    # their estate by freezing a CPU configuration of their own, which switched it off before each second run.
+    # The switch is a process-wide flag, so it can be set here without a GPU to show the default leaves it alone.
+    from corpora import built_in_place  # pylint: disable=import-outside-toplevel
+    from corpora import merged  # pylint: disable=import-outside-toplevel
+
+    from morpheus.config import CppConfig  # pylint: disable=import-outside-toplevel
+
+    for mode in (True, False):
+        CppConfig.set_should_use_cpp(mode)
+        built_in_place(merged(corpus).context)
+
+        assert CppConfig.get_should_use_cpp() is mode, (corpus, mode)
+
+
+def test_a_composition_run_with_the_default_context_sees_the_mode_it_was_called_under():
+    from corpora import _with_context  # pylint: disable=import-outside-toplevel
+
+    from morpheus.config import CppConfig  # pylint: disable=import-outside-toplevel
+
+    def a_context_that_runs_a_cpu_pipeline():
+        CppConfig.set_should_use_cpp(False)
+        return "estate"
+
+    def composition(*, context):
+        return (context, CppConfig.get_should_use_cpp())
+
+    CppConfig.set_should_use_cpp(True)
+
+    assert _with_context(composition, a_context_that_runs_a_cpu_pipeline)() == ("estate", True)
+    assert CppConfig.get_should_use_cpp() is True
