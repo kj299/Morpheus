@@ -30,6 +30,14 @@ to run without it (`morpheus.compositions.estate_context`); a corpus that has an
 the merged namespace every composition function that takes `context` defaults it to the corpus's, so a harness that
 runs a corpus through its composition need not pass it, while the composition itself, imported from the package, still
 has no default to fall back on.
+
+**Building the default leaves the run's C++ mode as it found it.** Four corpora build their estate by running a
+pipeline of their own, in CPU mode, and building and freezing a CPU configuration switches Morpheus's process-wide
+C++ mode off. In GPU mode that switched it off under a configuration already frozen for the GPU, so every second run
+of those four compositions in one process -- the double run, the batch split, the permutations -- was refused with
+"Execution mode ExecutionMode.GPU does not match C++ mode False". The CPU tiers could not see it, since CPU mode wants
+the switch off anyway; the GPU conformance run of 2026-11-19 found it. The default is now built with the switch saved
+and put back.
 """
 
 import functools
@@ -69,8 +77,26 @@ def _with_context(function, context):
     @functools.wraps(function)
     def wrapper(*args, **kwargs):
         if (kwargs.get("context") is None):
-            kwargs["context"] = context()
+            kwargs["context"] = built_in_place(context)
 
         return function(*args, **kwargs)
 
     return wrapper
+
+
+def built_in_place(context):
+    """
+    `context()`, with Morpheus's process-wide C++ mode put back as it was before.
+
+    A corpus that builds its estate by running a pipeline switches the mode to that pipeline's; the caller's
+    configuration may already be frozen to the other, and a frozen configuration refuses to run under a mode it does
+    not match.
+    """
+    from morpheus.config import CppConfig  # pylint: disable=import-outside-toplevel
+
+    before = CppConfig.get_should_use_cpp()
+
+    try:
+        return context()
+    finally:
+        CppConfig.set_should_use_cpp(before)
