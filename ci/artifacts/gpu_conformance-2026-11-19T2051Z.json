@@ -1,0 +1,55 @@
+{
+  "verdict": "passed",
+  "at": "2026-11-19T20:51:33.349005+00:00",
+  "device": "NVIDIA RTX 5000 Ada Generation Laptop GPU, 596.71, 8.9",
+  "commit": "98a46b2a5adaab24a5ab6794df9f17e2778b3661",
+  "gpu_mode": {
+    "outcome": "exited cleanly",
+    "counts": {
+      "passed": 1018
+    },
+    "failures": [],
+    "died_in": null,
+    "counted_from": "pytest's summary",
+    "collected": 1018,
+    "unaccounted": 0,
+    "log": "/tmp/gpu_conformance_marked.log"
+  },
+  "unmarked_gpu_coverage": {
+    "outcome": "exited cleanly",
+    "counts": {
+      "passed": 3331,
+      "skipped": 1
+    },
+    "failures": [],
+    "died_in": null,
+    "counted_from": "pytest's summary",
+    "collected": 3332,
+    "unaccounted": 0,
+    "log": "/tmp/gpu_conformance_unmarked.log"
+  },
+  "cpp_tests": {
+    "exit_status": 0,
+    "device": true,
+    "discovered": 57,
+    "selected": 57,
+    "counts": {
+      "passed": 57,
+      "failed": 0
+    },
+    "failures": [],
+    "unaccounted": [],
+    "not_run": {}
+  },
+  "wider_upstream_suite": {
+    "outcome": "exited cleanly",
+    "counts": {
+      "passed": 918,
+      "skipped": 7
+    },
+    "failures": [],
+    "died_in": null,
+    "counted_from": "pytest's summary",
+    "log": "/tmp/gpu_conformance_wider.log"
+  }
+}

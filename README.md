@@ -207,10 +207,26 @@ Being clear about the boundary is the point of writing it down:
   rather than in anything this fork adds. Every stage and utility added here passes in GPU mode. The suite
   was re-run on 2026-09-06 with the two parity repairs below in place -- **231 passed, 2 failed, 55
   skipped**, the same two upstream failures and nothing else.
-- **On 2026-10-09 every `gpu_mode` variant this fork had passed on a GPU, and so did everything else it adds,
-  across all twelve composed pipelines.** At 22:17 UTC, `ci/scripts/gpu_conformance.sh` ran on that same card
-  (driver 596.71) over tiers that are total: the marked tier **760 collected, 760 passed**; the tier carrying
-  no mode marker -- where the default execution mode on a machine with a card is the GPU -- **1,971 collected,
+- **On 2026-11-19 every `gpu_mode` variant this fork had passed on a GPU, and so did the C++ core's own
+  tests, across all thirteen composed pipelines.** At 20:51 UTC, `ci/scripts/gpu_conformance.sh` ran on that
+  same card (driver 596.71) at commit `98a46b2a`, the tree of pull request #135: the marked tier **1,018
+  collected, 1,018 passed**; the tier carrying no mode marker **3,332 collected, 3,331 passed, 1 skipped**; the
+  C++ tier, built from the fork's sources for compute capability 8.9, **57 of 57 passed**, 33 of them tests that
+  need a device and had never run before; and the wider upstream suite, run for the first time with its Git LFS
+  fixtures fetched, **918 passed, 7 skipped**. Nothing failed in any tier, and both pytest tiers reconcile exactly
+  against what pytest collected. It is the first device run since 2026-10-09, so the host segment's pipeline, the
+  layer 3 to 7 base class, the two models scored on the CPU, the C++ build and everything else merged in between
+  ran on a card for the first time. It took three attempts that day, none of the earlier two committed. The
+  September container image lacked `xgboost` and `onnxruntime`, which the two scoring stages need. With those
+  installed, 17 tests failed: every second run, in one process, of the four pipelines that build their estate
+  context with a CPU pipeline of their own, which switched Morpheus's process-wide C++ mode off under a
+  configuration frozen for the GPU. The CPU tiers could not see that, since CPU mode wants the switch off anyway;
+  pull request #135 fixed it, and this run is the tree with the fix.
+- **On 2026-10-09 every `gpu_mode` variant the fork then had passed on a GPU, and so did everything else it
+  added, across all twelve composed pipelines it then had.** At 22:17 UTC, `ci/scripts/gpu_conformance.sh`
+  ran on that same card (driver 596.71) over tiers that are total: the marked tier **760 collected, 760
+  passed**; the tier carrying no mode marker -- where the default execution mode on a machine with a card is
+  the GPU -- **1,971 collected,
   1,970 passed, 1 skipped**. Nothing failed in either, both exited cleanly, and both counts reconcile exactly
   against what pytest collected. The one skip is the test for a sourcetype nothing produces, which has no
   cases left to run because every sourcetype now has a producer; the six skips of September were all of that

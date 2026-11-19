@@ -4851,8 +4851,8 @@ learned model per peer group, control 8's total order, and control 13's seven
 checks over thirteen composed corpora, which ran in CPU mode in the fork's own CI on every push and pull
 request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, through pull requests #87 to
 #99, for a cause the repository does not show -- and in GPU mode on one card, where the twelve that existed then
-matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; the
-card has seen nothing merged after 2026-10-09: not the trees of steps 9 to 16, and not the host segment.
+matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; on
+2026-11-19 all thirteen, the host segment's included, matched on the card at the tree of pull request #135.
 That is sixty-two stages and fifty-four supporting
 modules, covered by 2,823 distinct tests, itemized in
 [Part 6](#provided). Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of
@@ -4945,7 +4945,21 @@ believed, and each of the four is recorded below, because each produced a verdic
 while measuring less than it claimed. A fifth, found in October, misreported where a failing run had died
 rather than passing one that had failed, and it is recorded with the run that found it.
 
-**The run that stands is 2026-10-09 at 22:17 UTC**, on the same card under driver 596.71, over tiers
+**The run that stands is 2026-11-19 at 20:51 UTC**, on the same card under driver 596.71, at commit
+`98a46b2a`, the tree of pull request #135: the marked tier 1,018 collected and 1,018 passed; the tier carrying
+no mode marker 3,332 collected, 3,331 passed and 1 skipped. Nothing failed, both tiers exited cleanly, and both
+counts reconcile exactly against what pytest collected. Two tiers ran on a card for the first time. The C++ tier,
+built from the fork's sources for compute capability 8.9, passed 57 of 57, 33 of them tests that need a device.
+The wider upstream suite, run with its Git LFS fixtures fetched, passed 918 and skipped 7. It was the first device
+run since 2026-10-09, so all thirteen composed pipelines, the host segment's among them, matched their golden files
+in GPU mode. Two earlier attempts that day are not committed. The first ran in the September container image,
+which lacked the `xgboost` and `onnxruntime` that the two scoring stages need. The second, with them installed,
+failed 17 tests: every second run, in one process, of the transport, application, campaign and presentation
+pipelines. Those four build their estate context with a CPU pipeline of their own, which switched the
+process-wide C++ mode off under a configuration already frozen for the GPU, and the CPU tiers could not see it
+because CPU mode wants the switch off anyway. Pull request #135 fixed it, and the run that stands is that tree.
+
+**The run that stood before it, 2026-10-09 at 22:17 UTC**, was on the same card under driver 596.71, over tiers
 that are total: the marked tier 760 collected and 760 passed; the tier carrying no mode marker 1,971
 collected, 1,970 passed and 1 skipped. Nothing failed in either, both exited cleanly, and both counts
 reconcile exactly against what pytest collected. The skip is the test for a sourcetype nothing produces,
@@ -4960,7 +4974,7 @@ same way. Each of the twelve golden checks ran in GPU mode and matched the golde
 through the canonical rendering with floats quantized to four places, so the cross-mode question is
 answered for every corpus. `test_gpu_parity.py` compared three corpora on that run; it was then
 parametrized over all twelve, and the nine variants that added passed on the card at 15:20 UTC on
-2026-10-09 and again in the run that stands. The estate harness was the one that mattered most in September, when it first ran on a card: a
+2026-10-09 and again at 22:17 UTC that day. The estate harness was the one that mattered most in September, when it first ran on a card: a
 chain is a Merkle root over its members in order, the estate seals five classes together over their
 union, and the ordering and hashing of that union is exactly the arithmetic this project has seen diverge
 between host and device before.

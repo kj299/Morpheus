@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,151 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,152 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -106,7 +106,8 @@ throughput benchmark, their tests and the throughput baseline) and the three sec
 generator, the environment request it solves and their test) and the seven section 4.8c added (the fork's
 getting-started page and contributor guide, the documentation environment's request, lock and pip pins, and the
 documentation and lint scripts) and the five section 4.8d added (the C++ build script, the C++ test runner and its
-test, and the build environment's request and lock), less
+test, and the build environment's request and lock) and the one the GPU run of 2026-11-19 added (its
+conformance artifact), less
 the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
@@ -116,7 +117,7 @@ ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and 
 | --- | --- |
 | `remove` | 84 |
 | `keep-dependency` | 410 |
-| `keep` | 512 |
+| `keep` | 513 |
 | `update` | 145 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream
@@ -509,7 +510,8 @@ that replaces it. Each item says how to know it is done.
    that count in the run's summary, with a warning when the count is not zero or the history cannot reach the
    verdict. The conformance report now records the commit it ran at, so the count is exact from the next GPU run
    on; until then it counts from the artifact's time. Its first run said the GPU verdict of 2026-10-09 is 80
-   GPU-path commits old. The GPU job waits for a runner with a card.
+   GPU-path commits old. The run of 2026-11-19 records its commit, the tree of pull request #135, so the count
+   is exact from there on. The GPU job waits for a runner with a card.
 10. **Build and test what stays in C++.** No CI tier builds the C++ tests, and the CUDA utilities carry an
     architecture workaround. Done when the kept C++ tests run in a tier. *Built under plan section 4.8d:* the
     fork's C++ is compiled on every pull request and its tests run in two tiers. Until now nothing compiled it at
@@ -530,8 +532,8 @@ that replaces it. Each item says how to know it is done.
     so. The first build found a defect the Python tiers could not: `morpheus._lib` still imported the `modules`
     binding that ruling D4 removed, so a build from the fork's sources could not import the package at all, and CI
     passed only because the installed upstream package still carried the compiled module. The import is gone and
-    a test holds the package's imports to the bindings the build makes. The 33 device tests have not run yet:
-    they wait, with the rest of the GPU path, for a run on a card.
+    a test holds the package's imports to the bindings the build makes. The 33 device tests first ran on the card on
+    2026-11-19, and all 57 passed.
 11. **One environment definition.** `dependencies.yaml` and the CPU lock disagree on channels and pins. Generate the
     lock from the dependency file, or make the lock the only definition. Done when one regeneration produces both.
     *Built under plan section 4.8b:* the dependency file is the definition. Its `cpu-test` file key lists what the
