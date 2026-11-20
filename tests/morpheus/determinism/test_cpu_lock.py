@@ -187,6 +187,18 @@ def test_ci_installs_every_lock_and_nothing_else():
     assert installed == sorted(path.replace(os.sep, "/") for path in make_lock.ENVIRONMENTS.values())
 
 
+def test_every_action_ci_runs_is_pinned_to_a_release_commit():
+    # The repository refuses a workflow whose actions are not pinned to a full commit, so a tag here would stop CI
+    # before its first step; and a tag can be moved upstream to code nobody here has seen.
+    with open(WORKFLOW, encoding="utf-8") as handle:
+        lines = [line.strip() for line in handle if line.strip().startswith("uses:")]
+
+    assert lines, "the workflow runs no action"
+
+    for line in lines:
+        assert re.fullmatch(r"uses: [\w.-]+/[\w.-]+@[0-9a-f]{40} # v\d+(\.\d+)*", line), line
+
+
 def test_the_pip_pins_are_everything_pip_installed():
     inspected = json.dumps({
         "installed": [
