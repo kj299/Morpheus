@@ -1,0 +1,167 @@
+{
+  "verdict": "passed",
+  "at": "2026-11-20T15:57:31.245427+00:00",
+  "device": "NVIDIA RTX 5000 Ada Generation Laptop GPU",
+  "torch": "2.4.0+cu124",
+  "seed": 42,
+  "epochs": 20,
+  "principals": {
+    "alice@example.com": 40,
+    "bob@example.com": 40,
+    "carol@example.com": 40,
+    "dave@example.com": 56,
+    "erin@example.com": 40,
+    "svc-batch@example.com": 14
+  },
+  "features": [
+    "logcount",
+    "locincrement",
+    "appincrement",
+    "deviceincrement",
+    "asns_in_window",
+    "hour_surprise_bits",
+    "weekday_surprise_bits",
+    "mfa_ratio",
+    "auth_attempts_in_window",
+    "auth_failures_in_window"
+  ],
+  "double_run_reproducible": true,
+  "batch_invariant": true,
+  "batch_sizes": [
+    1,
+    8,
+    64
+  ],
+  "batch_tolerance": 1e-05,
+  "batch_differences": {
+    "1_vs_8": {
+      "alice@example.com": {
+        "rows": 40,
+        "rows_different": 35,
+        "max_abs_difference": 1.0132789611816406e-06,
+        "max_relative_difference": 1.0132789611816406e-06,
+        "largest_score_differing": 1.3726729154586792,
+        "smallest_score_differing": 0.0868874341249466,
+        "largest_score": 2.3191678524017334
+      },
+      "bob@example.com": {
+        "rows": 40,
+        "rows_different": 29,
+        "max_abs_difference": 1.1920928955078125e-06,
+        "max_relative_difference": 9.95748056225113e-07,
+        "largest_score_differing": 1.1971832513809204,
+        "smallest_score_differing": 0.017576560378074646,
+        "largest_score": 1.1971832513809204
+      },
+      "carol@example.com": {
+        "rows": 40,
+        "rows_different": 36,
+        "max_abs_difference": 2.0265579223632812e-06,
+        "max_relative_difference": 2.0265579223632812e-06,
+        "largest_score_differing": 1.202083706855774,
+        "smallest_score_differing": 0.02213910222053528,
+        "largest_score": 1.202083706855774
+      },
+      "dave@example.com": {
+        "rows": 56,
+        "rows_different": 33,
+        "max_abs_difference": 2.384185791015625e-07,
+        "max_relative_difference": 1.4930954414228424e-07,
+        "largest_score_differing": 1.5968073606491089,
+        "smallest_score_differing": 0.002179402159526944,
+        "largest_score": 4.695089340209961
+      },
+      "erin@example.com": {
+        "rows": 40,
+        "rows_different": 18,
+        "max_abs_difference": 2.980232238769531e-07,
+        "max_relative_difference": 2.980232238769531e-07,
+        "largest_score_differing": 1.013002872467041,
+        "smallest_score_differing": 0.004246133845299482,
+        "largest_score": 1.097288966178894
+      },
+      "svc-batch@example.com": {
+        "rows": 14,
+        "rows_different": 10,
+        "max_abs_difference": 2.384185791015625e-07,
+        "max_relative_difference": 2.384185791015625e-07,
+        "largest_score_differing": 1.0871152877807617,
+        "smallest_score_differing": 0.4776941239833832,
+        "largest_score": 1.0871152877807617
+      }
+    },
+    "1_vs_64": {
+      "alice@example.com": {
+        "rows": 40,
+        "rows_different": 35,
+        "max_abs_difference": 1.0132789611816406e-06,
+        "max_relative_difference": 1.0132789611816406e-06,
+        "largest_score_differing": 1.3726729154586792,
+        "smallest_score_differing": 0.0868874341249466,
+        "largest_score": 2.3191678524017334
+      },
+      "bob@example.com": {
+        "rows": 40,
+        "rows_different": 29,
+        "max_abs_difference": 1.1920928955078125e-06,
+        "max_relative_difference": 9.95748056225113e-07,
+        "largest_score_differing": 1.1971832513809204,
+        "smallest_score_differing": 0.017576560378074646,
+        "largest_score": 1.1971832513809204
+      },
+      "carol@example.com": {
+        "rows": 40,
+        "rows_different": 36,
+        "max_abs_difference": 2.0265579223632812e-06,
+        "max_relative_difference": 2.0265579223632812e-06,
+        "largest_score_differing": 1.202083706855774,
+        "smallest_score_differing": 0.02213910222053528,
+        "largest_score": 1.202083706855774
+      },
+      "dave@example.com": {
+        "rows": 56,
+        "rows_different": 33,
+        "max_abs_difference": 2.384185791015625e-07,
+        "max_relative_difference": 1.4930954414228424e-07,
+        "largest_score_differing": 1.5968073606491089,
+        "smallest_score_differing": 0.002179402159526944,
+        "largest_score": 4.695089340209961
+      },
+      "erin@example.com": {
+        "rows": 40,
+        "rows_different": 18,
+        "max_abs_difference": 2.980232238769531e-07,
+        "max_relative_difference": 2.980232238769531e-07,
+        "largest_score_differing": 1.013002872467041,
+        "smallest_score_differing": 0.004246133845299482,
+        "largest_score": 1.097288966178894
+      },
+      "svc-batch@example.com": {
+        "rows": 14,
+        "rows_different": 10,
+        "max_abs_difference": 2.384185791015625e-07,
+        "max_relative_difference": 2.384185791015625e-07,
+        "largest_score_differing": 1.0871152877807617,
+        "smallest_score_differing": 0.4776941239833832,
+        "largest_score": 1.0871152877807617
+      }
+    }
+  },
+  "committed_models_match": false,
+  "pipeline_double_run_reproducible": true,
+  "pipeline_batch_invariant": true,
+  "pipeline_differences": {},
+  "pipeline_scored_rows": 155,
+  "pipeline_principals_pinned": 6,
+  "pipeline_principals_skipped": {},
+  "model_versions": {
+    "alice@example.com": "dfencoder/alice@example.com:1756e6343ac2fc1f",
+    "bob@example.com": "dfencoder/bob@example.com:a0dcdf41478b33c3",
+    "carol@example.com": "dfencoder/carol@example.com:81b90c5ff248dfa0",
+    "dave@example.com": "dfencoder/dave@example.com:bbd3330efa46d844",
+    "erin@example.com": "dfencoder/erin@example.com:2bc8332f1f64e4e8",
+    "svc-batch@example.com": "dfencoder/svc-batch@example.com:b31584ebbc01d668"
+  },
+  "pipeline_mean_abs_z_max": 5691.5504,
+  "measures": "reproducibility of the scoring path, not detection quality: a fortnight of six principals is far too little data to train an autoencoder that detects anything in general, and no claim is made that it does. The models are trained on the corpus's fortnight and the wired-path checks score the week after it."
+}
