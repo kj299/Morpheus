@@ -48,6 +48,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import golden  # noqa: E402
 import transport_pipeline as tp_  # noqa: E402
 
+# transport_pipeline replaces itself in sys.modules with the merged corpus and composition, which pylint cannot
+# follow, so every attribute read through `tp_` looks missing to it.
+# pylint: disable=no-member
+
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_transport_expected.csv")
 
 SYN_RATIO_THRESHOLD = 0.9
