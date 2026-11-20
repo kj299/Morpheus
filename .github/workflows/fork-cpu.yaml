@@ -41,6 +41,11 @@ concurrency:
 permissions:
   contents: read
 
+# Every action is pinned to the full commit of a release, with the release named beside it, so a tag moved upstream
+# changes nothing here until a pull request changes the commit. The repository requires it: Actions refuses a
+# workflow whose actions are not pinned this way. To update one, look up the release's commit with
+# `git ls-remote https://github.com/<owner>/<action>.git refs/tags/<release>` and replace both.
+
 jobs:
   cpu-tiers:
     name: CPU tiers
@@ -49,7 +54,7 @@ jobs:
     steps:
       # The whole history, so the GPU verdict below can count the commits since the last GPU run.
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -63,7 +68,7 @@ jobs:
       # objects are cached by the pointers' content, so the 45 MB model is downloaded when it changes rather than
       # on every run, which keeps the job inside the repository's LFS bandwidth.
       - name: Restore the model inventory's LFS objects
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .git/lfs/objects
           key: model-inventory-lfs-${{ hashFiles('models/inventory/**') }}
@@ -79,7 +84,7 @@ jobs:
           ! git lfs ls-files --include="models/inventory/**" | grep -q " - "
 
       - name: Create the environment
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
         with:
           # The environment the tests were run in, pinned package by package. Its definition is the cpu-test file key
           # of dependencies.yaml, and ci/scripts/cpu_env/make_lock.py generates this lock from it. A fresh solve on
@@ -124,12 +129,12 @@ jobs:
     steps:
       # The whole history, so the lint can find where the change left its base branch.
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
       - name: Create the environment
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
         with:
           micromamba-version: '2.9.0-0'
           environment-name: morpheus-docs
@@ -166,12 +171,12 @@ jobs:
     steps:
       # With the submodule that holds the build's CMake modules.
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: true
 
       - name: Create the environment
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
         with:
           # The compilers, the CUDA toolkit and the libraries the core is built against, pinned package by package:
           # the cpu-build file key of dependencies.yaml, locked by ci/scripts/cpu_env/make_lock.py.
