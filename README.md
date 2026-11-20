@@ -365,7 +365,8 @@ Being clear about the boundary is the point of writing it down:
   compile `matx_util.cu` on an `atomicAdd` overload; building for the card's own architecture,
   `CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=89"` for compute capability 8.9, compiles. And `pyarrow` fails
   to import, partway through the build, for want of `libgflags.so.2.2`; `conda install -c conda-forge
-  "gflags=2.2.*"` supplies it, and has to be repeated in every new container until the image carries it.
+  "gflags=2.2.*"` supplies it, and has to be repeated in every new container from that image. The dev
+  environment now pins `gflags` 2.2, so an image built from this tree carries it.
   `ci/scripts/fork_cpp.sh`, which builds the C++ core and its tests for CI and for the conformance run, now
   targets the card's own architecture by itself, and its locked environment pins `gflags` 2.2.
 - **The September image also lacks the two model libraries.** The SID and ABP scoring stages, added on

@@ -134,8 +134,10 @@ def test_corpus_is_shaped_like_a_capture(corpus: dict[str, pd.DataFrame]):
     packets = corpus[tp_.TELEMETRY_CLASS]
 
     # One record per packet, carrying the five-tuple, the flags byte and the payload length. This is the shape
-    # `abp_pcap_preprocessing.py` assumes, and the assumption is load-bearing: `ppm` counts records, so a flow
-    # exporter's one-record-per-flow feed would have the model reading flows per minute as packets per minute.
+    # upstream's ABP pcap preprocessing assumes (removed from this fork; at upstream commit c6a3b56d:
+    # https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/abp_pcap_detection/abp_pcap_preprocessing.py),
+    # and the assumption is load-bearing: `ppm` counts records, so a flow exporter's one-record-per-flow feed
+    # would have the model reading flows per minute as packets per minute.
     for column in ("src_ip", "src_port", "dst_ip", "dst_port", "protocol", "tcp_flags", "data_len"):
         assert column in packets.columns, column
 
@@ -199,7 +201,7 @@ def test_batch_split_sweep(pipeline_config: Config, corpus: dict[str, pd.DataFra
 
 @pytest.mark.gpu_and_cpu_mode
 def test_a_bin_split_across_messages_still_ends_on_the_right_number(pipeline_config: Config, corpus: dict):
-    # Control 5 aimed at the departure this stage makes from the reference. `abp_pcap_preprocessing.py` groups
+    # Control 5 aimed at the departure this stage makes from the reference. Upstream's ABP pcap preprocessing groups
     # within the message it was handed, so a sixty-second bin arriving in two messages is aggregated twice and
     # the model sees two partial bins as though each were whole. The check above says the whole frame does not
     # drift; this one says the figure a detection reads is the same number no matter how the stream was chunked.
@@ -393,7 +395,7 @@ def test_the_bin_is_floored_and_half_open(result: pd.DataFrame):
 @pytest.mark.cpu_mode
 def test_the_model_feature_list_is_complete(result: pd.DataFrame):
     # What this fork owes R-B-L4-001, which is a model it does not train: the thirteen features under the names
-    # `abp_pcap_preprocessing.py` declares them, mapped to the columns they are emitted as. A deployment builds
+    # upstream's ABP pcap preprocessing declares them, mapped to the columns they are emitted as. A deployment builds
     # the model's input frame from this mapping rather than from a second copy of the list that will drift.
     assert len(MODEL_FEATURES) == 13
     assert set(MODEL_FEATURES) == {

@@ -168,7 +168,6 @@ myst_heading_anchors = 4  # Generate links for markdown headers
 autodoc_mock_imports = [
     "cudf",  # Avoid loading GPU libraries during the documentation build
     "cupy",  # Avoid loading GPU libraries during the documentation build
-    "databricks.connect",
     "datacompy",
     "morpheus.cli.commands",  # Dont document the CLI in Sphinx
     "pandas",
@@ -256,16 +255,6 @@ html_theme_options = {
         False,
     'navigation_depth':
         6,
-    'extra_head': [  # Adding Adobe Analytics
-        '''
-    <script src="https://assets.adobedtm.com/5d4962a43b79/c1061d2c5e7b/launch-191c2462b890.min.js" ></script>
-    '''
-    ],
-    'extra_footer': [
-        '''
-    <script type="text/javascript">if (typeof _satellite !== "undefined") {_satellite.pageBottom();}</script>
-    '''
-    ],
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -347,7 +336,7 @@ intersphinx_mapping = {
 linkcode_resolve = make_linkcode_resolve(
     morpheus_root=morpheus_root,
     package='morpheus',
-    url_fmt='https://github.com/nv-morpheus/Morpheus/blob/{revision}/{path}#L{lineno}')
+    url_fmt='https://github.com/kj299/Morpheus/blob/{revision}/{path}#L{lineno}')
 
 # Set the default role for interpreted code (anything surrounded in `single
 # backticks`) to be a python object. See

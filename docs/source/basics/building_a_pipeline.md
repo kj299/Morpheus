@@ -16,20 +16,18 @@ limitations under the License.
 -->
 
 # Building a Pipeline
-> **Prerequisites**
-> The following examples assume that the example dataset has been fetched. From the root of the Morpheus repo, run:
->```bash
->./scripts/fetch_data.py fetch examples
->```
 
-To build a pipeline via the CLI, users must first specify the type of pipeline, a source object, followed by a sequential list of stages. For each stage, options can be specified to configure the particular stage. Since stages are listed sequentially the output of one stage becomes the input to the next. Unless heavily customized, pipelines typically start with `morpheus run` followed by the pipeline mode such as `pipeline-nlp` or `pipeline-fil`. For example, to run the NLP pipeline, use:
+> **Prerequisites**
+> Run the examples from the root of the repository. Their input, `examples/behavioral_analytics/samples/network/tc3.jsonlines`, is committed, so there is nothing to fetch.
+
+To build a pipeline via the CLI, users must first specify the type of pipeline, a source object, followed by a sequential list of stages. For each stage, options can be specified to configure the particular stage. Since stages are listed sequentially the output of one stage becomes the input to the next. Unless heavily customized, pipelines typically start with `morpheus run` followed by the pipeline mode such as `pipeline-other`, which every example on this page and this fork's telemetry pipelines use:
 
 ```bash
-morpheus run pipeline-nlp ...
+morpheus run pipeline-other ...
 ```
 
 While each stage has configuration options, there are options that apply to the pipeline as a whole as well. Check
-``morpheus run --help``, ``morpheus run pipeline-nlp --help`` and ``morpheus run pipeline-fil --help`` for these global
+``morpheus run --help`` and ``morpheus run pipeline-other --help`` for these global
 Pipeline options.
 
 ## Source Stages
@@ -128,9 +126,9 @@ morpheus --log_level=DEBUG run pipeline-other \
 ```
 
 ## Available Stages
-For a complete list of available stages for a particular pipeline mode, use the CLI help commands. First `morpheus run --help` can be used to list the available pipeline modes. Then `morpheus run <mode> --help` can be used to list the available stages for that mode. For example, to list the available stages for the `pipeline-nlp` mode:
+For a complete list of available stages for a particular pipeline mode, use the CLI help commands. First `morpheus run --help` can be used to list the available pipeline modes. Then `morpheus run <mode> --help` can be used to list the available stages for that mode. For example, to list the available stages for the `pipeline-other` mode:
 ```bash
-morpheus run pipeline-nlp --help
+morpheus run pipeline-other --help
 ```
 
 ## Basic Usage Examples
@@ -181,7 +179,7 @@ This example reports the throughput for each stage independently.
 ![../img/multi_monitor_throughput.png](../img/multi_monitor_throughput.png)
 
 ```bash
-morpheus --log_level=INFO run pipeline-nlp --viz_file=.tmp/multi_monitor_throughput.png  \
+morpheus --log_level=INFO run pipeline-other --viz_file=.tmp/multi_monitor_throughput.png  \
    from-file --filename examples/behavioral_analytics/samples/network/tc3.jsonlines \
    monitor --description "From File Throughput" \
    deserialize \

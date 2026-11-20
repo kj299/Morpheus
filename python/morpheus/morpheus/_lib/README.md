@@ -15,15 +15,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-**General architectural ideas**
+# The C++ library
 
-We build three libraries:
-- `libmorpheus` : Defines all the python aware library code for Morpheus, and interface proxies for python modules.
-  - Interface proxies are designed to provide a single consolidated point of interaction between the Morpheus library code and their associated pybind11 module definitions.
-  - Please avoid declaring ad-hoc functions/interfaces that link to python modules.
-- `libmorpheus_utils` : MatX and table manipulation functions.
-- `libcudf_helpers` : Small bridge module used to extract Cython based DataFrame, and series information from cuDF.
+This directory builds two libraries and three Python extension modules.
 
+- `libmorpheus` (`cmake/libmorpheus.cmake`): the C++ messages, objects, stages, controllers and utilities. Sources
+  are under `src/`, headers under `include/morpheus/`.
+- `cudf_helpers` (`cudf_helpers.pyx`): a small Cython bridge that passes cuDF tables and columns between Python and
+  C++.
+- The pybind11 modules `common`, `messages` and `stages`, each defined in `<name>/module.cpp` with a typed stub in
+  `<name>/__init__.pyi`, and declared with `morpheus_add_pybind11_module` in `CMakeLists.txt`.
 
-Python modules should be defined in `_lib/src/python_modules`, with an associated CMake declaration in
-`_lib/cmake/<module_name>.cmake` which can be included in `_lib/CMakeLists.txt`.
+The C++ unit tests are under `tests/` and build when `MORPHEUS_BUILD_TESTS=ON`. `ci/scripts/fork_cpp.sh` builds
+and runs them.
