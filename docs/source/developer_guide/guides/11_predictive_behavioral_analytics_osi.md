@@ -4912,12 +4912,16 @@ the hysteresis half of it does not. Control 3 has now been measured, on the one 
 `examples/layer5_model/run_model.py` sets `CUBLAS_WORKSPACE_CONFIG` before Torch is imported, enables
 `torch.use_deterministic_algorithms`, trains a per-principal autoencoder on the layer 5 corpus and checks
 the double run and the batch sweep, and then runs the composed pipeline with those models in the scoring
-slot. On 2026-10-03 at 23:53 UTC, with `torch==2.4.0+cu124` on an RTX 5000 Ada, **all four checks
-passed**: the double run was identical and the scores invariant across batch sizes 1, 8 and 64 for all
-five principals, and the composed pipeline returned the same 105 scores twice and again under the
-batch-split sweep. That repeats the first passing run, on 2026-09-19 at 23:17 UTC, on the tree after the
-layer 5 rules and context landed, with the same row counts per principal and the same
-`pipeline_mean_abs_z_max` of 2.3823. Had any of them failed, R-P-L5-006 -- a rule about a score rising by fractions of a
+slot. On 2026-11-20 at 15:57 UTC, with `torch==2.4.0+cu124` on an RTX 5000 Ada, **all four checks
+passed**: the double run was identical and the scores agreed across batch sizes 1, 8 and 64 for all six
+principals, within 1e-5 of their size, and the composed pipeline returned the same 155 scores twice and
+again under the batch-split sweep. The pipeline scores the week after the training fortnight, so its
+`pipeline_mean_abs_z_max` of 5691.5504 is an uncalibrated out-of-sample score, as the layer 5 model's README
+explains. The batch check compares unrounded scores because the GPU picks its matrix kernels by batch shape:
+the scores moved by at most 2.0e-6 of themselves, and an earlier attempt that day failed only because one
+score sat on a rounding boundary. The run before it, on 2026-10-03 at 23:53 UTC, passed on five principals
+with 105 scored rows and a `pipeline_mean_abs_z_max` of 2.3823, repeating the first passing run of
+2026-09-19. Had any of them failed, R-P-L5-006 -- a rule about a score rising by fractions of a
 standard deviation -- would have been measuring the model's own jitter rather than a principal's
 behaviour, and every threshold tuned against those scores would have been tuned against noise. The
 fourth check did fail on its first run, and that is written up where the adapter is described.

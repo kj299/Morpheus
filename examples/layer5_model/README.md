@@ -196,25 +196,41 @@ be worse than one that refuses. That refusal is itself tested, in the container 
 
 ## The result
 
-Run on 2026-10-03 at 23:53 UTC, on an NVIDIA RTX 5000 Ada Generation Laptop GPU with `torch==2.4.0+cu124`,
-seed 42 and 20 epochs, over five principals carrying 26, 18, 26, 28 and 7 usable rows: **all four checks
-passed.** The model's own double run was identical and its scores were invariant across batch sizes 1, 8 and
-64; the composed pipeline, with those models behind `TC5ScoreStage`, gave the same 105 scores twice and again
-under the batch-split sweep, with `pipeline_differences` empty, five principals pinned and none skipped.
-Verdict `passed`, `pipeline_mean_abs_z_max` 2.3823, and these weight digests:
+Run on 2026-11-20 at 15:57 UTC, on an NVIDIA RTX 5000 Ada Generation Laptop GPU with `torch==2.4.0+cu124`,
+seed 42 and 20 epochs, over the corpus's fortnight for six principals carrying 40, 40, 40, 56, 40 and 14
+usable rows: **all four checks passed.** The model's own double run was identical and its scores agreed across
+batch sizes 1, 8 and 64 within `BATCH_TOLERANCE`, 1e-5 of their size; the largest difference was 2.0e-6 of a
+score. The composed pipeline, with those models behind `TC5ScoreStage`, gave the same 155 scores twice and
+again under the batch-split sweep, with `pipeline_differences` empty, six principals pinned and none skipped.
+Verdict `passed`, `pipeline_mean_abs_z_max` 5691.5504, and these weight digests:
 
 | Principal | `model_version` |
 | --- | --- |
-| `alice@example.com` | `dfencoder/alice@example.com:ebf33ed32d52626c` |
-| `bob@example.com` | `dfencoder/bob@example.com:a3355010ab77c564` |
-| `carol@example.com` | `dfencoder/carol@example.com:47e623d362182a67` |
-| `dave@example.com` | `dfencoder/dave@example.com:aa2262f43228bb20` |
-| `svc-batch@example.com` | `dfencoder/svc-batch@example.com:cd5ddb14349473d3` |
+| `alice@example.com` | `dfencoder/alice@example.com:1756e6343ac2fc1f` |
+| `bob@example.com` | `dfencoder/bob@example.com:a0dcdf41478b33c3` |
+| `carol@example.com` | `dfencoder/carol@example.com:81b90c5ff248dfa0` |
+| `dave@example.com` | `dfencoder/dave@example.com:bbd3330efa46d844` |
+| `erin@example.com` | `dfencoder/erin@example.com:2bc8332f1f64e4e8` |
+| `svc-batch@example.com` | `dfencoder/svc-batch@example.com:b31584ebbc01d668` |
 
-That is the first passing run, 2026-09-19 at 23:17 UTC, repeated on the tree after the layer 5 rules and
-context landed: the same row counts, the same 105 rows and the same `pipeline_mean_abs_z_max`. The September
-digests were not written down anywhere this repository keeps, so whether these five match them is not
-something this file can say; recording them here is what makes the next comparison possible.
+The pipeline scores the week after the fortnight, out of sample, so its largest score is the uncalibrated kind
+the committed models' section describes: a feature the fortnight never varied scores in the thousands when it
+moves. `committed_models_match` is false, as expected: the card sums in a different order from the CPU that
+trained the committed models, and the committed file, not a recipe for it, is what CI pins.
+
+It took three attempts that day. The first two failed the batch check when it still compared rounded scores:
+the card picks its matrix kernels by batch shape, the last bits of a float32 move with it, and one of bob's 234
+training-row scores sat on a rounding boundary, 0.2973 at batch size 1 and 0.2974 at 8 and 64. The check now
+compares unrounded scores within a tolerance that float32 rounding clears by a factor of five and that batch
+normalization left in training mode, the failure it exists for, cannot.
+
+The run before it, on 2026-10-03 at 23:53 UTC, passed on the five principals and the single week the corpus had
+then, with 26, 18, 26, 28 and 7 rows, 105 scored rows and a `pipeline_mean_abs_z_max` of 2.3823; its artifact is
+kept beside this one. It repeated the first passing run, 2026-09-19 at 23:17 UTC, on the tree after the
+layer 5 rules and context landed: the same row counts, the same 105 rows and the same
+`pipeline_mean_abs_z_max`. The September digests were not written down anywhere this repository keeps, so
+whether October's five matched them is not something this file can say; recording each run's digests here is
+what makes the next comparison possible.
 
 The fourth check failed on its first attempt, on 2026-09-13, and the failure was real: the adapter was
 letting the size of a message's row group reach the model, so a score depended on how the stream had been
@@ -225,8 +241,8 @@ and reboots and the repair changed how rows were handed over rather than what wa
 they stayed put under re-batching.
 
 That is controls 1, 3 and 5, measured. It is not a statement that the model detects anything, and the
-paragraph above is not softened by the result: seven rows is not a training set, and neither is
-twenty-eight.
+paragraph above is not softened by the result: fourteen rows is not a training set, and neither is
+fifty-six.
 
 ## The artifact
 
@@ -240,18 +256,20 @@ Same shape as `gpu_conformance.json`: what ran, on what card, with what result.
   "torch": "2.4.0+cu124",
   "seed": 42,
   "epochs": 20,
-  "principals": {"alice@example.com": 26, "…": 0},
+  "principals": {"alice@example.com": 40, "…": 0},
   "double_run_reproducible": true,
   "batch_invariant": true,
   "batch_sizes": [1, 8, 64],
+  "batch_tolerance": 1e-05,
+  "batch_differences": {"1_vs_8": {"alice@example.com": {"rows": 40, "rows_different": 35, "…": 0}}},
   "pipeline_double_run_reproducible": true,
   "pipeline_batch_invariant": true,
   "pipeline_differences": {},
-  "pipeline_scored_rows": 105,
-  "pipeline_principals_pinned": 5,
+  "pipeline_scored_rows": 155,
+  "pipeline_principals_pinned": 6,
   "pipeline_principals_skipped": {},
   "model_versions": {"alice@example.com": "dfencoder/alice@example.com:…", "…": "…"},
-  "pipeline_mean_abs_z_max": 2.3823,
+  "pipeline_mean_abs_z_max": 5691.5504,
   "measures": "reproducibility of the scoring path, not detection quality: …"
 }
 ```

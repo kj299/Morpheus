@@ -137,15 +137,20 @@ Being clear about the boundary is the point of writing it down:
   altogether: its first sign-in from Amsterdam failed and carried the first-seen flags, and the rule reads
   successes only. All three are asserted and recorded rather than tuned away.
 - **The model's scoring path is reproducible all the way through the pipeline, and that is now measured
-  rather than assumed.** On 2026-10-03 at 23:53 UTC, on the same RTX 5000 Ada card with
+  rather than assumed.** On 2026-11-20 at 15:57 UTC, on the same RTX 5000 Ada card with
   `torch==2.4.0+cu124`, `examples/layer5_model/run_model.py` trained a per-principal autoencoder on the
-  layer 5 corpus for five principals and passed all four of its checks: **the model's double run was
-  identical and its scores were invariant across batch sizes 1, 8 and 64, and the composed pipeline with
-  those models behind `TC5ScoreStage` gave the same 105 scores twice and again under the batch-split
-  sweep.** That is controls 1, 3 and 5, measured. It repeats the first passing run, on 2026-09-19 at
-  23:17 UTC, on the tree as it stands after the layer 5 rules and context landed: the same five principals
-  with the same 26, 18, 26, 28 and 7 rows, the same 105 scored rows and the same
-  `pipeline_mean_abs_z_max` of 2.3823. Had any of them failed, R-P-L5-006 -- a rule about a
+  layer 5 corpus's fortnight for six principals, with 40, 40, 40, 56, 40 and 14 rows, and passed all four of
+  its checks: **the model's double run was identical and its scores agreed across batch sizes 1, 8 and 64,
+  and the composed pipeline with those models behind `TC5ScoreStage` gave the same 155 scores twice and
+  again under the batch-split sweep.** That is controls 1, 3 and 5, measured, on the tree of pull request
+  #139. The pipeline scores the week after the fortnight, so its `pipeline_mean_abs_z_max` of 5691.5504 is
+  the uncalibrated out-of-sample score the session models' findings above describe, not a sign of trouble.
+  The batch check now compares unrounded scores within 1e-5 of their size: the GPU picks its matrix kernels
+  by batch shape, the scores moved by at most 2.0e-6 of themselves, and the first attempt that day failed
+  only because one of bob's scores sat on a rounding boundary and rounded to 0.2973 one way and 0.2974 the
+  other. The run before it, on 2026-10-03 at 23:53 UTC, passed on the five principals the corpus then had,
+  with 105 scored rows and a `pipeline_mean_abs_z_max` of 2.3823, and repeated the first passing run, on
+  2026-09-19 at 23:17 UTC. Had any of them failed, R-P-L5-006 -- a rule about a
   score rising by fractions of a standard deviation -- would have been measuring the model's own jitter,
   and every threshold tuned against it would have been tuned against noise.
 - **The fourth check earned its place by failing.** Its first run, on 2026-09-13, was reproducible twice
