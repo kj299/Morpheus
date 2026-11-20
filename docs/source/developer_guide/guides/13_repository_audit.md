@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,153 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,065 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -108,15 +108,17 @@ getting-started page and contributor guide, the documentation environment's requ
 documentation and lint scripts) and the five section 4.8d added (the C++ build script, the C++ test runner and its
 test, and the build environment's request and lock) and the one the GPU run of 2026-11-19 added (its
 conformance artifact) and the one the GPU model run of 2026-11-20 added (its artifact), less
-the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
+the 1,498 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
-4.6a replaced with one.
+4.6a replaced with one, and 37 in the audit backlog of 2026-11-20: the upstream model material, data, environment
+files and pages the rulings had left, and the two aarch64 requirement lists that went with the aarch64 environments, and on the same day the 51 left
+after them: the upstream package code no ruling kept a reader for, its tests and fixtures, and two helper modules
+whose only readers the D4 removals had taken.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 84 |
-| `keep-dependency` | 410 |
+| `keep-dependency` | 406 |
 | `keep` | 514 |
 | `update` | 145 |
 
@@ -125,7 +127,8 @@ organization workflows the fork modified, and three were its own: `TC1FeatureSta
 its test, which `TC1ChangeStage` superseded. Those three are gone (D5, below), and so are the 224 files of the language-model part of D1, the 48 of its DOCA part, the
 384 of its security-examples part and the 96 of its digital fingerprinting part, the 120 of D7, the 327 of D2, the 59 of
 D6 and the 130 of D4. D2 kept one file the audit had marked, the SID validation set, which moved with the model. That
-leaves 84 marked.
+left 84 marked, and the audit backlog of 2026-11-20 removed them with the edits their rows named, so none is marked
+now and the removal list is empty.
 
 Between the passes, the second readers moved files in both directions:
 
@@ -254,7 +257,8 @@ The removals land as one change per ruling, in this order, each with the `update
    group, the `conf.py` path, the workspace analysis path, the release script's steps for them, the troubleshooting
    page's MLflow section and guide 1's Loki example. Guides 5 and 10, which describe that example, went with D7;
    `tests/morpheus_dfp` (D4) and `tests/benchmarks` (D1 and D2), which still name its paths, go with their rulings; and
-   `fetch_example_data.py` waits for the dataset README that links it. The remaining examples follow.
+   `fetch_example_data.py` waited for the dataset README that linked it; it went with the backlog of 2026-11-20 once no
+   README linked it. The remaining examples follow.
 3. **D2**, after the fork model inventory exists to receive the two models. Done on 2026-10-25. `models/inventory`
    holds both with each file's sha256, the settings the model was trained under and its upstream path and digest:
    the ABP booster converted from XGBoost's legacy binary format, which XGBoost 3 cannot read, to JSON with a

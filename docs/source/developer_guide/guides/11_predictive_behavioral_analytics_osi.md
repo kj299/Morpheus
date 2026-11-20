@@ -310,16 +310,20 @@ DOCA path under ruling D1.
 #### Stage inventory
 
 Sources (`stages/input/`): `KafkaSourceStage`, `HttpServerSourceStage`, `HttpClientSourceStage`,
-`FileSourceStage`, `RSSSourceStage`, `DatabricksDeltaLakeSourceStage`, `ControlMessageKafkaSourceStage`,
-`ControlMessageFileSourceStage`, `AppShieldSourceStage`, `InMemorySourceStage`,
-`InMemoryDataGenStage`, `ArxivSource`, and the autoencoder sources for CloudTrail, Duo, and Azure.
-`RSSSourceStage` and `ArxivSource` served only the language-model use case and have since been removed, and
+`FileSourceStage`, `RSSSourceStage`, [`DatabricksDeltaLakeSourceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/databricks_deltalake_source_stage.py),
+[`ControlMessageKafkaSourceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/control_message_kafka_source_stage.py),
+[`ControlMessageFileSourceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/control_message_file_source_stage.py), `AppShieldSourceStage`,
+`InMemorySourceStage`, `InMemoryDataGenStage`, `ArxivSource`, and the autoencoder sources for CloudTrail, Duo, and
+Azure. `RSSSourceStage` and `ArxivSource` served only the language-model use case and have since been removed; the
+Databricks and control-message sources went in the audit backlog of 2026-11-20, as nothing the fork runs reads
+from them; and
 [`AppShieldSourceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/appshield_source_stage.py) went with the ransomware
 use case.
 
 Preprocess (`stages/preprocess/`): `DeserializeStage`,
 [`PreprocessNLPStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/preprocess/preprocess_nlp_stage.py) (subword tokenization),
-[`PreprocessFILStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/preprocess/preprocess_fil_stage.py), `DropNullStage`, `GroupByColumnStage`.
+[`PreprocessFILStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/preprocess/preprocess_fil_stage.py), `DropNullStage`,
+[`GroupByColumnStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/preprocess/group_by_column_stage.py) (removed in the audit backlog of 2026-11-20).
 
 Inference (`stages/inference/`): [`TritonInferenceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/inference/triton_inference_stage.py),
 [`PyTorchInferenceStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/inference/pytorch_inference_stage.py),
@@ -329,17 +333,19 @@ Inference (`stages/inference/`): [`TritonInferenceStage`](https://github.com/nv-
 Postprocess (`stages/postprocess/`): [`AddClassificationsStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/postprocess/add_classifications_stage.py),
 [`AddScoresStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/postprocess/add_scores_stage.py),
 [`FilterDetectionsStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/postprocess/filter_detections_stage.py), `SerializeStage`, `ValidationStage`, `MLFlowDriftStage`, `TimeSeriesStage`,
-`GenerateVizFramesStage`.
+[`GenerateVizFramesStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/postprocess/generate_viz_frames_stage.py) (removed with the visualization
+use case, in the audit backlog of 2026-11-20).
 
 The two preprocessing stages, the inference directory and the three postprocessing stages linked above went with
 the Triton path under ruling D2; each fork model now scores inside a stage of its own, from a committed file.
 
 Output (`stages/output/`): `WriteToKafkaStage`, `WriteToElasticsearchStage`, `WriteToFileStage`,
-`WriteToDatabricksDeltaLakeStage`, `HttpClientSinkStage`, `HttpServerSinkStage`,
-`CompareDataFrameStage`, `InMemorySinkStage`.
+[`WriteToDatabricksDeltaLakeStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/output/write_to_databricks_deltalake_stage.py) (removed in the audit
+backlog of 2026-11-20), `HttpClientSinkStage`, `HttpServerSinkStage`, `CompareDataFrameStage`, `InMemorySinkStage`.
 
-General (`stages/general/`): `MonitorStage`, `TriggerStage`, `BufferStage`, `DelayStage`,
-`RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, and
+General (`stages/general/`): `MonitorStage`, `TriggerStage`,
+[`BufferStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/general/buffer_stage.py) and [`DelayStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/general/delay_stage.py) (both
+removed in the audit backlog of 2026-11-20), `RouterStage`, `MultiProcessingStage`, `LinearModulesStage`, and
 [`MultiPortModulesStage`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/general/multi_port_modules_stage.py), which went with
 the DFP module pipelines under the [repository audit](./13_repository_audit.md)'s ruling D4.
 
@@ -566,7 +572,7 @@ window is satisfied, which is a deliberate choice between latency and stability.
 | 7 | Named entity recognition over logs (removed) | [`examples/log_parsing/`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/examples/log_parsing) |
 | 7 | Sensitive information detection, phishing | [`models/inventory`](https://github.com/kj299/Morpheus/blob/branch-25.10/models/inventory/README.md) (the SID model, moved), `models/phishing-models` |
 | Host | Process, DLL, VAD, and handle snapshots (removed) | [`stages/input/appshield_source_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/stages/input/appshield_source_stage.py) |
-| SIEM | Splunk notable event regex parsing | `parsers/splunk_notable_parser.py` |
+| SIEM | Splunk notable event regex parsing (removed) | [`parsers/splunk_notable_parser.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/parsers/splunk_notable_parser.py) |
 
 The PCAP example is the clearest template for layer 3-4 feature engineering. It derives thirteen features
 from raw packet fields:
@@ -2323,7 +2329,7 @@ Three decisions the text above leaves open are made here. **Entropy is measured 
 Ordinary names score 3.0 to 3.7 bits per character as whole names but 0 to 2.3 once the registered domain is
 removed, while a tunnel's encoded labels score above 4 either way, so the narrower measurement widens the margin
 the 4.0 threshold sits in. The registered domain is found by the full Public Suffix List algorithm over the list
-Morpheus already bundles, because the existing loader in `url_parser.py` treats wildcard and exception rules as
+Morpheus already bundles, because the loader in [`url_parser.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/parsers/url_parser.py), since removed, treated wildcard and exception rules as
 literal names. **The distinct subdomain count is taken among qualifying queries.** Counting across all of a
 domain's traffic lets a SaaS domain with a hundred ordinary names and one random name satisfy all three
 conditions on different queries; the search counts distinct subdomains only among the queries that clear the

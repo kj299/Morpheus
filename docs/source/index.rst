@@ -139,7 +139,6 @@ Modifying Morpheus
    :hidden:
 
    extra_info/glossary
-   extra_info/performance
    extra_info/troubleshooting
    extra_info/known_issues
    Code of Conduct <https://docs.rapids.ai/resources/conduct/>
