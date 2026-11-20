@@ -35,7 +35,11 @@ Four things are checked, each a control from Part 5:
   with no deterministic implementation raises at startup instead of silently producing a different answer.
 - **Control 5, batching.** The same rows are scored at three batch sizes. A model with a batch-dependent
   operation -- batch normalization left in training mode is the usual one -- gives different scores for the same
-  row depending on what it was batched with, and no amount of seeding fixes that.
+  row depending on what it was batched with, and no amount of seeding fixes that. The scores are compared before
+  rounding, within `BATCH_TOLERANCE`: a GPU picks its matrix kernels by batch shape, so the last bits of a float32
+  may move with the batch size, and a score that falls on a rounding boundary then rounds both ways. The run of
+  2026-11-20 failed on exactly that, one row of 234 at 0.2973 against 0.2974. A batch-dependent operation moves
+  scores by far more than the tolerance and still fails.
 - **The double run.** Two full train-and-score cycles, compared byte for byte after quantization.
 - **The wired path.** The trained models are placed behind `TC5ScoreStage` through the session corpus's
   `PinnedScorer`, with a manifest pinning each principal to a digest of their model and the population fallback
@@ -78,6 +82,11 @@ somewhere new, which is a fact about the principal. The guide's whole argument f
 DEFAULT_EPOCHS = 20
 DEFAULT_SEED = 42
 BATCH_SIZES = (1, 8, 64)
+
+BATCH_TOLERANCE = 1e-5
+"""How far apart, relative to the score and never less than this absolutely, the same row's unrounded scores may be
+at two batch sizes. Float32 holds about seven significant digits, so kernel choice moves a score by about 1e-7 of
+itself; batch normalization in training mode moves it by a tenth or more."""
 
 
 def fail(message: str, artifact: str) -> int:
@@ -202,15 +211,27 @@ def pipeline_checks(frames: dict, seed: int, epochs: int, eval_batch_size: int) 
     }
 
 
+def within_tolerance(left: float, right: float, tolerance: float = BATCH_TOLERANCE) -> bool:
+    """Whether two unrounded scores of one row agree to `tolerance` of their size, or absolutely below a size of 1."""
+    return abs(left - right) <= tolerance * max(1.0, abs(left), abs(right))
+
+
+def batch_agrees(reference: dict, other: dict, tolerance: float = BATCH_TOLERANCE) -> bool:
+    """Whether two runs scored the same principals, the same number of rows each, every row within `tolerance`."""
+    return (set(reference) == set(other) and all(
+        len(reference[principal]) == len(other[principal]) and all(
+            within_tolerance(a, b, tolerance) for (a, b) in zip(reference[principal], other[principal]))
+        for principal in reference))
+
+
 def score_differences(reference: dict, other: dict) -> dict:
     """
     Where two runs' scores disagree, principal by principal: how many rows, by how much, and at what size.
 
     A verdict that says only "DIFFERENT" sends whoever reads the artifact back to the machine with the card. The
-    size of the scores is recorded beside the difference because the two together say which failure it is: a
-    difference in the last bits of a float32 is invisible on a score near 1 and is thousands of quanta on a score
-    in the thousands, which a near-zero training spread produces, while a batch-dependent operation moves small
-    scores too.
+    size of the scores is recorded beside the difference, and the largest difference relative to its score, because
+    together they say whether it is float32 rounding, about 1e-7 of the score, or an operation that depends on the
+    batch, which moves scores by far more.
     """
     found = {}
 
@@ -229,6 +250,7 @@ def score_differences(reference: dict, other: dict) -> dict:
 
         if (differing):
             entry["max_abs_difference"] = max(abs(a - b) for (a, b) in differing)
+            entry["max_relative_difference"] = max(abs(a - b) / max(1.0, abs(a), abs(b)) for (a, b) in differing)
             entry["largest_score_differing"] = max(max(abs(a), abs(b)) for (a, b) in differing)
             entry["smallest_score_differing"] = min(min(abs(a), abs(b)) for (a, b) in differing)
 
@@ -238,8 +260,13 @@ def score_differences(reference: dict, other: dict) -> dict:
     return found
 
 
-def train_and_score(frames: dict, seed: int, epochs: int, eval_batch_size: int) -> dict:
-    """One full cycle: seed, train a model per principal, score its own rows, return the scores."""
+def train_and_score(frames: dict, seed: int, epochs: int, eval_batch_size: int, quantize: bool = True) -> dict:
+    """
+    One full cycle: seed, train a model per principal, score its own rows, return the scores.
+
+    Quantized, as a deployment's scores are, unless `quantize` is false: the batch check compares the unrounded
+    scores, since rounding turns a last-bit difference on a rounding boundary into a whole quantum.
+    """
     import torch  # pylint: disable=import-outside-toplevel
 
     from morpheus.models.dfencoder import AutoEncoder  # pylint: disable=import-outside-toplevel
@@ -267,7 +294,8 @@ def train_and_score(frames: dict, seed: int, epochs: int, eval_batch_size: int) 
         model.fit(features, epochs=epochs)
 
         results = model.get_results(features)
-        scores[principal] = [quantize_value(float(value)) for value in results["mean_abs_z"].tolist()]
+        raw = [float(value) for value in results["mean_abs_z"].tolist()]
+        scores[principal] = [quantize_value(value) for value in raw] if quantize else raw
 
     return scores
 
@@ -315,15 +343,18 @@ def main() -> int:
     print("identical" if reproducible else "DIFFERENT: the same seed and the same data gave different scores")
 
     print("\n=== batch invariance ===")
-    by_batch = {size: train_and_score(frames, arguments.seed, arguments.epochs, size) for size in BATCH_SIZES}
-    batch_invariant = all(by_batch[size] == by_batch[BATCH_SIZES[0]] for size in BATCH_SIZES)
+    by_batch = {
+        size: train_and_score(frames, arguments.seed, arguments.epochs, size, quantize=False)
+        for size in BATCH_SIZES
+    }
+    batch_invariant = all(batch_agrees(by_batch[BATCH_SIZES[0]], by_batch[size]) for size in BATCH_SIZES)
     batch_differences = {
         f"{BATCH_SIZES[0]}_vs_{size}": score_differences(by_batch[BATCH_SIZES[0]], by_batch[size])
         for size in BATCH_SIZES[1:] if by_batch[size] != by_batch[BATCH_SIZES[0]]
     }
-    print("identical across " + ", ".join(
+    print((f"within {BATCH_TOLERANCE:g} across " + ", ".join(
         str(size)
-        for size in BATCH_SIZES) if batch_invariant else "DIFFERENT: the same rows scored differently by batch size")
+        for size in BATCH_SIZES)) if batch_invariant else "DIFFERENT: the same rows scored differently by batch size")
 
     for (label, by_principal) in sorted(batch_differences.items()):
         for (principal, entry) in by_principal.items():
@@ -357,6 +388,7 @@ def main() -> int:
         "double_run_reproducible": reproducible,
         "batch_invariant": batch_invariant,
         "batch_sizes": list(BATCH_SIZES),
+        "batch_tolerance": BATCH_TOLERANCE,
         "batch_differences": batch_differences,
         **wired,
         "measures": "reproducibility of the scoring path, not detection quality: a fortnight of six principals "

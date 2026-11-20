@@ -194,3 +194,28 @@ def test_a_batch_disagreement_says_where_and_how_large(runner_module):
 
 def test_agreeing_runs_have_no_differences(runner_module):
     assert not runner_module.score_differences({"alice": [1.0, 2.0]}, {"alice": [1.0, 2.0]})
+
+
+def test_a_last_bit_difference_is_within_the_batch_tolerance(runner_module):
+    # The run of 2026-11-20: one of bob's rows scored on either side of 0.29735, a float32 last-bit difference that
+    # rounding to four places made into a whole quantum.
+    reference = {"bob": [0.29734999, 1.1972]}
+    other = {"bob": [0.29735001, 1.1972]}
+
+    assert runner_module.batch_agrees(reference, other)
+
+
+def test_a_batch_dependent_operation_is_not(runner_module):
+    # Batch normalization in training mode moves a score by a large fraction of itself.
+    assert not runner_module.batch_agrees({"bob": [0.2974, 1.1972]}, {"bob": [0.2974, 1.05]})
+    assert not runner_module.batch_agrees({"bob": [5691.55]}, {"bob": [5691.0]})
+
+
+def test_a_large_score_is_held_to_the_tolerance_relative_to_its_size(runner_module):
+    assert runner_module.within_tolerance(5691.5504, 5691.5504 * (1 + 1e-7))
+    assert not runner_module.within_tolerance(5691.5504, 5691.5504 * (1 + 1e-4))
+
+
+def test_a_run_that_lost_a_principal_or_a_row_does_not_agree(runner_module):
+    assert not runner_module.batch_agrees({"bob": [1.0], "carol": [2.0]}, {"bob": [1.0]})
+    assert not runner_module.batch_agrees({"bob": [1.0, 2.0]}, {"bob": [1.0]})
