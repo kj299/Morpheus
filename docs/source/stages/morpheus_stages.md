@@ -37,9 +37,6 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 
 ## Input
 
-- Control Message File Source Stage {py:class}`~morpheus.stages.input.control_message_file_source_stage.ControlMessageFileSourceStage` Receives control messages from different sources specified by a list of [`fsspec`](https://filesystem-spec.readthedocs.io/en/latest/api.html?highlight=open_files#fsspec.open_files) strings.
-- Control Message Kafka Source Stage {py:class}`~morpheus.stages.input.control_message_kafka_source_stage.ControlMessageKafkaSourceStage` Load control messages from a Kafka cluster.
-- Databricks Delta Lake Source Stage {py:class}`~morpheus.stages.input.databricks_deltalake_source_stage.DataBricksDeltaLakeSourceStage` Source stage used to load messages from a DeltaLake table.
 - File Source Stage {py:class}`~morpheus.stages.input.file_source_stage.FileSourceStage` Load messages from a file.
 - HTTP Client Source Stage {py:class}`~morpheus.stages.input.http_client_source_stage.HttpClientSourceStage` Poll a remote HTTP server for incoming data.
 - HTTP Server Source Stage {py:class}`~morpheus.stages.input.http_server_source_stage.HttpServerSourceStage` Start an HTTP server and listens for incoming requests on a specified endpoint.
@@ -70,14 +67,12 @@ Stages are the building blocks of Morpheus pipelines. Below is a list of the mos
 - In Memory Sink Stage {py:class}`~morpheus.stages.output.in_memory_sink_stage.InMemorySinkStage` Collect incoming messages into a list that can be accessed after the pipeline is complete.
 - SIEM Wire Stage {py:class}`~morpheus.stages.output.siem_wire_stage.SiemWireStage` Render event-time columns and stamp the SIEM sourcetype, so what a sink writes is what the SIEM parses.
 - SIEM Wire Sink Stage {py:class}`~morpheus.stages.output.siem_wire_sink_stage.SiemWireSinkStage` Write each record to a file or a Kafka topic with its null fields left out, which is how a SIEM must receive it and what the generic file and Kafka writers do not do.
-- Databricks Delta Lake Sink Stage {py:class}`~morpheus.stages.output.write_to_databricks_deltalake_stage.DataBricksDeltaLakeSinkStage` Write messages to a DeltaLake table.
 - Write To Elastic Search Stage {py:class}`~morpheus.stages.output.write_to_elasticsearch_stage.WriteToElasticsearchStage` Write the messages as documents to Elasticsearch.
 - Write To File Stage {py:class}`~morpheus.stages.output.write_to_file_stage.WriteToFileStage` Write all messages to a file.
 - Write To Kafka Stage {py:class}`~morpheus.stages.output.write_to_kafka_stage.WriteToKafkaStage` Write all messages to a Kafka cluster.
 
 ## Post-process
 
-- Generate Viz Frames Stage {py:class}`~morpheus.stages.postprocess.generate_viz_frames_stage.GenerateVizFramesStage` Write out visualization DataFrames.
 - MLflow Drift Stage {py:class}`~morpheus.stages.postprocess.ml_flow_drift_stage.MLFlowDriftStage` Report model drift statistics to MLflow.
 - Serialize Stage {py:class}`~morpheus.stages.postprocess.serialize_stage.SerializeStage` Include & exclude columns from messages.
 - Time Series Stage {py:class}`~morpheus.stages.postprocess.timeseries_stage.TimeSeriesStage` Perform time series anomaly detection and add prediction.

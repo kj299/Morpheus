@@ -120,8 +120,6 @@ dependencies:
 - pip:
   - --extra-index-url https://download.pytorch.org/whl/cu124
   - --find-links https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html
-  - databricks-cli < 0.100
-  - databricks-connect
   - dgl
   - exhale>=0.3.7
   - nvidia-sphinx-theme>=0.0.7

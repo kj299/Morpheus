@@ -31,13 +31,11 @@ files:
       - cudatoolkit-dev
       - cve-mitigation
       - data_retrieval
-      - optional_databricks
       - development
       - docs
       - example-dfp-prod
       - example-dlp
       - example-gnn
-      - optional_databricks
       - python
       - runtime
       - test_python_morpheus
@@ -358,15 +356,6 @@ dependencies:
       - output_types: [conda]
         packages:
           - benchmark=1.8.3
-
-  optional_databricks:
-    common:
-      - output_types: [conda]
-        packages:
-          - pip
-          - pip:
-            - databricks-cli < 0.100
-            - databricks-connect
 
   # Runtime dependencies for Morpheus. Included in nearly all output files so dependencies should
   # be added only if it is needed to run the core Morpheus library.

@@ -43,8 +43,7 @@ committed under [`examples/layer5_model/models`](../examples/layer5_model/README
 
 The upstream model material for the use cases the audit removed -- the ABP `nvsmi` and phishing models, the
 training and tuning scripts, the validation and inference scripts and the data files only they read -- went in
-the audit backlog of 2026-11-20. Two files remain: `data/splunk_notable_regex.yaml` and
-`data/windows_event_regex.yaml`, read only by the upstream log parsers, which go with them. Each file's verdict and
-the ruling behind it are in [`ci/artifacts/repository_audit_manifest.csv`](../ci/artifacts/repository_audit_manifest.csv),
+the audit backlog of 2026-11-20, and so did the two regular-expression files under `data` that only the removed
+Splunk and Windows event log parsers read. Each file's verdict and the ruling behind it are in [`ci/artifacts/repository_audit_manifest.csv`](../ci/artifacts/repository_audit_manifest.csv),
 and the upstream description of what went is at the fork point,
 [`models/README.md` at `c6a3b56d`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56db1c77c2f375ae0833a65a7b6d2272269/models/README.md).

@@ -536,15 +536,12 @@ run.add_command(pipeline_fil)
 run.add_command(pipeline_other)
 
 ALL = (PipelineModes.NLP, PipelineModes.FIL, PipelineModes.OTHER)
-NLP_ONLY = (PipelineModes.NLP, )
 
 # Keep these sorted!!!
 add_command("binding-resolve", "morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage", modes=ALL)
-add_command("buffer", "morpheus.stages.general.buffer_stage.BufferStage", modes=ALL)
 add_command("chain-anchor", "morpheus.stages.lineage.chain_anchor_stage.ChainAnchorStage", modes=ALL)
 add_command("collector-sequence", "morpheus.stages.lineage.collector_sequence_stage.CollectorSequenceStage", modes=ALL)
 add_command("community-id", "morpheus.stages.lineage.community_id_stage.CommunityIdStage", modes=ALL)
-add_command("delay", "morpheus.stages.general.delay_stage.DelayStage", modes=ALL)
 add_command("deserialize", "morpheus.stages.preprocess.deserialize_stage.DeserializeStage", modes=ALL)
 add_command("determinism-stamp", "morpheus.stages.lineage.determinism_stamp_stage.DeterminismStampStage", modes=ALL)
 add_command("dropna", "morpheus.stages.preprocess.drop_null_stage.DropNullStage", modes=ALL)
@@ -555,14 +552,10 @@ add_command("envelope-validate", "morpheus.stages.lineage.envelope_validate_stag
 add_command("flow-normalize",
             "morpheus.stages.telemetry.flow_record_normalize_stage.FlowRecordNormalizeStage",
             modes=ALL)
-add_command("from-databricks-deltalake",
-            "morpheus.stages.input.databricks_deltalake_source_stage.DataBricksDeltaLakeSourceStage",
-            modes=ALL)
 add_command("from-file", "morpheus.stages.input.file_source_stage.FileSourceStage", modes=ALL)
 add_command("from-http", "morpheus.stages.input.http_server_source_stage.HttpServerSourceStage", modes=ALL)
 add_command("from-http-client", "morpheus.stages.input.http_client_source_stage.HttpClientSourceStage", modes=ALL)
 add_command("from-kafka", "morpheus.stages.input.kafka_source_stage.KafkaSourceStage", modes=ALL)
-add_command("gen-viz", "morpheus.stages.postprocess.generate_viz_frames_stage.GenerateVizFramesStage", modes=NLP_ONLY)
 add_command("lineage-stamp", "morpheus.stages.lineage.lineage_stamp_stage.LineageStampStage", modes=ALL)
 add_command("minimize", "morpheus.stages.lineage.minimization_stage.MinimizationStage", modes=ALL)
 add_command("mlflow-drift", "morpheus.stages.postprocess.ml_flow_drift_stage.MLFlowDriftStage", modes=ALL)
