@@ -245,16 +245,11 @@ html_logo = '_static/main_nv_logo_square.png'
 html_title = f'{project.title()} ({version})'
 
 html_theme_options = {
-    'logo_only':
-        True,
-    'display_version':
-        True,
-    'style_nav_header_background':
-        '#000000',  # Toc options
-    'collapse_navigation':
-        False,
-    'navigation_depth':
-        6,
+    'logo_only': True,
+    'display_version': True,
+    'style_nav_header_background': '#000000',  # Toc options
+    'collapse_navigation': False,
+    'navigation_depth': 6,
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -333,10 +328,9 @@ intersphinx_mapping = {
 }
 
 # The following is used by sphinx.ext.linkcode to provide links to github
-linkcode_resolve = make_linkcode_resolve(
-    morpheus_root=morpheus_root,
-    package='morpheus',
-    url_fmt='https://github.com/kj299/Morpheus/blob/{revision}/{path}#L{lineno}')
+linkcode_resolve = make_linkcode_resolve(morpheus_root=morpheus_root,
+                                         package='morpheus',
+                                         url_fmt='https://github.com/kj299/Morpheus/blob/{revision}/{path}#L{lineno}')
 
 # Set the default role for interpreted code (anything surrounded in `single
 # backticks`) to be a python object. See
