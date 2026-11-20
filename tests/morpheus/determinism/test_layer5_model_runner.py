@@ -53,11 +53,15 @@ def runner_module_fixture():
 def corpus_and_result_fixture():
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
 
+    # session_pipeline replaces itself in sys.modules with the merged corpus and composition, which pylint cannot
+    # follow, so it does not see the members the merged namespace has.
     import session_pipeline  # pylint: disable=import-outside-toplevel
 
-    corpus = session_pipeline.build_corpus()
+    corpus = session_pipeline.build_corpus()  # pylint: disable=no-member
 
-    return (corpus, session_pipeline.run_pipeline(session_pipeline.build_pipeline_config(), corpus))
+    config = session_pipeline.build_pipeline_config()  # pylint: disable=no-member
+
+    return (corpus, session_pipeline.run_pipeline(config, corpus))  # pylint: disable=no-member
 
 
 def test_every_feature_is_derived_rather_than_collected(runner_module, corpus_and_result):
