@@ -21,7 +21,7 @@ files:
     output: conda
     matrix:
       cuda: ["12.8"]
-      arch: [x86_64, aarch64]
+      arch: [x86_64]
     includes:
       - benchmark_cpp
       - build_cpp_build
@@ -49,7 +49,7 @@ files:
     output: conda
     matrix:
       cuda: ["12.8"]
-      arch: [x86_64, aarch64]
+      arch: [x86_64]
     includes:
       - benchmark_cpp
       - build_cpp_build
@@ -71,7 +71,7 @@ files:
     output: none
     matrix:
       cuda: ["12.8"]
-      arch: [x86_64, aarch64]
+      arch: [x86_64]
     includes:
       - benchmark_cpp
       - build_cpp_build
@@ -91,7 +91,7 @@ files:
     output: none
     matrix:
       cuda: ["12.8"]
-      arch: [x86_64, aarch64]
+      arch: [x86_64]
     includes:
       - benchmark_cpp
       - cudatoolkit
@@ -133,43 +133,12 @@ files:
     output: conda
     matrix:
       cuda: ["12.8"]
-      arch: [x86_64, aarch64]
+      arch: [x86_64]
     includes:
       - cudatoolkit
       - cve-mitigation
       - python
       - runtime
-
-  # Dependencies that are needed to run all Morpheus examples.
-  # Includes: runtime
-  # Excludes: build, dev, test
-  examples:
-    output: conda
-    matrix:
-      cuda: ["12.8"]
-      arch: [x86_64, aarch64]
-    includes:
-      - cve-mitigation
-      - example-abp-nvsmi
-      - example-dfp-prod
-      - example-dlp
-      - example-gnn
-      - python
-      - runtime
-      - optional_databricks
-
-
-  # Dependencies which are needed to run the model generation scripts in the `models` directory.
-  # Includes: none
-  # Excludes: runtime, build, dev, test, examples, docs
-  model-utils:
-    output: conda
-    matrix:
-      cuda: ["12.8"]
-      arch: [x86_64, aarch64]
-    includes:
-      - model-training-tuning
-      - python
 
   # The fork's CPU test environment: released morpheus-core for its compiled library, and what the test tiers import.
   # ci/scripts/cpu_env/make_lock.py solves the file this generates into ci/scripts/cpu_env/linux-64-cpu.lock, the
@@ -224,7 +193,7 @@ files:
     output: requirements
     requirements_dir: python/morpheus/morpheus
     matrix:
-      arch: [x86_64, aarch64]
+      arch: [x86_64]
     includes:
       - morpheus_core_pip
 
@@ -233,7 +202,7 @@ files:
     output: requirements
     requirements_dir: python/morpheus_dfp/morpheus_dfp
     matrix:
-      arch: [x86_64, aarch64]
+      arch: [x86_64]
     includes:
       - morpheus_core_pip
 
@@ -364,14 +333,10 @@ dependencies:
           - matrix:
               arch: x86_64
             packages:
-              # IWYU v0.20 doesn't support aarch64, but is supported in 0.21+
               - include-what-you-use=0.20
-              # Vale does not have arm64 builds for linux
               - vale=3.7
               - vale-styles-microsoft
               - vale-styles-write-good
-          - matrix:
-              arch: aarch64
 
   docs:
     common:
@@ -460,11 +425,6 @@ dependencies:
             packages:
               - pip:
                 - &torchcu torch==2.4.0+cu124
-          - matrix:
-              arch: aarch64
-            packages:
-              - pip:
-                - &torch torch==2.4.0
 
   test_python_morpheus:
     common:
@@ -537,10 +497,6 @@ dependencies:
               arch: x86_64
             packages:
               - *torchcu
-          - matrix:
-              arch: aarch64
-            packages:
-              - *torch
 
   example-dfp-prod:
     common:
@@ -565,29 +521,6 @@ dependencies:
             - --find-links https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html
             - dgl
 
-  example-abp-nvsmi:
-    common:
-      - output_types: [conda]
-        packages:
-          - *pynvml
-
-  model-training-tuning:
-    common:
-      - output_types: [conda]
-        packages:
-          - *cuml
-          - &transformers transformers>=4.40,<5.0
-          - scikit-learn=1.3.2
-          - jupyterlab
-          - matplotlib
-          - &onnx onnx=1.15
-          - pandas
-          - seaborn
-          - seqeval=1.2.2
-          - xgboost
-          - pip
-          - pip:
-            - tensorrt-cu12
 
   cve-mitigation:
     common:

@@ -56,9 +56,9 @@ VALIDATE_ARGS = [
     '--rel_tol=0.1'
 ]
 TO_FILE_ARGS = ['to-file', '--filename=out.csv']
-FILE_SRC_ARGS = [
-    'from-file', '--filename', os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')
-]
+# Any kept JSON-lines file will do: the tests check how the CLI builds the stage, not what the file holds.
+FILE_SRC_PATH = os.path.join(TEST_DIRS.examples_dir, 'behavioral_analytics', 'samples', 'network', 'tc3.jsonlines')
+FILE_SRC_ARGS = ['from-file', '--filename', FILE_SRC_PATH]
 
 KAFKA_BOOTS = ['--bootstrap_servers', 'kserv1:123,kserv2:321']
 FROM_KAFKA_ARGS = ['from-kafka', '--input_topic', 'test_topic'] + KAFKA_BOOTS
@@ -218,7 +218,7 @@ class TestCLI:
         ] = stages
 
         assert isinstance(file_source, FileSourceStage)
-        assert file_source._filename == os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')
+        assert file_source._filename == FILE_SRC_PATH
         assert not file_source._iterative
         assert file_source._file_type == FileTypes.JSON
 

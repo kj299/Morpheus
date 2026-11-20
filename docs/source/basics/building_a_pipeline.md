@@ -51,7 +51,7 @@ All pipelines configured with the CLI need to start with a source object. Two co
 From this point on, any number of stages can be sequentially added to the command line from start to finish. For example, we could build a trivial pipeline that reads from a file, deserializes messages, serializes them, and then writes to a file use the following:
 ```bash
 morpheus --log_level=DEBUG run pipeline-other --viz_file=.tmp/simple_identity.png \
-  from-file --filename=examples/data/pcap_dump.jsonlines \
+  from-file --filename=examples/behavioral_analytics/samples/network/tc3.jsonlines \
   deserialize \
   serialize \
   to-file --overwrite --filename .tmp/temp_out.json
@@ -84,7 +84,7 @@ CPP Enabled: True
 ====Starting Pipeline====
 ====Pipeline Started====
 ====Building Segment: linear_segment_0====
-Added source: <from-file-0; FileSourceStage(filename=examples/data/pcap_dump.jsonlines, iterative=False, file_type=FileTypes.Auto, repeat=1, filter_null=True, filter_null_columns=(), parser_kwargs={})>
+Added source: <from-file-0; FileSourceStage(filename=examples/behavioral_analytics/samples/network/tc3.jsonlines, iterative=False, file_type=FileTypes.Auto, repeat=1, filter_null=True, filter_null_columns=(), parser_kwargs={})>
   └─> morpheus.MessageMeta
 Added stage: <deserialize-1; DeserializeStage(ensure_sliceable_index=True, task_type=None, task_payload=None)>
   └─ morpheus.MessageMeta -> morpheus.ControlMessage
@@ -100,7 +100,7 @@ Added stage: <to-file-3; WriteToFileStage(filename=.tmp/temp_out.json, overwrite
 After the `====Building Pipeline====` message, if logging is `INFO` or greater, the CLI prints a list of all stages and the type transformations of each stage. To be a valid Pipeline, the output type of one stage must match the input type of the next. Many stages are flexible and determine their type at runtime but some stages require a specific input type. If your Pipeline is configured incorrectly, Morpheus reports the error. For example, if we run the same command as above but forget the `serialize` stage:
 ```bash
 morpheus --log_level=DEBUG run pipeline-other \
-  from-file --filename=examples/data/pcap_dump.jsonlines \
+  from-file --filename=examples/behavioral_analytics/samples/network/tc3.jsonlines \
   deserialize \
   to-file --overwrite --filename .tmp/temp_out.json
 ```
@@ -117,11 +117,11 @@ The above example essentially just copies a file. However, it is an important to
 
 We could also easily swap out the source or sink stages in the above example without any impact to the pipeline as a whole. For example, to read from a Kafka topic, simply replace the `from-file` stage with `from-kafka`:
 
-> **Note**: This assumes a Kafka broker running on the localhost listening to port 9092. For testing Morpheus with Kafka follow steps 1-8 in [Quick Launch Kafka Cluster](../developer_guide/contributing.md#quick-launch-kafka-cluster) section of [contributing.md](../developer_guide/contributing.md), creating a topic named `test_pcap` then replace port `9092` with the port your Kafka instance is listening on.
+> **Note**: This assumes a Kafka broker running on the localhost listening to port 9092. For testing Morpheus with Kafka follow steps 1-8 in [Quick Launch Kafka Cluster](../developer_guide/contributing.md#quick-launch-kafka-cluster) section of [contributing.md](../developer_guide/contributing.md), creating a topic named `test_flows` then replace port `9092` with the port your Kafka instance is listening on.
 
 ```bash
 morpheus --log_level=DEBUG run pipeline-other \
-  from-kafka --input_topic test_pcap --bootstrap_servers localhost:9092 \
+  from-kafka --input_topic test_flows --bootstrap_servers localhost:9092 \
   deserialize \
   serialize \
   to-file --filename .tmp/temp_out.json
@@ -136,16 +136,16 @@ morpheus run pipeline-nlp --help
 ## Basic Usage Examples
 
 ### Remove Fields from JSON Objects
-This example only copies the fields `timestamp`, `src_ip` and `dest_ip` from `examples/data/pcap_dump.jsonlines` to
-`out.jsonlines`.
+This example only copies the fields `event_time`, `src_ip` and `dst_ip` from `examples/behavioral_analytics/samples/network/tc3.jsonlines`, a sample of
+network flow records, to `out.jsonlines`.
 
 ![../img/remove_fields_from_json_objects.png](../img/remove_fields_from_json_objects.png)
 
 ```bash
 morpheus run pipeline-other --viz_file=.tmp/remove_fields_from_json_objects.png \
-   from-file --filename examples/data/pcap_dump.jsonlines \
+   from-file --filename examples/behavioral_analytics/samples/network/tc3.jsonlines \
    deserialize \
-   serialize --include 'timestamp' --include 'src_ip' --include 'dest_ip' \
+   serialize --include 'event_time' --include 'src_ip' --include 'dst_ip' \
    to-file --overwrite --filename out.jsonlines
 ```
 
@@ -157,7 +157,7 @@ This example reports the throughput on the command line.
 
 ```bash
 morpheus --log_level=INFO run pipeline-other --viz_file=.tmp/monitor_throughput.png  \
-   from-file --filename examples/data/pcap_dump.jsonlines \
+   from-file --filename examples/behavioral_analytics/samples/network/tc3.jsonlines \
    deserialize \
    monitor --description "Lines Throughput" --smoothing 0.1 --unit "lines" \
    serialize \
@@ -168,7 +168,7 @@ Output:
 ```console
 Configuring Pipeline via CLI
 Starting pipeline via CLI... Ctrl+C to Quit
-Lines Throughput[Complete]: 93085 lines [00:03, 29446.18 lines/s]
+Lines Throughput[Complete]: 1184 lines [00:00, 86638.91 lines/s]
 Pipeline visualization saved to .tmp/monitor_throughput.png
 ```
 
@@ -182,7 +182,7 @@ This example reports the throughput for each stage independently.
 
 ```bash
 morpheus --log_level=INFO run pipeline-nlp --viz_file=.tmp/multi_monitor_throughput.png  \
-   from-file --filename examples/data/pcap_dump.jsonlines \
+   from-file --filename examples/behavioral_analytics/samples/network/tc3.jsonlines \
    monitor --description "From File Throughput" \
    deserialize \
    monitor --description "Deserialize Throughput" \
@@ -195,8 +195,8 @@ Output:
 ```console
 Configuring Pipeline via CLI
 Starting pipeline via CLI... Ctrl+C to Quit
-From File Throughput[Complete]: 93085 messages [00:00, 168118.35 messages/s]
-Deserialize Throughput[Complete]: 93085 messages [00:04, 22584.37 messages/s]
-Serialize Throughput[Complete]: 93085 messages [00:06, 14095.36 messages/s]
+From File Throughput[Complete]: 1184 messages [00:00, 814641.72 messages/s]
+Deserialize Throughput[Complete]: 1184 messages [00:00, 326821.71 messages/s]
+Serialize Throughput[Complete]: 1184 messages [00:00, 183941.62 messages/s]
 Pipeline visualization saved to .tmp/multi_monitor_throughput.png
 ```

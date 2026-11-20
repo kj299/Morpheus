@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,153 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,116 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -108,15 +108,16 @@ getting-started page and contributor guide, the documentation environment's requ
 documentation and lint scripts) and the five section 4.8d added (the C++ build script, the C++ test runner and its
 test, and the build environment's request and lock) and the one the GPU run of 2026-11-19 added (its
 conformance artifact) and the one the GPU model run of 2026-11-20 added (its artifact), less
-the 1,410 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
+the 1,447 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
-4.6a replaced with one.
+4.6a replaced with one, and 37 in the audit backlog of 2026-11-20: the upstream model material, data, environment
+files and pages the rulings had left, and the two aarch64 requirement lists that went with the aarch64 environments.
 
 | Verdict | Files |
 | --- | --- |
-| `remove` | 84 |
-| `keep-dependency` | 410 |
+| `remove` | 49 |
+| `keep-dependency` | 408 |
 | `keep` | 514 |
 | `update` | 145 |
 
@@ -254,7 +255,8 @@ The removals land as one change per ruling, in this order, each with the `update
    group, the `conf.py` path, the workspace analysis path, the release script's steps for them, the troubleshooting
    page's MLflow section and guide 1's Loki example. Guides 5 and 10, which describe that example, went with D7;
    `tests/morpheus_dfp` (D4) and `tests/benchmarks` (D1 and D2), which still name its paths, go with their rulings; and
-   `fetch_example_data.py` waits for the dataset README that links it. The remaining examples follow.
+   `fetch_example_data.py` waited for the dataset README that linked it; it went with the backlog of 2026-11-20 once no
+   README linked it. The remaining examples follow.
 3. **D2**, after the fork model inventory exists to receive the two models. Done on 2026-10-25. `models/inventory`
    holds both with each file's sha256, the settings the model was trained under and its upstream path and digest:
    the ABP booster converted from XGBoost's legacy binary format, which XGBoost 3 cannot read, to JSON with a
