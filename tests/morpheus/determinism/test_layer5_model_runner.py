@@ -53,11 +53,15 @@ def runner_module_fixture():
 def corpus_and_result_fixture():
     sys.path.insert(0, os.path.join(REPO_ROOT, "tests", "morpheus", "determinism"))
 
+    # session_pipeline replaces itself in sys.modules with the merged corpus and composition, which pylint cannot
+    # follow, so it does not see the members the merged namespace has.
     import session_pipeline  # pylint: disable=import-outside-toplevel
 
-    corpus = session_pipeline.build_corpus()
+    corpus = session_pipeline.build_corpus()  # pylint: disable=no-member
 
-    return (corpus, session_pipeline.run_pipeline(session_pipeline.build_pipeline_config(), corpus))
+    config = session_pipeline.build_pipeline_config()  # pylint: disable=no-member
+
+    return (corpus, session_pipeline.run_pipeline(config, corpus))  # pylint: disable=no-member
 
 
 def test_every_feature_is_derived_rather_than_collected(runner_module, corpus_and_result):
@@ -169,3 +173,24 @@ def test_the_runner_says_what_it_does_not_measure(runner_module):
         source = handle.read()
 
     assert '"measures"' in source, "the artifact must carry the caveat, not only the docstring"
+
+
+def test_a_batch_disagreement_says_where_and_how_large(runner_module):
+    # The GPU run of 2026-11-20 reported batch_invariant false and nothing more, so the artifact could not say
+    # whether a batch-dependent operation moved every score or float32 rounding moved only the huge ones.
+    reference = {"alice": [0.5, 2.0, 5691.5504], "bob": [1.0, 1.0], "carol": [3.0]}
+    other = {"alice": [0.5, 2.0, 5691.5498], "bob": [1.0, 1.0], "carol": [3.0, 4.0]}
+
+    found = runner_module.score_differences(reference, other)
+
+    assert set(found) == {"alice", "carol"}, "a principal whose scores agree is not listed"
+    assert found["alice"]["rows"] == 3
+    assert found["alice"]["rows_different"] == 1
+    assert found["alice"]["max_abs_difference"] == pytest.approx(0.0006)
+    assert found["alice"]["smallest_score_differing"] == pytest.approx(5691.5498)
+    assert found["alice"]["largest_score"] == pytest.approx(5691.5504)
+    assert found["carol"]["row_counts"] == [1, 2]
+
+
+def test_agreeing_runs_have_no_differences(runner_module):
+    assert not runner_module.score_differences({"alice": [1.0, 2.0]}, {"alice": [1.0, 2.0]})

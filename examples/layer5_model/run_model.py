@@ -202,6 +202,42 @@ def pipeline_checks(frames: dict, seed: int, epochs: int, eval_batch_size: int) 
     }
 
 
+def score_differences(reference: dict, other: dict) -> dict:
+    """
+    Where two runs' scores disagree, principal by principal: how many rows, by how much, and at what size.
+
+    A verdict that says only "DIFFERENT" sends whoever reads the artifact back to the machine with the card. The
+    size of the scores is recorded beside the difference because the two together say which failure it is: a
+    difference in the last bits of a float32 is invisible on a score near 1 and is thousands of quanta on a score
+    in the thousands, which a near-zero training spread produces, while a batch-dependent operation moves small
+    scores too.
+    """
+    found = {}
+
+    for principal in sorted(set(reference) | set(other)):
+        (left, right) = (reference.get(principal, []), other.get(principal, []))
+
+        if (left == right):
+            continue
+
+        pairs = list(zip(left, right))
+        differing = [(a, b) for (a, b) in pairs if a != b]
+        entry = {"rows": len(pairs), "rows_different": len(differing)}
+
+        if (len(left) != len(right)):
+            entry["row_counts"] = [len(left), len(right)]
+
+        if (differing):
+            entry["max_abs_difference"] = max(abs(a - b) for (a, b) in differing)
+            entry["largest_score_differing"] = max(max(abs(a), abs(b)) for (a, b) in differing)
+            entry["smallest_score_differing"] = min(min(abs(a), abs(b)) for (a, b) in differing)
+
+        entry["largest_score"] = max((abs(value) for value in left + right), default=0.0)
+        found[principal] = entry
+
+    return found
+
+
 def train_and_score(frames: dict, seed: int, epochs: int, eval_batch_size: int) -> dict:
     """One full cycle: seed, train a model per principal, score its own rows, return the scores."""
     import torch  # pylint: disable=import-outside-toplevel
@@ -281,9 +317,17 @@ def main() -> int:
     print("\n=== batch invariance ===")
     by_batch = {size: train_and_score(frames, arguments.seed, arguments.epochs, size) for size in BATCH_SIZES}
     batch_invariant = all(by_batch[size] == by_batch[BATCH_SIZES[0]] for size in BATCH_SIZES)
+    batch_differences = {
+        f"{BATCH_SIZES[0]}_vs_{size}": score_differences(by_batch[BATCH_SIZES[0]], by_batch[size])
+        for size in BATCH_SIZES[1:] if by_batch[size] != by_batch[BATCH_SIZES[0]]
+    }
     print("identical across " + ", ".join(
         str(size)
-        for size in BATCH_SIZES) if batch_invariant else "DIFFERENT: the model has a batch-dependent operation")
+        for size in BATCH_SIZES) if batch_invariant else "DIFFERENT: the same rows scored differently by batch size")
+
+    for (label, by_principal) in sorted(batch_differences.items()):
+        for (principal, entry) in by_principal.items():
+            print(f"  {label} {principal}: {entry}")
 
     print("\n=== the wired path ===")
     wired = pipeline_checks(frames, arguments.seed, arguments.epochs, BATCH_SIZES[-1])
@@ -313,6 +357,7 @@ def main() -> int:
         "double_run_reproducible": reproducible,
         "batch_invariant": batch_invariant,
         "batch_sizes": list(BATCH_SIZES),
+        "batch_differences": batch_differences,
         **wired,
         "measures": "reproducibility of the scoring path, not detection quality: a fortnight of six principals "
                     "is far too little data to train an autoencoder that detects anything in general, and no claim "
