@@ -4854,7 +4854,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; on
 2026-11-19 all thirteen, the host segment's included, matched on the card at the tree of pull request #135.
 That is sixty-two stages and fifty-four supporting
-modules, covered by 2,826 distinct tests, itemized in
+modules, covered by 2,830 distinct tests, itemized in
 [Part 6](#provided). Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a
