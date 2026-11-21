@@ -20,6 +20,18 @@ set -e
 # Optionally can set INSTALL_PREFIX to build and install to a specific directory. Also causes cmake install to run
 BUILD_DIR=${BUILD_DIR:-build}
 
+# The CUDA architectures to compile for. The build's default list failed to compile matx_util.cu on the fork's GPU
+# machine, and building for the card's own architecture compiled, so on a machine with a card that is what is
+# targeted: compute capability 8.9 becomes 89. With no card visible, as in an image build, nothing is passed and the
+# project's default stands. MORPHEUS_CUDA_ARCHITECTURES overrides the detection, and so does naming
+# CMAKE_CUDA_ARCHITECTURES or MORPHEUS_CUDA_ARCHITECTURES in CMAKE_ARGS or CMAKE_CONFIGURE_EXTRA_ARGS.
+# ci/scripts/fork_cpp.sh, which builds the C++ tests, does the same.
+if [[ -z "${MORPHEUS_CUDA_ARCHITECTURES}" && "${CMAKE_ARGS} ${CMAKE_CONFIGURE_EXTRA_ARGS}" != *CUDA_ARCHITECTURES* ]]; then
+    if command -v nvidia-smi > /dev/null 2>&1; then
+        MORPHEUS_CUDA_ARCHITECTURES=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '. ' || true)
+    fi
+fi
+
 echo "Runing CMake configure..."
 
 # Use some standard default values plus CMAKE_ARGS and CMAKE_CONFIGURE_EXTRA_ARGS
@@ -34,6 +46,7 @@ cmake -S . -B ${BUILD_DIR} -GNinja \
    -DMORPHEUS_BUILD_MORPHEUS_CORE=${MORPHEUS_BUILD_MORPHEUS_CORE:-ON} \
    -DMORPHEUS_BUILD_MORPHEUS_DFP=${MORPHEUS_BUILD_MORPHEUS_DFP:-ON} \
    ${INSTALL_PREFIX:+-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}} \
+   ${MORPHEUS_CUDA_ARCHITECTURES:+-DMORPHEUS_CUDA_ARCHITECTURES=${MORPHEUS_CUDA_ARCHITECTURES}} \
    ${CMAKE_ARGS:+${CMAKE_ARGS}} \
    ${CMAKE_CONFIGURE_EXTRA_ARGS:+${CMAKE_CONFIGURE_EXTRA_ARGS}}
 

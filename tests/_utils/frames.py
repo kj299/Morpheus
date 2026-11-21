@@ -24,9 +24,9 @@ import math
 
 import pandas as pd
 
-from morpheus.compositions.host_frame import truthy  # noqa: F401 pylint: disable=unused-import
 from morpheus.config import Config
 from morpheus.messages import MessageMeta
+from morpheus.utils.column_assign import truthy  # noqa: F401 pylint: disable=unused-import
 from morpheus.utils.type_utils import get_df_class
 
 

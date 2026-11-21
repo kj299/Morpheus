@@ -58,6 +58,7 @@ import datetime
 import json
 import os
 import sys
+import tempfile
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 HARNESS = os.path.join(REPO_ROOT, "examples", "behavioral_analytics")
@@ -476,7 +477,12 @@ def refine(module, decisions, rule: str, low_ns: int, high_ns: int, columns=COLL
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("artifact", nargs="?", default=os.path.join(REPO_ROOT, "clock_skew.json"))
+    # Outside the checkout by default, so a run leaves no untracked file in it; the committed artifact is written
+    # by naming its path.
+    parser.add_argument("artifact",
+                        nargs="?",
+                        default=os.path.join(tempfile.gettempdir(), "clock_skew.json"),
+                        help="Where to write the result. Defaults to clock_skew.json in the temporary directory.")
     arguments = parser.parse_args()
 
     sys.path.insert(0, HARNESS)

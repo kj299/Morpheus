@@ -163,6 +163,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_splunk_validation_package.py
     tests/morpheus/determinism/test_stage_parameter_liveness.py
     tests/morpheus/determinism/test_upstream_reuse.py
+    tests/morpheus/test_cli.py
     tests/morpheus/determinism/test_verdict_artifacts.py
     tests/morpheus/stages/test_entity_frame_stage.py
     tests/morpheus/stages/test_flow_record_normalize_stage.py
@@ -222,6 +223,7 @@ UNMARKED=(
     tests/morpheus/utils/test_splunk_transport.py
     tests/morpheus/utils/test_stack_fingerprint.py
     tests/morpheus/utils/test_stage_throughput.py
+    tests/morpheus/utils/test_sum_window.py
     tests/morpheus/utils/test_tcp_flags.py
     tests/morpheus/utils/test_tracker_state.py
     tests/morpheus/utils/test_transfer_envelope.py

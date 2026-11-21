@@ -111,7 +111,7 @@ def run_pipeline(config: Config,
     pipe.run()
 
     # pylint: disable=import-outside-toplevel
-    from morpheus.compositions.host_frame import to_host_frame
+    from morpheus.utils.column_assign import to_host_frame
 
     frames = []
 
@@ -119,7 +119,7 @@ def run_pipeline(config: Config,
         meta = message.payload() if isinstance(message, ControlMessage) else message
         df = meta.copy_dataframe()
 
-        df = to_host_frame(df)
+        df = to_host_frame(df, nullable_ints=True)
 
         # A cumulative, order-derived feature in the style of IncrementColumn: each row's ordinal among its
         # entity's rows within the emitted window. Canonicalization erases row *order*, so without a *value*

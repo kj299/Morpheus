@@ -41,6 +41,7 @@ import pytest
 from _utils.number_words import from_words
 from morpheus.stages.telemetry.tc7_endpoint_stage import normalize_image_path
 from morpheus.utils import splunk_conf
+from morpheus.utils.user_agent import STACK_FAMILY
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 VALIDATE = os.path.join(REPO_ROOT, "examples", "splunk_lineage_app", "validate")
@@ -63,28 +64,17 @@ import endpoint_pipeline  # noqa: E402
 import golden  # noqa: E402
 import session_pipeline as sp  # noqa: E402
 import telemetry_pipeline as tp  # noqa: E402
+from rule_text import case_weights  # noqa: E402
+from rule_text import compared  # noqa: E402
+from rule_text import search as read_search
+from rule_text import threshold  # noqa: E402
 
+# The corpus and composition modules imported above replace themselves in sys.modules with the merged corpus and
+# composition, which pylint cannot follow, so every attribute read through them looks missing to it.
+# pylint: disable=no-member
 
-def _search(name: str) -> str:
-    """One saved search's SPL, with its continuation lines folded."""
-    return splunk_conf.search_text(SAVEDSEARCHES, name)
-
-
-def threshold(stanza: str, pattern: str) -> float:
-    """
-    A threshold as the shipped search states it, so the predicate this file evaluates is the app's and not a copy.
-
-    Six layer 5 thresholds lived here as constants for weeks; a stanza edit would have left every test green while
-    the package's expectations went stale. `pattern` names the eval variable or the comparison, with one group
-    around the number.
-    """
-
-    match = re.search(pattern, _search(stanza))
-
-    assert match is not None, f"{stanza} no longer states {pattern!r}"
-
-    return float(match.group(1))
-
+_search = read_search
+"""One saved search's SPL, with its continuation lines folded."""
 
 GAP_THRESHOLD_NS = int(threshold("R-D-L2-004 - MAC in two places at once", r"gap_threshold\s*=\s*(\d+)"))
 TRAVEL_KMH_THRESHOLD = threshold("R-D-L5-003 - Impossible travel", r"kmh_threshold\s*=\s*([\d.]+)")
@@ -538,7 +528,7 @@ def test_the_session_duration_rule_returns_exactly_what_is_written(expected: dic
     ]
     candidates = [event for event in sessions if event["session_duration_ratio"] > DURATION_RATIO_THRESHOLD]
     fires = [event for event in candidates if (event.get("ctx_account_type") or "unknown") != "service"]
-    severity = {"admin": 70, "elevated": 55}
+    (severity, otherwise) = case_weights("R-B-L5-005 - Session duration anomaly", "risk_score")
     entry = expected["searches"]["R-B-L5-005 - Session duration anomaly"]
 
     assert entry["expected_rows"] == len(fires)
@@ -547,14 +537,12 @@ def test_the_session_duration_rule_returns_exactly_what_is_written(expected: dic
         "user_principal": event["user_principal"],
         "session_key": event["session_key"],
         "session_duration_ratio": event["session_duration_ratio"],
-        "risk_score": severity.get(event.get("ctx_privilege_level"), 40),
+        "risk_score": severity.get(event.get("ctx_privilege_level"), otherwise),
     } for event in fires] == entry["key_values"]
 
-    search = _search("R-B-L5-005 - Session duration anomaly")
-
-    for (level, score) in severity.items():
-        assert f'ctx_privilege_level == "{level}", {score}' in search
-    assert 'account_type != "service"' in search
+    # Every session this corpus fires on is a standard account's, so each scores the search's default; the
+    # privileged levels are read from the same case() and wait for a corpus that holds one.
+    assert 'account_type != "service"' in _search("R-B-L5-005 - Session duration anomaly")
 
 
 def test_the_model_rules_return_exactly_what_is_written(expected: dict, sessions: pd.DataFrame):
@@ -662,12 +650,12 @@ def test_the_predictive_rules_write_the_watchlist_the_bulk_rule_reads(expected: 
     assert len(watched_hosts) == 5 and watched_hosts & reported_hosts == {endpoint_pipeline.CREEPING}
 
 
-SCAN_SYN_RATIO = 0.9
-SCAN_PORTS = 50
-REFUSAL_RATIO = 0.5
-REFUSAL_FAN_OUT = 10
-"""The layer 4 searches' own thresholds, repeated here so the predicate this file evaluates is the predicate the
-app ships rather than an approximation of it."""
+SCAN_SYN_RATIO = threshold("R-D-L4-002 - SYN without completion", r"\(syn / flags\)\s*>=\s*([\d.]+)")
+SCAN_PORTS = compared("R-D-L4-002 - SYN without completion", "destination_ports", ">")
+REFUSAL_RATIO = threshold("R-D-L4-003 - RST ratio", r"\(rst / flags\)\s*>=\s*([\d.]+)")
+REFUSAL_FAN_OUT = compared("R-D-L4-003 - RST ratio", "clients_refused", ">=")
+"""The layer 4 searches' own thresholds, read from their stanzas so the predicate this file evaluates is the
+predicate the app ships rather than an approximation of it."""
 
 
 def _layer_4_events() -> list:
@@ -961,12 +949,6 @@ def test_the_service_and_generation_detections_return_exactly_what_is_written(ex
     assert written["nxdomain_answers"] == max(event["dns_nxdomain_in_window"] for event in rows)
 
 
-STACK_FAMILIES = {
-    "windows": "windows", "macos": "darwin", "ios": "darwin", "linux": "linux", "android": "linux", "chromeos": "linux"
-}
-"""R-B-L4-004's `case()`: the stack family each operating system a User-Agent can claim runs."""
-
-
 def test_the_stack_mismatch_returns_exactly_what_is_written(expected: dict):
     # The search's two `stats ... BY` and its inner join on host_key, evaluated over the two sourcetypes it reads.
     stacks: dict = collections.defaultdict(list)
@@ -978,7 +960,7 @@ def test_the_stack_mismatch_returns_exactly_what_is_written(expected: dict):
 
     for event in _layer_7_events():
         if (event.get("host_key") and event.get("http_ua_os")):
-            claims[(event["host_key"], STACK_FAMILIES.get(event["http_ua_os"]))].append(event)
+            claims[(event["host_key"], STACK_FAMILY.get(event["http_ua_os"]))].append(event)
 
     mismatches = {
         (host, family, claimed): (rows, claims[(claimed_host, claimed)])
@@ -1151,16 +1133,18 @@ def test_the_saas_detections_return_exactly_what_is_written(expected: dict):
     # because every rise in it fits inside four weeks.
     events = _layer_7_events()
     searches = expected["searches"]
-    severity = {"restricted": 75, "confidential": 60, "internal": 40, "public": 20}
+    (severity, otherwise) = case_weights("R-B-L7-002 - Bulk data access", "risk_score")
+    record_ratio = compared("R-B-L7-002 - Bulk data access", "saas_record_ratio", ">")
+    rising_weeks = compared("R-P-L7-006 - Access breadth trajectory", "rising_weeks", ">=")
 
     bulk = [
         event for event in events
-        if event.get("saas_baseline_mature") is True and (event.get("saas_record_ratio") or 0) > 5
+        if event.get("saas_baseline_mature") is True and (event.get("saas_record_ratio") or 0) > record_ratio
     ]
     derived = sorted(({
         "user_principal": event["user_principal"],
         "classification": event.get("ctx_object_data_classification") or "unclassified",
-        "risk_score": severity.get(event.get("ctx_object_data_classification"), 40),
+        "risk_score": severity.get(event.get("ctx_object_data_classification"), otherwise),
     } for event in bulk),
                      key=lambda row: row["user_principal"])
     entry = searches["R-B-L7-002 - Bulk data access"]
@@ -1182,7 +1166,7 @@ def test_the_saas_detections_return_exactly_what_is_written(expected: dict):
 
     watchlisted = sorted(({
         "user_principal": principal, "rising_weeks": rising[principal], "role": next(iter(roles[principal]))
-    } for principal in rising if rising[principal] >= 4 and len(roles[principal]) == 1),
+    } for principal in rising if rising[principal] >= rising_weeks and len(roles[principal]) == 1),
                          key=lambda row: row["user_principal"])
     entry = searches["R-P-L7-006 - Access breadth trajectory"]
 
@@ -1195,8 +1179,8 @@ def test_the_endpoint_detection_returns_exactly_what_is_written(expected: dict):
     # novelty flag the trigger and the integrity level the severity, with no level at the default, and a host on the
     # hosts' list raised by the boost. The list is the predictive searches' entries, which the runner dispatches
     # first and expires last.
-    severity = {"system": 70, "high": 55, "medium": 40, "low": 25}
-    scale = {"high": 1.5, "low": 0.5}
+    (severity, unrated) = case_weights("R-B-L7-004 - Process ancestry novelty", "integrity_weight")
+    (scale, unscaled) = case_weights("R-B-L7-004 - Process ancestry novelty", "criticality_weight")
     boost = threshold("R-B-L7-004 - Process ancestry novelty", r"watchlist_boost\s*=\s*(\d+)")
     watched = {entry["host_key"] for entry in _host_watchlist()}
     novel = [event for event in _layer_7_events() if event.get("endpoint_pair_novel") is True]
@@ -1210,7 +1194,9 @@ def test_the_endpoint_detection_returns_exactly_what_is_written(expected: dict):
         "endpoint_host_only":
             event["endpoint_host_only"],
         "risk_score":
-            round(severity.get(event.get("endpoint_integrity"), 40) * scale.get(event.get("ctx_criticality"), 1.0)) +
+            round(
+                severity.get(event.get("endpoint_integrity"), unrated) *
+                scale.get(event.get("ctx_criticality"), unscaled)) +
             (boost if event["endpoint_host"] in watched else 0),
     } for event in novel),
                      key=lambda row: (row["endpoint_host"], row["risk_score"]))
@@ -1277,9 +1263,12 @@ def test_the_fingerprint_and_beacon_detections_count_exactly_what_is_written(exp
     # against the events until the campaign corpus added hosts to both; a written expectation that nothing
     # re-derives goes stale the first time another corpus shares the sourcetype.
     searches = expected["searches"]
+    prior_handshakes = compared("R-B-L6-001 - New TLS client fingerprint", "ja4_client_observations", ">=")
+    interval_cv = compared("R-B-L3-002 - Beaconing", "flow_interval_cv", "<")
+    size_cv = compared("R-B-L3-002 - Beaconing", "flow_size_cv", "<")
     fingerprints = [
         event for event in _events_of("morpheus_score_l6.jsonlines") if event.get("ja4_client_first_seen") is True and (
-            event.get("ja4_client_observations") or 0) >= 20 and event.get("ctx_found") is True
+            event.get("ja4_client_observations") or 0) >= prior_handshakes and event.get("ctx_found") is True
     ]
     entry = searches["R-B-L6-001 - New TLS client fingerprint"]
 
@@ -1287,12 +1276,12 @@ def test_the_fingerprint_and_beacon_detections_count_exactly_what_is_written(exp
     assert entry["expected_rows"] == len({event["src_ip"] for event in fingerprints})
     assert entry["key_values"]["src_ip"] in {event["src_ip"] for event in fingerprints}
 
-    def regular(value) -> bool:
-        return value is not None and value < 0.15
+    def regular(value, ceiling: float) -> bool:
+        return value is not None and value < ceiling
 
     beacons = [
         event for event in _events_of("morpheus_score_l3.jsonlines") if event.get("flow_regularity_mature") is True
-        and regular(event.get("flow_interval_cv")) and regular(event.get("flow_size_cv"))
+        and regular(event.get("flow_interval_cv"), interval_cv) and regular(event.get("flow_size_cv"), size_cv)
     ]
     entry = searches["R-B-L3-002 - Beaconing"]
 
@@ -1361,23 +1350,31 @@ def test_the_layer_3_host_baseline_detections_return_exactly_what_is_written(exp
 
         return float("nan") if value is None else float(value)
 
+    # Each threshold as its search states it, read once rather than per event.
+    fan_out_floor = compared("R-B-L3-001 - Fan-out expansion", "dsts_per_src", ">")
+    internal_majority = compared("R-B-L3-001 - Fan-out expansion", "internal_dst_ratio", ">")
+    fan_in_floor = compared("R-B-L3-006 - Fan-in onto a workstation", "srcs_per_dst", ">=")
+    upload_floor = compared("R-B-L3-007 - First-contact upload", "byte_asymmetry", ">=")
+    sweep_ports = compared("R-D-L3-008 - Port sweep", "dst_ports_per_src", ">=")
+
     fan_out = [
         event for event in flows
         if event.get("dsts_per_src_baseline_mature") is True and number(event, "dsts_per_src_step") > 0
-        and number(event, "dsts_per_src") > 50 and number(event, "internal_dst_ratio") > 0.5
+        and number(event, "dsts_per_src") > fan_out_floor and number(event, "internal_dst_ratio") > internal_majority
     ]
     fan_in = [
         event for event in flows
         if event.get("dst_ctx_device_role") == "workstation" and event.get("srcs_per_dst_baseline_mature") is True
-        and number(event, "srcs_per_dst_step") > 0 and number(event, "srcs_per_dst") >= 10
+        and number(event, "srcs_per_dst_step") > 0 and number(event, "srcs_per_dst") >= fan_in_floor
     ]
     upload = [
         event for event in flows
         if event.get("dst_asn_first_seen") is True and event.get("byte_asymmetry_baseline_mature") is True
-        and number(event, "byte_asymmetry_step") > 0 and number(event, "byte_asymmetry") >= 10
+        and number(event, "byte_asymmetry_step") > 0 and number(event, "byte_asymmetry") >= upload_floor
     ]
     sweep = [
-        event for event in flows if number(event, "dst_ports_per_src") >= 25 and event.get("dst_is_private") is True
+        event for event in flows
+        if number(event, "dst_ports_per_src") >= sweep_ports and event.get("dst_is_private") is True
     ]
 
     for (name, rows, keys) in (("R-B-L3-001 - Fan-out expansion", fan_out,
@@ -1741,56 +1738,10 @@ def test_the_validation_document_says_the_same_thing_the_expectation_file_does(e
 def test_every_expected_empty_search_says_why(expected: dict):
     empty = {name: entry for (name, entry) in expected["searches"].items() if entry.get("expected_empty")}
 
-    # Seven of thirty-four, when this was written. That ratio is the honest state of this app, and stating it is the
-    # package's main job.
-    # The seventh is R-P-L3-005, which reads the behavior summary this package does not populate -- the same
-    # deployment-step blocker the chain assembly search has, arriving with layer 3 rather than being discovered.
-    # It
-    # improved by two when the layer 5 rules landed with events to fire on, by one more when `TC1BindingStage`
-    # gave `binding:l1` a producer, and by one again when `EnvelopeStampStage` put `osi_layer` and `entity_key`
-    # on every record and the behavior summary finally had a grouping that keeps its rows.
-    #
-    # Then it went the other way twice, which is what this number is for. The layer 1 history expiry is empty for
-    # the same benign reason its layer 2 twin is: nothing in a fresh corpus is old enough to expire. The L2/L3
-    # refresh is empty because it always was and the document said otherwise -- it selects
-    # `binding_table=dhcp_lease`, this corpus has no DHCP source, and the 80 bucketed rows it was credited with
-    # are a MAC table under a different name. A count that only ever improves is a count nobody is checking.
-    #
-    # Six of thirty-seven now: R-C-002 left the list when it was rewritten to read scored events rather than
-    # notables and the campaign corpus gave it a chain to find.
-    # Six of thirty-eight after R-C-005, which arrived with a chain to find, six of thirty-nine after
-    # R-D-L1-001, whose optic swap the corpus already held, six of forty after R-P-L1-004, which arrived with a
-    # failing optic planted for it, and six of forty-one after R-B-L2-002, whose hub the corpus already held.
-    #
-    # Nine of forty-seven after the layer 5 baseline searches, and every one of the three new empties is correct
-    # for a reason it states: R-B-L5-001 and R-B-L5-002 read only rows a principal's own model scored, and none
-    # here was; the watchlist expiry drops entries for events that are years old. Nine of forty-eight after
-    # R-B-L5-005, which arrived with a long session planted for it.
-    #
-    # Eight of forty-eight after the first search-head run, and the change is a correction rather than a rule: the
-    # watchlist expiry was empty only against 1970 timestamps, and the runner dates the events so R-P-L7-006's two
-    # entries are still inside their thirty days when it runs.
-    #
-    # Seven after the risk write path, and the one that left was broken rather than starved: R-P-L3-005 read the
-    # value two rows back from a field its own streamstats was still creating, and fires fifteen times now that
-    # it takes two passes over a summary the run collects first.
-    #
-    # Five after the learned models, and the two that left were waiting for exactly that: R-B-L5-001 and R-B-L5-002
-    # read only rows a principal's own model scored, and each principal now has one, trained on a fortnight the
-    # scored week follows.
-    #
-    # Five of sixty-two after step 10, whose ten searches each arrived with something planted for it to find.
-    #
-    # Two after step 12. The L2/L3 refresh left: `TC2BindingStage` closes the campaign DHCP server's
-    # acknowledgements into leases, and their buckets are what the refresh selects. The expiry jobs left with it,
-    # and their reason had been wrong all along: an expiry rewrites the lookup with every row it keeps, and it had
-    # kept none only because each refresh keyed its rows on a bucket counted from 1970. Keyed on the bucket the
-    # row's own time falls in, which a validation run moves to the weeks before it, every row is kept.
-    #
-    # One after the desk spoof. Chain assembly left last, and not because a threshold moved: the two detections
-    # that accused a three-layer chain had accused different chains, and the corpus now holds the actor the search
-    # exists for, a tapped desk whose workstation claims the gateway. The one that remains, R-D-L2-001, waits for
-    # the designation list only an estate can supply.
+    # One search is expected to return nothing, and it says why: R-D-L2-001 waits for the designation list only an
+    # estate can supply. The count is asserted so that a search going quiet is a change somebody has to make here,
+    # with its reason, rather than something the package absorbs. It has moved in both directions as corpora and
+    # rules arrived, and the history of that is in the pull requests.
     assert len(empty) == 1
 
     for (name, entry) in empty.items():

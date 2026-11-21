@@ -59,8 +59,6 @@ import typing
 
 import pandas as pd
 
-from morpheus.utils.model_manifest import ModelManifest
-
 logger = logging.getLogger(__name__)
 
 MODEL_NAME_PREFIX = "dfencoder"
@@ -671,17 +669,3 @@ def train_dfencoder_models(frames: dict,
                        skipped)
 
     return TrainedModels(models=models, versions=versions, skipped=skipped)
-
-
-def build_manifest(versions: dict, window_id: int) -> ModelManifest:
-    """
-    A manifest pinning each principal to its own model, with no fallback.
-
-    No fallback, because a principal without a model of their own should be refused rather than scored
-    against somebody else's -- which is the manifest's own rule, applied here on purpose. The caller who wants
-    a population fallback declares one explicitly.
-    """
-    if (not versions):
-        raise ValueError("versions must pin at least one principal; a manifest that pins nobody scores nobody")
-
-    return ModelManifest(window_id=window_id, models=dict(versions), fallback=None)

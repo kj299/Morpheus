@@ -115,7 +115,6 @@ from morpheus.compositions.corpus_pipeline import _collect
 from morpheus.compositions.corpus_pipeline import build_pipeline_config  # noqa: F401 pylint: disable=unused-import
 from morpheus.compositions.corpus_pipeline import render  # noqa: F401 pylint: disable=unused-import
 from morpheus.compositions.estate_context import EstateContext
-from morpheus.compositions.host_frame import truthy
 from morpheus.compositions.resumable import ResumableLinearPipeline
 from morpheus.config import Config
 from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
@@ -142,6 +141,7 @@ from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
 from morpheus.stages.telemetry.tc7_endpoint_stage import TC7EndpointStage
 from morpheus.utils.binding_table import NS_PER_SECOND
 from morpheus.utils.binding_table import BindingTable
+from morpheus.utils.column_assign import truthy
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.determinism import canonicalize
 

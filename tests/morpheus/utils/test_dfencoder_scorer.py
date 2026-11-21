@@ -38,7 +38,6 @@ import pytest
 from morpheus.utils.dfencoder_scorer import MODEL_FORMAT
 from morpheus.utils.dfencoder_scorer import DfencoderScorer
 from morpheus.utils.dfencoder_scorer import NumpyAutoEncoder
-from morpheus.utils.dfencoder_scorer import build_manifest
 from morpheus.utils.dfencoder_scorer import export_model
 from morpheus.utils.dfencoder_scorer import load_models
 from morpheus.utils.dfencoder_scorer import load_torch_autoencoder
@@ -222,20 +221,6 @@ def test_training_refuses_without_torch_in_plain_words():
             del sys.modules["torch"]
         else:
             sys.modules["torch"] = saved
-
-
-def test_the_manifest_pins_every_principal_to_its_own_model_and_nobody_else():
-    versions = {"alice@example.com": VERSION, "bob@example.com": "dfencoder/bob@example.com:0000000000000000"}
-    manifest = build_manifest(versions, window_id=0)
-
-    assert manifest.resolve("alice@example.com", 0).model_version == VERSION
-    assert manifest.resolve("alice@example.com", 0).fallback_used is False
-
-    with pytest.raises(ValueError, match="no fallback"):
-        manifest.resolve("carol@example.com", 0)
-
-    with pytest.raises(ValueError, match="pins nobody"):
-        build_manifest({}, window_id=0)
 
 
 def hand_model() -> dict:

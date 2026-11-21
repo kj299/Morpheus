@@ -24,9 +24,12 @@ side of a triple is sending. A corpus that carried only one direction would let 
 wrong one, so the responses here travel the way a capture sees them, and each rule is asserted against the case
 beside it that must stay quiet.
 
-One of the five rules cannot be asserted here and is not pretended to be: R-B-L4-001 is the shipped `abp-pcap-xgb`
-model behind Triton, so what this fork owes it is the thirteen features under the names it was trained on, which
-`MODEL_FEATURES` carries and `test_the_model_feature_list_is_complete` pins. R-B-L4-004 joins this layer's stack
+One of the five rules is a model this fork does not train: R-B-L4-001 is the shipped `abp-pcap-xgb` booster,
+committed under `models/inventory` with its digest and scored inside the pipeline by `TC4AbpScoreStage`. The
+composition runs it, so its score, verdict and pinned version are columns of this corpus's golden file and are held
+by the golden comparison; what the model owes its inputs is the thirteen features under the names it was trained
+on, which `MODEL_FEATURES` carries and `test_the_model_feature_list_is_complete` pins, and the stage's own
+arithmetic is asserted in `tests/morpheus/stages/test_tc4_abp_score_stage.py`. R-B-L4-004 joins this layer's stack
 fingerprint to the application corpus's user agents on `host_key`, so it is asserted where both are in reach: the
 stack half here, and the join in `test_splunk_validation_package.py`, over the events the app is fed.
 """
@@ -41,12 +44,15 @@ from morpheus.config import Config
 from morpheus.stages.telemetry.tc4_flow_stage import MODEL_FEATURES
 from morpheus.utils.determinism import diff_frames
 from morpheus.utils.determinism import frame_digest
+from morpheus.utils.transfer_envelope import DEFAULT_MULTIPLIER
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # pylint: disable=wrong-import-position
 import golden  # noqa: E402
 import transport_pipeline as tp_  # noqa: E402
+from rule_text import compared  # noqa: E402
+from rule_text import threshold  # noqa: E402
 
 # transport_pipeline replaces itself in sys.modules with the merged corpus and composition, which pylint cannot
 # follow, so every attribute read through `tp_` looks missing to it.
@@ -54,22 +60,27 @@ import transport_pipeline as tp_  # noqa: E402
 
 GOLDEN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_transport_expected.csv")
 
-SYN_RATIO_THRESHOLD = 0.9
-"""R-D-L4-002's own figure, repeated so these tests evaluate the rule rather than something near it."""
+SYN_SCAN = "R-D-L4-002 - SYN without completion"
+REFUSALS = "R-D-L4-003 - RST ratio"
 
-SCAN_PORT_THRESHOLD = 50
-"""R-D-L4-002's own figure, likewise. The corpus reaches sixty, so the assertion is not on the threshold."""
+SYN_RATIO_THRESHOLD = threshold(SYN_SCAN, r"\(syn / flags\)\s*>=\s*([\d.]+)")
+"""R-D-L4-002's own figure, read from its stanza so these tests evaluate the rule rather than something near it."""
 
-RST_RATIO_THRESHOLD = 0.5
-"""R-D-L4-003 says 0.8, and this is a deliberate departure recorded in the same place the app's detection
-records it. A connection refused with RST+ACK puts exactly two flags on the flow that carries the refusal, so
-`rst/all` for it is 0.5 and nothing a sweep or an outage produces can reach 0.8. The rule as written would never
-fire on either of the two conditions it names. Half is what a flow carrying refusals and nothing else scores,
-and a flow that also carried a handshake or data scores well below it, so the separation the rule wants is the
-one this threshold makes."""
+SCAN_PORT_THRESHOLD = compared(SYN_SCAN, "destination_ports", ">")
+"""R-D-L4-002's own figure, likewise. The search fires above it; the corpus reaches sixty, so the assertion is not
+on the threshold."""
 
-ENVELOPE_MULTIPLIER = 3.0
-"""R-B-L4-005's own figure."""
+RST_RATIO_THRESHOLD = threshold(REFUSALS, r"\(rst / flags\)\s*>=\s*([\d.]+)")
+"""R-D-L4-003's figure as the app states it. The guide says 0.8, and the app's 0.5 is a deliberate departure
+recorded in the same place its detection records it. A connection refused with RST+ACK puts exactly two flags on
+the flow that carries the refusal, so `rst/all` for it is 0.5 and nothing a sweep or an outage produces can reach
+0.8. The rule as written would never fire on either of the two conditions it names. Half is what a flow carrying
+refusals and nothing else scores, and a flow that also carried a handshake or data scores well below it, so the
+separation the rule wants is the one this threshold makes."""
+
+ENVELOPE_MULTIPLIER = DEFAULT_MULTIPLIER
+"""R-B-L4-005's own figure. The search reads the breach flags `TC4EnvelopeStage` writes, so the figure is the
+stage's multiplier, which the corpus runs at its default."""
 
 
 @pytest.fixture(name="corpus", scope="module")
@@ -271,7 +282,7 @@ def test_only_the_scan_reaches_fifty_ports_in_a_bin(result: pd.DataFrame):
     reach = unanswered.groupby(["src_ip", "rollup_time_ns"])["dst_port"].nunique()
 
     assert reach.max() == tp_.SCAN_PORTS
-    assert list(reach[reach >= SCAN_PORT_THRESHOLD].index.get_level_values("src_ip")) == [tp_.SCANNER]
+    assert list(reach[reach > SCAN_PORT_THRESHOLD].index.get_level_values("src_ip")) == [tp_.SCANNER]
     assert tp_.SWEEPER in set(unanswered["src_ip"])
     assert reach[tp_.SWEEPER].max() == 1
 

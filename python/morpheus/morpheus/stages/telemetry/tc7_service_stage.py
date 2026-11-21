@@ -29,7 +29,10 @@ for one.
 **Per window, per service:** connections, bytes and distinct clients over the trailing window, and whether the
 connection's client fingerprint has ever reached this service before, through
 {py:mod}`~morpheus.utils.value_novelty`. A fingerprint is the client software, not the client: a new workstation
-running the estate's browser reaches the service with a fingerprint it already knows.
+running the estate's browser reaches the service with a fingerprint it already knows. The window holds a bounded
+number of connections per service, through {py:mod}`~morpheus.utils.sum_window` and
+{py:mod}`~morpheus.utils.distinct_window`; when that cap displaces a connection the hour would still have held,
+`service_clients_saturated` is set, and the three figures are floors rather than the hour's own.
 
 **The distinct client count is measured against the service's own days.** The busiest window of each day is kept
 through {py:mod}`~morpheus.utils.bucket_peak`, and `service_clients_ratio` is this window's count as a multiple of the
@@ -39,8 +42,6 @@ stays quiet on it: a service deployed this morning has no life to change yet.
 The stage is stateful across messages and must run single-engine, or sharded by service.
 """
 
-import collections
-import dataclasses
 import logging
 import typing
 
@@ -62,6 +63,7 @@ from morpheus.utils.distinct_window import DistinctWindowTracker
 from morpheus.utils.entity_key import compose_key
 from morpheus.utils.entity_key import normalize_text
 from morpheus.utils.event_clock import DEFAULT_MAX_SKEW_SECONDS
+from morpheus.utils.sum_window import SumWindowTracker
 from morpheus.utils.value_novelty import ValueNoveltyTracker
 
 logger = logging.getLogger(__name__)
@@ -96,52 +98,6 @@ FINGERPRINT_FIELD = "client_fingerprint"
 
 KEYED_BY_NAME = "sni"
 KEYED_BY_ADDRESS = "address"
-
-
-@dataclasses.dataclass
-class _Window:
-    entries: collections.deque = dataclasses.field(default_factory=collections.deque)
-    total: float = 0.0
-    last_ns: typing.Optional[int] = None
-
-
-class _WindowSums:
-    """Per-service connection counts and byte sums over a trailing window, bounded per service and in services."""
-
-    def __init__(self, window_ns: int, max_samples: int, max_entities: int):
-        self._window_ns = window_ns
-        self._max_samples = max_samples
-        self._max_entities = max_entities
-        self._windows: collections.OrderedDict[str, _Window] = collections.OrderedDict()
-
-    def observe(self, key: str, event_time_ns: int, value: typing.Optional[float]) -> typing.Optional[tuple]:
-        """`(connections, bytes)` in the window ending at this connection, or `None` for an out-of-order one."""
-        window = self._windows.get(key)
-
-        if (window is None):
-            window = _Window()
-            self._windows[key] = window
-
-            while (len(self._windows) > self._max_entities):
-                self._windows.popitem(last=False)
-        else:
-            self._windows.move_to_end(key)
-
-        if (window.last_ns is not None and event_time_ns < window.last_ns):
-            return None
-
-        horizon = event_time_ns - self._window_ns
-
-        while (len(window.entries) > 0
-               and (window.entries[0][0] <= horizon or len(window.entries) >= self._max_samples)):
-            window.total -= window.entries.popleft()[1]
-
-        amount = 0.0 if value is None else float(value)
-        window.entries.append((event_time_ns, amount))
-        window.total += amount
-        window.last_ns = event_time_ns
-
-        return (len(window.entries), window.total)
 
 
 def _number(value: typing.Any) -> typing.Optional[float]:
@@ -184,7 +140,8 @@ class TC7ServiceStage(CheckpointMixin, TelemetryStage):
     window_seconds : int, default = 3600
         Trailing window the counts are taken over.
     max_samples : int, default = 4096
-        Connections retained per service regardless of the window.
+        Connections retained per service regardless of the window. When it binds, `service_clients_saturated` is set
+        on the row and its connection, byte and client figures are lower bounds.
     max_entities : int, default = 100000
         Services tracked before the least recently seen is forgotten.
     baseline_bucket_seconds : int, default = 86400
@@ -242,7 +199,7 @@ class TC7ServiceStage(CheckpointMixin, TelemetryStage):
 
         window_ns = window_seconds * NS_PER_SECOND
 
-        self._sums = _WindowSums(window_ns, max_samples, max_entities)
+        self._sums = SumWindowTracker(window_ns=window_ns, max_samples=max_samples, max_entities=max_entities)
         self._clients = DistinctWindowTracker(window_ns=window_ns, max_samples=max_samples, max_entities=max_entities)
         # A service is reached by many clients in one second, so connections at one instant are measured, not
         # refused.
@@ -358,17 +315,19 @@ class TC7ServiceStage(CheckpointMixin, TelemetryStage):
                 continue
 
             sums = self._sums.observe(key, event_time_ns, _number(sizes[position]))
-            unordered += int(sums is None)
-            connections.append(None if sums is None else sums[0])
-            volumes.append(None if sums is None else sums[1])
+            unordered += int(sums.out_of_order)
+            connections.append(None if sums.out_of_order else sums.count)
+            volumes.append(None if sums.out_of_order else sums.total)
 
+            # One flag for the service's window: the cap is the same for the connections and for the clients among
+            # them, and when it binds the connection count and the byte sum are floors as the client count is.
             if (client is None):
                 reached_by.append(None)
-                saturated.append(False)
+                saturated.append(sums.saturated)
             else:
                 result = self._clients.observe(key, event_time_ns, client)
                 reached_by.append(result.distinct)
-                saturated.append(result.saturated)
+                saturated.append(result.saturated or sums.saturated)
 
             fingerprint = normalize_text(fingerprints[position])
 
