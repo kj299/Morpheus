@@ -144,6 +144,7 @@ TARGETS=(
 # not every test in it.
 UNMARKED=(
     tests/morpheus/determinism/test_clock_skew_experiment.py
+    tests/morpheus/determinism/test_container_build.py
     tests/morpheus/determinism/test_cpu_lock.py
     tests/morpheus/determinism/test_derived_counts.py
     tests/morpheus/determinism/test_end_to_end_mac_spoof.py

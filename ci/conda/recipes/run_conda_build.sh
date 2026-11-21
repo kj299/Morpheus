@@ -22,8 +22,10 @@ function hasArg {
    (( ${NUMARGS} != 0 )) && (echo " ${ARGS} " | grep -q " $1 ")
 }
 
+# The version the package is built as: the nearest tag, cut at its first hyphen, or without a tag the version
+# CMakeLists.txt gives the project. See ci/scripts/project_version.sh.
 function get_version() {
-   echo "$(git describe --tags | grep -o -E '^([^-]*?)')"
+   echo "$("${MORPHEUS_ROOT}/ci/scripts/project_version.sh" | grep -o -E '^([^-]*?)')"
 }
 
 # Color variables
@@ -44,6 +46,11 @@ export CONDA_COMMAND=${CONDA_COMMAND:-"mambabuild"}
 export MORPHEUS_ROOT=${MORPHEUS_ROOT:-$(git rev-parse --show-toplevel)}
 
 # Export script_env variables that must be set for conda build
+# CMAKE_CUDA_ARCHITECTURES is what the package is compiled for: RAPIDS, the list of architectures RAPIDS supports,
+# unless set. A package for one card can name that card's architecture instead, 89 for compute capability 8.9.
+# CMAKE_CONFIGURE_EXTRA_ARGS is passed to the CMake configure step as scripts/compile.sh passes it, for example
+# -DFETCHCONTENT_SOURCE_DIR_RAPIDS-CMAKE=<clone> where the build cannot download from GitHub.
+export CMAKE_CONFIGURE_EXTRA_ARGS=${CMAKE_CONFIGURE_EXTRA_ARGS:-""}
 export CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:-"RAPIDS"}
 export MORPHEUS_PYTHON_BUILD_STUBS=${MORPHEUS_PYTHON_BUILD_STUBS:-"ON"}
 export MORPHEUS_CACHE_DIR=${MORPHEUS_CACHE_DIR:-"${MORPHEUS_ROOT}/.cache"}
@@ -125,6 +132,14 @@ if [[ ${NUMARGS} == 0 ]]; then
    echo -e "${r}   morpheus-core${x}"
    echo -e "${r}   morpheus-libs (the same package, under its older name)${x}"
    echo -e "${r}Exiting...${x}"
+   exit 12
+fi
+
+# A name that is not a package builds nothing. That used to exit 0, so a mistyped target looked like a build.
+if ! (hasArg morpheus-core || hasArg morpheus-libs); then
+   echo -e "${r}ERROR: none of [${ARGS}] is a package this script builds. Available packages:${x}"
+   echo -e "${r}   morpheus-core${x}"
+   echo -e "${r}   morpheus-libs (the same package, under its older name)${x}"
    exit 12
 fi
 

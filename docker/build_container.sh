@@ -25,12 +25,12 @@ DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:?"Must set \$DOCKER_IMAGE_NAME to build. U
 DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG:?"Must set \DOCKER_IMAGE_TAG to build. Use the dev/release scripts to set these automatically"}
 DOCKER_TARGET=${DOCKER_TARGET:-"runtime"}
 
+# This fork keeps x86_64 environment files only (conda/environments/*_arch-x86_64.yaml), so that is the one
+# architecture an image can be built for; an arm64 build would fail at the first environment it copies.
 if [ "${DOCKER_TARGET_ARCH}" == "amd64" ]; then
     REAL_ARCH="x86_64"
-elif [ "${DOCKER_TARGET_ARCH}" == "arm64" ]; then
-    REAL_ARCH="aarch64"
 else
-    echo "Invalid DOCKER_TARGET_ARCH: ${DOCKER_TARGET_ARCH}"
+    echo "Invalid DOCKER_TARGET_ARCH: ${DOCKER_TARGET_ARCH}. This fork builds amd64 images only."
     exit 1
 fi
 
@@ -48,7 +48,8 @@ CUDA_REV_VER=${CUDA_REV_VER:-0}
 FROM_IMAGE=${FROM_IMAGE:-"nvidia/cuda"}
 LINUX_DISTRO=${LINUX_DISTRO:-ubuntu}
 LINUX_VER=${LINUX_VER:-22.04}
-MORPHEUS_BUILD_MORPHEUS_DFP=${MORPHEUS_BUILD_MORPHEUS_DFP:-"ON"}
+# What the conda package of the runtime image is compiled for: every architecture RAPIDS supports, unless set
+CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:-"RAPIDS"}
 PYTHON_VER=${PYTHON_VER:-3.12}
 
 # Determine the relative path from $PWD to $MORPHEUS_ROOT
@@ -64,7 +65,7 @@ DOCKER_ARGS="${DOCKER_ARGS} --build-arg FROM_IMAGE=${FROM_IMAGE}"
 DOCKER_ARGS="${DOCKER_ARGS} --build-arg LINUX_DISTRO=${LINUX_DISTRO}"
 DOCKER_ARGS="${DOCKER_ARGS} --build-arg LINUX_VER=${LINUX_VER}"
 DOCKER_ARGS="${DOCKER_ARGS} --build-arg MORPHEUS_ROOT_HOST=${MORPHEUS_ROOT_HOST}"
-DOCKER_ARGS="${DOCKER_ARGS} --build-arg MORPHEUS_BUILD_MORPHEUS_DFP=${MORPHEUS_BUILD_MORPHEUS_DFP}"
+DOCKER_ARGS="${DOCKER_ARGS} --build-arg CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
 DOCKER_ARGS="${DOCKER_ARGS} --build-arg PYTHON_VER=${PYTHON_VER}"
 DOCKER_ARGS="${DOCKER_ARGS} --build-arg REAL_ARCH=${REAL_ARCH}"
 DOCKER_ARGS="${DOCKER_ARGS} --platform=linux/${DOCKER_TARGET_ARCH}"
@@ -77,6 +78,7 @@ DOCKER_ARGS="${DOCKER_ARGS} ${DOCKER_EXTRA_ARGS}"
 export DOCKER_BUILDKIT=1
 
 echo "Building morpheus:${DOCKER_TAG} with args..."
+echo "   CMAKE_CUDA_ARCHITECTURES   : ${CMAKE_CUDA_ARCHITECTURES}"
 echo "   CUDA_MAJOR_VER             : ${CUDA_MAJOR_VER}"
 echo "   CUDA_MINOR_VER             : ${CUDA_MINOR_VER}"
 echo "   CUDA_REV_VER               : ${CUDA_REV_VER}"

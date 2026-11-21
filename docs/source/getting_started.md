@@ -113,13 +113,14 @@ At time of writing the defined datasets are:
 * datasets - Input files needed for many of the examples
 * docs - Graphics needed for documentation
 * examples - Data needed by scripts in the `examples` directory
+* inventory - The model inventory under `models/inventory`: the SID model and its validation set
 * models - Morpheus models (largest dataset)
 * tests - Data used by unittests
 * validation - Subset of the models dataset needed by some unittests
 
-To download just the examples and models:
+To download just the examples and the model inventory, which is what the release container build copies into the image and so needs fetched first:
 ```bash
-scripts/fetch_data.py fetch examples models
+scripts/fetch_data.py fetch examples inventory
 ```
 
 To download the data needed for unittests:
@@ -140,7 +141,13 @@ To assist in building the Morpheus container, several scripts have been provided
 ./docker/build_container_release.sh
 ```
 
-By default, this will create an image named `nvcr.io/nvidia/morpheus/morpheus:${MORPHEUS_VERSION}-runtime` where `$MORPHEUS_VERSION` is replaced by the output of `git describe --tags --abbrev=0`. You can specify a different Docker image name and tag by passing the script the `DOCKER_IMAGE_NAME`, and `DOCKER_IMAGE_TAG` environment variables, respectively.
+By default, this will create an image named `morpheus:${MORPHEUS_VERSION}-runtime-amd64`, where `${MORPHEUS_VERSION}` is the output of `ci/scripts/project_version.sh`: the nearest Git tag, or in a clone with no tags, as a clone of this fork is, the version `CMakeLists.txt` gives the project, `v25.10.00`. You can specify a different Docker image name and tag by passing the script the `DOCKER_IMAGE_NAME`, and `DOCKER_IMAGE_TAG` environment variables respectively.
+
+The build compiles the `morpheus-core` Conda package from the checkout and installs it into the image, with the examples, the Splunk app and the model inventory the scoring stages read. Three things about it are specific to this fork:
+
+- No step of an image build has a GPU. The package is therefore tested with a smoke test that needs none, `ci/conda/recipes/morpheus-core/morpheus_core_test.sh`, which runs a CPU pipeline over a committed sample. The test tiers run from a checkout; refer to [Contributing to This Fork](./developer_guide/fork_contributing.md).
+- The package is compiled for every CUDA architecture RAPIDS supports. To compile for one card, set `CMAKE_CUDA_ARCHITECTURES` to its architecture, `89` for compute capability 8.9: `CMAKE_CUDA_ARCHITECTURES=89 ./docker/build_container_release.sh`.
+- Only `amd64` images can be built, because the fork keeps `x86_64` environment files only.
 
 To run the built "release" container, use the following:
 
@@ -151,8 +158,10 @@ To run the built "release" container, use the following:
 The `./docker/run_container_release.sh` script accepts the same `DOCKER_IMAGE_NAME`, and `DOCKER_IMAGE_TAG` environment variables that the `./docker/build_container_release.sh` script does. For example, to run version `v25.10.00` use the following:
 
 ```bash
-DOCKER_IMAGE_TAG="v25.10.00-runtime" ./docker/run_container_release.sh
+DOCKER_IMAGE_TAG="v25.10.00-runtime-amd64" ./docker/run_container_release.sh
 ```
+
+In the container the repository's files are under `/workspace`, and `MORPHEUS_REPOSITORY` is set to that directory so that the compositions find the saved searches and the models wherever a command is run from.
 
 ## Models
 

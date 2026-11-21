@@ -43,6 +43,28 @@
 #    copy local build artifacts
 # ========================================================================= #
 
+# ============== BUILDING THIS FORK ======================================= #
+#  docker/build_container_dev.sh builds [development]: the environment to
+#    compile and test a mounted checkout in. scripts/compile.sh, run inside
+#    it, compiles for the card it finds.
+#  docker/build_container_release.sh builds [runtime]: morpheus-core
+#    installed as a conda package, with the examples, the Splunk app and the
+#    model inventory the fork's stages score with.
+#
+#  No step of an image build has a GPU. The conda package is therefore
+#  tested with a smoke test that needs none
+#  (ci/conda/recipes/morpheus-core/morpheus_core_test.sh); the test tiers run
+#  from a checkout, in CI on a CPU and with ci/scripts/gpu_conformance.sh on
+#  a card.
+#
+#  Build arguments beyond the versions below:
+#    CMAKE_CUDA_ARCHITECTURES  what the conda package is compiled for. RAPIDS
+#      (the default) is every architecture RAPIDS supports; a package for one
+#      card names its architecture, 89 for compute capability 8.9.
+#    CONDA_IMAGE  the image conda is copied from. Pinned, so a rebuild starts
+#      from the same conda.
+# ========================================================================= #
+
 # Args used in FROM commands must come first
 ARG FROM_IMAGE="nvidia/cuda"
 ARG CUDA_MAJOR_VER=12
@@ -60,6 +82,15 @@ ARG MORPHEUS_ROOT_HOST=.
 ARG CONDA_CHANNEL_ALIAS="https://conda.anaconda.org"
 # This should reflect the output of the `arch` command.
 ARG REAL_ARCH=x86_64
+# The image conda is copied from. `condaforge/mambaforge:latest` has resolved to this tag since 2024-11-27, when the
+# image stopped being published, so naming the tag changes nothing today and keeps a rebuild from moving if `latest`
+# is ever repointed. It carries mamba 1.x, which the `boa` installed below for `conda mambabuild` requires.
+ARG CONDA_IMAGE="condaforge/mambaforge:24.9.2-0"
+
+# ============ Stage: conda_source ============
+# Where /opt/conda is copied from. A stage of its own because COPY --from takes a stage or a literal image name and
+# does not expand a build argument.
+FROM --platform=$TARGETPLATFORM ${CONDA_IMAGE} AS conda_source
 
 # ============ Stage: base ============
 # Configure the base conda environment
@@ -112,13 +143,13 @@ ENV CUDA_PATH=/usr/local/cuda
 ENV MORPHEUS_ROOT=/workspace
 WORKDIR ${MORPHEUS_ROOT}
 
-COPY --from=condaforge/mambaforge:latest /opt/conda /opt/conda
+COPY --from=conda_source /opt/conda /opt/conda
 
 ENV PATH="${PATH}:/opt/conda/bin"
 
 # Install mamba to speed the solve up
+# Certificates are verified: every package the image is built from arrives over this configuration.
 RUN --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
-    conda config --set ssl_verify false &&\
     conda config --add pkgs_dirs /opt/conda/pkgs &&\
     # Install mamba, boa and git here. Conda build breaks with other git installs
     /opt/conda/bin/mamba install -y -n base -c conda-forge "boa" "git >=2.35.3" "python=${PYTHON_VER}" "tini=0.19"
@@ -138,7 +169,7 @@ RUN --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
     conda init bash && \
     echo "conda activate morpheus" >> ~/.bashrc
 
-# Set the permenant conda channes to use for morpheus
+# Set the permanent conda channels to use for morpheus
 RUN source activate morpheus &&\
     conda config --env --add channels conda-forge &&\
     conda config --env --add channels nvidia &&\
@@ -164,6 +195,8 @@ ARG CUDA_MINOR_VER
 # --build-arg CONDA_UPLOAD=upload
 ARG CONDA_TOKEN
 ARG CONDA_UPLOAD
+# What the package is compiled for; see the header.
+ARG CMAKE_CUDA_ARCHITECTURES=RAPIDS
 
 ENV GIT_CLONE_PROTECTION_ACTIVE=false
 
@@ -196,7 +229,10 @@ RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locke
     git config --global --add safe.directory "*" &&\
     # Change to the morpheus directory and build the conda package
     cd ${MORPHEUS_ROOT_HOST} &&\
-    MORPHEUS_PYTHON_BUILD_STUBS=OFF CONDA_TOKEN=${CONDA_TOKEN} CONDA_BLD_PATH=/opt/conda/conda-bld ./ci/conda/recipes/run_conda_build.sh morpheus-core ${CONDA_UPLOAD}
+    # The package's version is the nearest tag, or without one the version CMakeLists.txt gives the project
+    # (ci/scripts/project_version.sh). Stubs are off because generating them needs a driver.
+    MORPHEUS_PYTHON_BUILD_STUBS=OFF CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES} CONDA_TOKEN=${CONDA_TOKEN} \
+        CONDA_BLD_PATH=/opt/conda/conda-bld ./ci/conda/recipes/run_conda_build.sh morpheus-core ${CONDA_UPLOAD}
 
 # ============ Stage: base_extended ============
 # Extension point for optional environmental elements layered over conda_env.
@@ -239,20 +275,19 @@ RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locke
     --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
     --mount=type=cache,id=pip_cache,target=/root/.cache/pip,sharing=locked \
     source activate morpheus &&\
+    # The channels the package was built against in run_conda_build.sh, and no others
     CONDA_ALWAYS_YES=true /opt/conda/bin/mamba install -n morpheus \
         -c local \
         -c conda-forge \
-        -c huggingface \
         -c rapidsai \
-        -c rapidsai-nightly \
         -c nvidia \
         -c nvidia/label/dev \
-        -c pytorch \
         morpheus-core && \
-    # Change to the morpheus directory and build the docs
+    # Change to the morpheus directory and build the docs, as CI builds them: Sphinx imports the package installed
+    # above, so nothing is compiled a second time. The pages land in build/docs/html, where the runtime stage copies
+    # them from. Vale is CI's check and is not in this environment.
     cd ${MORPHEUS_ROOT_HOST} &&\
-    CMAKE_CONFIGURE_EXTRA_ARGS="-DMORPHEUS_BUILD_DOCS=ON -DMORPHEUS_PYTHON_BUILD_STUBS=OFF -DMORPHEUS_CUDA_ARCHITECTURES=RAPIDS"\
-         ./scripts/compile.sh --target morpheus_docs
+    SKIP_PROSE_CHECK=1 ./ci/scripts/fork_docs.sh
 
 # ============ Stage: runtime_conda_create ============
 # Setup conda for the runtime environment
@@ -276,12 +311,9 @@ RUN --mount=type=bind,from=conda_bld_morpheus_core,source=/opt/conda/conda-bld,t
     CONDA_ALWAYS_YES=true /opt/conda/bin/mamba install -n morpheus \
         -c local \
         -c conda-forge \
-        -c huggingface \
         -c rapidsai \
-        -c rapidsai-nightly \
         -c nvidia \
         -c nvidia/label/dev \
-        -c pytorch \
         morpheus-core && \
     /opt/conda/bin/conda env update --solver=libmamba -n morpheus --file \
         conda/environments/runtime_cuda-${CUDA_MAJOR_VER}${CUDA_MINOR_VER}_arch-${REAL_ARCH}.yaml
@@ -300,7 +332,8 @@ RUN --mount=type=bind,source=.,target=/opt/host_repo \
     git clone file:///opt/host_repo/${MORPHEUS_ROOT_HOST} /tmp/morpheus_repo &&\
     cd /tmp/morpheus_repo &&\
     git lfs install &&\
-    ./scripts/fetch_data.py fetch examples
+    # The LFS files the runtime image ships: the examples' data, and the model inventory's SID model
+    ./scripts/fetch_data.py fetch examples inventory
 
 # ============ Stage: runtime ============
 # Setup container for runtime environment
@@ -313,6 +346,8 @@ COPY --from=git_clone "/tmp/morpheus_repo/conda/environments/*.yaml" "./conda/en
 COPY --from=git_clone "/tmp/morpheus_repo/docker" "./docker"
 COPY --from=build_docs "/workspace/${MORPHEUS_ROOT_HOST}/build/docs/html" "./docs"
 COPY --from=git_clone "/tmp/morpheus_repo/examples" "./examples"
+# The two shipped models TC4AbpScoreStage and TC7SidScoreStage score with, and the inventory that pins their digests
+COPY --from=git_clone "/tmp/morpheus_repo/models/inventory" "./models/inventory"
 COPY --from=git_clone "/tmp/morpheus_repo/scripts" "./scripts"
 COPY --from=git_clone "/tmp/morpheus_repo/*.md" "./"
 COPY --from=git_clone "/tmp/morpheus_repo/LICENSE" "./"
@@ -322,6 +357,10 @@ RUN /opt/conda/bin/conda clean -afy && \
     # Ensure the conda-bld directory is indexed even if empty
     mkdir -p /opt/conda/conda-bld && \
     /opt/conda/bin/conda index /opt/conda/conda-bld
+
+# The compositions read the Splunk app's saved searches, the model inventory and the committed layer 5 models from
+# the repository. The package is installed outside it here, so say where those files are.
+ENV MORPHEUS_REPOSITORY=${MORPHEUS_ROOT}
 
 # Use morpheus by default
 CMD [ "morpheus" ]
