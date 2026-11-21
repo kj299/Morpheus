@@ -30,9 +30,6 @@ The deterministic identity of one record: the first 32 hexadecimal characters of
 ## `lineage_id`
 The identity of a correlation chain: the first 32 hexadecimal characters of a SHA-256 over the root [`entity_key`](#entity_key), the `window_id` and the Merkle root of the chain's sorted, deduplicated [`event_uid`](#event_uid) values. Because sorting and deduplication come before hashing, it depends on chain membership alone and survives out-of-order delivery, redelivery and replay.
 
-## MLflow Triton Plugin
-[MLflow](https://mlflow.org/) plugin for deploying your models from MLflow to [Triton Inference Server](#triton-inference-server). Refer to [`mlflow-triton-plugin`](https://github.com/triton-inference-server/server/tree/main/deploy/mlflow-triton-plugin) for more information.
-
 ## module
 A Morpheus module is a type of work unit that can be utilized in the Morpheus stage and can be registered to a MRC segment module registry. Modules are beneficial when there is a possibility for the work-unit to be reused.
 
@@ -74,9 +71,6 @@ Fundamental building block in Morpheus representing a unit of work. Stages may c
 
 ## telemetry class
 A family of records that share a schema and a behavioral subject, named in the `telemetry_class` envelope field: `TC-1` through `TC-7` for OSI layers 1 to 7, and `TC-0` for identity and asset context. Records of classes `TC-1` to `TC-7` carry the same fourteen-field universal envelope. The guide also treats the platform that delivers the telemetry as a class, `TC-P`, whose records are the pipeline's own health per collector, class and tenant. Refer to [Part 2: Telemetry Class Requirements](../developer_guide/guides/11_predictive_behavioral_analytics_osi.md#part-2-telemetry-class-requirements).
-
-## Triton Inference Server
-Triton Inference Server, part of the NVIDIA AI platform, streamlines and standardizes AI inference by enabling teams to deploy, run, and scale trained AI models from any framework on any GPU- or CPU-based infrastructure. Most Morpheus pipelines utilize Triton for inferencing via the `TritonInferenceStage`. Refer to [https://developer.nvidia.com/nvidia-triton-inference-server](https://developer.nvidia.com/nvidia-triton-inference-server)
 
 ## window seal
 The point at which a time window is closed for scoring: when the event-time watermark, the largest event time seen so far, reaches the window's end plus a lateness horizon. Windows are half-open intervals anchored to a fixed epoch, and only sealed windows are scored. A row that arrives for a sealed window goes to a late-arrival stream and never changes the published window. Because the watermark rather than the wall clock drives the seal, a replay seals the same windows at the same points. Implemented by `WindowSealStage` over {py:mod}`~morpheus.utils.window_seal`. Refer to [Control 7: Deterministic windows](../developer_guide/guides/11_predictive_behavioral_analytics_osi.md#control-7-deterministic-windows).

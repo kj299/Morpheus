@@ -38,8 +38,8 @@ Upstream Morpheus supplies the streaming runtime, the per-entity autoencoder, an
 it does not supply is the substrate that turns seven layers of telemetry into one story about one
 entity: identifiers stable across a replay, attribution from an IP at layer 3 back to a physical port at
 layer 1, windows that close on event time rather than on arrival, and the per-layer features the
-detection rules need. That substrate is what this fork adds: the lineage stages, the TC-1 and TC-2
-telemetry stages, the determinism controls, and an installable Splunk app.
+detection rules need. That substrate is what this fork adds: the lineage stages, the telemetry stages
+for TC-0 to TC-7, the determinism controls, and an installable Splunk app.
 
 The design was written down in full before any of it was built. See
 :doc:`developer_guide/guides/11_predictive_behavioral_analytics_osi` for the analysis, the per-layer
@@ -55,21 +55,14 @@ Features
 --------
 
  * Built on RAPIDS
-    * Built on the RAPIDS™ libraries, deep learning frameworks, and NVIDIA Triton™ Inference Server, Morpheus simplifies
-      the analysis of logs and telemetry to help detect and mitigate security threats.
- * AI Cybersecurity Capabilities
-    * Deploy your own models using common deep learning frameworks. Or get a jump-start in building applications to
-      identify leaked sensitive information, detect malware, and identify errors via logs by using one of NVIDIA's
-      pre-trained and tested models.
- * Real-Time Telemetry
-    * Morpheus can receive rich, real-time network telemetry from every NVIDIA® BlueField® DPU-accelerated server in the
-      data center without impacting performance. Integrating the framework into a third-party cybersecurity offering
-      brings the world's best AI computing to communication networks.
- * DPU-Connected
-    * The NVIDIA BlueField Data Processing Unit (DPU) can be used as a telemetry agent for receiving critical data
-      center communications into Morpheus. As an optional addition to Morpheus, BlueField DPU also extends static
-      security logging to a sophisticated dynamic real-time telemetry model that evolves with new policies and threat
-      intelligence.
+    * Built on the RAPIDS™ libraries, Morpheus runs the analysis of logs and telemetry on the GPU, and this fork's
+      stages also run on the CPU.
+ * Behavioral analytics across OSI layers 1 to 7
+    * The fork's telemetry stages turn each layer's records into per-entity features, the detection rules in the
+      Splunk app read them, and the lineage stages tie each detection back to the records it came from.
+ * Deterministic replay
+    * Identifiers, windows and scores depend only on the input, so a replay of the same records produces the same
+      detections. The golden tests check this on every change.
 
 Getting Started
 ---------------
@@ -92,6 +85,7 @@ Modifying Morpheus
 ^^^^^^^^^^^^^^^^^^
  * :doc:`Contributing to This Fork <developer_guide/fork_contributing>` - Making a change to the fork and getting it through its CI
  * :doc:`developer_guide/contributing` - Covers building from source, making changes and contributing to Morpheus
+ * :doc:`Testing the Kafka Stages <developer_guide/kafka_testing>` - Checking the Kafka source and sink stages by hand against a local broker
 
 
 .. toctree::
@@ -117,6 +111,7 @@ Modifying Morpheus
    developer_guide/architecture
    developer_guide/fork_contributing
    developer_guide/contributing
+   developer_guide/kafka_testing
 
 .. toctree::
    :caption: API

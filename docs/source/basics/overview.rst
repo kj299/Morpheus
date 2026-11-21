@@ -63,7 +63,7 @@ run:
    pipeline-other  Run a custom inference pipeline without a specific model type
 
 
-Currently, Morpheus pipeline can be operated in four different modes.
+A Morpheus pipeline can run in three modes. This fork's telemetry pipelines use ``pipeline-other``.
 
  * ``pipeline-fil``
     * This pipeline mode is used to run inference on FIL (Forest Inference Library) models such as XGBoost, RandomForestClassifier, etc.

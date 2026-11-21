@@ -1,8 +1,4 @@
-docs/source/developer_guide/guides/img/** filter=lfs diff=lfs merge=lfs -text
 docs/source/img/* filter=lfs diff=lfs merge=lfs -text
-examples/basic_usage/img/** filter=lfs diff=lfs merge=lfs -text
 examples/data/** filter=lfs diff=lfs merge=lfs -text
-git filter=lfs diff=lfs merge=lfs -text
-morpheus/_version.py export-subst
-status filter=lfs diff=lfs merge=lfs -text
+python/morpheus/morpheus/_version.py export-subst
 tests/tests_data/** filter=lfs diff=lfs merge=lfs -text

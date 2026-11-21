@@ -18,7 +18,6 @@ limitations under the License.
 This document walks through manual testing of the Kafka functionality in Morpheus. There are also several automated tests which are run as part of the CI process. To run the tests locally we will need to install a few dependencies needed for the tests:
 ```bash
 mamba install -c conda-forge "openjdk=11.0.15"
-npm install -g camouflage-server@0.15
 python ${MORPHEUS_ROOT}/ci/scripts/download_kafka.py
 cd ${MORPHEUS_ROOT}
 ```
@@ -37,7 +36,7 @@ pytest --run_slow --run_kafka
     ```bash
     mamba install -c conda-forge jq
     ```
-1. Launch Kafka using instructions from the [Quick Launch Kafka Cluster](../../docs/source/developer_guide/contributing.md#quick-launch-kafka-cluster) section of [contributing.md](../../docs/source/developer_guide/contributing.md) following steps 1-6.
+1. Launch Kafka using instructions from the [Quick Launch Kafka Cluster](contributing.md#quick-launch-kafka-cluster) section of [contributing.md](contributing.md) following steps 1-6.
 
 1. The testing steps below will require two separate terminal windows. Each will need to have the `KAFKA_ADVERTISED_HOST_NAME`, `BROKER_LIST` and `MORPHEUS_ROOT` environment variables set. In the example below both `morpheus` and `kafka-docker` repositories have been checked out into the `~work` directory, replacing these paths with the location of your checkouts.
     ```bash
@@ -126,7 +125,7 @@ ulimit -n 4096
 
 1. Return to the Morpheus terminal, and once the monitor stage has recorded: `read: 20 messages` shut down the pipeline with Ctrl-C.
 
-1. If successful the output file `.tmp/morpheus-src-copy-test-p.csv` should contain the same records as those in `tests/tests_data/filter_probs.csv` however they are most likely out of order. To verify the output we will compare the sorted outputs:
+1. If successful the output file `.tmp/morpheus-src-copy-test-p.csv` should contain the same records as those in `tests/tests_data/filter_probs.csv` however they are most likely out of order. Kafka keeps order only within a partition, so a consumer reading three partitions interleaves them. A pipeline that depends on order must restore it from each record's event time, as this fork's window stages do; it must not rely on arrival order. To verify the output we will compare the sorted outputs:
     ```bash
     diff -q --ignore-all-space <(sort tests/tests_data/filter_probs.csv) <(sort .tmp/morpheus-src-copy-test-p.csv)
     ```

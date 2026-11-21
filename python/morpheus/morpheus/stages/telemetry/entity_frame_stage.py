@@ -47,7 +47,6 @@ across a restart by its checkpoint. `event_uid` is the digest of those, so a fra
 stages can stamp, seal and order.
 """
 
-import hashlib
 import logging
 import math
 import typing
@@ -66,6 +65,7 @@ from morpheus.pipeline.pass_thru_type_mixin import PassThruTypeMixin
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.utils.column_assign import to_host_frame
 from morpheus.utils.entity_key import normalize_text
+from morpheus.utils.lineage import event_uid
 from morpheus.utils.type_utils import is_cudf_type
 
 logger = logging.getLogger(__name__)
@@ -346,8 +346,10 @@ class EntityFrameStage(CheckpointMixin, GpuAndCpuMixin, PassThruTypeMixin, Singl
             row["schema_version"] = self._schema_version
             row["origin_hash"] = f"{entity}@{int(first['window_id'])}:{int(first['revision'])}"
             row["collector_seq"] = self._next_seq
-            row["event_uid"] = hashlib.sha256(
-                f"{self._collector_id}|{self._schema_version}|{row['origin_hash']}".encode()).hexdigest()
+            row["event_uid"] = event_uid(self._collector_id,
+                                         self._schema_version,
+                                         row["origin_hash"],
+                                         row["collector_seq"])
             rows.append(row)
             self._next_seq += 1
 

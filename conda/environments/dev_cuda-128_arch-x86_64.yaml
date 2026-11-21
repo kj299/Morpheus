@@ -36,6 +36,7 @@ dependencies:
 - doxygen=1.9.2
 - elasticsearch==8.9.0
 - flake8
+- gflags=2.2
 - git-lfs
 - glog>=0.7.1,<0.8
 - grpcio
