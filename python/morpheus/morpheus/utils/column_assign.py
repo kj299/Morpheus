@@ -26,6 +26,9 @@ import pandas as pd
 
 from morpheus.utils.type_aliases import DataFrameType
 
+INTEGER_KINDS = ("i", "u")
+"""The dtype kinds that are integers: signed and unsigned."""
+
 
 def _as_integers(values: list) -> list:
     """
@@ -183,7 +186,7 @@ def assign_nullable_bool_column(df: DataFrameType, column: str, values: list):
         df[column] = pd.Series(pd.array(values, dtype="boolean"), index=df.index)
 
 
-def to_host_frame(df: DataFrameType) -> pd.DataFrame:
+def to_host_frame(df: DataFrameType, nullable_ints: bool = False) -> pd.DataFrame:
     """
     Return a whole frame on the host, keeping integer columns integral across the copy.
 
@@ -198,23 +201,61 @@ def to_host_frame(df: DataFrameType) -> pd.DataFrame:
     untouched: it never lost the type in the first place, and coercing it would move the CPU mode instead of
     meeting it.
 
+    **Collecting for a concatenation is the other case, and `nullable_ints` is for it.** A composition collects
+    its output by bringing each sink's frames to the host and concatenating them, and a telemetry class's frame
+    carries only its own columns, so the concatenation fills each with gaps for every other class's rows. What
+    pandas fills with depends on the dtype it starts from: a nullable `Int64` survives the fill, and a plain numpy
+    `int64` -- which cuDF's `to_pandas` gives whenever the frame has no gaps of its own, and which a host frame
+    may hold too -- cannot hold a gap, so it is widened to float64 and every count in it grows a decimal point.
+    With `nullable_ints` every integer column is carried as `Int64` whichever side of the boundary the frame was
+    on, so the concatenation is not left to choose, and both execution modes follow the one rule.
+
+    Asking `to_pandas` for nullable types instead was tried and was worse. It fixes the integer columns and changes
+    how every gap returns to the host, so object columns yield `pandas.NA` where they yielded `None` and stage code
+    testing `value is None` stops recognising a missing value. The conversion itself is therefore left alone.
+
     Parameters
     ----------
     df : `pandas.DataFrame` or `cudf.DataFrame`
         Frame to copy to the host.
+    nullable_ints : bool, default = False
+        Cast a host frame's integer columns to `Int64` as well. Set by code that concatenates what it collects;
+        left unset by a stage that sends the frame back, which must not retype a frame that never left the host.
 
     Returns
     -------
     `pandas.DataFrame`
-        The frame on the host, with every integer column readable as an integer.
+        The frame on the host, with every integer column readable as an integer. A copy: the frame passed in is
+        not written to.
     """
-    if (not hasattr(df, "to_pandas")):
+    on_device = hasattr(df, "to_pandas")
+
+    if (not on_device and not nullable_ints):
         return df.copy(deep=False)
 
-    integer_columns = [name for (name, dtype) in df.dtypes.items() if getattr(dtype, "kind", "O") in ("i", "u")]
-    host = df.to_pandas()
+    integer_columns = [name for (name, dtype) in df.dtypes.items() if getattr(dtype, "kind", "O") in INTEGER_KINDS]
+    host = df.to_pandas() if on_device else df.copy(deep=False)
 
-    for name in integer_columns:
+    return as_nullable_integers(host, integer_columns)
+
+
+def as_nullable_integers(host: pd.DataFrame, columns) -> pd.DataFrame:
+    """
+    Cast the named columns of a host frame to nullable `Int64`, in place, and return the frame.
+
+    The cast `to_host_frame` applies, on its own so the rule can be asserted without a device frame.
+    """
+    for name in columns:
         host[name] = host[name].astype("Int64")
 
     return host
+
+
+def truthy(value) -> bool:
+    """
+    A column value as a plain bool, with a null reading as False.
+
+    `bool(pd.NA)` raises rather than returning False, and a flag on a row is nullable because "not yet answerable" is
+    a distinct state from "no". Code that means "this did not fire" says so through this.
+    """
+    return False if pd.isna(value) else bool(value)

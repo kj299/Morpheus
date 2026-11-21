@@ -50,6 +50,11 @@ Beside the scored stream each runner writes the two branches a deployment's forw
 - **`--policy minimization_policy.example.yaml`** pseudonymizes before the wire, with the key from the
   environment variable the policy names. The example policy says how it was arrived at and what it costs.
 
+- **`--execution-mode gpu`** runs the composition, its two branches and the delivery in GPU mode. The default is
+  `cpu`, which is what every golden file is an artifact of. The class files are read on the host in both modes.
+  `tests/morpheus/determinism/test_gpu_parity.py` holds every segment's GPU output to its CPU output, and runs
+  only where there is a card.
+
 `tests/morpheus/determinism/test_segment_runners.py` holds every runner to its composition: the files it writes
 from the committed samples are, line for line, the in-memory result rendered through the same wire. For the
 session, SaaS and endpoint segments it also stops a runner halfway through the data and starts it again from its

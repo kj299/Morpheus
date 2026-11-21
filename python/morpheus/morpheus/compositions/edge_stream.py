@@ -52,7 +52,7 @@ def emit(config: Config, rows: pd.DataFrame, **stage_kwargs) -> pd.DataFrame:
     `pandas.DataFrame`
         One row per edge, in `EDGE_COLUMNS` order.
     """
-    from morpheus.compositions.host_frame import to_host_frame  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.column_assign import to_host_frame  # pylint: disable=import-outside-toplevel
 
     rows = rows[rows["event_uid"].notna()]
 
@@ -67,7 +67,7 @@ def emit(config: Config, rows: pd.DataFrame, **stage_kwargs) -> pd.DataFrame:
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
-    frames = [to_host_frame(message.copy_dataframe()) for message in sink.get_messages()]
+    frames = [to_host_frame(message.copy_dataframe(), nullable_ints=True) for message in sink.get_messages()]
     edges = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=list(EDGE_COLUMNS))
 
     return edges[list(EDGE_COLUMNS)]

@@ -66,12 +66,23 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lineage_pipeline as lp  # noqa: E402
 import run_golden  # noqa: E402
 
+# The corpus and composition modules imported above replace themselves in sys.modules with the merged corpus and
+# composition, which pylint cannot follow, so every attribute read through them looks missing to it.
+# pylint: disable=no-member
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 LINEAGE_GOLDEN = os.path.join(HERE, "golden_lineage_expected.csv")
 
 CORPORA = run_golden.CORPORA
 """Every composed pipeline, by the stem its corpus module and golden share: every golden file beside this one."""
+
+EXAMPLE = os.path.join(HERE, "..", "..", "..", "examples", "behavioral_analytics")
+"""Where the segment runner and its samples live."""
+
+SEGMENTS = sorted(name for name in os.listdir(os.path.join(EXAMPLE, "samples"))
+                  if os.path.isdir(os.path.join(EXAMPLE, "samples", name)))
+"""Every segment with a sample, read from the directory rather than listed."""
 
 
 def _every_difference(rendered: str, golden_text: str) -> list[str]:
@@ -175,12 +186,60 @@ def test_the_composed_pipeline_reaches_the_same_answer_on_a_gpu(corpus_name: str
     _reaches_golden(corpus_name, ExecutionMode.GPU)
 
 
+def _runner_writes(segment: str, execution_mode: str, output_dir) -> dict:
+    """What the segment runner puts on the wire for a segment's sample in one mode: sorted lines per file."""
+    import pathlib  # pylint: disable=import-outside-toplevel
+
+    sys.path.insert(0, os.path.abspath(EXAMPLE))
+
+    try:
+        import segment_runner  # pylint: disable=import-outside-toplevel,import-error
+    finally:
+        sys.path.remove(os.path.abspath(EXAMPLE))
+
+    segment_runner.run(segment,
+                       pathlib.Path(EXAMPLE) / "samples" / segment,
+                       output_dir=output_dir,
+                       execution_mode=execution_mode)
+
+    return {
+        path.name: sorted(path.read_text(encoding="utf-8").splitlines())
+        for path in sorted(output_dir.glob("*.jsonlines"))
+    }
+
+
+@pytest.mark.cpu_mode
+def test_the_runner_comparison_reads_what_a_run_wrote(tmp_path):
+    # The CPU half of the check below, so a machine with a GPU is testing the GPU run rather than this helper.
+    written = _runner_writes("network", "cpu", tmp_path / "cpu")
+
+    assert sum(len(lines) for lines in written.values()) > 0
+    assert all(name.endswith(".jsonlines") for name in written)
+
+
+@pytest.mark.gpu_mode
+@pytest.mark.parametrize("segment", SEGMENTS)
+def test_the_segment_runner_writes_the_same_records_on_a_gpu(segment: str, tmp_path):
+    # The compositions are held to their goldens in both modes above. A runner adds two ends around one, the host
+    # read of the collector files and the delivery through `MinimizationStage`, `SiemWireStage` and the sink, and
+    # `--execution-mode gpu` runs the composition, its health and edge branches and that delivery on the device.
+    # What reaches the wire must not depend on which mode the segment ran in.
+    on_cpu = _runner_writes(segment, "cpu", tmp_path / "cpu")
+    on_gpu = _runner_writes(segment, "gpu", tmp_path / "gpu")
+
+    assert sum(len(lines) for lines in on_cpu.values()) > 0
+    assert sorted(on_gpu) == sorted(on_cpu)
+
+    for (name, lines) in on_cpu.items():
+        assert on_gpu[name] == lines, f"{name} differs between the modes"
+
+
 @pytest.mark.cpu_mode
 def test_an_integer_column_survives_a_concatenation_that_has_to_fill_it():
     # What the GPU parity run actually caught, reproduced without a device. A telemetry class's frame carries only
     # its own columns, so collecting them means filling this one with gaps for every other class's rows. Starting
     # from a plain numpy integer the fill widens the column and every count in it grows a decimal point.
-    from host_frame import as_nullable_integers
+    from morpheus.utils.column_assign import as_nullable_integers  # pylint: disable=import-outside-toplevel
 
     counts = pd.DataFrame({"arp_count_in_window": np.array([3], dtype="int64")})
     other_class = pd.DataFrame({"event_time": [1, 2]})
@@ -204,10 +263,10 @@ def test_an_integer_column_survives_a_concatenation_that_has_to_fill_it():
 def test_a_column_that_was_never_an_integer_is_left_alone():
     # The negative control. The rule keys on the frame's own dtypes, not on whether a value looks whole, so an
     # optical power reading of 3.0 stays a float.
-    from host_frame import to_host_frame
+    from morpheus.utils.column_assign import to_host_frame  # pylint: disable=import-outside-toplevel
 
     readings = pd.DataFrame({"optical_rx_dbm": [3.0, float("nan"), 5.0]})
-    left = to_host_frame(readings.copy())
+    left = to_host_frame(readings.copy(), nullable_ints=True)
 
     assert left["optical_rx_dbm"].dtype.kind == "f"
     assert left.to_csv(index=False) == readings.to_csv(index=False)

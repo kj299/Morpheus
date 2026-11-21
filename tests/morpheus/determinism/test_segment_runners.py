@@ -53,6 +53,10 @@ from morpheus.utils.siem_wire import to_wire_lines  # noqa: E402
 from morpheus.utils.stage_checkpoint import snapshot_digest  # noqa: E402
 from morpheus.utils.tracker_state import from_bytes  # noqa: E402
 
+# The corpus and composition modules imported above replace themselves in sys.modules with the merged corpus and
+# composition, which pylint cannot follow, so every attribute read through them looks missing to it.
+# pylint: disable=no-member
+
 SEGMENTS = sorted(segment_runner.SEGMENTS)
 
 
@@ -351,3 +355,44 @@ def test_a_context_directory_that_is_not_there_is_refused(tmp_path):
                            EXAMPLE / "samples" / "network",
                            output_dir=tmp_path / "out",
                            context_dir=tmp_path / "absent")
+
+
+def test_the_execution_mode_reaches_the_configuration():
+    from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
+
+    # pylint: disable=protected-access
+    assert segment_runner._config().execution_mode == ExecutionMode.CPU
+    assert segment_runner._config("cpu").execution_mode == ExecutionMode.CPU
+    assert segment_runner._config("gpu").execution_mode == ExecutionMode.GPU
+
+    with pytest.raises(ValueError, match="execution mode"):
+        segment_runner._config("tpu")
+
+
+def test_an_unknown_execution_mode_is_refused_before_anything_is_written(tmp_path):
+    with pytest.raises(ValueError, match="execution mode"):
+        segment_runner.run("saas", EXAMPLE / "samples" / "saas", output_dir=tmp_path / "out", execution_mode="tpu")
+
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("arguments,expected", [([], "cpu"), (["--execution-mode", "cpu"], "cpu"),
+                                                (["--execution-mode", "gpu"], "gpu")])
+def test_the_command_line_passes_the_execution_mode_to_the_run(arguments: list, expected: str, tmp_path, monkeypatch):
+    seen = {}
+
+    def record(segment, input_dir, **options):
+        seen.update(options, segment=segment, input_dir=input_dir)
+
+        return {}
+
+    monkeypatch.setattr(segment_runner, "run", record)
+
+    assert segment_runner.main(["saas", "--output", str(tmp_path / "out")] + arguments) == 0
+    assert seen["execution_mode"] == expected
+    assert seen["segment"] == "saas"
+
+
+def test_the_command_line_refuses_a_mode_it_does_not_know(tmp_path):
+    with pytest.raises(SystemExit):
+        segment_runner.main(["saas", "--output", str(tmp_path / "out"), "--execution-mode", "tpu"])

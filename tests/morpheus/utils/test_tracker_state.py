@@ -58,6 +58,7 @@ from morpheus.utils.outcome_run import OutcomeRunTracker
 from morpheus.utils.pair_history import PairHistoryTracker
 from morpheus.utils.ratio_window import RatioWindowTracker
 from morpheus.utils.session_timer import SessionTimer
+from morpheus.utils.sum_window import SumWindowTracker
 from morpheus.utils.tracker_state import StateError
 from morpheus.utils.tracker_state import decode
 from morpheus.utils.tracker_state import encode
@@ -219,6 +220,10 @@ def _ratio(tracker, key, now, draw):
     return tracker.observe(key, now, draw < 0.3)
 
 
+def _amount(tracker, key, now, draw):
+    return tracker.observe(key, now, round(draw * 1500, 3))
+
+
 def _reboots(tracker, key, now, draw):
     return tracker.count(tracker.state(key), now, draw < 0.3)
 
@@ -273,6 +278,8 @@ CASES = {
     "ratio_window": (lambda: RatioWindowTracker(min_denominator=2, max_entities=3), _keyed_by(_ratio)),
     "reboot_counter": (lambda: RebootCounter(bucket_ns=6 * HOUR_NS, max_devices=3), _keyed_by(_reboots)),
     "session_timer": (lambda: SessionTimer(timeout_ns=2 * HOUR_NS, max_pending=3), _session_timer_ops),
+    # A cap of four, so the run reaches saturation and the restored tracker has to carry it.
+    "sum_window": (lambda: SumWindowTracker(window_ns=6 * HOUR_NS, max_samples=4, max_entities=3), _keyed_by(_amount)),
     "transfer_envelope": (lambda: TransferEnvelopeTracker(min_samples=3, max_entities=3), _keyed_by(_transfer)),
     "ttl_profile": (lambda: TtlProfileTracker(min_samples=3, max_entities=3), _keyed_by(_ttl)),
     "value_novelty": (lambda: ValueNoveltyTracker(["serial", "chassis"], max_values=3, max_entities=3),

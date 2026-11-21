@@ -30,6 +30,7 @@ The registry starts non-empty, which is the point. Naming the void is what makes
 than by accident.
 """
 
+import functools
 import glob
 import os
 import re
@@ -71,70 +72,42 @@ def searches() -> dict:
     return {name: parsed[name]["search"] for name in parsed.sections() if parsed.has_option(name, "search")}
 
 
-def stage_columns() -> set:
-    """Every column the fork's stages declare they write, read from the stages themselves."""
-    from morpheus.config import Config
-    from morpheus.config import CppConfig
-    from morpheus.config import ExecutionMode
+LIVENESS = os.path.join(REPO_ROOT, "tests", "morpheus", "determinism")
+"""Where the stage parameter liveness registry lives: one scenario, with constructor arguments, per fork stage."""
 
-    CppConfig.set_should_use_cpp(False)
-    config = Config()
-    config.execution_mode = ExecutionMode.CPU
+
+@functools.lru_cache(maxsize=1)
+def stage_columns() -> frozenset:
+    """
+    Every column the fork's stages declare they write, read from the stages themselves.
+
+    The stages are the ones the liveness registry constructs, each with the arguments its scenario gives it. That
+    registry is held total by its own test, which scans the stage directories, so a stage that arrives is read here
+    without being added to a second list. A column a stage writes only because of how it was configured -- the
+    value columns of the binding table a resolver was handed -- is whatever the registry's scenario configures.
+    """
+    import sys  # pylint: disable=import-outside-toplevel
 
     # Imported here so this module stays importable without a Morpheus runtime for the parsing tests above.
-    from morpheus.stages.lineage.binding_resolver_stage import BindingResolverStage
-    from morpheus.stages.lineage.community_id_stage import CommunityIdStage
-    from morpheus.stages.lineage.lineage_stamp_stage import LineageStampStage
-    from morpheus.stages.lineage.window_seal_stage import WindowSealStage
-    from morpheus.stages.telemetry.tc1_change_stage import TC1ChangeStage
-    from morpheus.stages.telemetry.tc1_flap_stage import TC1FlapStage
-    from morpheus.stages.telemetry.tc1_normalize_stage import TC1NormalizeStage
-    from morpheus.stages.telemetry.tc1_optical_stage import TC1OpticalStage
-    from morpheus.stages.telemetry.tc2_arp_stage import TC2ArpStage
-    from morpheus.stages.telemetry.tc2_auth_stage import TC2AuthStage
-    from morpheus.stages.telemetry.tc2_binding_stage import TC2BindingStage
-    from morpheus.stages.telemetry.tc2_cardinality_stage import TC2CardinalityStage
-    from morpheus.stages.telemetry.tc5_cadence_stage import TC5CadenceStage
-    from morpheus.stages.telemetry.tc5_novelty_stage import TC5NoveltyStage
-    from morpheus.stages.telemetry.tc5_risk_stage import TC5RiskStage
-    from morpheus.stages.telemetry.tc5_session_stage import TC5SessionStage
-    from morpheus.stages.telemetry.tc5_travel_stage import TC5TravelStage
-    from morpheus.utils.binding_table import Binding
-    from morpheus.utils.binding_table import BindingTable
+    sys.path.insert(0, LIVENESS)
 
-    table = BindingTable(name="t",
-                         value_columns=["port_key", "vlan_id"],
-                         bindings=[Binding(key="k", start_ns=0, end_ns=1, values=("p", "v"), uid="u")])
-    built = [
-        TC1NormalizeStage(config),
-        TC1OpticalStage(config),
-        TC1FlapStage(config),
-        TC1ChangeStage(config),
-        TC2CardinalityStage(config),
-        TC2ArpStage(config),
-        TC2AuthStage(config),
-        TC2BindingStage(config),
-        TC5SessionStage(config),
-        TC5NoveltyStage(config),
-        TC5CadenceStage(config),
-        TC5TravelStage(config),
-        TC5RiskStage(config),
-        CommunityIdStage(config),
-        LineageStampStage(config, id_columns=["collector_id"]),
-        BindingResolverStage(config, binding_table=table, key_column="k", uid_column="binding_uid"),
-        WindowSealStage(config, period_seconds=300, lateness_seconds=30, entity_key_column="entity_key"),
-    ]
+    try:
+        import test_stage_parameter_liveness as liveness  # pylint: disable=import-outside-toplevel,import-error
+    finally:
+        sys.path.remove(LIVENESS)
+
+    config = liveness._config()  # pylint: disable=protected-access
     columns = set()
 
-    for stage in built:
-        columns.update(stage.get_needed_columns())
+    for scenario in liveness.REGISTRY.values():
+        columns.update(scenario.stage(config, **scenario.base).get_needed_columns())
 
     # The health and edge stages replace their payload rather than adding columns to it, so they declare none; the
     # record each writes in their place is its contract.
-    from morpheus.stages.lineage.edge_emit_stage import EDGE_COLUMNS
-    from morpheus.stages.lineage.pipeline_health_stage import HEALTH_COLUMNS
+    from morpheus.stages.lineage.edge_emit_stage import EDGE_COLUMNS  # pylint: disable=import-outside-toplevel
+    from morpheus.stages.lineage.pipeline_health_stage import HEALTH_COLUMNS  # pylint: disable=import-outside-toplevel
 
-    return columns | set(HEALTH_COLUMNS) | set(EDGE_COLUMNS)
+    return frozenset(columns | set(HEALTH_COLUMNS) | set(EDGE_COLUMNS))
 
 
 def lookup_fields() -> set:
@@ -951,3 +924,51 @@ def test_the_registry_of_hollow_reads_is_honest():
             assert field in reads, f"{name} no longer reads {field} from {sourcetype}; drop the entry ({reason})"
             assert field not in contract, f"{sourcetype} now guarantees {field}; drop the entry ({reason})"
             assert "issue #" in reason, f"{name}/{field}: every hollow read names the issue that closes it"
+
+
+STACK_RULE = "R-B-L4-004 - Stack fingerprint mismatch"
+
+CLAIMED_STACK = re.compile(r"eval\s+claimed_stack\s*=\s*case\((?P<arms>.*?)\)\s*\|")
+
+CASE_ARM = re.compile(r"(?P<condition>(?:http_ua_os=\"\w+\"(?:\s+OR\s+)?)+),\s*\"(?P<stack>\w+)\"")
+
+
+def claimed_stacks(search: str) -> dict:
+    """The operating system to TCP stack mapping a search's `claimed_stack` case() spells out."""
+    match = CLAIMED_STACK.search(search)
+
+    assert match is not None, "the search no longer derives claimed_stack with a case() over http_ua_os"
+
+    mapping = {}
+
+    for arm in CASE_ARM.finditer(match.group("arms")):
+        for system in re.findall(r"http_ua_os=\"(\w+)\"", arm.group("condition")):
+            assert system not in mapping, f"{system} is claimed by two arms"
+            mapping[system] = arm.group("stack")
+
+    return mapping
+
+
+def test_the_stack_mismatch_search_claims_the_stack_the_package_says_each_system_runs():
+    # R-B-L4-004 compares the stack a flow's fingerprint belongs to with the stack the host's user agent claims,
+    # and has to turn an operating system into a stack to do it. The search spells that mapping out in SPL, and
+    # `morpheus.utils.user_agent.STACK_FAMILY` is the authority for it: `TC7HttpStage` names the systems and
+    # `morpheus.utils.stack_fingerprint` the stacks. A system added to one and not the other is a host the rule
+    # either never fires on or always does.
+    from morpheus.utils.stack_fingerprint import FAMILIES  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.user_agent import OS_TOKENS  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.user_agent import STACK_FAMILY  # pylint: disable=import-outside-toplevel
+
+    assert claimed_stacks(searches()[STACK_RULE]) == STACK_FAMILY
+
+    # And the authority covers what the stages can emit on either side of the comparison.
+    assert set(STACK_FAMILY) == {system for (_, system) in OS_TOKENS}
+    assert set(STACK_FAMILY.values()) <= set(FAMILIES.values())
+
+
+def test_a_search_that_claimed_a_different_stack_would_be_caught():
+    drifted = searches()[STACK_RULE].replace('http_ua_os="macos" OR http_ua_os="ios", "darwin"',
+                                             'http_ua_os="macos", "darwin", http_ua_os="ios", "linux"')
+
+    assert claimed_stacks(drifted)["ios"] == "linux"
+    assert claimed_stacks(drifted) != claimed_stacks(searches()[STACK_RULE])

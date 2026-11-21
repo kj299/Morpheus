@@ -17,6 +17,11 @@ limitations under the License.
 
 # Getting Started with Morpheus
 
+> **Note for this fork**: The pre-built containers and Conda packages this page describes come from the upstream project and do not
+> hold this fork's stages. To go from a clone of this fork to a running pipeline and passing tests, with no GPU and
+> nothing to build, follow [Getting Started with This Fork on a CPU](./fork_getting_started.md). For a GPU run, build
+> the development container as below and run `ci/scripts/gpu_conformance.sh` inside it.
+
 There are three ways to get started with Morpheus:
 - [Using pre-built Docker containers](#using-pre-built-docker-containers)
 - [Using the Morpheus Conda packages](#using-morpheus-conda-packages)

@@ -305,7 +305,7 @@ these searches.
 | `http_distinct_paths_baseline`, `http_distinct_paths_baseline_days` | `TC7HttpStage` | The client's busiest day and how many days it is over. R-D-L7-005 reads the ratio against it and `_baseline_mature`. |
 | `http_ua_family_first_seen` | `TC7HttpStage` | Whether this client has sent this user agent family before. R-B-L4-004 reads `http_ua_os`; the novelty is per client rather than per principal, and no rule reads it until it is. |
 | `service_connections_in_window` | `TC7ServiceStage` | The service's connections, beside its bytes and clients. R-B-L7-007 fires on the clients and carries the bytes. |
-| `service_clients_saturated` | `TC7ServiceStage` | The sample cap on one service's connections, which makes the client count a lower bound. |
+| `service_clients_saturated` | `TC7ServiceStage` | The sample cap on one service's connections, which makes its connection count, byte sum and client count lower bounds. |
 | `service_client_fingerprints` | `TC7ServiceStage` | How many client fingerprints the service has ever seen: context for `service_client_fingerprint_first_seen`, which R-B-L7-007 reads. |
 | `service_clients_baseline_days` | `TC7ServiceStage` | How many days the busiest day is over. R-B-L7-007 reads `service_clients_baseline_mature`. |
 | `saas_baseline_key` | `TC7SaasStage` | The principal and operation the baseline is kept on. R-B-L7-002 groups by `user_principal` and `operation`. |

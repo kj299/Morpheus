@@ -16,6 +16,12 @@ limitations under the License.
 -->
 
 # Morpheus Conda Packages
+
+> **Note for this fork**: The packages on the `nvidia` channel come from the upstream project. They hold its stages and
+> none of this fork's telemetry, lineage or delivery stages. To run this fork, install the locked environment and
+> overlay the fork's sources onto it, as [Getting Started with This Fork on a CPU](./fork_getting_started.md)
+> describes. The rest of this page describes the upstream packages and is kept for reference.
+
 The Morpheus stages are the building blocks for creating pipelines. The stages are organized into libraries by use case. The current libraries are:
 - `morpheus-core`
 - `morpheus-dfp`

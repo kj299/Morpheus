@@ -25,10 +25,10 @@ golden was generated that way).
 
 import pandas as pd
 
-from morpheus.compositions.host_frame import to_host_frame
 from morpheus.config import Config
 from morpheus.messages import ControlMessage
 from morpheus.stages.output.in_memory_sink_stage import InMemorySinkStage
+from morpheus.utils.column_assign import to_host_frame
 
 
 def build_pipeline_config(execution_mode=None, use_cpp: bool = False) -> Config:
@@ -77,8 +77,8 @@ def _collect(sink: InMemorySinkStage, drop_empty: bool = False) -> pd.DataFrame:
     for message in sink.get_messages():
         meta = message.payload() if isinstance(message, ControlMessage) else message
         # Integer columns are carried as nullable integers in both modes before anything is joined, so the
-        # concatenation cannot widen them to float in one mode and not the other; see `host_frame`.
-        frames.append(to_host_frame(meta.copy_dataframe()))
+        # concatenation cannot widen them to float in one mode and not the other; see `to_host_frame`.
+        frames.append(to_host_frame(meta.copy_dataframe(), nullable_ints=True))
 
     if drop_empty:
         frames = [frame for frame in frames if len(frame) > 0]

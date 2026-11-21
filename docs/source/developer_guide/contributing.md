@@ -17,6 +17,11 @@ limitations under the License.
 
 # Contributing to Morpheus
 
+> **Note for this fork**: This page is the upstream guide to building from source and contributing to Morpheus, and its
+> issue links point at the upstream project. To change this fork and get the change through its checks, follow
+> [Contributing to This Fork](./fork_contributing.md): the locked CPU environment, the source overlay, the test
+> tiers that `ci/scripts/gpu_conformance.sh` lists, and the `fork-cpu.yaml` workflow that runs them.
+
 Contributions to Morpheus fall into the following three categories.
 
 1. To report a bug, request a new feature, or report a problem with

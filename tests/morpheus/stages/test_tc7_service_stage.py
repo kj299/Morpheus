@@ -80,6 +80,29 @@ def test_an_old_connection_leaves_the_window(config: Config):
 
 
 @pytest.mark.gpu_and_cpu_mode
+def test_a_binding_sample_cap_marks_every_window_figure_as_a_floor(config: Config):
+    # Five connections inside one hour against a cap of three: from the fourth on, the connection count, the byte
+    # sum and the client count are what the cap kept rather than what the hour held, and the row says so.
+    result = run(config, connections(["a", "b", "c", "d", "e"], sizes=[10, 20, 30, 40, 50]), max_samples=3)
+
+    assert list(result["service_connections_in_window"]) == [1, 2, 3, 3, 3]
+    assert list(result["service_bytes_in_window"]) == [10.0, 30.0, 60.0, 90.0, 120.0]
+    assert list(result["service_clients_in_window"]) == [1, 2, 3, 3, 3]
+    assert [bool(value) for value in result["service_clients_saturated"]] == [False, False, False, True, True]
+
+
+@pytest.mark.gpu_and_cpu_mode
+def test_connections_without_a_client_still_say_when_the_cap_binds(config: Config):
+    # The connections and bytes are counted whether or not the record names a client, so the flag cannot wait on
+    # the client count to be set.
+    result = run(config, connections([None, None, None], sizes=[10, 20, 30]), max_samples=2)
+
+    assert list(result["service_connections_in_window"]) == [1, 2, 2]
+    assert list(result["service_bytes_in_window"]) == [10.0, 30.0, 50.0]
+    assert [bool(value) for value in result["service_clients_saturated"]] == [False, False, True]
+
+
+@pytest.mark.gpu_and_cpu_mode
 def test_client_software_is_novel_to_the_service_and_not_to_the_client(config: Config):
     fingerprints = ["fp-browser", "fp-browser", "fp-script", "fp-script"]
     result = run(config, connections(["a", "b", "c", "d"], fingerprints=fingerprints))

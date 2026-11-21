@@ -141,13 +141,13 @@ def replay_ingest_clock(observed: typing.Sequence[typing.Optional[int]]) -> list
 
 def _messages(sink: InMemorySinkStage) -> list:
     # pylint: disable=import-outside-toplevel
-    from morpheus.compositions.host_frame import to_host_frame
+    from morpheus.utils.column_assign import to_host_frame
 
     frames = []
 
     for message in sink.get_messages():
         meta = message.payload() if isinstance(message, ControlMessage) else message
-        frames.append(to_host_frame(meta.copy_dataframe()))
+        frames.append(to_host_frame(meta.copy_dataframe(), nullable_ints=True))
 
     return frames
 

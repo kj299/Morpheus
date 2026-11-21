@@ -41,7 +41,7 @@ PREFIX = "ctx_application_"
 
 def produce(config: Config, frame: pd.DataFrame) -> pd.DataFrame:
     """The CMDB records through `TC0ApplicationStage`, as `context:application` carries them."""
-    from morpheus.compositions.host_frame import to_host_frame  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.column_assign import to_host_frame  # pylint: disable=import-outside-toplevel
 
     pipe = ResumableLinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=[frame]))
@@ -49,7 +49,7 @@ def produce(config: Config, frame: pd.DataFrame) -> pd.DataFrame:
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
-    frames = [to_host_frame(message.copy_dataframe()) for message in sink.get_messages()]
+    frames = [to_host_frame(message.copy_dataframe(), nullable_ints=True) for message in sink.get_messages()]
 
     return pd.concat(frames, ignore_index=True)
 

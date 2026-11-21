@@ -62,6 +62,10 @@ from morpheus.utils.bitemporal import make_version
 from morpheus.utils.determinism import DEFAULT_ORDER_COLUMNS
 from morpheus.utils.entity_key import normalize_hostname
 
+# The corpus and composition modules imported above replace themselves in sys.modules with the merged corpus and
+# composition, which pylint cannot follow, so every attribute read through them looks missing to it.
+# pylint: disable=no-member
+
 NS_PER_SECOND = 10**9
 HOUR = 10
 PERIOD_SECONDS = 3600
@@ -268,7 +272,7 @@ def _layer_stages(config: Config, name: str, leases, inventory) -> list:
 
 
 def _run_layer(config: Config, name: str, frame: pd.DataFrame, leases, inventory) -> pd.DataFrame:
-    from host_frame import to_host_frame  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.column_assign import to_host_frame  # pylint: disable=import-outside-toplevel
 
     pipe = LinearPipeline(config)
     pipe.set_source(InMemorySourceStage(config, dataframes=[frame.copy()]))
@@ -290,7 +294,8 @@ def _run_layer(config: Config, name: str, frame: pd.DataFrame, leases, inventory
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
-    result = pd.concat([to_host_frame(message.copy_dataframe()) for message in sink.get_messages()], ignore_index=True)
+    result = pd.concat([to_host_frame(message.copy_dataframe(), nullable_ints=True) for message in sink.get_messages()],
+                       ignore_index=True)
     result["telemetry_class"] = name
 
     return result
@@ -306,7 +311,7 @@ def run_pipeline(config: Config, corpus: dict[str, pd.DataFrame]) -> pd.DataFram
 
 def _seal(config: Config, union: pd.DataFrame, entity_key_column: str) -> pd.DataFrame:
     """One hourly seal over every layer's rows, so a chain can hold records from all of them."""
-    from host_frame import to_host_frame  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.column_assign import to_host_frame  # pylint: disable=import-outside-toplevel
 
     union = union.sort_values(list(DEFAULT_ORDER_COLUMNS), kind="stable").reset_index(drop=True)
 
@@ -321,7 +326,8 @@ def _seal(config: Config, union: pd.DataFrame, entity_key_column: str) -> pd.Dat
     sink = pipe.add_stage(InMemorySinkStage(config))
     pipe.run()
 
-    return pd.concat([to_host_frame(message.copy_dataframe()) for message in sink.get_messages()], ignore_index=True)
+    return pd.concat([to_host_frame(message.copy_dataframe(), nullable_ints=True) for message in sink.get_messages()],
+                     ignore_index=True)
 
 
 def _python_stages() -> None:

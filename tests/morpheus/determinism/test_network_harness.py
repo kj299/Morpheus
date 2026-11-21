@@ -39,24 +39,37 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # pylint: disable=wrong-import-position
 import golden  # noqa: E402
 import network_pipeline as np_  # noqa: E402
+from rule_text import compared  # noqa: E402
 
-BEACON_CV_THRESHOLD = 0.15
-"""R-B-L3-002's own figure, repeated so these tests evaluate the rule rather than something near it."""
+# The corpus and composition modules imported above replace themselves in sys.modules with the merged corpus and
+# composition, which pylint cannot follow, so every attribute read through them looks missing to it.
+# pylint: disable=no-member
 
-INTERNAL_MAJORITY = 0.5
-"""What "predominantly internal" is taken to mean. Named here because the guide does not give a number, and a
+FAN_OUT = "R-B-L3-001 - Fan-out expansion"
+BEACONING = "R-B-L3-002 - Beaconing"
+FAN_IN = "R-B-L3-006 - Fan-in onto a workstation"
+UPLOAD = "R-B-L3-007 - First-contact upload"
+SWEEP = "R-D-L3-008 - Port sweep"
+
+BEACON_CV_THRESHOLD = compared(BEACONING, "flow_interval_cv", "<")
+"""R-B-L3-002's own figure, read from its stanza so these tests evaluate the rule rather than something near it.
+The search holds the interval and the size to the one ceiling, which `test_the_beacon_ceilings_are_one_figure`
+asserts."""
+
+INTERNAL_MAJORITY = compared(FAN_OUT, "internal_dst_ratio", ">")
+"""What "predominantly internal" is taken to mean, as R-B-L3-001 states it. The guide does not give a number, and a
 rule whose threshold lives only in prose is a rule two people implement differently."""
 
-FAN_OUT_FLOOR = 50
+FAN_OUT_FLOOR = compared(FAN_OUT, "dsts_per_src", ">")
 """The literal R-B-L3-001 shipped with, which it now keeps as a floor beneath the step."""
 
-FAN_IN_FLOOR = 10
+FAN_IN_FLOOR = int(compared(FAN_IN, "srcs_per_dst", ">="))
 """R-B-L3-006's floor: sources a workstation must be reached by before a step is a finding."""
 
-UPLOAD_FLOOR = 10
+UPLOAD_FLOOR = compared(UPLOAD, "byte_asymmetry", ">=")
 """R-B-L3-007's floor: bytes out for each byte back."""
 
-SWEEP_PORTS_THRESHOLD = 25
+SWEEP_PORTS_THRESHOLD = compared(SWEEP, "dst_ports_per_src", ">=")
 """R-D-L3-008's threshold. Not `np_.SWEEP_PORTS`, which is how many ports the corpus's sweeper tries."""
 
 
@@ -280,6 +293,12 @@ def test_the_beacon_is_regular_and_the_worker_is_not(result: pd.DataFrame):
     assert mature_beacon["flow_interval_cv"].max() < BEACON_CV_THRESHOLD
     assert mature_beacon["flow_size_cv"].max() < BEACON_CV_THRESHOLD
     assert mature_worker["flow_interval_cv"].min() > BEACON_CV_THRESHOLD
+
+
+def test_the_beacon_ceilings_are_one_figure():
+    # The tests above hold the interval and the size to `BEACON_CV_THRESHOLD`, which is read from the interval's
+    # comparison. That is the rule only while the search holds both to the same ceiling.
+    assert compared(BEACONING, "flow_size_cv", "<") == BEACON_CV_THRESHOLD
 
 
 @pytest.mark.cpu_mode

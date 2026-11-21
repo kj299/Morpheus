@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib.util
 import os
 import shutil
 import warnings
@@ -45,20 +46,23 @@ from morpheus.stages.preprocess.drop_null_stage import DropNullStage
 
 GENERAL_ARGS = ['run', '--num_threads=12', '--pipeline_batch_size=1024', '--model_max_batch_size=1024', '--use_cpp=0']
 MONITOR_ARGS = ['monitor', '--description', 'Unittest', '--smoothing=0.001', '--unit', 'inf']
+TO_FILE_ARGS = ['to-file', '--filename=out.csv']
+# Any kept JSON-lines file will do: the tests check how the CLI builds the stage, not what the file holds.
+FILE_SRC_PATH = os.path.join(TEST_DIRS.examples_dir, 'behavioral_analytics', 'samples', 'network', 'tc3.jsonlines')
+FILE_SRC_ARGS = ['from-file', '--filename', FILE_SRC_PATH]
+
+# The validation stage reads its comparison file when it is built, so the file has to exist; the same committed
+# sample serves, since nothing here runs the comparison.
 VALIDATE_ARGS = [
     'validate',
     '--val_file_name',
-    os.path.join(TEST_DIRS.validation_data_dir, 'dfp-cloudtrail-role-g-validation-data-output.csv'),
+    FILE_SRC_PATH,
     '--results_file_name=results.json',
     '--index_col=_index_',
     '--exclude',
     'event_dt',
     '--rel_tol=0.1'
 ]
-TO_FILE_ARGS = ['to-file', '--filename=out.csv']
-# Any kept JSON-lines file will do: the tests check how the CLI builds the stage, not what the file holds.
-FILE_SRC_PATH = os.path.join(TEST_DIRS.examples_dir, 'behavioral_analytics', 'samples', 'network', 'tc3.jsonlines')
-FILE_SRC_ARGS = ['from-file', '--filename', FILE_SRC_PATH]
 
 KAFKA_BOOTS = ['--bootstrap_servers', 'kserv1:123,kserv2:321']
 FROM_KAFKA_ARGS = ['from-kafka', '--input_topic', 'test_topic'] + KAFKA_BOOTS
@@ -96,7 +100,8 @@ def callback_values(request: pytest.FixtureRequest):
 @pytest.fixture(scope="function")
 def mlflow_uri(tmp_path):
     experiment_name = "Morpheus"
-    uri = f"file://{tmp_path}"
+    # A database backend: the file store is in maintenance mode and current MLflow refuses to create one.
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
     mlflow.set_tracking_uri(uri)
     mlflow.create_experiment(experiment_name)
     experiment = mlflow.get_experiment_by_name(experiment_name)
@@ -139,6 +144,8 @@ class TestCLI:
         result = runner.invoke(commands.cli, cmd, env={'HOME': str(tmp_path)})
         assert result.exit_code == 0, result.output
 
+    # `morpheus.utils.seed` seeds Torch and imports it, so the function patched here exists only where Torch does.
+    @pytest.mark.skipif(importlib.util.find_spec("torch") is None, reason="morpheus.utils.seed needs Torch")
     @pytest.mark.usefixtures("restore_environ")
     @pytest.mark.parametrize('use_environ', [True, False])
     @pytest.mark.parametrize('value', [1, 13, 33])

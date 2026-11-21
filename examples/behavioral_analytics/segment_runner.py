@@ -44,6 +44,10 @@ row carries the digest of the checkpoint it resumed from as `resumed_from_state`
 `MinimizationStage` immediately before the wire, after every feature has been computed. The key is read from the
 environment variable the policy names and never from the file.
 
+**Execution mode.** `--execution-mode gpu` runs the composition, its two branches and the delivery in GPU mode;
+the default is CPU, which is what every golden file is an artifact of. The class files are read on the host in
+both.
+
 **Context.** A composition that enriches with the estate's identity, asset or application context, or reads another
 input of the estate's (the telemetry segment's router redundancy addresses), takes it as an `EstateContext` and has
 no default: the runner reads it with `EstateContext.from_directory` from `--context`, or from the input directory's
@@ -157,22 +161,35 @@ FILE_PARSER_KWARGS = {"convert_dates": False, "dtype": False, "precise_float": T
 """How `FileSourceStage` parses a sample: JSON's own types, no date guessing on `*_time` columns, and floats read
 exactly. pandas' defaults turn an AS number sent as a string into a number and parse `event_time` as a date."""
 
+EXECUTION_MODES = ("cpu", "gpu")
+"""What `--execution-mode` takes. CPU is the default and what every golden file is an artifact of."""
 
-def _config():
-    from morpheus.config import Config  # pylint: disable=import-outside-toplevel
-    from morpheus.config import CppConfig  # pylint: disable=import-outside-toplevel
+
+def _config(execution_mode: str = "cpu"):
+    """
+    The configuration the composition, its two branches and the delivery run under.
+
+    Parameters
+    ----------
+    execution_mode : str, default = "cpu"
+        One of `EXECUTION_MODES`. The stages run their Python implementations in both.
+    """
+    from morpheus.compositions.corpus_pipeline import build_pipeline_config  # pylint: disable=import-outside-toplevel
     from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
 
-    CppConfig.set_should_use_cpp(False)
-    config = Config()
-    config.execution_mode = ExecutionMode.CPU
+    if (execution_mode not in EXECUTION_MODES):
+        raise ValueError(f"unknown execution mode {execution_mode!r}; one of {list(EXECUTION_MODES)}")
 
-    return config
+    return build_pipeline_config(ExecutionMode.GPU if execution_mode == "gpu" else ExecutionMode.CPU)
 
 
 def read_class(path: pathlib.Path):
     """
     One class's records, read by `FileSourceStage` and typed by the class's contract.
+
+    The read is on the host in either execution mode. `FILE_PARSER_KWARGS` are keywords of pandas' JSON parser, and
+    the types the contract is written against are the ones that parser yields under them; the frames reach the
+    composition as host frames in both modes, as a corpus harness's do.
 
     Returns
     -------
@@ -406,9 +423,10 @@ def edges(module,
 def deliver(groups: list,
             output_dir: typing.Optional[pathlib.Path],
             policy: typing.Optional[dict] = None,
-            kafka_bootstrap_servers: typing.Optional[str] = None) -> dict[str, int]:
+            kafka_bootstrap_servers: typing.Optional[str] = None,
+            execution_mode: str = "cpu") -> dict[str, int]:
     """
-    Put each group through `MinimizationStage`, `SiemWireStage` and `SiemWireSinkStage`.
+    Put each group through `MinimizationStage`, `SiemWireStage` and `SiemWireSinkStage`, in `execution_mode`.
 
     Returns
     -------
@@ -424,7 +442,7 @@ def deliver(groups: list,
     from morpheus.utils.siem_wire import filename_for
     from morpheus.utils.siem_wire import topic_for
 
-    config = _config()
+    config = _config(execution_mode)
     written: dict[str, int] = {}
 
     for (_, sourcetype, rows) in groups:
@@ -463,7 +481,8 @@ def run(segment: str,
         final: bool = True,
         policy_path: typing.Optional[pathlib.Path] = None,
         kafka_bootstrap_servers: typing.Optional[str] = None,
-        context_dir: typing.Optional[pathlib.Path] = None) -> dict[str, int]:
+        context_dir: typing.Optional[pathlib.Path] = None,
+        execution_mode: str = "cpu") -> dict[str, int]:
     """
     Run one segment over the class files in `input_dir` and deliver its records.
 
@@ -487,6 +506,9 @@ def run(segment: str,
         Produce to Kafka, one topic per sourcetype, instead of writing files.
     context_dir : pathlib.Path, optional
         The estate context, as `EstateContext.from_directory` reads it. Defaults to `input_dir / "context"`.
+    execution_mode : str, default = "cpu"
+        One of `EXECUTION_MODES`: the mode the composition, its health and edge branches and the delivery run in.
+        The class files are read on the host in both.
 
     Returns
     -------
@@ -497,6 +519,8 @@ def run(segment: str,
     ------
     FileNotFoundError
         If `context_dir` is given and is not a directory.
+    ValueError
+        If `segment` or `execution_mode` is not one the runner knows.
     morpheus.compositions.estate_context.MissingContext
         If the segment's composition reads context the directory does not hold. Raised before any record is
         delivered or a checkpoint written.
@@ -507,6 +531,9 @@ def run(segment: str,
 
     if (segment not in SEGMENTS):
         raise ValueError(f"unknown segment {segment!r}; one of {sorted(SEGMENTS)}")
+
+    if (execution_mode not in EXECUTION_MODES):
+        raise ValueError(f"unknown execution mode {execution_mode!r}; one of {list(EXECUTION_MODES)}")
 
     if (kafka_bootstrap_servers is None):
         if (output_dir is None):
@@ -530,7 +557,7 @@ def run(segment: str,
         options["context"] = read_context(input_dir / CONTEXT_DIR if context_dir is None else context_dir)
 
     corpus = read_inputs(input_dir)
-    config = module.build_pipeline_config()
+    config = _config(execution_mode)
 
     if (state_dir is None):
         result = module.run_pipeline(config, corpus, **options)
@@ -543,7 +570,7 @@ def run(segment: str,
     groups = (route(segment, result) + health(module, config, result, state_dir, final) +
               edges(module, config, result, state_dir, final))
 
-    return deliver(groups, output_dir, policy, kafka_bootstrap_servers)
+    return deliver(groups, output_dir, policy, kafka_bootstrap_servers, execution_mode)
 
 
 def main(argv: typing.Optional[list] = None, segment: typing.Optional[str] = None) -> int:
@@ -566,6 +593,10 @@ def main(argv: typing.Optional[list] = None, segment: typing.Optional[str] = Non
                         help="The estate's context records and extras. Defaults to the input's context/ directory.")
     parser.add_argument("--policy", type=pathlib.Path, help="Minimization policy YAML.")
     parser.add_argument("--kafka", dest="kafka_bootstrap_servers", help="Produce to Kafka at these brokers.")
+    parser.add_argument("--execution-mode",
+                        choices=EXECUTION_MODES,
+                        default="cpu",
+                        help="Run the composition and the delivery on the CPU (the default) or on a GPU.")
     arguments = parser.parse_args(argv)
     chosen = segment or arguments.segment
 
@@ -577,7 +608,8 @@ def main(argv: typing.Optional[list] = None, segment: typing.Optional[str] = Non
                   final=arguments.final,
                   policy_path=arguments.policy,
                   kafka_bootstrap_servers=arguments.kafka_bootstrap_servers,
-                  context_dir=arguments.context_dir)
+                  context_dir=arguments.context_dir,
+                  execution_mode=arguments.execution_mode)
 
     for (sourcetype, count) in sorted(written.items()):
         print(f"{sourcetype:<28} {count:>6} records")
