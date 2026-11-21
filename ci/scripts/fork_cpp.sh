@@ -71,13 +71,12 @@ echo "CUDA architectures: ${MORPHEUS_CUDA_ARCHITECTURES}"
 echo ""
 echo "=== configure ==="
 # In place, so the tests that start an interpreter can import the package from the source tree. No stubs, which
-# need a driver to generate, no install, and no DFP package, which has no C++.
+# need a driver to generate, and no install.
 # shellcheck disable=SC2086
 cmake -S . -B "${BUILD_DIR}" -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_MESSAGE_CONTEXT_SHOW=ON \
     -DMORPHEUS_BUILD_TESTS=ON \
-    -DMORPHEUS_BUILD_MORPHEUS_DFP=OFF \
     -DMORPHEUS_PYTHON_BUILD_STUBS=OFF \
     -DMORPHEUS_PYTHON_INPLACE_BUILD=ON \
     -DMORPHEUS_PYTHON_PERFORM_INSTALL=OFF \

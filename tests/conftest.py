@@ -901,16 +901,6 @@ def _get_random_port():
         return sckt.getsockname()[1]
 
 
-@pytest.fixture(name="morpheus_dfp", scope='session')
-def morpheus_dfp_fixture(fail_missing: bool):
-    """
-    Fixture to ensure morpheus_dfp is installed
-    """
-    yield import_or_skip("morpheus_dfp",
-                         reason=OPT_DEP_SKIP_REASON.format(package="morpheus_dfp"),
-                         fail_missing=fail_missing)
-
-
 @pytest.fixture(scope='session')
 def dask_distributed(fail_missing: bool):
     """

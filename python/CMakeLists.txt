@@ -23,8 +23,4 @@ if (MORPHEUS_BUILD_MORPHEUS_CORE)
   add_subdirectory(morpheus)
 endif()
 
-if (MORPHEUS_BUILD_MORPHEUS_DFP)
-  add_subdirectory(morpheus_dfp)
-endif()
-
 list(POP_BACK CMAKE_MESSAGE_CONTEXT)

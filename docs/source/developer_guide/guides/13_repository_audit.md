@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,068 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,049 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -110,18 +110,19 @@ test, and the build environment's request and lock) and the one the GPU run of 2
 conformance artifact) and the one the GPU model run of 2026-11-20 added (its artifact) and the three the audit
 refactors of 2026-11-21 added (the sum window, its test and the harnesses' saved search reader) and the two the
 container work of the same day added (the version script and the test of the container build's inputs), less
-the 1,500 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
+the 1,519 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
 4.6a replaced with one, and 37 in the audit backlog of 2026-11-20: the upstream model material, data, environment
 files and pages the rulings had left, and the two aarch64 requirement lists that went with the aarch64 environments, and on the same day the 51 left
 after them: the upstream package code no ruling kept a reader for, its tests and fixtures, and two helper modules
 whose only readers the D4 removals had taken, and, in the audit refactors of 2026-11-21, the two `host_frame.py`
-modules that `column_assign.to_host_frame` replaced.
+modules that `column_assign.to_host_frame` replaced, and on the same day the nineteen files of `morpheus_dfp` that
+D4 had kept, once the reuse evidence read the package from upstream history.
 
 | Verdict | Files |
 | --- | --- |
-| `keep-dependency` | 406 |
+| `keep-dependency` | 387 |
 | `keep` | 518 |
 | `update` | 144 |
 
@@ -186,7 +187,9 @@ exist only for a removed use case go with it.
 `morpheus_dfp` stages, three of its utilities, `MLFlowDriftStage`, `TimeSeriesStage`, the Azure, Duo and CloudTrail
 sources and the MLflow writer controller. They are the measured evidence behind the guide's decision not to reuse
 them, so they and the package files that build them are `keep-dependency`. The rest of `morpheus_dfp` and
-`tests/morpheus_dfp` go.
+`tests/morpheus_dfp` go. On 2026-11-21 the kept part went too: the runner now extracts `python/morpheus_dfp` from
+upstream commit c6a3b56d with `git archive`, the test reads its two source checks from that commit with `git show`,
+and the nineteen package files, the build option, the requirements file and the documentation target went with it.
 
 **D5. The fork's superseded stage goes.** `TC1FeatureStage` and its utility module, with their test, command-line
 entry, liveness entry, the comparison in the `TC1ChangeStage` test, the stages page line, the guide's citations and the
@@ -222,7 +225,7 @@ small framework with one application on top, and the structure should say so.
 | --- | --- | --- | --- |
 | `python/morpheus/morpheus/stages/telemetry`, `stages/lineage`, `utils` | 133 | The fork's stages and their trackers, mixed into the upstream package. | Unchanged in place: they are the product. The trackers that live inside stage files move to `utils`, so every tracker is one module with one test. |
 | `python/morpheus/morpheus/_lib` | 196 | The upstream C++ core: messages, sources, the inference stack, DOCA, loaders. | The messages, I/O and the sources and sinks D3 keeps. 89 files go. |
-| `python/morpheus_llm`, `python/morpheus_dfp` | 134 | Two upstream packages. | `morpheus_llm` goes. `morpheus_dfp` shrinks to the D4 evidence and goes entirely once its source-text checks become citations. |
+| `python/morpheus_llm`, `python/morpheus_dfp` | 134 | Two upstream packages. | `morpheus_llm` goes. `morpheus_dfp` shrank to the D4 evidence and went on 2026-11-21, its source read from upstream history since. |
 | `examples` | 641 | Fourteen upstream examples, five fork examples and the upstream shared data. | The five fork examples, guide 1's example and the data it reads. 507 files go. |
 | `tests/morpheus/determinism` | 78 | Corpus builders, composed pipelines, harnesses, golden files, and three deployable modules. | Corpora and harnesses only. The compositions, sharding, resumable pipeline and host-frame helper move into the package. |
 | `tests` (rest) | 585 | The upstream tests for every use case, the mock Triton server and its payloads. | The fork's stage and utility tests and the D3 runtime tests, every one in a CI tier. 368 files go. |

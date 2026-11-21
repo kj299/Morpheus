@@ -22,14 +22,9 @@ limitations under the License.
 > overlay the fork's sources onto it, as [Getting Started with This Fork on a CPU](./fork_getting_started.md)
 > describes. The rest of this page describes the upstream packages and is kept for reference.
 
-The Morpheus stages are the building blocks for creating pipelines. The stages are organized into libraries by use case. The current libraries are:
-- `morpheus-core`
-- `morpheus-dfp`
+The Morpheus stages are the building blocks for creating pipelines. Upstream organizes them into libraries by use case, `morpheus-core` and `morpheus-dfp`. This fork keeps the source of `morpheus-core` only: the digital fingerprinting package was removed under ruling D4 of the [repository audit](./developer_guide/guides/13_repository_audit.md), and its source is in the upstream repository at commit [`c6a3b56d`](https://github.com/nv-morpheus/Morpheus/tree/c6a3b56db1c77c2f375ae0833a65a7b6d2272269/python/morpheus_dfp).
 
-The  libraries are hosted as Conda packages on the [`nvidia`](https://anaconda.org/nvidia/) channel.
-
-The split into multiple libraries allows for a more modular approach to using the Morpheus stages. For example, if you are building an application for Digital Finger Printing, you can install just the `morpheus-dfp` library. This reduces the size of the installed package. It also limits the dependencies, eliminating unnecessary version conflicts.
-
+The libraries are hosted as Conda packages on the [`nvidia`](https://anaconda.org/nvidia/) channel.
 
 ## Morpheus Core
 The `morpheus-core` library contains the core stages that are common across all use cases. The Morpheus core library is built from the source code in the `python/morpheus` directory of the Morpheus repository. The core library is installed as a dependency when you install any of the other Morpheus libraries.
@@ -62,37 +57,6 @@ Some of the stages in the core library require additional dependencies that are 
 ```bash
 MORPHEUS_CORE_PKG_DIR=$(dirname $(python -c "import morpheus; print(morpheus.__file__)"))
 pip install -r ${MORPHEUS_CORE_PKG_DIR}/requirements_morpheus_core_arch-x86_64.txt
-```
-
-## Morpheus DFP
-Digital Finger Printing (DFP) is a technique used to identify anomalous behavior and uncover potential threats in the environment​. The `morpheus-dfp` library contains stages for DFP. It is built from the source code in the `python/morpheus_dfp` directory of the Morpheus repository. To set up a Conda environment with the [`morpheus-dfp`](https://anaconda.org/nvidia/morpheus-dfp) library, you can run the following commands:
-
-### Create a Conda Environment
-```bash
-export CONDA_ENV_NAME=morpheus-dfp
-conda create -n ${CONDA_ENV_NAME} python=3.12
-conda activate ${CONDA_ENV_NAME}
-```
-
-### Add Conda Channels
-These channels are required for installing the runtime dependencies:
-```bash
-conda config --env --add channels conda-forge &&\
-  conda config --env --add channels nvidia &&\
-  conda config --env --add channels rapidsai &&\
-  conda config --env --add channels pytorch
-```
-
-### Install the `morpheus-dfp` Library
-```bash
-conda install -c nvidia morpheus-dfp=25.10
-```
-The `morpheus-dfp` Conda package installs the `morpheus_dfp` Python package. It also pulls down all the necessary Conda runtime dependencies including [`morpheus-core`](https://anaconda.org/nvidia/morpheus-core).
-### Install Additional PyPI dependencies
-Some of the DFP stages in the library require additional dependencies that are hosted on PyPI. These dependencies are included as a requirements file in the `morpheus_dfp` Python package. It can be installed by running the following command:
-```bash
-MORPHEUS_DFP_PKG_DIR=$(dirname $(python -c "import morpheus_dfp; print(morpheus_dfp.__file__)"))
-pip install -r ${MORPHEUS_DFP_PKG_DIR}/requirements_morpheus_dfp_arch-x86_64.txt
 ```
 
 ## Miscellaneous

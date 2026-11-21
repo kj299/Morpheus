@@ -18,9 +18,11 @@ The reuse decisions in the guide's Part 0, held to the run that made them.
 
 `examples/upstream_reuse/evaluate.py` ran the upstream pieces the guide names and wrote what happened to an
 artifact; Pass 4 quotes it. Two kinds of check follow. The first holds every number Pass 4 quotes to the committed
-artifact, so the prose cannot drift from the run. The second re-checks, against the code in the tree, the reasons
-that can be checked without a card, Torch or the Git LFS samples: if upstream repairs one, the check fails and the
-decision it supports is due to be revisited rather than left standing on a reason that stopped being true.
+artifact, so the prose cannot drift from the run. The second re-checks the reasons that can be checked without a
+card, Torch or the Git LFS samples, against the code they are about. For the stages the fork keeps, that is the code
+in the tree: if one is repaired, the check fails and the decision it supports is due another look. `morpheus_dfp`
+left the tree once it had been measured (ruling D4), so its two reasons are read from the repository's history at
+the upstream commit the run imported it from, which is the code the decision was made against and cannot change.
 """
 
 import ast
@@ -29,6 +31,7 @@ import inspect
 import json
 import math
 import os
+import subprocess
 
 import pytest
 
@@ -40,6 +43,25 @@ GUIDE = os.path.join(REPO_ROOT,
                      "developer_guide",
                      "guides",
                      "11_predictive_behavioral_analytics_osi.md")
+
+UPSTREAM_COMMIT = "c6a3b56db1c77c2f375ae0833a65a7b6d2272269"
+"""The upstream commit `evaluate.py` takes `morpheus_dfp` from."""
+
+
+def _upstream(path: str) -> str:
+    """A file as it stood at `UPSTREAM_COMMIT`, read from the repository's history."""
+    shown = subprocess.run(["git", "-C", REPO_ROOT, "show", f"{UPSTREAM_COMMIT}:{path}"],
+                           capture_output=True,
+                           text=True,
+                           check=False)
+
+    if (shown.returncode != 0 and ("bad object" in shown.stderr or "unknown revision" in shown.stderr)):
+        # CI clones the whole history (fork-cpu.yaml, fetch-depth 0); a shallow local clone does not have it.
+        pytest.skip(f"this clone lacks upstream commit {UPSTREAM_COMMIT[:8]}; `git fetch --unshallow` fetches it")
+
+    assert shown.returncode == 0, f"{path} at {UPSTREAM_COMMIT[:8]}: {shown.stderr.strip()}"
+
+    return shown.stdout
 
 
 @pytest.fixture(name="run", scope="module")
@@ -194,8 +216,8 @@ def test_the_azure_stage_still_renames_nothing():
 
 
 def test_the_writer_and_the_reader_still_name_a_model_differently():
-    # The writer escapes a dot; the reader's `user_to_model_name` does not. Read from source, because the reader's
-    # module imports cuDF and so cannot be imported where this runs.
+    # The writer escapes a dot; the reader's `user_to_model_name` does not. The reader is upstream's, read from the
+    # commit the run measured, and as source: its module imports cuDF and so cannot be imported where this runs.
     from morpheus.controllers.mlflow_model_writer_controller import MLFlowModelWriterController
 
     writer = MLFlowModelWriterController(model_name_formatter="dfp-{user_id}",
@@ -207,10 +229,7 @@ def test_the_writer_and_the_reader_still_name_a_model_differently():
 
     assert writer.user_id_to_model("alice@example.com") == "dfp-alice@example_dot_com"
 
-    path = os.path.join(REPO_ROOT, "python", "morpheus_dfp", "morpheus_dfp", "utils", "model_cache.py")
-
-    with open(path, encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
+    tree = ast.parse(_upstream("python/morpheus_dfp/morpheus_dfp/utils/model_cache.py"))
 
     [reader] = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "user_to_model_name"]
     calls = [
@@ -239,12 +258,19 @@ def test_the_time_series_stage_still_cannot_reach_its_own_threshold():
 
 
 def test_the_dfp_stages_still_declare_the_gpu_only():
-    # Read from source for the same reason as the reader above: the modules import cuDF.
-    stages = os.path.join(REPO_ROOT, "python", "morpheus_dfp", "morpheus_dfp", "stages")
-
+    # Read from the commit the run measured, as source, for the same reasons as the reader above.
     for name in ("dfp_split_users_stage", "dfp_rolling_window_stage", "dfp_training", "dfp_inference_stage"):
-        with open(os.path.join(stages, f"{name}.py"), encoding="utf-8") as handle:
-            source = handle.read()
+        source = _upstream(f"python/morpheus_dfp/morpheus_dfp/stages/{name}.py")
 
         assert "GpuAndCpuMixin" not in source and "CpuOnlyMixin" not in source, name
         assert "import cudf" in source or name == "dfp_inference_stage", name
+
+
+def test_the_runner_measures_the_package_the_tests_read():
+    # `evaluate.py` and the checks above must name the same commit, or the reasons would be read from code the
+    # decision was not measured against.
+    with open(os.path.join(REPO_ROOT, "examples", "upstream_reuse", "evaluate.py"), encoding="utf-8") as handle:
+        runner = handle.read()
+
+    assert f'UPSTREAM_COMMIT = "{UPSTREAM_COMMIT}"' in runner
+    assert not os.path.exists(os.path.join(REPO_ROOT, "python", "morpheus_dfp")), "the package is back in the tree"
