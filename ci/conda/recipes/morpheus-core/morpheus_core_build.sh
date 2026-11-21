@@ -62,9 +62,10 @@ if [[ -d "./${BUILD_DIR}" ]]; then
    rm -rf "./${BUILD_DIR}/"
 fi
 
-# Run configure
+# Run configure. CMAKE_CONFIGURE_EXTRA_ARGS comes last so that what the builder asks for wins.
 cmake -B ${BUILD_DIR} \
    ${CMAKE_ARGS} \
+   ${CMAKE_CONFIGURE_EXTRA_ARGS} \
    --log-level=verbose \
    .
 

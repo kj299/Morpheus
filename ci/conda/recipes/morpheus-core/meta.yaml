@@ -13,9 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This recipe splits into packages - morpheus-core and morpheus-dfp
+# This recipe builds one package, morpheus-core: the C++ library, its Python bindings and the Python package.
 {% set version = environ.get('GIT_VERSION', '0.0.0.dev').lstrip('v') + environ.get('VERSION_SUFFIX', '') %}
 {% set minor_version =  version.split('.')[0] + '.' + version.split('.')[1] %}
+# conda-build describes the source from its nearest tag. A clone with no tag has none of these, so the build number
+# falls back to zero and the build string to the commit.
+{% set git_number = environ.get('GIT_DESCRIBE_NUMBER', '0') %}
+{% set git_hash = environ.get('GIT_DESCRIBE_HASH', 'g' + environ.get('GIT_FULL_HASH', '0000000')[:7]) %}
 
 package:
   name: morpheus-split
@@ -27,13 +31,16 @@ source:
 outputs:
   ############################### morpheus-core #############################
   - name: morpheus-core
-    type: conda_v2
+    # No `type:`. conda-build then writes the package in the format it is configured for, `.conda` by default
+    # in current releases. `type: conda_v2`, which this output named, is a key current conda-build no longer
+    # accepts: it fails with KeyError 'conda_v2' once the build environment is made.
     build:
-      number: {{ GIT_DESCRIBE_NUMBER }}
-      string: cuda_{{ cuda_compiler_version }}_py{{ python }}_{{ GIT_DESCRIBE_HASH }}_{{ GIT_DESCRIBE_NUMBER }}
+      number: {{ git_number }}
+      string: cuda_{{ cuda_compiler_version }}_py{{ python }}_{{ git_hash }}_{{ git_number }}
       script_env:
         # Note: Setting a default value here will overwrite the value from the
         # shell! Defaults should be set in the run_conda_build.sh script
+        - CMAKE_CONFIGURE_EXTRA_ARGS
         - CMAKE_CUDA_ARCHITECTURES
         - MORPHEUS_CACHE_DIR
         - MORPHEUS_PYTHON_BUILD_STUBS
@@ -51,7 +58,10 @@ outputs:
         - cmake =3.27
         - ninja =1.11
         - pkg-config =0.29
-        - sysroot_linux-64>=2.28
+        # Held at 2.28. The channel now solves ">=2.28" to 2.39, whose libc carries a `.relr.dyn` section the
+        # binutils that gxx 12.1 brings cannot read, so the compiler check fails at link. The same pin is in
+        # `cpu_build` in dependencies.yaml.
+        - sysroot_linux-64 =2.28
       host:
         # CUDA dependencies
         - cuda-cudart-dev {{ cuda_compiler_version }}.*
@@ -64,6 +74,9 @@ outputs:
         - cuda-python {{ cuda_compiler_version }}.*
         - cudf {{ rapids_version }}
         - cython 3.0.*
+        # libarrow, which libcudf brings, links libgflags.so.2.2, and its metadata admits the 2.3 the channel now
+        # solves to. Without the pin cudf does not import, at build or at run time.
+        - &gflags gflags 2.2.*
         - glog >=0.7.1,<0.8
         - indicators=2.3
         - libcudf {{ rapids_version }}
@@ -81,12 +94,13 @@ outputs:
         # We are currently depending on some deprecated functionality removed in setuptools 80+ #2224
         - setuptools>=75,<80
         - versioneer-518
-        - zlib >=1.3.1,<2 # required to build triton client
+        - zlib >=1.3.1,<2
       run:
-        # Runtime only requirements. This + setup.py is the definitive runtime requirement list
-        # This should be synced with `runtime` in dependencies.yaml
+        # Runtime only requirements. This + setup.py is the definitive runtime requirement list.
+        # The same packages as `runtime` in dependencies.yaml, which tests/morpheus/determinism/test_conda_recipe.py
+        # holds: a package added to one and not the other fails there.
         - appdirs
-        - beautifulsoup4
+        - beautifulsoup4 =4.12
         - click>=8, <8.2 # work-around for #2219
         - cuda-version {{ cuda_compiler_version }}.*
         - cudf
@@ -95,16 +109,17 @@ outputs:
         - dill =0.3.7
         - docker-py >=7.1,<8
         - elasticsearch ==8.9.0
-        - feedparser =6.0.*
-        - grpcio =1.62.*
-        - lxml
+        - *gflags
+        - grpcio
+        - grpcio-status
         - *mlflow
         - *mrc
         - networkx=2.8.8
         - numba=0.60 # Pin version to avoid https://github.com/nv-morpheus/Morpheus/issues/2166
         - numpydoc =1.5.*
-        - pydantic
+        - onnxruntime # the SID model, scored on the CPU from models/inventory
         - pluggy =1.3.*
+        - pydantic
         - python
         - python-confluent-kafka =2.6.1
         - python-graphviz
@@ -112,28 +127,26 @@ outputs:
         - requests>=2.32.3,<3
         - requests-cache =1.1.*
         - scikit-learn =1.3.2.*
-        - sqlalchemy 1.4.54, <2.0 # 2.0 is incompatible with pandas=1.3
+        - sqlalchemy <2.0 # 2.0 is incompatible with pandas=1.3
         - tqdm =4.*
-        - tritonclient =2.34.*
         - typing_utils =0.1.*
         - urllib3>=2.3,<3
         - watchdog =3.0.*
         - websockets
+        - xgboost # the abp-pcap-xgb booster, scored on the CPU from models/inventory
+        - yaml =0.2
     test:
+      # A smoke test that needs no GPU, so it can run inside an image build, where there is none: the package
+      # imports, the command line starts, and a CPU pipeline copies a committed sample through the fork's stages.
+      # The test suite itself runs from a checkout: the CPU tiers in .github/workflows/fork-cpu.yaml, and the GPU
+      # tiers in ci/scripts/gpu_conformance.sh.
       imports:
         - morpheus
-      requires:
-        - cuml {{ rapids_version }}.*
-        - pynvml
-        - pytest-asyncio
-        - pytest-benchmark
-        - pytest-cov
-        - pytest =7.4.4
+        - morpheus.compositions
+        - morpheus.stages.telemetry
+        - morpheus.stages.lineage
       source_files:
-        - dependencies.yaml
-        - pyproject.toml
-        - scripts/fetch_data.py
-        - tests/*
+        - examples/behavioral_analytics/samples/network/tc3.jsonlines
       script: morpheus_core_test.sh
 
 

@@ -27,6 +27,10 @@
 # build. Most come from upstream's generated API pages. Five are in-page links to headings whose text holds an
 # underscore or a slash (`ref.ref`): they resolve on GitHub and under MyST alone, and an extension the upstream
 # configuration loads stops them resolving here.
+#
+# SKIP_PROSE_CHECK, when set, skips Vale and builds the pages only. The image build sets it (docker/Dockerfile, stage
+# build_docs): it builds the pages the runtime image ships, in an environment that has Sphinx and no Vale, and the
+# prose is CI's to check.
 
 set -o pipefail
 
@@ -36,10 +40,14 @@ FATAL_WARNINGS='\[(myst\.xref_missing|ref\.doc|toc\.[a-z_]+)\]'
 
 cd "${REPO_ROOT}" || exit 2
 
-echo "== Vale: the prose of every tracked document"
-vale sync > /dev/null || exit 1
-# CHANGELOG.md is upstream's and immutable, as ci/scripts/documentation_checks.sh also holds.
-git ls-files "*.md" "*.rst" | grep -v -E '^CHANGELOG\.md$' | xargs vale || exit 1
+if [[ -n "${SKIP_PROSE_CHECK}" ]]; then
+    echo "== Vale: skipped (SKIP_PROSE_CHECK is set)"
+else
+    echo "== Vale: the prose of every tracked document"
+    vale sync > /dev/null || exit 1
+    # CHANGELOG.md is upstream's and immutable, as ci/scripts/documentation_checks.sh also holds.
+    git ls-files "*.md" "*.rst" | grep -v -E '^CHANGELOG\.md$' | xargs vale || exit 1
+fi
 
 echo "== Sphinx: the documentation build"
 mkdir -p "${BUILD_DIR}"

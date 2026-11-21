@@ -13,26 +13,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# For now conda tests are disabled on aarch64, largely due to difficulties with installing a cuda enabled version of
-# pytorch on aarch64 from a requirements file.
-if [[ $(arch) == "aarch64" ]]; then
-    exit 0
+# The package's smoke test, run by conda-build in a fresh environment that holds only the package and what it
+# requires at run time. It needs no GPU: an image build has none, and the fork's stages all run in CPU mode.
+# It is run from the directory conda-build copied the recipe's `source_files` into.
+
+set -euo pipefail
+
+SAMPLE="examples/behavioral_analytics/samples/network/tc3.jsonlines"
+OUTPUT="$(mktemp -d)/smoke.jsonlines"
+
+# The command line starts and lists the fork's stages.
+# Read into a variable and searched there: `grep -q` on a pipe stops reading at its first match, and under pipefail
+# the command it stopped listening to would fail the script.
+morpheus --help > /dev/null
+STAGES="$(morpheus run pipeline-other --help)"
+grep -q "tc3-baseline" <<< "${STAGES}" || { echo "the command line does not list the fork's stages"; exit 1; }
+
+# A CPU pipeline runs end to end through one of the fork's stages and writes every record it read.
+morpheus --log_level=WARNING run --use_cpu_only pipeline-other \
+    from-file --filename "${SAMPLE}" \
+    deserialize \
+    lineage-stamp --id_columns src_ip --id_columns dst_ip --id_columns event_time \
+    serialize \
+    to-file --filename "${OUTPUT}" --overwrite
+
+EXPECTED=$(wc -l < "${SAMPLE}")
+WRITTEN=$(wc -l < "${OUTPUT}")
+
+if [[ "${WRITTEN}" != "${EXPECTED}" ]]; then
+    echo "the smoke pipeline read ${EXPECTED} records and wrote ${WRITTEN}"
+    exit 1
 fi
 
-package_name="morpheus"
-file_name="requirements_morpheus_core_arch-$(arch).txt"
+grep -q '"event_uid"' "${OUTPUT}" || { echo "the smoke pipeline's output carries no event_uid"; exit 1; }
 
-# Install requirements if they are included in the package
-python3 <<EOF
-import subprocess
-import sys
-import importlib.resources as ir
-
-package_name = "${package_name}"
-file_name = "${file_name}"
-
-with ir.as_file(ir.files(anchor=package_name).joinpath(file_name)) as requirements_file:
-    subprocess.call(f"pip install -r {requirements_file}".split())
-EOF
-
-pytest tests/${package_name}
+echo "morpheus-core smoke test passed: ${WRITTEN} records"

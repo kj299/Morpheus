@@ -20,9 +20,12 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # Change to the script file to ensure we are in the correct repo (in case were in a submodule)
 pushd ${SCRIPT_DIR} &> /dev/null
 
-export DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-"nvcr.io/nvidia/morpheus/morpheus"}
+# A local name, as the development image has. The upstream scripts named NVIDIA's registry here, which an image built
+# from this fork is not from.
+export DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-"morpheus"}
 export DOCKER_TARGET_ARCH=${DOCKER_TARGET_ARCH:-$(dpkg --print-architecture)}
-export DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG:-"$(git describe --tags --abbrev=0)-runtime-${DOCKER_TARGET_ARCH}"}
+# The version is the nearest tag, or without one the version CMakeLists.txt gives the project
+export DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG:-"$(${SCRIPT_DIR}/../ci/scripts/project_version.sh)-runtime-${DOCKER_TARGET_ARCH}"}
 export DOCKER_TARGET=${DOCKER_TARGET:-"runtime"}
 
 popd &> /dev/null

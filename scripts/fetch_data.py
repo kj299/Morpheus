@@ -26,6 +26,7 @@ LFS_DATASETS = {
     'datasets': 'models/datasets/**',
     'docs': 'docs/**',
     'examples': 'examples/**',
+    'inventory': 'models/inventory/**',
     'models': 'models/**',
     'tests': 'tests/**',
     'validation': 'models/datasets/validation-data/**'
