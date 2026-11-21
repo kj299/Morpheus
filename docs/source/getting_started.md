@@ -81,8 +81,8 @@ Note about some of the flags above:
 Skip ahead to the [Models](#models) section.
 
 ## Using Morpheus Conda Packages
-The Morpheus stages are available as libraries that are hosted on the [`nvidia`](https://anaconda.org/nvidia) Conda channel. The Morpheus Conda packages are:
-[`morpheus-core`](https://anaconda.org/nvidia/morpheus-core) and [`morpheus-dfp`](https://anaconda.org/nvidia/morpheus-dfp).
+The Morpheus stages are available as libraries that are hosted on the [`nvidia`](https://anaconda.org/nvidia) Conda channel. The Morpheus Conda package this fork builds is
+[`morpheus-core`](https://anaconda.org/nvidia/morpheus-core); upstream also publishes `morpheus-dfp`, whose source this fork removed.
 
 For details on these libraries and how to use them, refer to the [Morpheus Conda Packages](./conda_packages.md) guide.
 

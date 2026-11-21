@@ -22,4 +22,3 @@ Python API
     :recursive:
 
     morpheus
-    morpheus_dfp

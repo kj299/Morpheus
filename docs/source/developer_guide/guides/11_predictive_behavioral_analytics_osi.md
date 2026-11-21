@@ -221,7 +221,7 @@ The repository ships three Python packages plus a compiled core:
 | `python/morpheus/morpheus` | Core SDK: configuration, pipeline, stages, messages, modules, parsers, controllers, I/O |
 | `python/morpheus/morpheus/_lib` | C++/CUDA core exposed through pybind11: messages, stages, tensors, cuDF interoperability |
 | [`python/morpheus/morpheus/_lib/doca`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus/morpheus/_lib/doca) | Optional NVIDIA DOCA GPUNetIO path for line-rate packet capture directly into GPU memory; removed from this fork by the [repository audit](./13_repository_audit.md)'s ruling D1 |
-| `python/morpheus_dfp/morpheus_dfp` | Digital fingerprinting: per-entity behavioral modeling, the piece most relevant here |
+| [`python/morpheus_dfp/morpheus_dfp`](https://github.com/nv-morpheus/Morpheus/tree/c6a3b56d/python/morpheus_dfp/morpheus_dfp) | Digital fingerprinting: per-entity behavioral modeling, the piece most relevant here |
 | [`python/morpheus_llm/morpheus_llm`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_llm/morpheus_llm) | LLM engine nodes, vector database services, retrieval-augmented enrichment; removed from this fork by the [repository audit](./13_repository_audit.md)'s ruling D1 |
 
 `docs/source/developer_guide/architecture.md` describes five conceptual layers: orchestration, pipeline,
@@ -291,7 +291,7 @@ container. It carries five things:
 2. `_tensors: TensorMemory` - GPU tensors for inference input and output.
 3. `_config["metadata"]` - a free-form dict, accessed through `set_metadata`/`get_metadata`/`list_metadata`.
 4. `_tasks: dict[str, deque]` - work items such as `load`, `training`, `inference`, driving the
-   control-message pipelines in `morpheus_dfp`.
+   control-message pipelines in the upstream `morpheus_dfp`.
 5. `_timestamps: dict[str, datetime]` - accessed through `set_timestamp`, `get_timestamp`,
    `get_timestamps`, and `filter_timestamp(regex)`.
 
@@ -367,8 +367,8 @@ Modules are the composable sub-stage unit introduced in 23.03. They are register
 example of nesting: `dfp_deployment` contains `dfp_training_pipe` and `dfp_inference_pipe`, each of which contains
 `dfp_preproc`, `dfp_rolling_window`, `dfp_data_prep`, among others. Module identifiers lived in
 [`python/morpheus_dfp/morpheus_dfp/utils/module_ids.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_dfp/morpheus_dfp/utils/module_ids.py).
-Ruling D4 removed those modules with the rest of `morpheus_dfp` that the reuse evidence does not import; the only
-module left in the tree is the one `DeserializeStage` loads.
+Ruling D4 removed those modules with the rest of `morpheus_dfp`; the reuse evidence reads the stages it measured
+from the upstream commit, and the only module left in the tree is the one `DeserializeStage` loads.
 
 ---
 
@@ -485,7 +485,7 @@ source -> dfp_preproc -> dfp_split_users -> dfp_rolling_window -> dfp_data_prep
 `DFPSplitUsersStage` fans a mixed batch into one `ControlMessage` per entity, tagging
 `message.set_metadata('user_id', ...)`.
 
-`DFPRollingWindowStage` (`python/morpheus_dfp/morpheus_dfp/stages/dfp_rolling_window_stage.py`) holds a
+`DFPRollingWindowStage` ([`python/morpheus_dfp/morpheus_dfp/stages/dfp_rolling_window_stage.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_dfp/morpheus_dfp/stages/dfp_rolling_window_stage.py)) holds a
 `CachedUserWindow` per entity and gates emission on three parameters:
 
 - `min_history` - suppress entities with too little data.
@@ -493,7 +493,7 @@ source -> dfp_preproc -> dfp_split_users -> dfp_rolling_window -> dfp_data_prep
 - `max_history` - either an integer row count or a `pandas.Timedelta` string, in which case only rows
   within `[latest_timestamp - max_history, latest_timestamp]` are retained.
 
-`python/morpheus_dfp/morpheus_dfp/utils/cached_user_window.py` adds two provenance columns on append:
+[`python/morpheus_dfp/morpheus_dfp/utils/cached_user_window.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_dfp/morpheus_dfp/utils/cached_user_window.py) adds two provenance columns on append:
 
 ```python
 filtered_df["_row_hash"] = pd.util.hash_pandas_object(filtered_df, index=False)
@@ -511,7 +511,7 @@ exactly what a SIEM needs to tie a score back to a source record.
 hash of the source object set, which makes it a usable batch-level provenance token.
 
 `DFPInferenceStage` resolves a per-entity model from MLflow through `ModelManager`/`ModelCache`
-(`python/morpheus_dfp/morpheus_dfp/utils/model_cache.py`), using the format string `dfp-{user_id}` and
+([`python/morpheus_dfp/morpheus_dfp/utils/model_cache.py`](https://github.com/nv-morpheus/Morpheus/blob/c6a3b56d/python/morpheus_dfp/morpheus_dfp/utils/model_cache.py)), using the format string `dfp-{user_id}` and
 falling back to `fallback_user_ids=[self._fallback_user]`. It writes `model_version` into the payload as
 `f"{model_cache.reg_model_name}:{model_cache.reg_model_version}"`. That single line is the seed of a
 reproducibility envelope; Part 5 expands it.
@@ -3950,7 +3950,8 @@ What Morpheus provides versus what has to be built, stated plainly.
 
 - Streaming pipeline runtime with GPU acceleration and segment-level distribution.
 - Declarative feature engineering DSL with behavioral novelty primitives (`column_info.py`).
-- Per-entity model training, registry integration, caching, and inference (`morpheus_dfp`).
+- Per-entity model training, registry integration, caching, and inference (the upstream `morpheus_dfp`, which Pass 4
+  measured and ruling D4 then removed from the fork).
 - Tabular autoencoder with per-feature attribution output (`dfencoder`).
 - Periodicity-based anomaly detection (`TimeSeriesStage`).
 
@@ -4860,7 +4861,7 @@ request from 2026-10-03 to 2026-10-12 -- no Actions run is recorded after that, 
 matched their golden files on 2026-10-04 and again on 2026-10-09, with cross-mode parity over all twelve; on
 2026-11-19 all thirteen, the host segment's included, matched on the card at the tree of pull request #135.
 That is sixty-two stages and fifty-five supporting
-modules, covered by 2,876 distinct tests, itemized in
+modules, covered by 2,878 distinct tests, itemized in
 [Part 6](#provided). Sixty-two of the sixty-three rules Part 3 specifies ship as saved searches, five of
 them chained. The Community ID implementation was checked against the reference implementation
 against the six published reference vectors, and the Splunk app was validated three ways, the strongest being a

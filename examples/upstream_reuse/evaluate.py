@@ -34,7 +34,17 @@ only so that the measurement can continue past them, and each is recorded with t
 
 `--lfs-data` is a directory holding `models/datasets/...` fetched from Git LFS; without it the source-stage section
 records the sample data as unavailable rather than guessing at its columns.
+
+**Where `morpheus_dfp` comes from.** The fork removed the package once this had measured it (ruling D4). The runner
+takes it from the repository's own history instead: `git archive` writes `python/morpheus_dfp` as it stood at
+upstream commit c6a3b56d, the fork point, into the run's temporary directory, and the run imports it from
+there. Those are the files the committed artifact was measured with, byte for byte. A clone without that commit, a
+shallow one, cannot run this; `git fetch --unshallow` gives it the history.
 """
+
+# Torch, MLflow and the upstream stages are imported where each measurement uses them: they are heavy, a probe has to
+# see an import fail without the run failing, and `morpheus_dfp` exists only once `extract_upstream_dfp` has run.
+# pylint: disable=import-outside-toplevel
 
 import argparse
 import contextlib
@@ -51,6 +61,43 @@ import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+
+UPSTREAM_COMMIT = "c6a3b56db1c77c2f375ae0833a65a7b6d2272269"
+"""The upstream commit the fork was taken from, and the `morpheus_dfp` this measures."""
+
+UPSTREAM_DFP = "python/morpheus_dfp"
+"""Where the package was, in that commit."""
+
+DFP_SOURCE = None
+"""The directory the run imports `morpheus_dfp` from, once `extract_upstream_dfp` has written it."""
+
+
+def extract_upstream_dfp(destination: str) -> str:
+    """
+    Write `UPSTREAM_DFP` as it stood at `UPSTREAM_COMMIT` under `destination`, and return the directory to
+    import the package from.
+
+    Raises
+    ------
+    RuntimeError
+        If the clone does not have the commit, as a shallow one does not.
+    """
+    archive = subprocess.run(["git", "-C", REPO_ROOT, "archive", "--format=tar", UPSTREAM_COMMIT, UPSTREAM_DFP],
+                             capture_output=True,
+                             check=False)
+
+    if (archive.returncode != 0):
+        raise RuntimeError(f"cannot read {UPSTREAM_DFP} at upstream commit {UPSTREAM_COMMIT[:8]} from this clone "
+                           f"({archive.stderr.decode(errors='replace').strip()}); a shallow clone lacks it, and "
+                           f"`git fetch --unshallow` fetches it")
+
+    import tarfile
+
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+        tar.extractall(destination, filter="data")
+
+    return os.path.join(destination, UPSTREAM_DFP)
+
 
 TRAINING_KWARGS = {"device": "cpu", "encoder_layers": [8, 4], "decoder_layers": [4, 8]}
 """DFPTraining's model arguments, overridden only where the upstream defaults cannot apply here: the CPU device, and
@@ -71,17 +118,16 @@ INFERENCE_WINDOW = {"min_history": 1, "min_increment": 0, "max_history": "1d"}
 
 def _probe(statement: str) -> dict:
     """Run one import in a fresh interpreter, so a failure cannot leave half-initialized native state here."""
-    completed = subprocess.run(
-        [sys.executable, "-c", statement],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=REPO_ROOT,
-        env={
-            **os.environ,
-            "PYTHONPATH":
-                os.pathsep.join([os.path.join(REPO_ROOT, "python", "morpheus_dfp"), os.environ.get("PYTHONPATH", "")])
-        })
+    completed = subprocess.run([sys.executable, "-c", statement],
+                               capture_output=True,
+                               text=True,
+                               check=False,
+                               cwd=REPO_ROOT,
+                               env={
+                                   **os.environ,
+                                   "PYTHONPATH":
+                                       os.pathsep.join([DFP_SOURCE or "", os.environ.get("PYTHONPATH", "")])
+                               })
     lines = [line for line in completed.stderr.strip().splitlines() if line.strip()]
 
     return {"ok": completed.returncode == 0, "error": lines[-1][:240] if (completed.returncode and lines) else None}
@@ -90,7 +136,7 @@ def _probe(statement: str) -> dict:
 def install_shims(shims: list) -> None:
     """Stand pandas in for cuDF and NumPy for CuPy where the real ones cannot load, and say so."""
     if (not _probe("import cudf")["ok"]):
-        import pandas as pd  # pylint: disable=import-outside-toplevel
+        import pandas as pd
 
         pd.DataFrame.to_pandas = lambda self: self
         pd.DataFrame.from_pandas = staticmethod(lambda frame: frame)
@@ -102,7 +148,7 @@ def install_shims(shims: list) -> None:
         shims.append("cudf -> pandas: no CUDA driver; the DFP stages' own methods are called off-pipeline")
 
     if (not _probe("import cupy; cupy.zeros(1)")["ok"]):
-        import numpy  # pylint: disable=import-outside-toplevel
+        import numpy
 
         class HostArray(numpy.ndarray):
             """A NumPy array answering CuPy's `.get()`, which copies a device array to the host."""
@@ -118,11 +164,11 @@ def install_shims(shims: list) -> None:
         shims.append("cupy -> numpy: no CUDA device; the arithmetic is the stages' own, with `choose` and `.get()` "
                      "given CuPy's semantics")
 
-    import morpheus.common  # pylint: disable=import-outside-toplevel
+    import morpheus.common
 
     morpheus.common.load_cudf_helper = lambda: None
 
-    from morpheus.config import CppConfig  # pylint: disable=import-outside-toplevel
+    from morpheus.config import CppConfig
 
     CppConfig.set_should_use_cpp(False)
 
@@ -148,8 +194,8 @@ def session_features():
     """The session corpus's authentications, as the ten features the fork's models are trained on."""
     sys.path.insert(0, os.path.join(REPO_ROOT, "examples", "behavioral_analytics"))
 
-    import pandas as pd  # pylint: disable=import-outside-toplevel
-    from corpora import merged  # pylint: disable=import-outside-toplevel
+    import pandas as pd
+    from corpora import merged
     sp = merged("session")
 
     result = sp.run_pipeline(sp.build_pipeline_config(), sp.build_corpus())
@@ -189,10 +235,9 @@ class MlflowRepairs:
         self._saved = []
 
     def __enter__(self):
-        import mlflow  # pylint: disable=import-outside-toplevel
-        import mlflow.pytorch  # pylint: disable=import-outside-toplevel
-
-        from morpheus_dfp.utils import model_cache  # pylint: disable=import-outside-toplevel
+        import mlflow
+        import mlflow.pytorch
+        from morpheus_dfp.utils import model_cache
 
         last = {}
         original_log = mlflow.pytorch.log_model
@@ -237,9 +282,9 @@ class DfpPath:
     """The upstream training and inference pipelines' stages, driven message by message over the session corpus."""
 
     def __init__(self, sp, workdir: str):
-        from morpheus.config import Config  # pylint: disable=import-outside-toplevel
-        from morpheus.config import ConfigAutoEncoder  # pylint: disable=import-outside-toplevel
-        from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
+        from morpheus.config import Config
+        from morpheus.config import ConfigAutoEncoder
+        from morpheus.config import ExecutionMode
 
         self.sp = sp
         self.workdir = workdir
@@ -256,31 +301,28 @@ class DfpPath:
         self.config.ae.timestamp_column_name = "timestamp"
 
     def _split(self, frame, generic: bool):
-        from morpheus_dfp.stages.dfp_split_users_stage import (  # pylint: disable=import-outside-toplevel
-            DFPSplitUsersStage, )
+        from morpheus_dfp.stages.dfp_split_users_stage import DFPSplitUsersStage
 
         return DFPSplitUsersStage(self.config, include_generic=generic,
                                   include_individual=True).extract_users(frame.drop(columns=["event_time"]))
 
     def window(self, name: str, settings: dict):
-        from morpheus_dfp.stages.dfp_rolling_window_stage import (  # pylint: disable=import-outside-toplevel
-            DFPRollingWindowStage, )
+        from morpheus_dfp.stages.dfp_rolling_window_stage import DFPRollingWindowStage
 
         return DFPRollingWindowStage(self.config, cache_dir=os.path.join(self.workdir, name), **settings)
 
     def trainer(self):
-        from morpheus_dfp.stages.dfp_training import DFPTraining  # pylint: disable=import-outside-toplevel
+        from morpheus_dfp.stages.dfp_training import DFPTraining
 
         return DFPTraining(self.config, model_kwargs=dict(TRAINING_KWARGS), epochs=TRAINING_EPOCHS)
 
     def writer(self):
-        from morpheus_dfp.stages.dfp_mlflow_model_writer import (  # pylint: disable=import-outside-toplevel
-            DFPMLFlowModelWriterStage, )
+        from morpheus_dfp.stages.dfp_mlflow_model_writer import DFPMLFlowModelWriterStage
 
         return DFPMLFlowModelWriterStage(self.config)
 
     def inference(self):
-        from morpheus_dfp.stages.dfp_inference_stage import DFPInferenceStage  # pylint: disable=import-outside-toplevel
+        from morpheus_dfp.stages.dfp_inference_stage import DFPInferenceStage
 
         return DFPInferenceStage(self.config)
 
@@ -302,7 +344,7 @@ class DfpPath:
 
     def registered(self) -> dict:
         """Registered model name to its latest version, as the registry holds it."""
-        from mlflow.tracking import MlflowClient  # pylint: disable=import-outside-toplevel
+        from mlflow.tracking import MlflowClient
 
         client = MlflowClient()
         found = {}
@@ -319,10 +361,8 @@ class DfpPath:
 
         Returns the scored frames, one per emitted window, each tagged with the batch it came from.
         """
-        import pandas as pd  # pylint: disable=import-outside-toplevel
-
-        from morpheus_dfp.stages.dfp_postprocessing_stage import (  # pylint: disable=import-outside-toplevel
-            DFPPostprocessingStage, )
+        import pandas as pd
+        from morpheus_dfp.stages.dfp_postprocessing_stage import DFPPostprocessingStage
 
         stage = stage if stage is not None else self.inference()
         window = window if window is not None else self.window(f"infer-{id(stage)}-{len(batches)}", INFERENCE_WINDOW)
@@ -352,8 +392,8 @@ class DfpPath:
 
 
 def _digest(model, features: list) -> str:
-    from morpheus.utils.dfencoder_scorer import export_model  # pylint: disable=import-outside-toplevel
-    from morpheus.utils.dfencoder_scorer import model_digest  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.dfencoder_scorer import export_model
+    from morpheus.utils.dfencoder_scorer import model_digest
 
     return model_digest(export_model(model, features))
 
@@ -391,7 +431,7 @@ def measure_dfp(sp, fortnight, week, workroot: str) -> dict:
         named = DfpPath(sp, os.path.join(workroot, "naming"))
         named.train(fortnight)
         scored = named.score([week])
-        from morpheus_dfp.utils.model_cache import user_to_model_name  # pylint: disable=import-outside-toplevel
+        from morpheus_dfp.utils.model_cache import user_to_model_name
 
         found["naming"] = {
             "registered":
@@ -429,13 +469,13 @@ def measure_dfp(sp, fortnight, week, workroot: str) -> dict:
 
 def _cpu_pipeline(fortnight) -> dict:
     """Build a CPU-mode pipeline with the split stage in it, as a deployment without a card would."""
-    from morpheus.config import Config  # pylint: disable=import-outside-toplevel
-    from morpheus.config import ConfigAutoEncoder  # pylint: disable=import-outside-toplevel
-    from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
-    from morpheus.pipeline import LinearPipeline  # pylint: disable=import-outside-toplevel
-    from morpheus.stages.input.in_memory_source_stage import (  # pylint: disable=import-outside-toplevel
-        InMemorySourceStage, )
-    from morpheus_dfp.stages.dfp_split_users_stage import DFPSplitUsersStage  # pylint: disable=import-outside-toplevel
+    from morpheus_dfp.stages.dfp_split_users_stage import DFPSplitUsersStage
+
+    from morpheus.config import Config
+    from morpheus.config import ConfigAutoEncoder
+    from morpheus.config import ExecutionMode
+    from morpheus.pipeline import LinearPipeline
+    from morpheus.stages.input.in_memory_source_stage import InMemorySourceStage
 
     config = Config()
     config.execution_mode = ExecutionMode.CPU
@@ -473,7 +513,7 @@ def _first_window(path: DfpPath, fortnight, principal: str):
 
 def _training_double_run(path: DfpPath, fortnight, features: list) -> dict:
     """Train the same principal's window twice, as shipped and then after seeding, and compare the weights."""
-    from morpheus.utils.seed import manual_seed  # pylint: disable=import-outside-toplevel
+    from morpheus.utils.seed import manual_seed
 
     principal = "alice@example.com"
     window = _first_window(path, fortnight, principal)
@@ -589,7 +629,7 @@ def _late_row(path: DfpPath, week) -> dict:
 
 def _event_time(path: DfpPath, week) -> dict:
     """What DFPPostprocessingStage leaves in `event_time`, twice over the same rows."""
-    import time  # pylint: disable=import-outside-toplevel
+    import time
 
     batch = week[week["user_principal"] == "dave@example.com"].head(2)
     first = path.score([batch], postprocess=True)
@@ -707,13 +747,12 @@ def _falls(series) -> bool:
 
 def measure_sources(lfs_dir: str) -> dict:
     """Read each sample through its stage's own methods and map the result onto the fork's TC-5 inputs."""
-    import pandas as pd  # pylint: disable=import-outside-toplevel
+    import pandas as pd
 
-    from morpheus.common import FileTypes  # pylint: disable=import-outside-toplevel
-    from morpheus.stages.input.azure_source_stage import AzureSourceStage  # pylint: disable=import-outside-toplevel
-    from morpheus.stages.input.cloud_trail_source_stage import (  # pylint: disable=import-outside-toplevel
-        CloudTrailSourceStage, )
-    from morpheus.stages.input.duo_source_stage import DuoSourceStage  # pylint: disable=import-outside-toplevel
+    from morpheus.common import FileTypes
+    from morpheus.stages.input.azure_source_stage import AzureSourceStage
+    from morpheus.stages.input.cloud_trail_source_stage import CloudTrailSourceStage
+    from morpheus.stages.input.duo_source_stage import DuoSourceStage
 
     found = {}
     stages = {"azure": AzureSourceStage, "cloudtrail": CloudTrailSourceStage, "duo": DuoSourceStage}
@@ -823,16 +862,15 @@ def _modes(stage_class) -> str:
 
 def measure_drift(sp, workdir: str) -> dict:
     """What MLFlowDriftStage reads, what it writes, and whether the batching decides it."""
-    import numpy as np  # pylint: disable=import-outside-toplevel
-    from mlflow.tracking import MlflowClient  # pylint: disable=import-outside-toplevel
+    import numpy as np
+    from mlflow.tracking import MlflowClient
 
-    from morpheus.config import Config  # pylint: disable=import-outside-toplevel
-    from morpheus.config import ExecutionMode  # pylint: disable=import-outside-toplevel
-    from morpheus.messages import ControlMessage  # pylint: disable=import-outside-toplevel
-    from morpheus.messages import MessageMeta  # pylint: disable=import-outside-toplevel
-    from morpheus.messages.memory.tensor_memory import TensorMemory  # pylint: disable=import-outside-toplevel
-    from morpheus.stages.postprocess.ml_flow_drift_stage import (  # pylint: disable=import-outside-toplevel
-        MLFlowDriftStage, )
+    from morpheus.config import Config
+    from morpheus.config import ExecutionMode
+    from morpheus.messages import ControlMessage
+    from morpheus.messages import MessageMeta
+    from morpheus.messages.memory.tensor_memory import TensorMemory
+    from morpheus.stages.postprocess.ml_flow_drift_stage import MLFlowDriftStage
 
     os.makedirs(workdir, exist_ok=True)
     os.chdir(workdir)
@@ -859,7 +897,7 @@ def measure_drift(sp, workdir: str) -> dict:
     except Exception as error:  # pylint: disable=broad-exception-caught
         found["on_the_fork_rows"] = f"{type(error).__name__}: {str(error)[:160]}"
     finally:
-        import mlflow  # pylint: disable=import-outside-toplevel
+        import mlflow
 
         mlflow.end_run()
 
@@ -890,16 +928,16 @@ def measure_drift(sp, workdir: str) -> dict:
 
 def measure_timeseries(workdir: str) -> dict:
     """TimeSeriesStage over the failing optic's hour: as shipped, scaled to the hour, and with its values flattened."""
-    import pandas as pd  # pylint: disable=import-outside-toplevel
+    import pandas as pd
 
     sys.path.insert(0, os.path.join(REPO_ROOT, "examples", "behavioral_analytics"))
 
-    from corpora import merged  # pylint: disable=import-outside-toplevel
+    from corpora import merged
     tp = merged("telemetry")
 
-    from morpheus.messages import ControlMessage  # pylint: disable=import-outside-toplevel
-    from morpheus.messages import MessageMeta  # pylint: disable=import-outside-toplevel
-    from morpheus.stages.postprocess import timeseries_stage  # pylint: disable=import-outside-toplevel
+    from morpheus.messages import ControlMessage
+    from morpheus.messages import MessageMeta
+    from morpheus.stages.postprocess import timeseries_stage
 
     del workdir
     layer_1 = tp.build_corpus()["tc1"]
@@ -1017,18 +1055,27 @@ def main() -> int:
     artifact = os.path.abspath(arguments.artifact)
     lfs_dir = os.path.abspath(arguments.lfs_data) if arguments.lfs_data else None
 
-    sys.path.insert(0, os.path.join(REPO_ROOT, "python", "morpheus_dfp"))
+    global DFP_SOURCE  # pylint: disable=global-statement
+
+    workroot = tempfile.mkdtemp(prefix="upstream-reuse-")
+
+    try:
+        DFP_SOURCE = extract_upstream_dfp(os.path.join(workroot, "upstream"))
+    except RuntimeError as error:
+        print(error, file=sys.stderr)
+        return 1
+
+    sys.path.insert(0, DFP_SOURCE)
     shims: list = []
     install_shims(shims)
 
     try:
-        import torch  # pylint: disable=import-outside-toplevel
+        import torch
     except ImportError:
         print("The DFP model path trains with Torch, which is not importable here.", file=sys.stderr)
         return 1
 
     (sp, fortnight, week) = session_features()
-    workroot = tempfile.mkdtemp(prefix="upstream-reuse-")
     home = os.getcwd()
 
     try:
@@ -1039,6 +1086,7 @@ def main() -> int:
                 "torch": torch.__version__,
                 "mlflow": _version("mlflow"),
                 "pandas": _version("pandas"),
+                "morpheus_dfp": f"{UPSTREAM_DFP} at upstream {UPSTREAM_COMMIT}",
                 "shims": shims,
             },
             "corpus": {

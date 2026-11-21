@@ -36,10 +36,18 @@ MANIFEST = os.path.join(REPO_ROOT, "ci", "artifacts", "repository_audit_manifest
 REMOVALS = os.path.join(REPO_ROOT, "ci", "artifacts", "repository_audit_removals.txt")
 GUIDE = os.path.join(REPO_ROOT, "docs", "source", "developer_guide", "guides", "13_repository_audit.md")
 VERDICTS = ("keep", "update", "keep-dependency", "remove")
-PACKAGE_ROOTS = ("python/morpheus/", "python/morpheus_dfp/")
+PACKAGE_ROOTS = ("python/morpheus/", )
 CHECKED_PACKAGES = ("morpheus", "morpheus_dfp", "morpheus_llm")
-"""Top-level packages whose imports must resolve to a file in the tree. `morpheus_llm` is listed although the tree no
-longer has it, so that an import of it reads as what it is: an import of something removed."""
+"""Top-level packages whose imports must resolve to a file in the tree. `morpheus_dfp` and `morpheus_llm` are listed
+although the tree no longer has them, so that an import of either reads as what it is: an import of something
+removed."""
+
+IMPORTS_FROM_HISTORY = {
+    "examples/upstream_reuse/evaluate.py": "morpheus_dfp",
+}
+"""Files that import a removed package on purpose, from the repository's history rather than the tree: the reuse
+evaluation measures upstream's `morpheus_dfp` and extracts it from the upstream commit with `git archive` before it
+imports it. Only the named package is excused, and only in the named file."""
 
 
 def _tracked() -> list:
@@ -187,12 +195,25 @@ def test_nothing_kept_imports_a_module_the_tree_no_longer_has(manifest: dict):
         if row["verdict"] == "remove" or not path.endswith(".py"):
             continue
 
-        missing = _unresolved(_parse(path), index)
+        missing = {
+            name
+            for name in _unresolved(_parse(path), index) if name.split(".")[0] != IMPORTS_FROM_HISTORY.get(path)
+        }
 
         if missing:
             offenders[path] = sorted(missing)
 
     assert not offenders, f"kept files importing modules the tree does not have: {offenders}"
+
+
+def test_a_file_excused_an_import_takes_the_package_from_history():
+    # The excuse holds only while the file does what it says: reads the package out of a commit with `git archive`.
+    for (path, package) in IMPORTS_FROM_HISTORY.items():
+        with open(os.path.join(REPO_ROOT, path), encoding="utf-8") as handle:
+            source = handle.read()
+
+        assert '"archive"' in source and f"python/{package}" in source, path
+        assert not os.path.exists(os.path.join(REPO_ROOT, "python", package)), f"{package} is back in the tree"
 
 
 def test_an_import_of_a_deleted_module_is_seen():

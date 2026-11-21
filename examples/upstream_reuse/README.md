@@ -28,8 +28,15 @@ a reading.
 ./examples/upstream_reuse/evaluate.py /tmp/upstream_reuse.json --lfs-data .
 ```
 
-It needs Torch and the `morpheus_dfp` package importable, and took 45 seconds on a CPU-only container. Without
-`--lfs-data` the source-stage section records the samples as not fetched and measures nothing about them.
+It needs Torch, and took 45 seconds on a CPU-only container. Without `--lfs-data` the source-stage section records
+the samples as not fetched and measures nothing about them.
+
+The fork removed `morpheus_dfp` once this had measured it (ruling D4 of the
+[repository audit](../../docs/source/developer_guide/guides/13_repository_audit.md)). The runner takes the package
+from the repository's history instead: it writes `python/morpheus_dfp` as it stood at upstream commit
+[`c6a3b56d`](https://github.com/nv-morpheus/Morpheus/tree/c6a3b56db1c77c2f375ae0833a65a7b6d2272269/python/morpheus_dfp),
+the fork point, into its temporary directory and imports it from there. Those are the files the committed artifact
+was measured with. A shallow clone does not have that commit; `git fetch --unshallow` fetches it.
 
 The decisions and the reason for each are in
 [Pass 4 of the design guide's Part 0](../../docs/source/developer_guide/guides/11_predictive_behavioral_analytics_osi.md#pass-4-what-to-reuse-measured).
@@ -83,8 +90,8 @@ MLflow and pandas the fork's CPU lock resolves.
 
 [`tests/morpheus/determinism/test_upstream_reuse.py`](../../tests/morpheus/determinism/test_upstream_reuse.py)
 holds every number Pass 4 quotes to the latest committed artifact under [`artifacts/`](./artifacts/), and checks
-the run's findings are what Pass 4 says they are. It also re-checks, against the code in the tree, the reasons that
-need no card, Torch or LFS sample: the Azure and Duo stages still rename nothing, the writer still escapes a dot
-the reader does not, `TimeSeriesStage`'s defaults still cannot reach its own threshold, and the DFP stages still
-declare the GPU alone. If upstream repairs one of those, the test fails and the decision it supports is due another
-look.
+the run's findings are what Pass 4 says they are. It also re-checks the reasons that need no card, Torch or LFS
+sample. Against the code in the tree: the Azure and Duo stages still rename nothing, the MLflow writer still escapes
+a dot, and `TimeSeriesStage`'s defaults still cannot reach its own threshold; if one is repaired, the test fails
+and the decision it supports is due another look. Against `morpheus_dfp` at `c6a3b56d`, read from the history: its
+reader does not escape the dot the writer does, and its stages declare the GPU alone.

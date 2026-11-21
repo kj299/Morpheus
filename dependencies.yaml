@@ -188,15 +188,6 @@ files:
     includes:
       - morpheus_core_pip
 
-  # morpheus-dfp pip dependencies are published as a morpheus_dfp package data file
-  morpheus_dfp:
-    output: requirements
-    requirements_dir: python/morpheus_dfp/morpheus_dfp
-    matrix:
-      arch: [x86_64]
-    includes:
-      - morpheus_core_pip
-
   # dfp example conda dependencies
 
 channels:
