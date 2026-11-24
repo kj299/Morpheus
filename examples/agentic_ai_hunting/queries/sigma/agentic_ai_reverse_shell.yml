@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: Agent Process Opens A Reverse Shell
+id: 53a34a43-7228-40b2-a641-a0c021234716
+status: experimental
+description: >-
+    An AI coding agent's process tree opens an interactive shell to a remote host.
+    Hunt AAH-004 of examples/agentic_ai_hunting.
+references:
+    - https://atlas.mitre.org/
+    - https://genai.owasp.org/llm-top-10/
+author: Morpheus agentic AI hunting examples
+date: 2026-11-24
+tags:
+    - attack.execution
+    - attack.t1059.004
+logsource:
+    category: process_creation
+detection:
+    selection_agent:
+        - ParentImage|endswith:
+              - '/claude'
+              - '\claude.exe'
+              - '/codex'
+              - '\codex.exe'
+              - '/cursor'
+              - '\Cursor.exe'
+              - '/windsurf'
+              - '\Windsurf.exe'
+              - '/aider'
+              - '/gemini'
+        - ParentCommandLine|contains:
+              - '@anthropic-ai/claude-code'
+              - '@openai/codex'
+              - '@google/gemini-cli'
+    selection_shell:
+        - CommandLine|re: '/dev/tcp/[\w.-]+/\d+'
+        - CommandLine|re: '\bnc(at)?\b.*\s-[ec]\s'
+        - CommandLine|contains|all:
+              - 'socat'
+              - 'exec:'
+        - CommandLine|contains: 'bash -i >&'
+    condition: selection_agent and selection_shell
+falsepositives:
+    - Unknown
+level: critical

@@ -24,5 +24,6 @@ reads a file stored in Git LFS; fetch it first with `./scripts/fetch_data.py fet
 * [Splunk Lineage App for Morpheus Behavioral Analytics](./splunk_lineage_app/README.md) - The installable Splunk app that implements the SIEM half of the design
 * [Layer 5 models](./layer5_model/README.md) - Training and scoring the per-principal and per-peer-group models the layer 5 rules read
 * [Clock skew tolerance](./clock_skew/README.md) - How much clock skew each detection tolerates, measured rule by rule
+* [Agentic AI hunting](./agentic_ai_hunting/README.md) - Hunts, Claude Code skills, an MCP server and SIEM queries for malicious behavior by and through AI agents
 * [Upstream reuse](./upstream_reuse/README.md) - Which upstream digital fingerprinting pieces the fork reuses, measured
 * [Simple Python stage](./developer_guide/1_simple_python_stage/README.md) - The example for developer guide 1, writing a stage

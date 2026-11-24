@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agentic-hunt": {
+      "command": "python3",
+      "args": ["examples/agentic_ai_hunting/mcp_server.py"]
+    }
+  }
+}

@@ -81,7 +81,7 @@ together.
 
 The manifest is `ci/artifacts/repository_audit_manifest.csv`: one row per tracked file with its class, both passes'
 verdicts, the final verdict, purpose, why it is here, reason, action, dependents and needs. The files marked for
-removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,049 tracked files:
+removal are listed one per line in `ci/artifacts/repository_audit_removals.txt`. Both cover all 1,083 tracked files:
 the 2,407 the passes read, the five this audit adds (the two manifests, this guide, its test and the shared
 corpus pipeline helper) and the seven the repository research pass of 2026-10-24 added (the Entra ID sign-in fixture, the host segment's runner and its five input samples)
 and the sixteen ruling D2 added (four model inventory files, six modules and their six tests) and the two plan
@@ -109,7 +109,10 @@ documentation and lint scripts) and the five section 4.8d added (the C++ build s
 test, and the build environment's request and lock) and the one the GPU run of 2026-11-19 added (its
 conformance artifact) and the one the GPU model run of 2026-11-20 added (its artifact) and the three the audit
 refactors of 2026-11-21 added (the sum window, its test and the harnesses' saved search reader) and the two the
-container work of the same day added (the version script and the test of the container build's inputs), less
+container work of the same day added (the version script and the test of the container build's inputs) and the
+thirty-four the agentic AI hunting work of 2026-11-24 added (four Claude Code skills and two references, the
+project's MCP configuration, the hunting engine with its command line, MCP server, fixtures and SIEM queries, and
+its two tests), less
 the 1,519 files removed since: three under ruling D5, and 224 in the language-model part of D1, 48 in its DOCA part and 384 in its
 security-examples part, all on 2026-10-24, and, on 2026-10-25, 96 in its digital fingerprinting part, 120 under
 ruling D7, 331 under ruling D2, 59 under ruling D6 and 132 under ruling D4, and the thirteen golden drivers section
@@ -123,7 +126,7 @@ D4 had kept, once the reuse evidence read the package from upstream history.
 | Verdict | Files |
 | --- | --- |
 | `keep-dependency` | 387 |
-| `keep` | 518 |
+| `keep` | 552 |
 | `update` | 144 |
 
 The audit marked 1,476 files for removal. 1,467 are upstream code the fork never touched, six are upstream

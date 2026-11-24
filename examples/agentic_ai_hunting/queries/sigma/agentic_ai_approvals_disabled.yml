@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: AI Agent Started With Approvals Disabled
+id: 72b30bc4-7e8f-4912-9d1d-93ec6fa5caaa
+status: experimental
+description: >-
+    An AI coding agent is launched with the flag that skips its permission prompts or sandbox.
+    Hunt AAH-011 of examples/agentic_ai_hunting.
+references:
+    - https://atlas.mitre.org/
+    - https://genai.owasp.org/llm-top-10/
+author: Morpheus agentic AI hunting examples
+date: 2026-11-24
+tags:
+    - attack.defense-evasion
+    - attack.t1562.001
+logsource:
+    category: process_creation
+detection:
+    selection:
+        CommandLine|contains:
+            - '--dangerously-skip-permissions'
+            - '--dangerously-bypass-approvals-and-sandbox'
+            - ' --yolo'
+    condition: selection
+falsepositives:
+    - Agents run inside disposable sandboxes or CI containers by design
+level: medium

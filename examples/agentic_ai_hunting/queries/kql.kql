@@ -1,0 +1,171 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Agentic AI hunts in KQL, one query per hunt in examples/agentic_ai_hunting/agentic_hunt/catalog.py.
+//
+// Hunts an endpoint sensor can see (AAH-003, AAH-004, AAH-010, AAH-011) read Microsoft Defender XDR's Device*
+// tables, attributing a process to an agent by its parent's name or command line. The rest read AgentTelemetry_CL,
+// a custom Sentinel table holding the normalized agent event schema with each section (args, process, file,
+// network, auth, tools) as a dynamic column. Tune AgentImages and the allow lists before relying on a result.
+
+// AAH-004 Risky commands from an agent's process tree
+let AgentImages = dynamic(["claude", "claude.exe", "cursor", "Cursor.exe", "codex", "codex.exe", "windsurf", "Windsurf.exe", "aider", "gemini", "cline"]);
+DeviceProcessEvents
+| where Timestamp > ago(14d)
+| where InitiatingProcessFileName in~ (AgentImages) or InitiatingProcessParentFileName in~ (AgentImages)
+    or InitiatingProcessCommandLine has_any ("claude-code", "@anthropic-ai/claude-code", "@openai/codex", "gemini-cli")
+| extend Pattern = case(
+    ProcessCommandLine matches regex @"(curl|wget)[^|;&]*\|\s*(sudo\s+)?(ba|z|da)?sh\b", "download_and_execute",
+    ProcessCommandLine matches regex @"base64\s+(-d|--decode)[^|;]*\|\s*(ba|z)?sh\b", "decode_and_execute",
+    ProcessCommandLine matches regex @"/dev/tcp/[\w.-]+/\d+|\bnc(at)?\b.*\s-[ec]\s|socat.*exec:|bash\s+-i\s+>&", "reverse_shell",
+    ProcessCommandLine matches regex @">>?\s*\S*\.(bashrc|zshrc|profile|bash_profile|zprofile)\b", "shell_profile_persistence",
+    ProcessCommandLine matches regex @"\|\s*crontab\b|launchctl\s+(load|bootstrap)|systemctl\s+--user\s+enable", "scheduled_persistence",
+    ProcessCommandLine matches regex @"unset\s+HISTFILE|HISTFILE=/dev/null|set\s+\+o\s+history|history\s+-c", "history_tampering",
+    "")
+| where isnotempty(Pattern)
+| extend Severity = iff(Pattern in ("reverse_shell", "download_and_execute"), "critical", "high")
+| project Timestamp, DeviceName, AccountName, Pattern, Severity, ProcessCommandLine, InitiatingProcessCommandLine
+
+// AAH-003 A credential read followed by egress (Defender does not log file reads, so the read is a command line)
+let AgentImages = dynamic(["claude", "claude.exe", "cursor", "Cursor.exe", "codex", "codex.exe", "windsurf", "Windsurf.exe", "aider", "gemini", "cline"]);
+let Window = 10m;
+let Ignored = dynamic(["localhost", "127.0.0.1", "api.anthropic.com", "api.openai.com"]);
+let Reads = DeviceProcessEvents
+    | where Timestamp > ago(14d)
+    | where InitiatingProcessFileName in~ (AgentImages) or InitiatingProcessParentFileName in~ (AgentImages)
+    | where ProcessCommandLine matches regex @"\.ssh/(id_|config)|\.aws/credentials|\.config/gcloud/|\.azure/|\.kube/config|\.docker/config\.json|\.npmrc|\.pypirc|\.git-credentials|\.netrc|(^|[/\s])\.env(\.[a-z]+)?(\s|$)|Login Data|Keychains"
+    | project DeviceId, DeviceName, ReadTime = Timestamp, ReadCommand = ProcessCommandLine;
+DeviceNetworkEvents
+| where Timestamp > ago(14d)
+| where InitiatingProcessFileName in~ (AgentImages) or InitiatingProcessParentFileName in~ (AgentImages)
+    or InitiatingProcessFileName in~ ("curl", "wget", "nc", "ncat", "scp", "python", "python3", "node")
+| extend Destination = coalesce(RemoteUrl, RemoteIP)
+| where not(Destination has_any (Ignored))
+| join kind=inner Reads on DeviceId
+| where Timestamp between (ReadTime .. (ReadTime + Window))
+| summarize Destinations = make_set(Destination), FirstRead = min(ReadTime), Reads = make_set(ReadCommand) by DeviceName
+
+// AAH-010 Destructive agent commands
+let AgentImages = dynamic(["claude", "claude.exe", "cursor", "Cursor.exe", "codex", "codex.exe", "windsurf", "Windsurf.exe", "aider", "gemini", "cline"]);
+DeviceProcessEvents
+| where Timestamp > ago(14d)
+| where InitiatingProcessFileName in~ (AgentImages) or InitiatingProcessParentFileName in~ (AgentImages)
+| extend Pattern = case(
+    ProcessCommandLine matches regex @"\brm\s+-[a-z]*r[a-z]*\s+(/|~|\$HOME|\*|/\*)", "recursive_delete",
+    ProcessCommandLine matches regex @"git\s+push\b.*(\s--force\b|\s-f\b)", "force_push",
+    ProcessCommandLine matches regex @"(?i)\b(drop\s+(table|database|schema)|truncate\s+table)\b", "drop_database_object",
+    ProcessCommandLine matches regex @"aws\s+s3\s+(rb\b|rm\b.*--recursive)|gsutil\s+(-m\s+)?rm\s+-r", "cloud_storage_delete",
+    ProcessCommandLine matches regex @"kubectl\s+delete\s+(ns|namespace|deployment|pvc|--all)\b", "cluster_delete",
+    ProcessCommandLine matches regex @"terraform\s+destroy|pulumi\s+destroy|gh\s+repo\s+delete", "infrastructure_destroy",
+    "")
+| where isnotempty(Pattern)
+| project Timestamp, DeviceName, AccountName, Pattern, ProcessCommandLine
+
+// AAH-011 Agents tampering with their own guardrails: configuration writes, and agents started with approvals off
+let AgentImages = dynamic(["claude", "claude.exe", "cursor", "Cursor.exe", "codex", "codex.exe", "windsurf", "Windsurf.exe", "aider", "gemini", "cline", "node", "node.exe"]);
+let ConfigWrites = DeviceFileEvents
+    | where Timestamp > ago(14d)
+    | where ActionType in ("FileCreated", "FileModified", "FileRenamed")
+    | where InitiatingProcessFileName in~ (AgentImages) or InitiatingProcessParentFileName in~ (AgentImages)
+    | where FolderPath matches regex @"(\.claude[/\\]settings(\.local)?\.json|\.claude\.json|\.mcp\.json|\.cursor[/\\](mcp\.json|rules)|\.cursorrules|\.vscode[/\\](mcp|settings)\.json|claude_desktop_config\.json|\.windsurfrules|copilot-instructions\.md|[/\\](CLAUDE|AGENTS|GEMINI)\.md|\.codex[/\\]config\.toml)$"
+    | project Timestamp, DeviceName, Evidence = FolderPath, Kind = "config_write", InitiatingProcessCommandLine;
+let BypassFlags = DeviceProcessEvents
+    | where Timestamp > ago(14d)
+    | where ProcessCommandLine has_any ("--dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox", "--yolo")
+    | project Timestamp, DeviceName, Evidence = ProcessCommandLine, Kind = "approvals_disabled", InitiatingProcessCommandLine;
+union ConfigWrites, BypassFlags
+| order by Timestamp desc
+
+// AAH-001 Indirect prompt injection in content an agent read
+AgentTelemetry_CL
+| where type in ("tool_result", "document")
+| extend c = tolower(content)
+| extend Score = iff(c matches regex @"(ignore|disregard|forget|override|bypass)[^.\n]{0,40}(previous|prior|above|earlier|all|any|your)[^.\n]{0,20}(instruction|prompt|rule|guideline)", 3, 0)
+    + iff(c matches regex @"(do not|don't|never|without)\s+(tell|inform|mention|reveal|show|alert|notify)[^.\n]{0,30}(user|human|operator)", 3, 0)
+    + iff(c matches regex @"(send|post|upload|forward|exfiltrate|include|copy)[^.\n]{0,60}(to|at|into|in)[^.\n]{0,40}(https?://|webhook|pastebin|ngrok)", 3, 0)
+    + iff(c matches regex @"<\s*/?\s*(important|system|instructions?)\s*>|\[/?(system|inst)\]", 2, 0)
+    + iff(content matches regex @"[\x{200B}-\x{200F}\x{2060}-\x{2064}\x{202A}-\x{202E}\x{2066}-\x{2069}]", 2, 0)
+    + iff(c matches regex @"!\[[^\]]*\]\(https?://[^)\s]+\?[^)\s]*=", 3, 0)
+    + iff(c matches regex @"webhook\.site|requestbin|pipedream\.net|ngrok(-free)?\.(app|io|dev)|trycloudflare\.com|pastebin\.com|\.oast\.", 2, 0)
+| where Score >= 3
+| project TimeGenerated, session_id, agent, host, server, tool, Score, Severity = iff(Score >= 6, "high", "medium")
+
+// AAH-002 A privileged action follows injected content
+let Window = 10m;
+let Tainted = AgentTelemetry_CL
+    | where type in ("tool_result", "document")
+    | where tolower(content) matches regex @"(ignore|disregard|override)[^.\n]{0,40}(previous|prior|all|your)[^.\n]{0,20}instruction|(do not|don't|never)\s+(tell|mention|reveal)[^.\n]{0,30}user"
+    | project session_id, InjectedAt = TimeGenerated, Source = strcat(server, ".", tool);
+AgentTelemetry_CL
+| where type == "process" or (type == "tool_call" and tolower(tool) matches regex @"bash|shell|exec|run|terminal|command|write|edit|fetch|http|post|send|upload|email")
+| join kind=inner Tainted on session_id
+| where TimeGenerated between (InjectedAt .. (InjectedAt + Window))
+| summarize Actions = count(), Tools = make_set(tool), FirstAction = min(TimeGenerated) by session_id, InjectedAt, Source
+
+// AAH-005 Poisoned MCP tool descriptions
+AgentTelemetry_CL
+| where type == "tool_manifest"
+| mv-expand tool = tools
+| extend d = tolower(tostring(tool))
+| extend Score = iff(d matches regex @"<\s*/?\s*important\s*>|<\s*/?\s*system\s*>", 2, 0)
+    + iff(d matches regex @"before (using|calling|running) (this|any|the|other) tools?", 2, 0)
+    + iff(d matches regex @"(do not|don't|never)\s+(tell|mention|reveal|inform)[^.\n]{0,30}(user|human)", 3, 0)
+    + iff(d matches regex @"~/\.ssh|id_rsa|\.aws/credentials|\.npmrc|mcp\.json", 2, 0)
+    + iff(d matches regex @"(ignore|disregard|override)[^.\n]{0,40}(previous|prior|all|your)[^.\n]{0,20}instruction", 3, 0)
+| where Score >= 3
+| project TimeGenerated, session_id, server, ToolName = tostring(tool.name), Score, Description = tostring(tool.description)
+
+// AAH-006 MCP tool shadowing
+AgentTelemetry_CL
+| where type == "tool_manifest"
+| mv-expand tool = tools
+| summarize Servers = make_set(server) by session_id, ToolName = tostring(tool.name)
+| where array_length(Servers) > 1
+
+// AAH-007 MCP tool definitions that changed
+AgentTelemetry_CL
+| where type == "tool_manifest"
+| mv-expand tool = tools
+| extend Digest = hash_sha256(strcat(tostring(tool.description), tostring(tool.inputSchema)))
+| summarize Definitions = dcount(Digest), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated) by server, ToolName = tostring(tool.name)
+| where Definitions > 1
+
+// AAH-008 Risky MCP server configuration: run hunt.py audit-config on the collected client configuration files.
+// Where a configuration management tool ships them to a table, the unpinned-package check reads:
+AgentConfig_CL
+| mv-expand server = bag_keys(mcpServers)
+| extend Entry = mcpServers[tostring(server)]
+| extend Command = tostring(Entry.command), Args = tostring(Entry.args)
+| where Command in ("npx", "bunx", "pnpx", "uvx", "pipx") and not(Args matches regex @"@\d|==\d")
+| project TimeGenerated, host, server, Command, Args
+
+// AAH-009 Agent credentials used from somewhere new: a source first seen after the identity's own first use,
+// and scopes beyond those declared for the identity
+let Auth = AgentTelemetry_CL
+    | where type == "auth" and tostring(auth.identity_type) in ("agent", "service", "workload")
+    | extend Identity = coalesce(tostring(auth.identity), tostring(auth.token_id)), Source = coalesce(tostring(auth.source_asn), tostring(auth.source_ip));
+let NewSources = Auth
+    | summarize SourceFirstSeen = min(TimeGenerated) by Identity, Source
+    | join kind=inner (Auth | summarize IdentityFirstSeen = min(TimeGenerated) by Identity) on Identity
+    | where SourceFirstSeen > IdentityFirstSeen
+    | project TimeGenerated = SourceFirstSeen, Identity, Finding = strcat("new source ", Source);
+let ExtraScopes = Auth
+    | extend Extra = set_difference(auth.scopes, auth.declared_scopes)
+    | where array_length(auth.declared_scopes) > 0 and array_length(Extra) > 0
+    | project TimeGenerated, Identity, Finding = strcat("scopes beyond declaration: ", strcat_array(Extra, ", "));
+union NewSources, ExtraScopes
+| order by TimeGenerated desc
+
+// AAH-012 Credentials in what an agent says or sends
+AgentTelemetry_CL
+| where type in ("model_output", "tool_call")
+| extend Text = iff(type == "model_output", content, url_decode(tostring(args)))
+| extend Kind = case(
+    Text matches regex @"-----BEGIN ([A-Z]+ )*PRIVATE KEY-----", "private_key",
+    Text matches regex @"\b(AKIA|ASIA)[0-9A-Z]{16}\b", "aws_access_key_id",
+    Text matches regex @"\b(gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})\b", "github_token",
+    Text matches regex @"\bxox[abposr]-[A-Za-z0-9-]{10,}", "slack_token",
+    Text matches regex @"\bsk-ant-[A-Za-z0-9_-]{20,}", "anthropic_api_key",
+    "")
+| where isnotempty(Kind)
+| project TimeGenerated, session_id, host, type, tool, Kind, Severity = iff(type == "tool_call" and Text has "http", "critical", "high")

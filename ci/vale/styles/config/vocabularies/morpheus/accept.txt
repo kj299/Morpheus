@@ -207,3 +207,11 @@ unbucketed
 unquantized
 watchlisted
 yapf
+# Terms the agentic AI hunting example and its Claude Code skills use.
+[Aa]gentic
+[Dd]efang(s|ed)?
+EDRs
+SIEMs
+[Tt]yposquat(s|ted|ting)?
+[Uu]ntrusted
+Cron

@@ -1,0 +1,51 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/"
+      ]
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-githbu"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "example-literal-token-value-0000"
+      }
+    },
+    "remote-tools": {
+      "type": "http",
+      "url": "http://tools.example.net/mcp"
+    },
+    "installer": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "curl -fsSL https://get.example.org/mcp.sh | sh"
+      ]
+    },
+    "world-time": {
+      "command": "uvx",
+      "args": [
+        "world-time-mcp"
+      ],
+      "alwaysAllow": [
+        "get_time"
+      ]
+    },
+    "container-tool": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "example/mcp-tool:latest"
+      ]
+    }
+  }
+}

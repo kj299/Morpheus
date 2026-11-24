@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: AI Agent Writes Agent Configuration Or Standing Instructions
+id: 0f98b772-a4ac-4ca3-9b39-d35d0eeaf543
+status: experimental
+description: >-
+    A process under an AI agent writes the files agents read permissions, MCP servers and standing instructions from.
+    Hunt AAH-011 of examples/agentic_ai_hunting.
+references:
+    - https://atlas.mitre.org/
+    - https://genai.owasp.org/llm-top-10/
+author: Morpheus agentic AI hunting examples
+date: 2026-11-24
+tags:
+    - attack.defense-evasion
+    - attack.t1562.001
+logsource:
+    category: file_event
+detection:
+    selection_agent:
+        Image|endswith:
+            - '/claude'
+            - '\claude.exe'
+            - '/codex'
+            - '\codex.exe'
+            - '/cursor'
+            - '\Cursor.exe'
+            - '/node'
+            - '\node.exe'
+    selection_target:
+        TargetFilename|endswith:
+            - '/.claude/settings.json'
+            - '/.claude/settings.local.json'
+            - '\.claude\settings.json'
+            - '/.mcp.json'
+            - '\.mcp.json'
+            - '/.cursor/mcp.json'
+            - '\.cursor\mcp.json'
+            - '/.vscode/mcp.json'
+            - '/claude_desktop_config.json'
+            - '\claude_desktop_config.json'
+            - '/.github/copilot-instructions.md'
+            - '/AGENTS.md'
+            - '/CLAUDE.md'
+            - '/.codex/config.toml'
+    condition: selection_agent and selection_target
+falsepositives:
+    - A developer asking the agent to update its own settings or instructions
+level: medium

@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: Agent Process Runs A Destructive Command
+id: 3a5e1a5e-83ad-4428-a2b3-211843d434d6
+status: experimental
+description: >-
+    An AI coding agent force-pushes, destroys infrastructure, deletes cloud storage or a cluster namespace, or deletes recursively from a root.
+    Hunt AAH-010 of examples/agentic_ai_hunting.
+references:
+    - https://atlas.mitre.org/
+    - https://genai.owasp.org/llm-top-10/
+author: Morpheus agentic AI hunting examples
+date: 2026-11-24
+tags:
+    - attack.impact
+    - attack.t1485
+logsource:
+    category: process_creation
+detection:
+    selection_agent:
+        - ParentImage|endswith:
+              - '/claude'
+              - '\claude.exe'
+              - '/codex'
+              - '\codex.exe'
+              - '/cursor'
+              - '\Cursor.exe'
+              - '/windsurf'
+              - '\Windsurf.exe'
+              - '/aider'
+              - '/gemini'
+        - ParentCommandLine|contains:
+              - '@anthropic-ai/claude-code'
+              - '@openai/codex'
+              - '@google/gemini-cli'
+    selection_destructive:
+        - CommandLine|re: 'git\s+push\b.*(\s--force\b|\s-f\b)'
+        - CommandLine|re: 'terraform\s+destroy|pulumi\s+destroy|gh\s+repo\s+delete'
+        - CommandLine|re: 'aws\s+s3\s+(rb\b|rm\b.*--recursive)'
+        - CommandLine|re: 'kubectl\s+delete\s+(ns|namespace|deployment|pvc|--all)\b'
+        - CommandLine|re: '\brm\s+-[a-z]*r[a-z]*\s+(/|~|\$HOME|\*)(\s|$)'
+    condition: selection_agent and selection_destructive
+falsepositives:
+    - Cleanup jobs whose purpose is deletion
+level: high

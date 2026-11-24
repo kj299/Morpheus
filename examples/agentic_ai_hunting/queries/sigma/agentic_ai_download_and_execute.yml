@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+title: Agent Process Downloads And Runs Code
+id: e7466f9e-2c64-4798-aa1d-8fb6e6288265
+status: experimental
+description: >-
+    An AI coding agent, or a shell it started, pipes a download into a shell or interpreter.
+    Hunt AAH-004 of examples/agentic_ai_hunting.
+references:
+    - https://atlas.mitre.org/
+    - https://genai.owasp.org/llm-top-10/
+author: Morpheus agentic AI hunting examples
+date: 2026-11-24
+tags:
+    - attack.execution
+    - attack.t1059.004
+    - attack.command-and-control
+    - attack.t1105
+logsource:
+    category: process_creation
+detection:
+    selection_agent:
+        - ParentImage|endswith:
+              - '/claude'
+              - '\claude.exe'
+              - '/codex'
+              - '\codex.exe'
+              - '/cursor'
+              - '\Cursor.exe'
+              - '/windsurf'
+              - '\Windsurf.exe'
+              - '/aider'
+              - '/gemini'
+        - ParentCommandLine|contains:
+              - '@anthropic-ai/claude-code'
+              - '@openai/codex'
+              - '@google/gemini-cli'
+    selection_pipe:
+        CommandLine|re: '(curl|wget)[^|;&]*\|\s*(sudo\s+)?(ba|z|da)?sh\b|(curl|wget)[^|;&]*\|\s*python'
+    condition: selection_agent and selection_pipe
+falsepositives:
+    - Installers documented as curl | sh that a developer asked the agent to run
+level: high

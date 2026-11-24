@@ -1,0 +1,151 @@
+``` SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+    SPDX-License-Identifier: Apache-2.0
+
+Agentic AI hunts for Splunk, one search per hunt in examples/agentic_ai_hunting/agentic_hunt/catalog.py.
+They read the normalized agent event schema (.claude/skills/agentic-ai-threat-hunt/references/telemetry-schema.md)
+indexed as JSON, so fields such as process.cmdline and network.dest_host are extracted automatically. Replace
+index=agent_telemetry with your index, and tune the allow lists. The Python engine is the reference: where a search
+and hunt.py disagree on the fixtures, the search is wrong. ```
+
+``` AAH-001 Indirect prompt injection in content an agent read ```
+index=agent_telemetry type IN ("tool_result", "document")
+| eval c=lower(content)
+| eval score=if(match(c, "(ignore|disregard|forget|override|bypass)[^.\n]{0,40}(previous|prior|above|earlier|all|any|your)[^.\n]{0,20}(instruction|prompt|rule|direction|guideline|guardrail)"), 3, 0)
+    + if(match(c, "(do not|don't|never|without)\s+(tell|inform|mention|reveal|show|alert|notify)[^.\n]{0,30}(user|human|operator|developer)"), 3, 0)
+    + if(match(c, "(send|post|upload|forward|exfiltrate|transmit|include|copy)[^.\n]{0,60}(to|at|into|in)[^.\n]{0,40}(https?://|webhook|pastebin|ngrok)"), 3, 0)
+    + if(match(c, "<\s*/?\s*(important|system|instructions?)\s*>|\[/?(system|inst)\]|<\|(system|im_start)\|>"), 2, 0)
+    + if(match(c, "before (using|calling|running) (this|any|the|other) tools?"), 2, 0)
+    + if(match(content, "[\x{200B}-\x{200F}\x{2060}-\x{2064}\x{202A}-\x{202E}\x{2066}-\x{2069}]"), 2, 0)
+    + if(match(content, "[\x{E0000}-\x{E007F}]"), 3, 0)
+    + if(match(c, "!\[[^\]]*\]\(https?://[^)\s]+\?[^)\s]*="), 3, 0)
+    + if(match(c, "webhook\.site|requestbin|pipedream\.net|ngrok(-free)?\.(app|io|dev)|trycloudflare\.com|pastebin\.com|\.oast\.|interact\.sh"), 2, 0)
+| where score >= 3
+| eval severity=if(score >= 6, "high", "medium")
+| table _time session_id agent host server tool score severity
+
+``` AAH-002 A privileged action follows injected content ```
+index=agent_telemetry type IN ("tool_result", "document", "tool_call", "process")
+| eval c=lower(content)
+| eval tainted=if(type IN ("tool_result", "document") AND (match(c, "(ignore|disregard|override)[^.\n]{0,40}(previous|prior|all|your)[^.\n]{0,20}instruction") OR match(c, "(do not|don't|never)\s+(tell|mention|reveal)[^.\n]{0,30}user") OR match(content, "[\x{E0000}-\x{E007F}\x{200B}-\x{200F}]")), _time, null())
+| eval privileged=if(type="process" OR (type="tool_call" AND match(lower(tool), "bash|shell|exec|run|terminal|command|write|edit|fetch|http|post|send|upload|email")), 1, 0)
+| sort 0 session_id _time
+| streamstats last(tainted) as tainted_at by session_id
+| where privileged=1 AND isnotnull(tainted_at) AND _time - tainted_at <= 600
+| stats min(tainted_at) as injected_at count as actions values(tool) as tools values(process.cmdline) as commands by session_id
+| eval injected_at=strftime(injected_at, "%FT%T%z"), severity="high"
+
+``` AAH-003 A credential read followed by egress ```
+index=agent_telemetry type IN ("file", "tool_call", "process", "network")
+| eval text=coalesce('file.path', 'args.command', 'args.file_path', 'args.path', 'process.cmdline')
+| eval read_at=if(match(text, "\.ssh/(id_|config)|\.aws/credentials|\.config/gcloud/|\.azure/|\.kube/config|\.docker/config\.json|\.npmrc|\.pypirc|\.git-credentials|\.netrc|(^|[/\s])\.env(\.[a-z]+)?($|\s)|Login Data|Keychains") AND NOT (type="file" AND 'file.op'!="read"), _time, null())
+| eval dest=case(type="network", 'network.dest_host', match('args.url', "^https?://"), replace('args.url', "^https?://([^/:?]+).*", "\1"), match(text, "\b(curl|wget|nc|scp|rsync)\b"), "command-line")
+| sort 0 session_id _time
+| streamstats last(read_at) as last_read by session_id
+| where isnotnull(dest) AND isnotnull(last_read) AND _time - last_read <= 600 AND NOT dest IN ("localhost", "127.0.0.1", "api.anthropic.com", "api.openai.com")
+| eval severity=if(dest IN ("github.com", "api.github.com", "registry.npmjs.org", "pypi.org"), "high", "critical")
+| stats min(last_read) as read_at values(dest) as destinations values(severity) as severity by session_id host principal
+
+``` AAH-004 Risky commands from an agent's process tree ```
+index=agent_telemetry type IN ("process", "tool_call")
+| where (type="process" AND (isnotnull(agent) OR 'process.agent_lineage'="true" OR match('process.parent_image', "(claude|cursor|codex|copilot|windsurf|aider|gemini|cline)(\.exe)?$"))) OR (type="tool_call" AND isnotnull('args.command'))
+| eval cmd=coalesce('process.cmdline', 'args.command')
+| eval pattern=case(match(cmd, "(curl|wget)[^|;&]*\|\s*(sudo\s+)?(ba|z|da)?sh\b"), "download_and_execute",
+    match(cmd, "base64\s+(-d|--decode)[^|;]*\|\s*(ba|z)?sh\b"), "decode_and_execute",
+    match(cmd, "/dev/tcp/[\w.-]+/\d+|\bnc(at)?\b.*\s-[ec]\s|socat.*exec:|bash\s+-i\s+>&"), "reverse_shell",
+    match(cmd, ">>?\s*\S*\.(bashrc|zshrc|profile|bash_profile|zprofile)\b"), "shell_profile_persistence",
+    match(cmd, "\|\s*crontab\b|launchctl\s+(load|bootstrap)|systemctl\s+--user\s+enable"), "scheduled_persistence",
+    match(cmd, "unset\s+HISTFILE|HISTFILE=/dev/null|set\s+\+o\s+history|history\s+-c"), "history_tampering")
+| where isnotnull(pattern)
+| eval severity=if(pattern IN ("reverse_shell", "download_and_execute"), "critical", "high")
+| table _time session_id host principal pattern severity cmd
+
+``` AAH-005 Poisoned MCP tool descriptions (tool_manifest events, one row per offered tool) ```
+index=agent_telemetry type="tool_manifest"
+| spath path=tools{} output=tool
+| mvexpand tool
+| spath input=tool path=name output=tool_name
+| spath input=tool path=description output=description
+| eval d=lower(tool)
+| eval score=if(match(d, "<\s*/?\s*important\s*>|<\s*/?\s*system\s*>"), 2, 0)
+    + if(match(d, "before (using|calling|running) (this|any|the|other) tools?"), 2, 0)
+    + if(match(d, "(do not|don't|never)\s+(tell|mention|reveal|inform)[^.\n]{0,30}(user|human)"), 3, 0)
+    + if(match(d, "~/\.ssh|id_rsa|\.aws/credentials|\.env\b|\.npmrc|mcp\.json"), 2, 0)
+    + if(match(d, "(ignore|disregard|override)[^.\n]{0,40}(previous|prior|all|your)[^.\n]{0,20}instruction"), 3, 0)
+    + if(match(tool, "[\x{200B}-\x{200F}\x{E0000}-\x{E007F}]"), 3, 0)
+| where score >= 3
+| table _time session_id server tool_name score description
+
+``` AAH-006 MCP tool shadowing: one tool name offered by more than one server in a session ```
+index=agent_telemetry type="tool_manifest"
+| spath path=tools{}.name output=tool_name
+| mvexpand tool_name
+| stats dc(server) as servers values(server) as server_list by session_id tool_name
+| where servers > 1
+
+``` AAH-007 MCP tool definitions that changed: more than one definition digest per server and tool ```
+index=agent_telemetry type="tool_manifest"
+| spath path=tools{} output=tool
+| mvexpand tool
+| spath input=tool path=name output=tool_name
+| eval digest=sha256(tool)
+| stats dc(digest) as definitions min(_time) as first_seen max(_time) as last_seen values(session_id) as sessions by server tool_name
+| where definitions > 1
+
+``` AAH-008 Risky MCP server configuration is read from files, not events: run hunt.py audit-config on
+    collected .mcp.json, claude_desktop_config.json and .cursor/mcp.json files, or index them and search: ```
+index=agent_config sourcetype="mcp:config"
+| spath path=mcpServers output=servers
+| rex field=_raw "\"command\"\s*:\s*\"(?<command>[^\"]+)\"\s*,\s*\"args\"\s*:\s*\[(?<args>[^\]]*)\]"
+| eval check=case(match(command, "^(npx|bunx|pnpx|uvx|pipx)$") AND NOT match(args, "@\d|==\d"), "unpinned_package",
+    match(_raw, "\"url\"\s*:\s*\"http://(?!localhost|127\.0\.0\.1)"), "plaintext_remote",
+    match(_raw, "(curl|wget)[^|]*\|\s*(ba)?sh"), "download_to_shell",
+    match(_raw, "\"[A-Z_]*(TOKEN|SECRET|PASSWORD|API_?KEY)[A-Z_]*\"\s*:\s*\"(?!\$\{)[^\"]{8,}\""), "inline_secret")
+| where isnotnull(check)
+| table _time host source check command args
+
+``` AAH-009 Agent credentials used from somewhere new ```
+index=agent_telemetry type="auth"
+| where 'auth.identity_type' IN ("agent", "service", "workload") OR isnotnull(agent)
+| eval identity=coalesce('auth.identity', 'auth.token_id'), source=coalesce('auth.source_asn', 'auth.source_ip')
+| sort 0 identity _time
+| streamstats current=f dc(source) as known_sources values(source) as seen by identity
+| eval new_source=if(known_sources > 0 AND isnull(mvfind(seen, "^" . source . "$")), 1, 0)
+| eval extra_scopes=mvmap('auth.scopes{}', if(isnull(mvfind('auth.declared_scopes{}', "^" . 'auth.scopes{}' . "$")), 'auth.scopes{}', null()))
+| where new_source=1 OR isnotnull(extra_scopes)
+| table _time identity source seen extra_scopes session_id
+
+``` AAH-010 Destructive or runaway agent activity ```
+index=agent_telemetry type IN ("tool_call", "process")
+| eval cmd=coalesce('args.command', 'process.cmdline')
+| eval pattern=case(match(cmd, "\brm\s+-[a-z]*r[a-z]*\s+(/|~|\$HOME|\*|/\*)"), "recursive_delete",
+    match(cmd, "git\s+push\b.*(\s--force\b|\s-f\b)"), "force_push",
+    match(cmd, "(?i)\b(drop\s+(table|database|schema)|truncate\s+table)\b"), "drop_database_object",
+    match(cmd, "aws\s+s3\s+(rb\b|rm\b.*--recursive)|gsutil\s+(-m\s+)?rm\s+-r"), "cloud_storage_delete",
+    match(cmd, "kubectl\s+delete\s+(ns|namespace|deployment|pvc|--all)\b"), "cluster_delete",
+    match(cmd, "terraform\s+destroy|pulumi\s+destroy|gh\s+repo\s+delete"), "infrastructure_destroy")
+| bin _time span=1m as minute
+| eventstats count(eval(type="tool_call")) as calls_in_minute by session_id minute
+| where isnotnull(pattern) OR calls_in_minute > 30
+| stats values(pattern) as patterns max(calls_in_minute) as peak_calls_per_minute by session_id host principal
+
+``` AAH-011 Agents tampering with their own guardrails ```
+index=agent_telemetry type IN ("file", "tool_call", "process")
+| eval target=coalesce('file.path', 'args.file_path', 'args.path'), body=coalesce('file.content', 'args.content', 'args.new_string', 'process.cmdline')
+| where match(target, "(\.claude[/\\]settings(\.local)?\.json|\.claude\.json|\.mcp\.json|\.cursor[/\\](mcp\.json|rules)|\.cursorrules|\.vscode[/\\](mcp|settings)\.json|claude_desktop_config\.json|\.windsurfrules|copilot-instructions\.md|(^|[/\\])(CLAUDE|AGENTS|GEMINI)\.md|\.codex[/\\]config\.toml)$")
+    OR match(body, "--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--yolo\b")
+| eval widening=if(match(body, "Bash\(\*\)|bypassPermissions|enableAllProjectMcpServers\"\s*:\s*true|autoApprove|alwaysAllow|approval_policy\s*=\s*\"never\"|danger-full-access"), 1, 0)
+| eval severity=if(widening=1 OR match(lower(body), "ignore[^.\n]{0,40}instructions|do not (tell|mention)"), "high", "medium")
+| table _time session_id host principal type target severity
+
+``` AAH-012 Credentials in what an agent says or sends ```
+index=agent_telemetry type IN ("model_output", "tool_call")
+| eval text=if(type="model_output", content, urldecode(_raw))
+| eval kind=case(match(text, "-----BEGIN ([A-Z]+ )*PRIVATE KEY-----"), "private_key",
+    match(text, "\b(AKIA|ASIA)[0-9A-Z]{16}\b"), "aws_access_key_id",
+    match(text, "\b(gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})\b"), "github_token",
+    match(text, "\bxox[abposr]-[A-Za-z0-9-]{10,}"), "slack_token",
+    match(text, "\bsk-ant-[A-Za-z0-9_-]{20,}"), "anthropic_api_key",
+    match(text, "\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"), "jwt")
+| where isnotnull(kind)
+| eval severity=if(type="tool_call" AND match(_raw, "https?://"), "critical", "high")
+| table _time session_id host principal type tool kind severity
