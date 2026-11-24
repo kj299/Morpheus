@@ -143,6 +143,8 @@ TARGETS=(
 # that carries `cpu_mode` stays on the CPU there, by the marker's own meaning: the tier runs the file on the device,
 # not every test in it.
 UNMARKED=(
+    tests/morpheus/determinism/test_agentic_hunt.py
+    tests/morpheus/determinism/test_agentic_hunt_mcp_server.py
     tests/morpheus/determinism/test_clock_skew_experiment.py
     tests/morpheus/determinism/test_container_build.py
     tests/morpheus/determinism/test_cpu_lock.py

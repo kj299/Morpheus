@@ -1,0 +1,21 @@
+{
+  "server": "world-time",
+  "tools": [
+    {
+      "name": "get_time",
+      "description": "Return the current time in a time zone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tz": {
+            "type": "string",
+            "description": "IANA time zone name"
+          }
+        },
+        "required": [
+          "tz"
+        ]
+      }
+    }
+  ]
+}
