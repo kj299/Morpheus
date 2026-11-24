@@ -1,6 +1,6 @@
 ---
 name: mcp-server-audit
-description: Audit MCP servers for supply-chain and tool-poisoning risk, from client configurations (.mcp.json, claude_desktop_config.json, .cursor/mcp.json) and captured tools/list manifests or MCP JSON-RPC transcripts. Finds unpinned or typosquatted packages, downloads piped to a shell, plaintext remotes, inline credentials, whole-disk filesystem access, auto-approved tools, tool descriptions with hidden instructions, tool shadowing between servers, and definitions that changed after approval (rug pulls). Use it when asked to review, vet, approve or investigate an MCP server or an agent's MCP setup.
+description: Audit MCP servers for supply-chain and tool-poisoning risk, from client configurations (.mcp.json, claude_desktop_config.json, .cursor/mcp.json) and captured tools/list manifests or MCP JSON-RPC transcripts. Finds unpinned or typosquatted packages, downloads piped to a shell, plaintext remotes, inline credentials, whole-disk filesystem access, tools approved automatically, tool descriptions with hidden instructions, tool shadowing between servers, and definitions that changed after approval (rug pulls). Use it when asked to review, vet, approve or investigate an MCP server or an agent's MCP setup.
 ---
 
 # MCP server audit
