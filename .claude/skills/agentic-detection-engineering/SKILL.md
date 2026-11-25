@@ -13,6 +13,10 @@ The hunts in `examples/agentic_ai_hunting` come with queries for three platforms
   `AgentTelemetry_CL` table in the normalized schema for the rest;
 - `sigma/`: process and file rules for an EDR (AAH-003, 004, 010, 011).
 
+Where the telemetry already flows through a Morpheus pipeline, `AgenticHuntStage` runs the engine itself on the
+stream, with no port to keep in step; its output columns can feed the SIEM directly. Prefer it to a port when
+the pipeline exists.
+
 The Python engine is the reference implementation. A query that disagrees with `hunt.py` on the fixtures is the one
 that is wrong.
 

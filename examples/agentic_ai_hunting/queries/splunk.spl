@@ -1,7 +1,7 @@
 ``` SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
     SPDX-License-Identifier: Apache-2.0
 
-Agentic AI hunts for Splunk, one search per hunt in examples/agentic_ai_hunting/agentic_hunt/catalog.py.
+Agentic AI hunts for Splunk, one search per hunt in python/morpheus/morpheus/utils/agentic_hunt/catalog.py.
 They read the normalized agent event schema (.claude/skills/agentic-ai-threat-hunt/references/telemetry-schema.md)
 indexed as JSON, so fields such as process.cmdline and network.dest_host are extracted automatically. Replace
 index=agent_telemetry with your index, and tune the allow lists. The Python engine is the reference: where a search

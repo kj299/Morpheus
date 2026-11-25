@@ -33,12 +33,14 @@ import os
 import sys
 import traceback
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# The engine is `morpheus.utils.agentic_hunt`, which needs only the standard library; reading it from this checkout
+# lets the script run where Morpheus is not installed.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "python", "morpheus"))
 
-from agentic_hunt import catalog  # noqa: E402  pylint: disable=wrong-import-position
-from agentic_hunt import events  # noqa: E402  pylint: disable=wrong-import-position
-from agentic_hunt import inputs  # noqa: E402  pylint: disable=wrong-import-position
-from agentic_hunt import service  # noqa: E402  pylint: disable=wrong-import-position
+from morpheus.utils.agentic_hunt import catalog  # noqa: E402  pylint: disable=wrong-import-position
+from morpheus.utils.agentic_hunt import events  # noqa: E402  pylint: disable=wrong-import-position
+from morpheus.utils.agentic_hunt import inputs  # noqa: E402  pylint: disable=wrong-import-position
+from morpheus.utils.agentic_hunt import service  # noqa: E402  pylint: disable=wrong-import-position
 
 SERVER_INFO = {"name": "agentic-hunt", "version": "1.0.0"}
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")

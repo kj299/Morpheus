@@ -5,7 +5,7 @@ description: Triage a piece of text an AI agent read or might read (a tool resul
 
 # Prompt injection triage
 
-Scores text with the indicators AAH-001 uses (`examples/agentic_ai_hunting/agentic_hunt/text_indicators.py`). Use
+Scores text with the indicators AAH-001 uses (`python/morpheus/morpheus/utils/agentic_hunt/text_indicators.py`). Use
 the `agentic-hunt` MCP server's `scan_text` tool when it is connected, otherwise
 `examples/agentic_ai_hunting/hunt.py scan-text --file <file>` (or `--text`).
 

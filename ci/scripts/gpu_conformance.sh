@@ -168,6 +168,7 @@ UNMARKED=(
     tests/morpheus/determinism/test_upstream_reuse.py
     tests/morpheus/test_cli.py
     tests/morpheus/determinism/test_verdict_artifacts.py
+    tests/morpheus/stages/test_agentic_hunt_stage.py
     tests/morpheus/stages/test_entity_frame_stage.py
     tests/morpheus/stages/test_flow_record_normalize_stage.py
     tests/morpheus/stages/test_kafka_source_provenance.py

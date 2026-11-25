@@ -8,7 +8,9 @@ description: Hunt agent telemetry for malicious behavior by and through AI agent
 Hypothesis-driven hunting over what AI agents read, called and ran. The hunts are implemented once, in
 `examples/agentic_ai_hunting/`, and reached two ways: the `agentic-hunt` MCP server (tools `list_hunts`,
 `explain_hunt`, `summarize_telemetry`, `run_hunts`, `audit_mcp_config`, `scan_text`) when it is connected, or the
-command line `examples/agentic_ai_hunting/hunt.py` from the repository root. Both need only Python 3.10+.
+command line `examples/agentic_ai_hunting/hunt.py` from the repository root. Both need only Python 3.10+. For a
+standing hunt over a live stream rather than files, a Morpheus pipeline runs the same hunts with
+`AgenticHuntStage`; the agentic-detection-engineering skill and the example README describe it.
 
 ## Rules that hold throughout
 
