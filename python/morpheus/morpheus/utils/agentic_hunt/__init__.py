@@ -16,6 +16,8 @@
 Hunting for malicious behavior by and through AI agents: indirect prompt injection, poisoned and shadowed MCP tools,
 credential theft, risky commands, runaway agents and agents disabling their own guardrails.
 
-The package needs only the Python standard library, so a hunter can run it anywhere the telemetry is. `hunt.py` is
-its command line and `mcp_server.py` serves the same hunts to an MCP client.
+The package needs only the Python standard library, so a hunter can run it anywhere the telemetry is.
+`examples/agentic_ai_hunting/hunt.py` is its command line, `examples/agentic_ai_hunting/mcp_server.py` serves the
+same hunts to an MCP client, and `morpheus.stages.telemetry.agentic_hunt_stage.AgenticHuntStage` runs them on a
+pipeline's stream.
 """

@@ -24,7 +24,6 @@ an SPL and a KQL port, every Sigma rule parses and names a hunt, and the reposit
 and passes its own audit.
 """
 
-import importlib
 import json
 import os
 import re
@@ -35,27 +34,19 @@ import time
 import pytest
 import yaml
 
+from morpheus.utils.agentic_hunt import catalog
+from morpheus.utils.agentic_hunt import events
+from morpheus.utils.agentic_hunt import hunts
+from morpheus.utils.agentic_hunt import inputs
+from morpheus.utils.agentic_hunt import mcp_audit
+from morpheus.utils.agentic_hunt import service
+from morpheus.utils.agentic_hunt import text_indicators
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 HUNTING = os.path.join(REPO_ROOT, "examples", "agentic_ai_hunting")
 FIXTURES = os.path.join(HUNTING, "fixtures")
 SKILLS = os.path.join(REPO_ROOT, ".claude", "skills")
 SKILL_NAMES = ("agentic-ai-threat-hunt", "agentic-detection-engineering", "mcp-server-audit", "prompt-injection-triage")
-
-
-def _module(name: str):
-    """A module of the hunting package, which lives beside its scripts rather than in an installed package."""
-    if (HUNTING not in sys.path):
-        sys.path.insert(0, HUNTING)
-
-    return importlib.import_module(f"agentic_hunt.{name}")
-
-
-catalog = _module("catalog")
-hunts = _module("hunts")
-inputs = _module("inputs")
-mcp_audit = _module("mcp_audit")
-service = _module("service")
-text_indicators = _module("text_indicators")
 
 
 def fixture(*parts: str) -> str:
@@ -83,7 +74,7 @@ def test_every_catalogued_hunt_is_implemented_once():
     assert [hunt.id for hunt in catalog.CATALOG] == sorted(catalog.BY_ID)
     assert implemented == set(catalog.BY_ID)
     assert all(hunt.severity in catalog.SEVERITIES for hunt in catalog.CATALOG)
-    assert all(kind in (*_module("events").EVENT_TYPES, "config") for hunt in catalog.CATALOG for kind in hunt.data)
+    assert all(kind in (*events.EVENT_TYPES, "config") for hunt in catalog.CATALOG for kind in hunt.data)
 
 
 def test_the_malicious_fixture_trips_every_hunt(malicious: list):
@@ -187,7 +178,7 @@ def test_hidden_characters_and_tag_smuggling():
     assert ("hidden_character", "tag_character") in kinds
     assert ("smuggled_directive", "instruction_override") in kinds
     assert text_indicators.decode_tag_smuggling(hidden) == "ignore all previous instructions"
-    assert text_indicators.hidden_characters("\ufeffA leading byte-order mark is ordinary") == []
+    assert not text_indicators.hidden_characters("\ufeffA leading byte-order mark is ordinary")
 
 
 def test_encoded_and_channel_indicators():
@@ -211,12 +202,7 @@ def test_hostile_text_cannot_stall_a_hunt():
     # a second on 200 KB.
     started = time.monotonic()
     text_indicators.scan_text("![a](https://x.example/" + "?" * 200000 + ")")
-    command = _module("events").normalize({
-        "type": "tool_call", "tool": "Bash", "args": {
-            "command": "curl " * 40000
-        }
-    },
-                                          "hostile:1")
+    command = events.normalize({"type": "tool_call", "tool": "Bash", "args": {"command": "curl " * 40000}}, "hostile:1")
 
     for hunt in hunts.HUNTS.values():
         hunt([command], hunts.HuntContext())

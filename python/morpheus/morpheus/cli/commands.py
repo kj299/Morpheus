@@ -538,6 +538,7 @@ run.add_command(pipeline_other)
 ALL = (PipelineModes.NLP, PipelineModes.FIL, PipelineModes.OTHER)
 
 # Keep these sorted!!!
+add_command("agentic-hunt", "morpheus.stages.telemetry.agentic_hunt_stage.AgenticHuntStage", modes=ALL)
 add_command("binding-resolve", "morpheus.stages.lineage.binding_resolver_stage.BindingResolverStage", modes=ALL)
 add_command("chain-anchor", "morpheus.stages.lineage.chain_anchor_stage.ChainAnchorStage", modes=ALL)
 add_command("collector-sequence", "morpheus.stages.lineage.collector_sequence_stage.CollectorSequenceStage", modes=ALL)

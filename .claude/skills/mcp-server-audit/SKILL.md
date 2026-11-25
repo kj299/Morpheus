@@ -43,7 +43,7 @@ Covers hunts AAH-005 to AAH-008 of `examples/agentic_ai_hunting` (see the threat
 | --- | --- | --- |
 | `unpinned_package` | `npx -y pkg` or `uvx pkg` runs whatever the registry serves today, so one compromised release reaches every machine | Pin a version (`pkg@1.2.3`, `pkg==1.2.3`) or a container digest |
 | `unpinned_image` | `image:latest` or no tag changes under you | Pin `@sha256:` |
-| `typosquat_candidate` | A name one or two edits from a well-known server | Confirm the publisher; extend `KNOWN_PACKAGES` in `mcp_audit.py` with approved servers |
+| `typosquat_candidate` | A name one or two edits from a well-known server | Confirm the publisher; extend `KNOWN_PACKAGES` in `morpheus.utils.agentic_hunt.mcp_audit` with approved servers |
 | `download_to_shell` | The launch line runs a script fetched at start-up | Install a reviewed version instead |
 | `plaintext_remote` | An `http://` remote server can be read and rewritten on the network | Use `https://` |
 | `inline_secret` | A literal token in a configuration file is readable by every process, and by agents | Reference the environment (`${TOKEN}`) or the client's secret store; rotate the exposed one |

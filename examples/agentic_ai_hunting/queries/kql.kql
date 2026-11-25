@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Agentic AI hunts in KQL, one query per hunt in examples/agentic_ai_hunting/agentic_hunt/catalog.py.
+// Agentic AI hunts in KQL, one query per hunt in python/morpheus/morpheus/utils/agentic_hunt/catalog.py.
 //
 // Hunts an endpoint sensor can see (AAH-003, AAH-004, AAH-010, AAH-011) read Microsoft Defender XDR's Device*
 // tables, attributing a process to an agent by its parent's name or command line. The rest read AgentTelemetry_CL,
