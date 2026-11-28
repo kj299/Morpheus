@@ -34,6 +34,7 @@ Messages are JSON-RPC 2.0, one per line, as the MCP stdio transport specifies. L
 """
 
 import json
+import math
 import os
 import sys
 import traceback
@@ -399,8 +400,9 @@ class Server:
         if ("id" not in message):
             return None
 
-        if (isinstance(ident, bool) or not isinstance(ident, (str, int, float)) or ident != ident  # NaN
-                or ident in (float("inf"), float("-inf"))):
+        # NaN and the infinities parse as numbers and cannot be written back as JSON.
+        if (isinstance(ident, bool) or not isinstance(ident, (str, int, float))
+                or (isinstance(ident, float) and not math.isfinite(ident))):
             return _error(None, -32600, "invalid request: id must be a string or a number")
 
         if (not isinstance(method, str)):
