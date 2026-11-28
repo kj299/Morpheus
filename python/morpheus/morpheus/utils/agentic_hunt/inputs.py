@@ -15,20 +15,29 @@
 """
 The files a hunt is pointed at, sorted by what they are.
 
-- `.jsonl` / `.jsonlines` / `.ndjson`: agent events or MCP JSON-RPC transcripts (`events.read_lines`).
-- `.json` holding `mcpServers`: an MCP client configuration (`mcp_audit.audit_config`).
+- `.jsonl` / `.jsonlines` / `.ndjson`, in any letter case: agent events or MCP JSON-RPC transcripts
+  (`events.read_lines`).
+- `.json` holding MCP servers in any of the shapes clients use (`mcp_audit.servers_in`): an MCP client
+  configuration.
 - `.json` holding `tools`: a captured `tools/list` result, read as one tool manifest event. The server is the
   document's `server` field, or the file name without its extension.
+- A directory: every such file under it.
+
+A file that cannot be read is skipped and reported, with every other file still hunted; `strict` makes it an
+error instead.
 """
 
 import json
 import os
 
 from . import events
+from . import mcp_audit
 
 LINE_SUFFIXES = (".jsonl", ".jsonlines", ".ndjson")
 MAX_BYTES = 64 * 1024 * 1024
 """The largest file read. A hunt over more belongs in a SIEM; the queries under `queries/` are for that."""
+
+MAX_FILES = 5000
 
 
 class InputError(ValueError):
@@ -36,7 +45,8 @@ class InputError(ValueError):
 
 
 def _manifest_event(document: dict, path: str) -> dict:
-    server = str(document.get("server") or os.path.splitext(os.path.basename(path))[0])
+    name = os.path.basename(path)
+    server = str(document.get("server") or os.path.splitext(name)[0])
 
     return events.normalize(
         {
@@ -46,36 +56,94 @@ def _manifest_event(document: dict, path: str) -> dict:
             "ts": document.get("ts"),
             "tools": document.get("tools")
         },
-        os.path.basename(path))
+        name,
+        f"(no session id; file {name})")
 
 
-def load(paths: list[str]) -> tuple:
-    """`(events, configs)`: the events of every events file and manifest, ordered, and each configuration."""
+def expand(paths: list[str]) -> list[str]:
+    """The files named, with each directory replaced by the readable files under it, in a stable order."""
     found = []
-    configs = []
 
     for path in paths:
-        if (os.path.getsize(path) > MAX_BYTES):
-            raise InputError(f"{path} is over {MAX_BYTES // (1024 * 1024)} MiB")
+        if (os.path.isdir(path)):
+            for (root, directories, names) in os.walk(path):
+                directories.sort()
 
-        if (path.endswith(LINE_SUFFIXES)):
-            found.extend(events.read_lines(path))
-            continue
+                for name in sorted(names):
+                    if (name.lower().endswith((*LINE_SUFFIXES, ".json"))):
+                        found.append(os.path.join(root, name))
+
+                if (len(found) > MAX_FILES):
+                    raise InputError(f"{path} holds more than {MAX_FILES} files; name a narrower directory")
+        else:
+            found.append(path)
+
+    return found
+
+
+def load(paths: list[str], strict: bool = False) -> tuple:
+    """
+    `(events, configs, skipped)`: the ordered events of every events file and manifest, each configuration as
+    `(name, document)`, and `(ref, reason)` for every line or file that could not be read.
+
+    Raises
+    ------
+    InputError
+        Under `strict`, for the first thing that could not be read. Otherwise only when nothing could be.
+    """
+    found = []
+    configs = []
+    skipped = []
+    files = expand(paths)
+
+    def refuse(ref: str, reason: str):
+        if (strict):
+            raise InputError(f"{ref}: {reason}")
+
+        skipped.append((ref, reason))
+
+    for path in files:
+        name = os.path.basename(path)
 
         try:
-            with open(path, encoding="utf-8") as handle:
+            if (os.path.getsize(path) > MAX_BYTES):
+                refuse(name, f"over {MAX_BYTES // (1024 * 1024)} MiB")
+                continue
+
+            if (path.lower().endswith(LINE_SUFFIXES)):
+                problems = []
+                found.extend(events.read_lines(path, problems))
+
+                for (ref, reason) in problems:
+                    refuse(ref, reason)
+
+                continue
+
+            with open(path, encoding="utf-8-sig", errors="replace") as handle:
                 document = json.load(handle)
-        except (json.JSONDecodeError, UnicodeDecodeError) as error:
-            raise InputError(f"{path} is neither JSON lines nor a JSON document") from error
+        except InputError:
+            raise
+        except OSError as error:
+            refuse(name, f"cannot be opened ({error.strerror or type(error).__name__})")
+            continue
+        except (ValueError, RecursionError):
+            refuse(name, "neither JSON lines nor a JSON document")
+            continue
 
-        if (events.is_mcp_config(document)):
-            configs.append((os.path.basename(path), document))
+        if (mcp_audit.servers_in(document)):
+            configs.append((name, document))
         elif (isinstance(document, dict) and isinstance(document.get("tools"), list)):
-            found.append(_manifest_event(document, path))
+            try:
+                found.append(_manifest_event(document, path))
+            except (ValueError, TypeError, OverflowError, RecursionError) as error:
+                refuse(name, f"a tool manifest that could not be read ({type(error).__name__})")
         else:
-            raise InputError(f"{path} is JSON but neither an MCP configuration nor a tool manifest")
+            refuse(name, "JSON, but neither an MCP configuration nor a tool manifest")
 
-    return (events.order(found), configs)
+    if (files and not found and not configs and skipped and len(skipped) >= len(files)):
+        raise InputError(f"nothing could be read: {skipped[0][0]}: {skipped[0][1]}")
+
+    return (events.order(found), configs, skipped)
 
 
 def load_baseline(path: str | None) -> dict:
@@ -83,10 +151,13 @@ def load_baseline(path: str | None) -> dict:
     if (not path):
         return {}
 
-    with open(path, encoding="utf-8") as handle:
-        document = json.load(handle)
+    try:
+        with open(path, encoding="utf-8-sig") as handle:
+            document = json.load(handle)
+    except (ValueError, RecursionError) as error:
+        raise InputError(f"{os.path.basename(path)} is not a tool baseline") from error
 
     if (not isinstance(document, dict) or not all(isinstance(tools, dict) for tools in document.values())):
-        raise InputError(f"{path} is not a tool baseline")
+        raise InputError(f"{os.path.basename(path)} is not a tool baseline")
 
     return document

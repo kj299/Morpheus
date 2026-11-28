@@ -18,7 +18,9 @@ stream, with no port to keep in step; its output columns can feed the SIEM direc
 the pipeline exists.
 
 The Python engine is the reference implementation. A query that disagrees with `hunt.py` on the fixtures is the one
-that is wrong.
+that is wrong. The ports were written against the engine's first version, which matched command lines as text; the
+engine now reads them as a shell does and grades severity by what a command touches, so expect a port to be noisier
+and to miss spellings the engine finds until it is brought up to date. Say so when you hand one over.
 
 ## Workflow
 
@@ -34,8 +36,15 @@ that is wrong.
    `hunt.py run <the same files> --hunt <id>`: every engine finding should appear, and the benign file should give
    nothing. Add a fixture line for each new behavior the query covers, and the matching assertion in
    `tests/morpheus/determinism/test_agentic_hunt.py`, so the engine and the query keep meaning the same thing.
-5. **Set severity and response** from the hunt's default severity and triage steps; record the known benign causes
-   as the detection's documented false positives.
+   Then try it on the labelled corpus in `examples/agentic_ai_hunting/fixtures/corpus/commands.json`: 140 attacks
+   in the spellings attackers use and 85 things a coding agent does all day. A query that passes the fixtures and
+   reports a third of the benign entries is not ready. When a real miss or false alarm turns up, add it to the
+   corpus as a synthetic entry; `tests/morpheus/determinism/test_agentic_hunt_corpus.py` holds the engine to
+   recall and precision floors over it.
+5. **Set severity and response** from the catalog's account of how the hunt's severity is set and its triage steps;
+   record the known benign causes as the detection's documented false positives. Response steps that change
+   something (revoke, disable, isolate) belong to a person or to a playbook with an owner, not to an agent reading
+   the alert.
 6. **Write it down**: the query, the data it needs, the tuning applied, the fixture results, and the owner.
 
 ## Rules

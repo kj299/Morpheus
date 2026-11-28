@@ -144,6 +144,7 @@ TARGETS=(
 # not every test in it.
 UNMARKED=(
     tests/morpheus/determinism/test_agentic_hunt.py
+    tests/morpheus/determinism/test_agentic_hunt_corpus.py
     tests/morpheus/determinism/test_agentic_hunt_mcp_server.py
     tests/morpheus/determinism/test_clock_skew_experiment.py
     tests/morpheus/determinism/test_container_build.py
