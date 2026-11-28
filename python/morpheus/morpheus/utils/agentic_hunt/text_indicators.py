@@ -66,8 +66,7 @@ SECRETS = (
     ("aws_secret_access_key",
      re.compile(r"(?i:aws_secret_access_key|secret_?access_?key)[\"']?\s{0,3}[=:]\s{0,3}[\"']?([A-Za-z0-9/+=]{40})"
                 r"(?![A-Za-z0-9/+=])")),
-    ("github_token",
-     re.compile(r"(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{40,255})")),
+    ("github_token", re.compile(r"(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{40,255})")),
     ("gitlab_token", re.compile(r"(?<![A-Za-z0-9_])glpat-[A-Za-z0-9_-]{20,64}")),
     ("slack_token", re.compile(r"(?<![A-Za-z0-9])xox[abposr]-[A-Za-z0-9-]{10,255}")),
     ("slack_webhook", re.compile(r"hooks\.slack\.com/services/(T[A-Z0-9]{6,16}/B[A-Z0-9]{6,16}/[A-Za-z0-9]{16,64})")),
@@ -105,19 +104,59 @@ TAG_CHARACTERS = range(0xE0000, 0xE0080)
 VARIATION_SELECTORS = range(0xFE00, 0xFE10)
 VARIATION_SELECTORS_SUPPLEMENT = range(0xE0100, 0xE01F0)
 """Variation selectors: 256 invisible characters in all, so each can stand for one byte of a hidden message."""
-OTHER_INVISIBLE = frozenset([0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180E, 0x180F, 0x3164,
-                             0xFFA0, 0x2800, 0x061C])
+OTHER_INVISIBLE = frozenset(
+    [0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180E, 0x180F, 0x3164, 0xFFA0, 0x2800, 0x061C])
 """Characters that render as nothing or as blank and are in none of the ranges above."""
 
 CONFUSABLES = dict((
-    (0x0430, "a"), (0x0441, "c"), (0x0435, "e"), (0x043E, "o"), (0x0440, "p"), (0x0445, "x"),
-    (0x0443, "y"), (0x0456, "i"), (0x0458, "j"), (0x0455, "s"), (0x04BB, "h"), (0x043A, "k"),
-    (0x043C, "m"), (0x0442, "t"), (0x0432, "b"), (0x043D, "h"), (0x0410, "A"), (0x0412, "B"),
-    (0x0421, "C"), (0x0415, "E"), (0x041D, "H"), (0x041A, "K"), (0x041C, "M"), (0x041E, "O"),
-    (0x0420, "P"), (0x0422, "T"), (0x0425, "X"), (0x0406, "I"), (0x03BF, "o"), (0x03B1, "a"),
-    (0x03B5, "e"), (0x03B9, "i"), (0x03BA, "k"), (0x03BD, "v"), (0x03C1, "p"), (0x03C4, "t"),
-    (0x03C5, "u"), (0x03C7, "x"), (0x0391, "A"), (0x0392, "B"), (0x0395, "E"), (0x0399, "I"),
-    (0x039A, "K"), (0x039C, "M"), (0x039D, "N"), (0x039F, "O"), (0x03A1, "P"), (0x03A4, "T"),
+    (0x0430, "a"),
+    (0x0441, "c"),
+    (0x0435, "e"),
+    (0x043E, "o"),
+    (0x0440, "p"),
+    (0x0445, "x"),
+    (0x0443, "y"),
+    (0x0456, "i"),
+    (0x0458, "j"),
+    (0x0455, "s"),
+    (0x04BB, "h"),
+    (0x043A, "k"),
+    (0x043C, "m"),
+    (0x0442, "t"),
+    (0x0432, "b"),
+    (0x043D, "h"),
+    (0x0410, "A"),
+    (0x0412, "B"),
+    (0x0421, "C"),
+    (0x0415, "E"),
+    (0x041D, "H"),
+    (0x041A, "K"),
+    (0x041C, "M"),
+    (0x041E, "O"),
+    (0x0420, "P"),
+    (0x0422, "T"),
+    (0x0425, "X"),
+    (0x0406, "I"),
+    (0x03BF, "o"),
+    (0x03B1, "a"),
+    (0x03B5, "e"),
+    (0x03B9, "i"),
+    (0x03BA, "k"),
+    (0x03BD, "v"),
+    (0x03C1, "p"),
+    (0x03C4, "t"),
+    (0x03C5, "u"),
+    (0x03C7, "x"),
+    (0x0391, "A"),
+    (0x0392, "B"),
+    (0x0395, "E"),
+    (0x0399, "I"),
+    (0x039A, "K"),
+    (0x039C, "M"),
+    (0x039D, "N"),
+    (0x039F, "O"),
+    (0x03A1, "P"),
+    (0x03A4, "T"),
     (0x03A7, "X"),
 ))
 """Cyrillic and Greek letters drawn like Latin ones, folded to Latin in the copy the directives are matched on."""
@@ -134,7 +173,9 @@ CATEGORIES = (ADDRESS, CONCEAL, TARGET, EXFIL, HIDDEN)
 credential, that names a way out, or that was hidden from a reader."""
 
 DIRECTIVES = (
-    ("instruction_override", ADDRESS, 3,
+    ("instruction_override",
+     ADDRESS,
+     3,
      re.compile(
          r"\b(?:ignore|disregard|forget|discard)\b[^.\n]{0,40}?\b(?:previous|prior|above|earlier|"
          r"preceding|original|initial|system|all|any|your|the|these|those)\b[^.\n]{0,20}?\b(?:instructions?|prompts?|"
@@ -142,7 +183,9 @@ DIRECTIVES = (
          r"prior|above|earlier|original|initial|system|all|your)\b[^.\n]{0,20}?\b(?:instructions?|prompts?|guardrails|"
          r"safety\s{1,3}(?:checks?|rules|filters?))\b",
          re.I)),
-    ("new_instructions", ADDRESS, 2,
+    ("new_instructions",
+     ADDRESS,
+     2,
      re.compile(
          r"\b(?:new|updated|revised|additional|real|actual|true)\s{1,3}(?:system\s{1,3})?instructions?\s{0,3}[:\-]|"
          r"\b(?:new|next|updated|real)\s{1,3}(?:task|job|goal|objective|mission)\s{1,3}(?:for\s{1,3}(?:the|you|an?)\b|"
@@ -155,7 +198,9 @@ DIRECTIVES = (
          r"priority\s{1,3}than\s{1,3}(?:anything|everything|any|all)\b|\bthe\s{1,3}task\s{1,3}above\s{1,3}is\s{1,3}"
          r"(?:complete|done|finished)\b|\bpolicy\s{1,3}update\s{0,3}:",
          re.I)),
-    ("role_reassignment", ADDRESS, 2,
+    ("role_reassignment",
+     ADDRESS,
+     2,
      re.compile(
          r"\byou are (?:now|no longer)\b|\bfrom now on,? you\b|\bact as (?:an? )?(?:unrestricted|jailbroken|"
          r"dan\b|developer mode)|\bpretend\s{1,3}(?:you\s{1,3}are|to\s{1,3}be|that\s{1,3}you)\b|\byour\s{1,3}new\s{1,3}"
@@ -163,7 +208,9 @@ DIRECTIVES = (
          r"superuser)\b|\b(?:with|has|have)\s{1,3}no\s{1,3}(?:restrictions|rules|limits|guardrails|filters)\b|"
          r"\bin\s{1,3}(?:maintenance|developer|debug|god|admin|unrestricted)\s{0,3}mode\b[^.\n]{0,30}?\byou\b",
          re.I)),
-    ("addressed_to_model", ADDRESS, 2,
+    ("addressed_to_model",
+     ADDRESS,
+     2,
      re.compile(
          r"\b(?:note|message|attention|instructions?|reminder|notice|task|request)\s{1,3}(?:for|to)\s{1,3}(?:the\s{1,3}|"
          r"any\s{1,3}|all\s{1,3})?(?:coding\s{1,3}|ai\s{1,3})?(?:ai|llm|language model|assistant|agent|chatbot|copilot|"
@@ -175,7 +222,9 @@ DIRECTIVES = (
          r"(?:^|[.>\n])\s{0,4}(?:model|assistant|agent|ai)\s{0,2}(?:note\s{0,2})?[,:]\s{1,3}(?:your|you|please|"
          r"the\s{1,3}next|collect|after|when|before)\b",
          re.I | re.M)),
-    ("role_marker", ADDRESS, 2,
+    ("role_marker",
+     ADDRESS,
+     2,
      re.compile(
          r"<\|(?:system|im_start|im_end|start_header_id|end_header_id|eot_id|begin_of_text)\|>|\[/?(?:SYSTEM|INST)\]|"
          r"<[ \t]{0,8}/?[ \t]{0,8}(?:important(?:_note)?|system|instructions?|admin|system-reminder|tool_result|"
@@ -183,12 +232,16 @@ DIRECTIVES = (
          r"^[ \t]{0,8}#{1,6}[ \t]{0,3}(?-i:SYSTEM)\b(?![ \t]{1,3}(?-i:REQUIREMENTS|OVERVIEW|DESIGN|ARCHITECTURE))|"
          r"\"role\"\s{0,3}:\s{0,3}\"system\"|(?-i:\b(?:Human|User)):\s[^\n]{0,200}?(?-i:\b(?:Assistant|AI)):\s",
          re.I | re.M)),
-    ("tool_mention", ADDRESS, 1,
+    ("tool_mention",
+     ADDRESS,
+     1,
      re.compile(
          r"\b(?:call|invoke|use|run|execute)\s{1,3}(?:the\s{1,3})?[`'\"]?(?!(?:this|that|any|each|another|other|same|"
          r"following|a|an|the)\b)[a-z][a-z0-9_.-]{2,40}[`'\"]?\s{1,3}tool\b",
          re.I)),
-    ("tool_directive", ADDRESS, 2,
+    ("tool_directive",
+     ADDRESS,
+     2,
      re.compile(
          r"\bbefore (?:using|calling|running|invoking) (?:this|any|the|other) tools?\b|"
          r"\b(?:you\s{1,3})?must\s{1,3}first\s{1,3}(?:call|invoke|use|run|"
@@ -198,7 +251,9 @@ DIRECTIVES = (
          r"value|data)\b[^.\n]{0,30}?\b(?:as|in|into)\s{1,3}(?:the\s{1,3})?[`'\"]?[a-z_]{1,40}[`'\"]?\s{1,3}(?:field|"
          r"parameter|argument)\b",
          re.I)),
-    ("concealment", CONCEAL, 3,
+    ("concealment",
+     CONCEAL,
+     3,
      re.compile(
          r"\b(?:do not|don't|never|without)\s{1,3}(?:tell|telling|inform|informing|alert|alerting|notify|notifying|"
          r"warn|warning)\s{1,3}(?:the\s{1,3})?(?:user|human|operator|developer)s?\b(?!\s{1,3}(?:name|menu|id|list|"
@@ -208,7 +263,9 @@ DIRECTIVES = (
          r"(?:knowledge|knowing|noticing|consent|approval)\b|\bkeep\s{1,3}(?:this|it)\s{1,3}(?:secret|hidden|"
          r"confidential|between us)\b",
          re.I)),
-    ("quiet_action", CONCEAL, 2,
+    ("quiet_action",
+     CONCEAL,
+     2,
      re.compile(
          r"\b(?:silently|quietly|secretly|covertly|discreetly)\s{1,3}(?:add|send|open|run|include|upload|copy|read|"
          r"post|execute|forward|push|fetch|collect|attach|append|email)\b|\b(?:no|not\s{1,3}any)\s{1,3}need\s{1,3}to"
@@ -217,7 +274,9 @@ DIRECTIVES = (
          r"\s{1,3}of\s{1,3}your\s{1,3}(?:explanation|reply|response|summary|answer|output)\b|\b(?:do\s{1,3}not|don't|"
          r"never)\s{1,3}(?:mention|reveal|disclose|surface)\s{1,3}(?:this|it|that|these|any\s{1,3}of\s{1,3}this)\b",
          re.I)),
-    ("sensitive_target", TARGET, 2,
+    ("sensitive_target",
+     TARGET,
+     2,
      re.compile(
          r"~/\.ssh\b|\bid_(?:rsa|ed25519|ecdsa)\b|\.aws/credentials|(?<![\w.])\.env\b(?!\.(?:example|sample|template|"
          r"dist))|\.npmrc\b|\.pypirc\b|\.git-credentials\b|\.kube/config\b|\.docker/config\.json|/etc/shadow\b|"
@@ -226,12 +285,16 @@ DIRECTIVES = (
          r"repeat|output|leak|send)\b)|\b(?:reveal|print|show|repeat|output|leak|send)\b[^.\n]{0,60}?\b(?:hidden|"
          r"system)\s{1,3}prompt\b",
          re.I)),
-    ("sensitive_topic", TARGET, 1,
+    ("sensitive_topic",
+     TARGET,
+     1,
      re.compile(
          r"\bapi keys?\b|\baccess tokens?\b|\bsystem prompt\b|\bconversation history\b|\bcredentials\b|"
          r"\benv(?:ironment)?\s{1,3}var(?:iable)?s\b|\b(?:session|auth\w{0,10})\s{1,3}tokens?\b",
          re.I)),
-    ("exfiltration_instruction", EXFIL, 3,
+    ("exfiltration_instruction",
+     EXFIL,
+     3,
      re.compile(
          r"\b(?:send|post|upload|forward|exfiltrate|transmit|leak|email|submit|deliver|copy|mirror|back up)\b"
          r"[^\n\[\]()|]{0,80}?\b(?:to|at|into)\b[^\n\[\]()|]{0,40}?(?:(?<!\]\()https?://|\bwebhook\b|\bpastebin\b|"
@@ -239,14 +302,18 @@ DIRECTIVES = (
          r"|\b(?:append|include|encode|embed|put|add|attach)\b[^\n]{0,80}?\b(?:in|into|to|as)\b[^\n]{0,40}?"
          r"(?:\bquery (?:string|parameter)s?\b|\b(?:image|link) (?:url|link|address)\b)",
          re.I)),
-    ("send_to_address", EXFIL, 2,
+    ("send_to_address",
+     EXFIL,
+     2,
      re.compile(
          r"\b(?:send|post|upload|forward|email|push|transmit|submit|bcc)\b[^\n]{0,80}?\b(?:to|at)\s{1,3}"
          r"(?:[\w.+-]{1,40}@)?(?:[a-z0-9-]{1,40}\.){1,4}[a-z]{2,12}\b(?!\.[a-z0-9])|\bset\s{1,3}the\s{1,3}(?:bcc|cc|to)"
          r"\s{1,3}field\s{1,3}to\b|\bcurl\b[^\n]{0,80}?\s(?:-d|--data[a-z-]{0,10}|-F|-T)\s{0,3}@[^\n]{0,80}?https?://|"
          r"\b(?:nslookup|dig|host)\s[^\n]{0,40}?\$\(",
          re.I)),
-    ("url_with_data_slot", EXFIL, 2,
+    ("url_with_data_slot",
+     EXFIL,
+     2,
      re.compile(
          r"https?://[^\s\"'<>)\]]{1,200}?(?:\{[^{}\n]{0,40}?(?:content|data|conversation|history|secret|token|key|"
          r"password|credential|env|file|output|result|summary|context|prompt|base64|cookie|session|value)[^{}\n]{0,40}\}"
@@ -260,7 +327,9 @@ Every gap is bounded and none of two adjacent repetitions can match the same cha
 backtrack more than linearly; `test_no_pattern_can_be_stalled` times every one of them on hostile shapes."""
 
 FOREIGN_DIRECTIVES = (
-    ("instruction_override", ADDRESS, 3,
+    ("instruction_override",
+     ADDRESS,
+     3,
      re.compile(
          r"ignora(?:r)?\s{1,3}(?:todas\s{1,3})?las\s{1,3}instrucciones\s{1,3}(?:anteriores|previas)|"
          r"ignore[zr]?\s{1,3}(?:toutes\s{1,3})?les\s{1,3}instructions\s{1,3}pr\u00e9c\u00e9dentes|"
@@ -276,7 +345,9 @@ FOREIGN_DIRECTIVES = (
          r"\u0627\u0644\u062a\u0639\u0644\u064a\u0645\u0627\u062a\s{1,3}\u0627\u0644\u0633\u0627\u0628\u0642\u0629|"
          r"\uc774\uc804\uc758?\s{0,3}\ubaa8\ub4e0\s{0,3}\uc9c0\uc2dc(?:\uc0ac\ud56d)?\ub97c\s{0,3}\ubb34\uc2dc",
          re.I)),
-    ("concealment", CONCEAL, 3,
+    ("concealment",
+     CONCEAL,
+     3,
      re.compile(
          r"no\s{1,3}(?:le\s{1,3})?digas\s{1,3}(?:nada\s{1,3})?al\s{1,3}usuario|"
          r"ne\s{1,3}(?:le\s{1,3})?di(?:s|tes)\s{1,3}(?:rien|pas)\s{1,3}\u00e0\s{1,3}l'utilisateur|"
@@ -334,7 +405,8 @@ HIDDEN_STYLE = re.compile(
     r"<[a-z][a-z0-9]{0,10}\b[^>]{0,300}?style\s{0,3}=\s{0,3}[\"'][^\"'>]{0,200}?(?:display\s{0,3}:\s{0,3}none|"
     r"font-size\s{0,3}:\s{0,3}0|opacity\s{0,3}:\s{0,3}0|visibility\s{0,3}:\s{0,3}hidden)[^>]{0,300}>([^<]{1,2000})",
     re.I)
-HIDDEN_ATTRIBUTE = re.compile(r"\b(?:alt|title|aria-label|data-[a-z-]{1,30})\s{0,3}=\s{0,3}\"([^\"\n]{20,2000})\"", re.I)
+HIDDEN_ATTRIBUTE = re.compile(r"\b(?:alt|title|aria-label|data-[a-z-]{1,30})\s{0,3}=\s{0,3}\"([^\"\n]{20,2000})\"",
+                              re.I)
 
 BASE64_RUN = re.compile(r"(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{32,4096}={0,2}")
 ENCODED_VALUE = re.compile(r"[A-Za-z0-9+/_=-]{64,4096}")
@@ -345,8 +417,8 @@ SHORT_BASE64_RUN = re.compile(r"(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{24,4096}={0,
 """Long enough for the shortest credential worth carrying: a twenty-character key id is twenty-eight in base64."""
 HEX_RUN = re.compile(r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}){20,2048}(?![0-9A-Fa-f])")
 
-STRONG_KINDS = frozenset(["smuggled_directive", "encoded_directive", "obfuscated_directive", "hidden_text",
-                          "hidden_markup"])
+STRONG_KINDS = frozenset(
+    ["smuggled_directive", "encoded_directive", "obfuscated_directive", "hidden_text", "hidden_markup"])
 """Indicators that mean an instruction was hidden from a reader. One of these is enough: prose is never hidden."""
 
 LIKELY_SCORE = 3
@@ -415,8 +487,8 @@ def _credential_spans(text: str, most: int | None = MAX_MATCHES) -> list[tuple]:
             group = 1 if pattern.groups else 0
             value = match.group(group)
 
-            if (name == "openai_style_api_key" and not (any(c.isdigit() for c in value)
-                                                        and any(c.isupper() for c in value))):
+            if (name == "openai_style_api_key"
+                    and not (any(c.isdigit() for c in value) and any(c.isupper() for c in value))):
                 # A real key mixes cases and digits; `sk-estimator-doc-link` and its like do not.
                 continue
 
@@ -526,8 +598,8 @@ def _visible(text: str) -> str:
 
 
 _SCHEME = re.compile(r"(?i)(?<![a-z0-9])([a-z][a-z0-9+.-]{1,15})://([^/\s?#]{0,255})")
-_BARE_LINK = re.compile(r"(?i)(?<![a-z0-9@/.])(www)\.(?=[a-z0-9-]{1,63}\.)|(?<![a-z0-9])(mailto|javascript|data|vbscript):")
-
+_BARE_LINK = re.compile(
+    r"(?i)(?<![a-z0-9@/.])(www)\.(?=[a-z0-9-]{1,63}\.)|(?<![a-z0-9])(mailto|javascript|data|vbscript):")
 
 _BARE_DOT = re.compile(r"(?<!\[)\.(?!\])")
 
@@ -736,8 +808,13 @@ def hidden_characters(text: str) -> list[Indicator]:
 
         if (weight > 0):
             found.append(
-                Indicator("hidden_character", kind, weight, first[kind],
-                          f"{count} x {kind}, the first at offset {first[kind]}", HIDDEN, count))
+                Indicator("hidden_character",
+                          kind,
+                          weight,
+                          first[kind],
+                          f"{count} x {kind}, the first at offset {first[kind]}",
+                          HIDDEN,
+                          count))
 
     return found
 
@@ -793,8 +870,13 @@ def directives(text: str) -> list[Indicator]:
 
         for match in matches[:MAX_SHOWN]:
             found.append(
-                Indicator("directive", name, weight, match.start(), _context(text, match.start(), match.end()),
-                          category, len(matches)))
+                Indicator("directive",
+                          name,
+                          weight,
+                          match.start(),
+                          _context(text, match.start(), match.end()),
+                          category,
+                          len(matches)))
 
     return found
 
@@ -808,8 +890,13 @@ def foreign_directives(text: str) -> list[Indicator]:
         match = pattern.search(view)
 
         if (match):
-            found.append(Indicator("directive", name, weight, match.start(),
-                                   _context(view, match.start(), match.end()), category))
+            found.append(
+                Indicator("directive",
+                          name,
+                          weight,
+                          match.start(),
+                          _context(view, match.start(), match.end()),
+                          category))
 
     return found
 
@@ -831,8 +918,10 @@ def obfuscated_directives(text: str, plain: list[Indicator]) -> list[Indicator]:
     found = []
 
     if (view != text):
-        found = [dataclasses.replace(indicator, kind="obfuscated_directive", weight=indicator.weight + 1)
-                 for indicator in directives(view) if indicator.name not in seen]
+        found = [
+            dataclasses.replace(indicator, kind="obfuscated_directive", weight=indicator.weight + 1)
+            for indicator in directives(view) if indicator.name not in seen
+        ]
         seen |= {indicator.name for indicator in found}
 
     # Spelled out letter by letter, split across list items or table cells, or written with digits for letters.
@@ -842,9 +931,13 @@ def obfuscated_directives(text: str, plain: list[Indicator]) -> list[Indicator]:
         for (name, pattern) in SQUEEZED_DIRECTIVES:
             if (name not in seen and pattern.search(letters)):
                 seen.add(name)
-                found.append(Indicator("obfuscated_directive", name, 4, 0,
-                                       "the phrase is spelled across punctuation, lines or digits",
-                                       CONCEAL if name == "concealment" else ADDRESS))
+                found.append(
+                    Indicator("obfuscated_directive",
+                              name,
+                              4,
+                              0,
+                              "the phrase is spelled across punctuation, lines or digits",
+                              CONCEAL if name == "concealment" else ADDRESS))
 
     return found
 
@@ -882,8 +975,8 @@ def hidden_markup(text: str) -> list[Indicator]:
     hidden = [("html_comment", offset, inner) for (offset, inner) in itertools.islice(html_comments(text), MAX_MATCHES)]
 
     for (name, pattern) in (("hidden_element", HIDDEN_STYLE), ("attribute", HIDDEN_ATTRIBUTE)):
-        hidden.extend((name, match.start(), match.group(1))
-                      for match in itertools.islice(pattern.finditer(text), MAX_MATCHES))
+        hidden.extend(
+            (name, match.start(), match.group(1)) for match in itertools.islice(pattern.finditer(text), MAX_MATCHES))
 
     for (name, offset, inner) in hidden:
         if (not any(indicator.name == name for indicator in found) and directives(matching_view(inner))):
@@ -904,8 +997,9 @@ def _carries_data(url: str) -> bool:
 
     # A long value that is prose or one encoded run is data. A long value that is another address is a badge
     # pointing at its own definition.
-    return any(len(value) >= 64 and "://" not in value and (" " in value or ENCODED_VALUE.fullmatch(value))
-               for values in urllib.parse.parse_qs(query).values() for value in values)
+    return any(
+        len(value) >= 64 and "://" not in value and (" " in value or ENCODED_VALUE.fullmatch(value))
+        for values in urllib.parse.parse_qs(query).values() for value in values)
 
 
 def _address(match: re.Match) -> str:
@@ -919,28 +1013,38 @@ def exfiltration_channels(text: str) -> list[Indicator]:
     badge has, is counted and weighs 1.
     """
     found = []
-    images = [match for pattern in (MARKDOWN_IMAGE, HTML_IMAGE)
-              for match in itertools.islice(pattern.finditer(text), MAX_MATCHES)]
+    images = [
+        match for pattern in (MARKDOWN_IMAGE, HTML_IMAGE)
+        for match in itertools.islice(pattern.finditer(text), MAX_MATCHES)
+    ]
     loaded = [match for match in images if _carries_data(_address(match)) or COLLECTION_HOSTS.search(_address(match))]
     plain = [match for match in images if match not in loaded and "?" in _address(match) and "=" in _address(match)]
 
     for (name, weight, matches) in (("image_with_data_slot", 3, loaded), ("image_with_query_data", 1, plain)):
         for match in matches[:MAX_SHOWN]:
-            found.append(Indicator("exfil_channel", name, weight, match.start(), defang(_address(match)), EXFIL,
-                                   len(matches)))
+            found.append(
+                Indicator("exfil_channel", name, weight, match.start(), defang(_address(match)), EXFIL, len(matches)))
 
-    links = [match for pattern in (MARKDOWN_LINK, REFERENCE_DEFINITION)
-             for match in itertools.islice(pattern.finditer(text), MAX_MATCHES) if PLACEHOLDER.search(match.group(1))]
+    links = [
+        match for pattern in (MARKDOWN_LINK, REFERENCE_DEFINITION)
+        for match in itertools.islice(pattern.finditer(text), MAX_MATCHES) if PLACEHOLDER.search(match.group(1))
+    ]
 
     for match in links[:MAX_SHOWN]:
-        found.append(Indicator("exfil_channel", "link_with_data_slot", 2, match.start(), defang(match.group(1)),
-                               EXFIL, len(links)))
+        found.append(
+            Indicator("exfil_channel",
+                      "link_with_data_slot",
+                      2,
+                      match.start(),
+                      defang(match.group(1)),
+                      EXFIL,
+                      len(links)))
 
     hosts = list(itertools.islice(COLLECTION_HOSTS.finditer(text), MAX_MATCHES))
 
     for match in hosts[:MAX_SHOWN]:
-        found.append(Indicator("exfil_channel", "collection_host", 2, match.start(), defang(match.group(0)), EXFIL,
-                               len(hosts)))
+        found.append(
+            Indicator("exfil_channel", "collection_host", 2, match.start(), defang(match.group(0)), EXFIL, len(hosts)))
 
     return found
 
@@ -957,9 +1061,14 @@ def find_secrets(text: str) -> list[Indicator]:
             continue
 
         example = _is_example(value)
-        found.append(Indicator("secret", "published_example_key" if example else name, 0 if example else 3, start,
-                               f"{name}, {end - start} characters, redacted" +
-                               (" (a published example value)" if example else ""), TARGET))
+        found.append(
+            Indicator(
+                "secret",
+                "published_example_key" if example else name,
+                0 if example else 3,
+                start,
+                f"{name}, {end - start} characters, redacted" + (" (a published example value)" if example else ""),
+                TARGET))
 
     return found
 
@@ -1025,8 +1134,8 @@ def encoded_directives(text: str) -> list[Indicator]:
             continue
 
     for match in itertools.islice(UNICODE_ESCAPES.finditer(text), MAX_MATCHES):
-        candidates.append(("unicode_escapes", match.start(),
-                           "".join(chr(int(code, 16)) for code in match.group(0).split("\\u")[1:])))
+        candidates.append(
+            ("unicode_escapes", match.start(), "".join(chr(int(code, 16)) for code in match.group(0).split("\\u")[1:])))
 
     for (name, offset, decoded) in candidates:
         if (decoded and directives(matching_view(decoded)) and not any(i.name == name for i in found)):
@@ -1039,8 +1148,8 @@ def encoded_directives(text: str) -> list[Indicator]:
             match = next((match for match in (pattern.search(turned) for pattern in STOCK_DIRECTIVES) if match), None)
 
             if (match):
-                found.append(Indicator("encoded_directive", name, 3, 0, _context(turned, match.start(), match.end()),
-                                       HIDDEN))
+                found.append(
+                    Indicator("encoded_directive", name, 3, 0, _context(turned, match.start(), match.end()), HIDDEN))
 
     return found
 
@@ -1051,8 +1160,10 @@ def encoded_secrets(text: str) -> list[Indicator]:
 
     for match in itertools.islice(SHORT_BASE64_RUN.finditer(text), MAX_MATCHES):
         for indicator in find_secrets(_decoded(match.group(0))):
-            found.append(dataclasses.replace(indicator, offset=match.start(),
-                                             evidence=indicator.evidence + ", carried as base64"))
+            found.append(
+                dataclasses.replace(indicator,
+                                    offset=match.start(),
+                                    evidence=indicator.evidence + ", carried as base64"))
 
     return found
 
@@ -1074,8 +1185,15 @@ def scan_text(text: str) -> list[Indicator]:
 
     (text, _) = _scannable(text)
     plain = [*directives(text), *foreign_directives(text)]
-    found = [*hidden_characters(text), *hidden_text(text), *plain, *obfuscated_directives(text, plain),
-             *hidden_markup(text), *exfiltration_channels(text), *encoded_directives(text)]
+    found = [
+        *hidden_characters(text),
+        *hidden_text(text),
+        *plain,
+        *obfuscated_directives(text, plain),
+        *hidden_markup(text),
+        *exfiltration_channels(text),
+        *encoded_directives(text)
+    ]
 
     return sorted(found, key=lambda indicator: (-indicator.weight, indicator.offset, indicator.kind, indicator.name))
 
@@ -1120,8 +1238,9 @@ def assess(text: str) -> Assessment:
     # Two kinds of evidence agree, and one of them is about the model or about hiding: a page that names a
     # credential and gives an address with a slot in it is API documentation.
     # A status badge or a passing mention of "API keys" weighs 1 and agrees with nothing.
-    agreed = len(weighty) >= 2 and (bool({ADDRESS, CONCEAL, HIDDEN} & weighty) or any(
-        indicator.category == EXFIL and indicator.weight >= 3 for indicator in indicators))
+    agreed = len(weighty) >= 2 and (bool({ADDRESS, CONCEAL, HIDDEN} & weighty)
+                                    or any(indicator.category == EXFIL and indicator.weight >= 3
+                                           for indicator in indicators))
 
     if (not indicators):
         level = "none"

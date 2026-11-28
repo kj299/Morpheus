@@ -15,11 +15,13 @@
 | AAH-009 | Agent credentials used from somewhere new | high | `auth` | - | T1078.004 Valid Accounts: Cloud Accounts; T1528 Steal Application Access Token | LLM06 Excessive Agency |
 | AAH-010 | Destructive or runaway agent activity | high | `tool_call`, `process`, `file` | - | T1485 Data Destruction; T1119 Automated Collection | LLM06 Excessive Agency; LLM10 Unbounded Consumption |
 | AAH-011 | Agents tampering with their own guardrails | high | `file`, `tool_call`, `process` | AML.T0051.001 LLM Prompt Injection: Indirect | T1562.001 Impair Defenses: Disable or Modify Tools | LLM06 Excessive Agency; LLM01 Prompt Injection |
-| AAH-012 | Credentials in what an agent says or sends | high | `model_output`, `tool_call` | AML.T0057 LLM Data Leakage | T1552 Unsecured Credentials; T1567 Exfiltration Over Web Service | LLM02 Sensitive Information Disclosure; LLM07 System Prompt Leakage |
+| AAH-012 | Credentials in what an agent says, sends or is shown | high | `model_output`, `tool_call`, `tool_result`, `process` | AML.T0057 LLM Data Leakage | T1552 Unsecured Credentials; T1567 Exfiltration Over Web Service | LLM02 Sensitive Information Disclosure; LLM07 System Prompt Leakage |
 
 ## AAH-001: Indirect prompt injection in content an agent read
 
 Content that came back from a tool, a fetched page or a retrieved document addresses the model: it tells it to ignore its instructions, hide what it does, call a tool, or send data somewhere.
+
+Severity: High where two kinds of evidence agree and the score is 6 or more, or text was hidden from a reader; medium where two kinds agree; low where there is one kind only (an override phrase and nothing else, a link with a slot for data and nothing else). The kinds are: addressing or redirecting the model, asking for secrecy, naming a credential, naming a way out, and hiding text.
 
 Triage:
 
@@ -31,16 +33,19 @@ Known benign causes:
 
 - Security research, red-team notes and documentation about prompt injection quote these phrases.
 - Templates and chat transcripts can carry role markers.
+- Agent instruction files (CLAUDE.md, AGENTS.md) address a model on purpose.
 
 ## AAH-002: A privileged action follows injected content
 
-Within one session, after a tool result carrying an injection, the agent runs a command, writes a file, sends data out or reads a credential: the confused deputy acting on the injection.
+Within one session, after a tool result carrying an injection, the agent does what the text asked (reaches a host it named, reads a credential it named, calls a tool it named) or does something another hunt reports. An action that merely follows is not reported: a coding agent runs a command after nearly every tool result.
+
+Severity: Critical where an action reads a credential or reaches a host the text named, sends a credential, or opens a reverse shell; high otherwise. One finding per injected text, listing the actions tied to it.
 
 Triage:
 
 1. Compare the action with the injected text: does it do what the text asked?
 1. Establish whether a person approved the action, and from which prompt.
-1. Contain the session's credentials if the action reached a network or a secret.
+1. If the action reached a network or a secret, recommend that the owner rotate the session's credentials.
 
 Known benign causes:
 
@@ -48,49 +53,59 @@ Known benign causes:
 
 ## AAH-003: A credential read followed by egress
 
-In one session an agent reads a credential store (SSH keys, cloud credentials, .env files, token caches, browser login data) and then sends something over the network.
+In one session an agent reads a credential store (SSH keys, cloud credentials, .env files, token caches, browser login data, a command that prints a token) and then sends data over the network; or one command does both.
+
+Severity: Critical where one command reads the credential and carries it out, or a later request visibly carries a credential; high where data is later sent to a host that is not on the allowlist, or anything goes to a known collection host; medium where data is sent to an allowlisted host, or a connection is seen to an unlisted one. A page fetched after a credential was read is not reported.
 
 Triage:
 
 1. Identify the destination host and whether it belongs to the organization.
-1. Rotate the credential that was read, whatever the destination turns out to be.
+1. Recommend rotating the credential that was read, whatever the destination turns out to be.
 1. Look back for the content that led the agent to the file (AAH-001).
 
 Known benign causes:
 
 - Deploy tooling that reads a cloud profile and then calls that cloud's API.
+- A deliberate upload of a configuration file to the organization's own bucket.
 
 ## AAH-004: Risky commands from an agent's process tree
 
 An agent, or a shell it started, downloads and runs code, decodes and runs a payload, opens a reverse shell, adds persistence, or erases its history.
 
+Severity: Critical for a reverse shell; high for download and run, decode and run, persistence and erased history; low for a unit that exists being enabled and for a `PATH` entry, alias or well-known initialiser added to a shell profile. A command is judged on what it runs: text that is only written, searched for or committed is not a command.
+
 Triage:
 
 1. Pull the full command line and the agent prompt or tool result that preceded it.
-1. Fetch whatever was downloaded and analyse it in isolation.
+1. Record the address of whatever was downloaded and hand it to malware analysis; do not fetch it from the machine the hunt runs on.
 1. Check the host for the persistence the command would have written.
 
 Known benign causes:
 
 - Installers documented as `curl ... | sh` that a developer asked the agent to run.
+- A tool's own initialiser added to a shell profile, which is reported at low.
 
 ## AAH-005: Poisoned MCP tool descriptions
 
 A tool an MCP server offers carries instructions for the model in its description or parameter descriptions: read a file, call another tool, hide something from the user, put data in a parameter.
 
+Severity: Reported where two kinds of evidence agree (a directive about other tools or data, a request for secrecy, a credential named, a way out named) or anything is hidden. Critical at a score of 6 or more, high below.
+
 Triage:
 
 1. Record the server's package, version and source, and who added it to the client configuration.
 1. Search other sessions and hosts for the same server and tool name.
-1. Disable the server before reading further; the description acts on every session that loads it.
+1. Recommend that the server be disabled wherever it is configured: its description acts on every session that loads it, a hunter's own agent included.
 
 Known benign causes:
 
-- Descriptions that tell the model how to use the tool itself correctly, which score low.
+- Descriptions that tell the model how to use the tool itself correctly: "call `resolve` first" is one kind of evidence and is not reported alone.
 
 ## AAH-006: MCP tool shadowing
 
 Two servers in one session offer a tool of the same name, or one server's description steers how the model uses another server's tool, so a malicious server intercepts or rewrites a trusted one.
+
+Severity: High where one of the definitions carries an injection indicator or names another server's tools; low for a shared name with nothing else, which is common and is reported once per set of servers.
 
 Triage:
 
@@ -100,6 +115,7 @@ Triage:
 Known benign causes:
 
 - Two versions of the same server configured side by side during an upgrade.
+- Unrelated servers that both offer `search` or `get`.
 
 ## AAH-007: MCP tool definitions that changed after approval
 
@@ -118,10 +134,12 @@ Known benign causes:
 
 An MCP client configuration launches servers from unpinned packages, pipes downloads into a shell, talks to a remote server in plaintext, writes credentials into the file, grants a filesystem server the whole disk, or names a package one edit away from a well-known one.
 
+Severity: Each check carries its own severity: high for a download piped to a shell, a plaintext remote, a credential in the file and a likely typosquat; medium for unpinned packages and images and whole-disk filesystem access; low for tools approved automatically.
+
 Triage:
 
-1. Pin each server to a version or digest and record who owns it.
-1. Move credentials written into the file to the client's secret store, and rotate them.
+1. Recommend pinning each server to a version or digest, and record who owns it.
+1. Recommend moving credentials written into the file to the client's secret store and rotating them.
 
 Known benign causes:
 
@@ -134,7 +152,7 @@ A token or service identity that an agent uses appears from a network it has not
 Triage:
 
 1. Confirm whether the agent's host moved networks (a VPN, a new runner pool).
-1. Revoke the token if the source is not the agent's own infrastructure.
+1. If the source is not the agent's own infrastructure, recommend that the token's owner revoke it.
 
 Known benign causes:
 
@@ -142,40 +160,48 @@ Known benign causes:
 
 ## AAH-010: Destructive or runaway agent activity
 
-An agent issues destructive operations (recursive deletes, force pushes, dropped tables, deleted buckets or namespaces) or acts at a rate or breadth no task needs.
+An agent issues destructive operations (recursive deletes of a root or home, force pushes and deleted branches, dropped tables and unfiltered deletes, deleted buckets, clusters and cloud resources) or acts at a rate or breadth no task needs.
+
+Severity: By what is destroyed. High where the command names production or a protected branch, and for a root, a home or a system directory; low where it names a test, development or scratch target; otherwise the operation's own weight (high for a database, a namespace, infrastructure; medium for one workload or an unprotected branch). A build directory removed, `--force-with-lease`, `terraform plan -destroy` and a `find` with a name filter are not reported. Bursts and sweeps are medium.
 
 Triage:
 
-1. Stop the session, then establish what the operation reached.
+1. Establish what the operation reached, and recommend stopping the session if it is still running.
 1. Read the prompt that started the run for scope the agent exceeded.
 
 Known benign causes:
 
 - Cleanup jobs whose purpose is deletion.
 - Large refactors that read many files.
+- A test's teardown of its own database or namespace, which is reported at low.
 
 ## AAH-011: Agents tampering with their own guardrails
 
 An agent writes to its own or another agent's configuration or standing instructions: widening permissions, approving tools automatically, adding an MCP server, or planting instructions in a file every future session reads.
 
+Severity: By what was written. High where it turns approvals off, adds servers or hooks, tells the agent to stop asking or to keep something from the user, or carries injection indicators; medium for another change to a file that holds permissions, for content the telemetry does not show, for an MCP server registered from the command line and for an agent started with approvals off; low for ordinary text in an instructions file. Reading these files is not reported, and an editor's settings file counts only in the keys that govern agents.
+
 Triage:
 
 1. Diff the configuration or instruction file against its last reviewed version.
-1. Revert the change and look for the content that asked for it.
+1. Recommend reverting the change, and look for the content that asked for it.
 
 Known benign causes:
 
 - A developer asking the agent to update its own settings.
+- `/init` and documentation edits to an instructions file, which are reported at low.
 
-## AAH-012: Credentials in what an agent says or sends
+## AAH-012: Credentials in what an agent says, sends or is shown
 
-A model output, or the arguments of a tool call that sends data out, contains a credential.
+A credential appears in a model output, in the arguments or command line of a call, or in what a tool returned, which is the model's context and the provider's logs from then on.
+
+Severity: Critical where the call that carries the credential also sends to the network; high in model output; medium in arguments that stay on the machine and in tool output; low for a value a vendor publishes as an example. Values are looked for as given, URL-decoded and inside base64.
 
 Triage:
 
-1. Rotate the credential.
+1. Recommend that the credential's owner rotate it.
 1. Find how it entered the context: a file read, a tool result, the system prompt.
 
 Known benign causes:
 
-- Documented example keys, which still deserve a look at why they were printed.
+- Documented example keys, which are reported at low and still deserve a look at why they were printed.

@@ -321,8 +321,11 @@ def _bounded(arguments: dict, resolved: list[str], baseline: str | None) -> dict
     limit = arguments.get("limit") or DEFAULT_LIMIT
 
     while (True):
-        result = service.run(resolved, arguments.get("hunt_ids"), ctx=ctx,
-                             min_severity=arguments.get("min_severity") or "info", limit=limit)
+        result = service.run(resolved,
+                             arguments.get("hunt_ids"),
+                             ctx=ctx,
+                             min_severity=arguments.get("min_severity") or "info",
+                             limit=limit)
 
         if (limit <= 1 or len(json.dumps(result)) <= MAX_RESULT):
             return result
@@ -375,8 +378,11 @@ class Server:
         self.protocol = PROTOCOL_VERSIONS[0]
 
     def tool_result(self, payload: dict, is_error: bool = False) -> dict:
-        result = {"content": [{"type": "text", "text": json.dumps(payload, separators=(",", ":"))}],
-                  "isError": is_error}
+        result = {
+            "content": [{
+                "type": "text", "text": json.dumps(payload, separators=(",", ":"))
+            }], "isError": is_error
+        }
 
         # Structured results arrived in the 2025-06-18 revision; older clients read the text alone.
         if (self.protocol >= "2025-06-18" and not is_error):
@@ -482,8 +488,7 @@ def serve(reader, writer) -> None:
                 except Exception:  # pylint: disable=broad-exception-caught
                     traceback.print_exc(file=sys.stderr)
                     ident = message.get("id")
-                    response = _error(ident if isinstance(ident, (str, int, float)) else None, -32603,
-                                      "internal error")
+                    response = _error(ident if isinstance(ident, (str, int, float)) else None, -32603, "internal error")
             elif (message is not None or line.strip() == "null"):
                 # Batches left the protocol in the 2025-06-18 revision; this server never took them.
                 response = _error(None, -32600, "invalid request: one JSON object per line")

@@ -49,8 +49,22 @@ WINDOWS_LINE = re.compile(
 MAX_COMMANDS = 2000
 
 SHELLS = frozenset(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish"])
-INTERPRETERS = frozenset(["python", "python2", "python3", "node", "nodejs", "deno", "bun", "perl", "ruby", "php",
-                          "pwsh", "powershell", "osascript", "lua"])
+INTERPRETERS = frozenset([
+    "python",
+    "python2",
+    "python3",
+    "node",
+    "nodejs",
+    "deno",
+    "bun",
+    "perl",
+    "ruby",
+    "php",
+    "pwsh",
+    "powershell",
+    "osascript",
+    "lua"
+])
 WRAPPERS = {
     "sudo": frozenset(["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "--user", "--group"]),
     "doas": frozenset(["-u"]),
@@ -72,10 +86,22 @@ WRAPPERS = {
 }
 """Commands that run another command, with the options of each that take a value."""
 
-INLINE_CODE_FLAGS = {"python": ("-c", ), "python2": ("-c", ), "python3": ("-c", ), "node": ("-e", "--eval", "-p"),
-                     "nodejs": ("-e", "--eval"), "deno": ("eval", ), "bun": ("-e", ), "perl": ("-e", "-E"),
-                     "ruby": ("-e", ), "php": ("-r", ), "pwsh": ("-c", "-command", "-Command"),
-                     "powershell": ("-c", "-command", "-Command"), "osascript": ("-e", ), "lua": ("-e", )}
+INLINE_CODE_FLAGS = {
+    "python": ("-c", ),
+    "python2": ("-c", ),
+    "python3": ("-c", ),
+    "node": ("-e", "--eval", "-p"),
+    "nodejs": ("-e", "--eval"),
+    "deno": ("eval", ),
+    "bun": ("-e", ),
+    "perl": ("-e", "-E"),
+    "ruby": ("-e", ),
+    "php": ("-r", ),
+    "pwsh": ("-c", "-command", "-Command"),
+    "powershell": ("-c", "-command", "-Command"),
+    "osascript": ("-e", ),
+    "lua": ("-e", )
+}
 
 
 @dataclasses.dataclass
@@ -282,9 +308,17 @@ class _Reader:
             end_word()
 
             if (words or writes or reads):
-                command = Command(argv=words, raw=text[start:stop].strip(), pipeline=pipeline, position=position,
-                                  piped_out=piped, writes=writes, reads=reads, heredoc="\n".join(bodies),
-                                  herestring=herestring, via=self.via, parent=self.parent)
+                command = Command(argv=words,
+                                  raw=text[start:stop].strip(),
+                                  pipeline=pipeline,
+                                  position=position,
+                                  piped_out=piped,
+                                  writes=writes,
+                                  reads=reads,
+                                  heredoc="\n".join(bodies),
+                                  herestring=herestring,
+                                  via=self.via,
+                                  parent=self.parent)
                 self.commands.append(command)
                 own = len(self.commands) - 1
 
@@ -583,7 +617,11 @@ def _fallback_commands(text: str, via: str = "", parent: int = -1) -> list:
         words = piece.split()[:400]
 
         if (words):
-            command = Command(argv=words, raw=piece.strip()[:4000], pipeline=number, via=via, parent=parent,
+            command = Command(argv=words,
+                              raw=piece.strip()[:4000],
+                              pipeline=number,
+                              via=via,
+                              parent=parent,
                               uncertain=True)
             _resolve(command)
             found.append(command)
@@ -616,8 +654,8 @@ def _resolve(command: Command) -> None:
         takes_value = WRAPPERS[name]
         words.pop(0)
 
-        while words and (words[0].startswith("-") or (name == "env" and "=" in words[0])
-                         or (name == "timeout" and words[0][:1].isdigit())):
+        while words and (words[0].startswith("-") or (name == "env" and "=" in words[0]) or
+                         (name == "timeout" and words[0][:1].isdigit())):
             option = words.pop(0)
 
             if (name == "timeout" and option[:1].isdigit()):
@@ -661,8 +699,10 @@ def _inline(reader: _Reader, commands: list) -> None:  # pylint: disable=too-man
         flags = INLINE_CODE_FLAGS.get(program)
 
         if (program in SHELLS):
-            codes = [command.args[i + 1] for (i, word) in enumerate(command.args[:-1])
-                     if word.startswith("-") and not word.startswith("--") and word.endswith("c")]
+            codes = [
+                command.args[i + 1] for (i, word) in enumerate(command.args[:-1])
+                if word.startswith("-") and not word.startswith("--") and word.endswith("c")
+            ]
 
             for code in codes[:1]:
                 position = command.argv.index(code) if code in command.argv else -1
@@ -687,8 +727,9 @@ def _inline(reader: _Reader, commands: list) -> None:  # pylint: disable=too-man
                         reader.nested(command.heredoc or command.herestring, "heredoc", index - 1)
                     elif (command.position > 0):
                         producer = next((c for c in reversed(commands[:index - 1])
-                                         if c.pipeline == command.pipeline and c.position == command.position - 1
-                                         and c.via == command.via), None)
+                                         if c.pipeline == command.pipeline and c.position == command.position -
+                                         1 and c.via == command.via),
+                                        None)
 
                         if (producer is not None and producer.program in ("echo", "printf") and producer.args):
                             reader.nested(" ".join(producer.operands), "pipe", index - 1)
@@ -743,8 +784,29 @@ def _inline(reader: _Reader, commands: list) -> None:  # pylint: disable=too-man
                     break
 
 
-SSH_VALUE_OPTIONS = frozenset(["-i", "-p", "-l", "-o", "-F", "-J", "-L", "-R", "-D", "-b", "-c", "-m", "-S", "-W", "-w",
-                               "-E", "-e", "-B", "-I", "-Q", "-P"])
+SSH_VALUE_OPTIONS = frozenset([
+    "-i",
+    "-p",
+    "-l",
+    "-o",
+    "-F",
+    "-J",
+    "-L",
+    "-R",
+    "-D",
+    "-b",
+    "-c",
+    "-m",
+    "-S",
+    "-W",
+    "-w",
+    "-E",
+    "-e",
+    "-B",
+    "-I",
+    "-Q",
+    "-P"
+])
 
 
 def _ssh_operands(command: Command) -> list:
@@ -806,5 +868,7 @@ def parse(text: str) -> tuple:
 
 def pipeline_of(commands: tuple, command: Command) -> list:
     """The commands of one pipeline, in order, at the same nesting as `command`."""
-    return [other for other in commands
-            if other.pipeline == command.pipeline and other.via == command.via and other.parent == command.parent]
+    return [
+        other for other in commands
+        if other.pipeline == command.pipeline and other.via == command.via and other.parent == command.parent
+    ]

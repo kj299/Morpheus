@@ -48,9 +48,16 @@ def _manifest_event(document: dict, path: str) -> dict:
     name = os.path.basename(path)
     server = str(document.get("server") or os.path.splitext(name)[0])
 
-    return events.normalize({"type": "tool_manifest", "server": server, "session_id": document.get("session_id"),
-                             "ts": document.get("ts"), "tools": document.get("tools")}, name,
-                            f"(no session id; file {name})")
+    return events.normalize(
+        {
+            "type": "tool_manifest",
+            "server": server,
+            "session_id": document.get("session_id"),
+            "ts": document.get("ts"),
+            "tools": document.get("tools")
+        },
+        name,
+        f"(no session id; file {name})")
 
 
 def expand(paths: list[str]) -> list[str]:

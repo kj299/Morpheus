@@ -48,7 +48,10 @@ def table(result: dict) -> str:
     rows = [("SEVERITY", "HUNT", "SESSION", "TIME", "SUMMARY")]
 
     for finding in result["findings"]:
-        rows.append((finding["severity"], finding["hunt_id"], finding["session_id"][:40] or "-", finding["ts"] or "-",
+        rows.append((finding["severity"],
+                     finding["hunt_id"],
+                     finding["session_id"][:40] or "-",
+                     finding["ts"] or "-",
                      finding["summary"]))
 
     widths = [max(len(row[column]) for row in rows) for column in range(4)]
@@ -69,8 +72,10 @@ def table(result: dict) -> str:
 def warn_skipped(coverage: dict) -> None:
     """Say on standard error what the hunt did not cover, so a quiet result is never mistaken for a clean one."""
     if (coverage.get("skipped")):
-        print(f"hunt.py: {coverage['skipped']} line(s) or file(s) could not be read and were NOT hunted, e.g. "
-              f"{'; '.join(coverage['skipped_examples'][:3])}", file=sys.stderr)
+        print(
+            f"hunt.py: {coverage['skipped']} line(s) or file(s) could not be read and were NOT hunted, e.g. "
+            f"{'; '.join(coverage['skipped_examples'][:3])}",
+            file=sys.stderr)
 
     if (coverage.get("failed_hunts")):
         print(f"hunt.py: hunt(s) did NOT complete and report nothing: {', '.join(coverage['failed_hunts'])}",
@@ -85,10 +90,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     run.add_argument("paths", nargs="+", help="files, or directories to read every telemetry file under")
     run.add_argument("--hunt", action="append", dest="hunt_ids", choices=sorted(catalog.BY_ID))
     run.add_argument("--window", type=int, dest="window_seconds", help="seconds a sequence may span (600)")
-    run.add_argument("--allow-host", action="append", dest="allow_hosts",
+    run.add_argument("--allow-host",
+                     action="append",
+                     dest="allow_hosts",
                      help="a destination that is ordinary here, added to the default list; a leading dot allows "
                      "every host under a domain")
-    run.add_argument("--replace-allowlist", action="store_true",
+    run.add_argument("--replace-allowlist",
+                     action="store_true",
                      help="use only the --allow-host values, without the default list")
     run.add_argument("--calls-per-minute", type=int, help="tool calls in a minute that count as a burst (30)")
     run.add_argument("--distinct-files", type=int, help="files read in a session that count as a sweep (50)")
@@ -111,8 +119,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     source.add_argument("--file")
     source.add_argument("--text")
 
-    commands.add_parser("summarize", help="what event types, sessions and times the files cover").add_argument(
-        "paths", nargs="+")
+    commands.add_parser("summarize",
+                        help="what event types, sessions and times the files cover").add_argument("paths", nargs="+")
     commands.add_parser("baseline", help="digest every tool definition, for AAH-007").add_argument("paths", nargs="+")
 
     listing = commands.add_parser("catalog", help="the hunts, as JSON or as the skill's reference page")
@@ -131,12 +139,19 @@ def _failed(result: dict, fail_on: str) -> bool:
 def dispatch(args: argparse.Namespace) -> int:
     if (args.command in ("run", "audit-config")):
         if (args.command == "run"):
-            ctx = service.context(window_seconds=args.window_seconds, allow_hosts=args.allow_hosts,
-                                  replace_allowlist=args.replace_allowlist, baseline_path=args.baseline_path,
-                                  calls_per_minute=args.calls_per_minute, distinct_files=args.distinct_files,
+            ctx = service.context(window_seconds=args.window_seconds,
+                                  allow_hosts=args.allow_hosts,
+                                  replace_allowlist=args.replace_allowlist,
+                                  baseline_path=args.baseline_path,
+                                  calls_per_minute=args.calls_per_minute,
+                                  distinct_files=args.distinct_files,
                                   injection_threshold=args.injection_threshold)
-            result = service.run(args.paths, args.hunt_ids, ctx=ctx, min_severity=args.min_severity,
-                                 strict=args.strict, limit=args.limit)
+            result = service.run(args.paths,
+                                 args.hunt_ids,
+                                 ctx=ctx,
+                                 min_severity=args.min_severity,
+                                 strict=args.strict,
+                                 limit=args.limit)
         else:
             result = service.audit_config(args.path, args.baseline_path)
 

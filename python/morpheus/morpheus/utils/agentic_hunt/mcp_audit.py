@@ -272,15 +272,21 @@ def audit_config(document: dict) -> list[dict]:
 
     for (name, entry) in sorted(servers_in(document).items()):
         if (not isinstance(entry, dict)):
-            found.append(_finding(str(name), "unreadable_entry", "medium",
-                                  f"this server's entry is a {type(entry).__name__}, not a mapping, and was not audited"))
+            found.append(
+                _finding(str(name),
+                         "unreadable_entry",
+                         "medium",
+                         f"this server's entry is a {type(entry).__name__}, not a mapping, and was not audited"))
             continue
 
         try:
             found.extend(audit_server(str(name), entry))
         except (TypeError, ValueError, AttributeError, RecursionError) as error:
-            found.append(_finding(str(name), "unreadable_entry", "medium",
-                                  f"this server's entry could not be audited ({type(error).__name__})"))
+            found.append(
+                _finding(str(name),
+                         "unreadable_entry",
+                         "medium",
+                         f"this server's entry could not be audited ({type(error).__name__})"))
 
     return found
 
@@ -344,9 +350,11 @@ def tool_assessment(tool: dict) -> ToolAssessment:
     places = []
 
     for (where, text) in tool_texts(tool):
-        found = [indicator for indicator in text_indicators.assess(text).indicators
-                 if indicator.category != text_indicators.ADDRESS or indicator.name in MODEL_DIRECTED
-                 or indicator.kind in text_indicators.STRONG_KINDS]
+        found = [
+            indicator for indicator in text_indicators.assess(text).indicators
+            if indicator.category != text_indicators.ADDRESS or indicator.name in MODEL_DIRECTED
+            or indicator.kind in text_indicators.STRONG_KINDS
+        ]
 
         if (found):
             indicators.extend(found)

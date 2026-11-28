@@ -379,8 +379,9 @@ class AgenticHuntStage(CheckpointMixin, TelemetryStage):
         for session in touched:
             timed = [(events.parse_time(record["ts"]), record) for record in self._retained[session]]
             newest = max(moment for (moment, _) in timed)
-            recent = [record for (moment, record) in timed
-                      if (newest - moment).total_seconds() <= self._retention_seconds]
+            recent = [
+                record for (moment, record) in timed if (newest - moment).total_seconds() <= self._retention_seconds
+            ]
             self._retained[session] = recent[-MAX_RETAINED_PER_SESSION:]
 
         self._release()
@@ -396,8 +397,10 @@ class AgenticHuntStage(CheckpointMixin, TelemetryStage):
         if (not self._retained):
             return
 
-        newest = {session: events.parse_time(max(record["ts"] for record in kept))
-                  for (session, kept) in self._retained.items()}
+        newest = {
+            session: events.parse_time(max(record["ts"] for record in kept))
+            for (session, kept) in self._retained.items()
+        }
         latest = max(newest.values())
         total = sum(len(kept) for kept in self._retained.values())
 
@@ -414,8 +417,8 @@ class AgenticHuntStage(CheckpointMixin, TelemetryStage):
     def _process(self, df) -> None:
         host = to_host_frame(df)
         timed = self._time_column in host.columns
-        (times, refused) = (self._guarded_times(df, self._time_column, self._time_unit)
-                            if timed else ([None] * len(host), [False] * len(host)))
+        (times, refused) = (self._guarded_times(df, self._time_column, self._time_unit) if timed else
+                            ([None] * len(host), [False] * len(host)))
         self._refuse(df, refused, logger=logger, what="agent events", outcome="hunted alone and not kept")
 
         records = self._records(host, times, refused)
@@ -472,7 +475,8 @@ class AgenticHuntStage(CheckpointMixin, TelemetryStage):
 
         if (failed):
             logger.error("AgenticHuntStage: hunt(s) did NOT complete on this batch and report nothing for it: %s",
-                         ", ".join(sorted({f"{hunt_id} ({error})" for (hunt_id, error) in failed})))
+                         ", ".join(sorted({f"{hunt_id} ({error})"
+                                           for (hunt_id, error) in failed})))
 
         per_row = [[] for _ in range(len(host))]
 

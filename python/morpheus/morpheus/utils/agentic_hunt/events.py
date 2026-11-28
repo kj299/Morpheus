@@ -62,7 +62,8 @@ class TelemetryError(ValueError):
 
 _ISO = re.compile(
     r"^\s*(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?\s*"
-    r"(Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)?\s*$", re.I)
+    r"(Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)?\s*$",
+    re.I)
 
 
 def parse_time(value) -> datetime.datetime | None:
@@ -98,8 +99,14 @@ def parse_time(value) -> datetime.datetime | None:
                 offset = datetime.timezone(delta if zone[0] == "+" else -delta)
 
             try:
-                return datetime.datetime(int(year), int(month), int(day), int(hour), int(minute), int(second or 0),
-                                         micro, tzinfo=offset).astimezone(datetime.timezone.utc)
+                return datetime.datetime(int(year),
+                                         int(month),
+                                         int(day),
+                                         int(hour),
+                                         int(minute),
+                                         int(second or 0),
+                                         micro,
+                                         tzinfo=offset).astimezone(datetime.timezone.utc)
             except (ValueError, OverflowError):
                 return None
 
@@ -291,8 +298,13 @@ class _TranscriptReader:
 
     def read(self, record: dict, ref: str, session: str) -> dict | None:
         message = record["message"]
-        base = {"ts": record.get("ts"), "session_id": record.get("session_id"), "server": record.get("server"),
-                "agent": record.get("agent"), "host": record.get("host")}
+        base = {
+            "ts": record.get("ts"),
+            "session_id": record.get("session_id"),
+            "server": record.get("server"),
+            "agent": record.get("agent"),
+            "host": record.get("host")
+        }
 
         try:
             key = (str(record.get("session_id")), str(record.get("server")), json.dumps(message.get("id")))
@@ -308,8 +320,12 @@ class _TranscriptReader:
             if (method == "tools/call"):
                 params = _mapping(message.get("params"))
 
-                return normalize({**base, "type": "tool_call", "tool": params.get("name"),
-                                  "args": params.get("arguments")}, ref, session)
+                return normalize(
+                    {
+                        **base, "type": "tool_call", "tool": params.get("name"), "args": params.get("arguments")
+                    },
+                    ref,
+                    session)
 
             return None
 
@@ -336,10 +352,18 @@ class _TranscriptReader:
             return normalize({**base, "type": "tool_manifest", "tools": result.get("tools")}, ref, session)
 
         if (request.get("method") == "tools/call"):
-            return normalize({**base, "type": "tool_result",
-                              "tool": _mapping(request.get("params")).get("name"),
-                              "content": _result_text(result),
-                              "args": {"is_error": bool(result.get("isError"))}}, ref, session)
+            return normalize(
+                {
+                    **base,
+                    "type": "tool_result",
+                    "tool": _mapping(request.get("params")).get("name"),
+                    "content": _result_text(result),
+                    "args": {
+                        "is_error": bool(result.get("isError"))
+                    }
+                },
+                ref,
+                session)
 
         return None
 
@@ -463,7 +487,8 @@ def summarize(events: list[dict]) -> dict:
 
     return {
         "events": len(events),
-        "sessions": len({event["session_id"] for event in events}),
+        "sessions": len({event["session_id"]
+                         for event in events}),
         "by_type": dict(sorted(by_type.items())),
         "missing_types": [kind for kind in EVENT_TYPES if kind not in by_type],
         "untimed": len(events) - len(times),

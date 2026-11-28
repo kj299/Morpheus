@@ -39,23 +39,71 @@ from . import shell
 
 LOOPBACK = frozenset(["localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]", "host.docker.internal"])
 
-FETCHERS = frozenset(["curl", "wget", "fetch", "http", "https", "xh", "aria2c", "iwr", "irm", "invoke-webrequest",
-                      "invoke-restmethod"])
-STDIN_PROGRAMS = shell.SHELLS | frozenset(["python", "python2", "python3", "node", "nodejs", "perl", "ruby", "php",
-                                           "iex", "invoke-expression", "source", "."])
+FETCHERS = frozenset(
+    ["curl", "wget", "fetch", "http", "https", "xh", "aria2c", "iwr", "irm", "invoke-webrequest", "invoke-restmethod"])
+STDIN_PROGRAMS = shell.SHELLS | frozenset([
+    "python", "python2", "python3", "node", "nodejs", "perl", "ruby", "php", "iex", "invoke-expression", "source", "."
+])
 DECODERS = frozenset(["base64", "base32", "xxd", "openssl", "uudecode"])
 PASS_THROUGH = frozenset(["tee", "cat", "gunzip", "zcat", "gzip", "bunzip2", "xz", "tr", "sed", "head", "tail", "rev"])
 """Commands a payload passes through on its way down a pipe without ceasing to be the payload."""
 
-READERS = frozenset(["cat", "head", "tail", "less", "more", "bat", "nl", "tac", "base64", "base32", "xxd", "od",
-                     "hexdump", "strings", "cut", "awk", "gawk", "sed", "grep", "egrep", "fgrep", "rg", "sort", "uniq",
-                     "jq", "yq", "openssl", "gpg", "tar", "zip", "7z", "gzip", "source", ".", "get-content", "type",
-                     "gc"])
+READERS = frozenset([
+    "cat",
+    "head",
+    "tail",
+    "less",
+    "more",
+    "bat",
+    "nl",
+    "tac",
+    "base64",
+    "base32",
+    "xxd",
+    "od",
+    "hexdump",
+    "strings",
+    "cut",
+    "awk",
+    "gawk",
+    "sed",
+    "grep",
+    "egrep",
+    "fgrep",
+    "rg",
+    "sort",
+    "uniq",
+    "jq",
+    "yq",
+    "openssl",
+    "gpg",
+    "tar",
+    "zip",
+    "7z",
+    "gzip",
+    "source",
+    ".",
+    "get-content",
+    "type",
+    "gc"
+])
 """Commands whose output, or archive, holds the content of the files they are given."""
 
 NETWORK_SENDERS = frozenset(["nc", "ncat", "netcat", "socat", "telnet"])
-DATABASE_CLIENTS = frozenset(["psql", "mysql", "mariadb", "sqlite3", "sqlcmd", "clickhouse-client", "bq", "snowsql",
-                              "duckdb", "cockroach", "mongosh", "mongo"])
+DATABASE_CLIENTS = frozenset([
+    "psql",
+    "mysql",
+    "mariadb",
+    "sqlite3",
+    "sqlcmd",
+    "clickhouse-client",
+    "bq",
+    "snowsql",
+    "duckdb",
+    "cockroach",
+    "mongosh",
+    "mongo"
+])
 
 SECRET_PATH = re.compile(
     r"(?<![\w.-])(?:~|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE|/home/[^/\\\s]{1,64}|/Users/[^/\\\s]{1,64}|"
@@ -78,16 +126,27 @@ keychains and browser stores. Either path separator; example and template files 
 
 SECRET_DIRECTORY = re.compile(
     r"(?<![\w.-])(?:~|\$HOME|\$\{HOME\}|/home/[^/\s]{1,64}|/Users/[^/\s]{1,64}|/root)[/\\](?:\.ssh|\.aws|\.gnupg|"
-    r"\.config[/\\]gcloud|\.azure|\.kube)[/\\]?(?:\*|cred\*)?$", re.I)
+    r"\.config[/\\]gcloud|\.azure|\.kube)[/\\]?(?:\*|cred\*)?$",
+    re.I)
 """A credential store named whole, as `tar` or `scp -r` take it."""
 
 CREDENTIAL_COMMANDS = (
-    ("gh", ("auth", "token")), ("aws", ("configure", "export-credentials")), ("aws", ("sts", "get-session-token")),
-    ("gcloud", ("auth", "print-access-token")), ("gcloud", ("auth", "print-identity-token")),
-    ("az", ("account", "get-access-token")), ("kubectl", ("config", "view", "--raw")),
-    ("security", ("find-generic-password", )), ("security", ("find-internet-password", )), ("op", ("read", )),
-    ("pass", ("show", )), ("vault", ("kv", "get")), ("vault", ("read", )), ("git", ("credential", "fill")),
-    ("doppler", ("secrets", )), ("heroku", ("auth:token", )),
+    ("gh", ("auth", "token")),
+    ("aws", ("configure", "export-credentials")),
+    ("aws", ("sts", "get-session-token")),
+    ("gcloud", ("auth", "print-access-token")),
+    ("gcloud", ("auth", "print-identity-token")),
+    ("az", ("account", "get-access-token")),
+    ("kubectl", ("config", "view", "--raw")),
+    ("security", ("find-generic-password", )),
+    ("security", ("find-internet-password", )),
+    ("op", ("read", )),
+    ("pass", ("show", )),
+    ("vault", ("kv", "get")),
+    ("vault", ("read", )),
+    ("git", ("credential", "fill")),
+    ("doppler", ("secrets", )),
+    ("heroku", ("auth:token", )),
 )
 """Commands that print a credential without reading a file a path rule could name."""
 
@@ -101,19 +160,26 @@ AGENT_CONFIG_PATH = re.compile(
     r"\.roo(?:[/\\][^\s]{1,256})|\.roomodes|\.continue[/\\](?:config\.(?:json|yaml|ts)|mcpServers[/\\][^\s]{1,256})|"
     r"\.kiro[/\\](?:settings|steering)[/\\][^\s]{1,256}|opencode\.jsonc?|\.goosehints|\.config[/\\]goose[/\\]config\.yaml|"
     r"\.amazonq[/\\](?:mcp\.json|rules[/\\][^\s]{1,256})|\.junie[/\\]guidelines\.md|"
-    r"\.claude[/\\](?:hooks|commands|agents|skills|rules)[/\\][^\s]{1,256})$", re.I)
+    r"\.claude[/\\](?:hooks|commands|agents|skills|rules)[/\\][^\s]{1,256})$",
+    re.I)
 """Files agents read their permissions, MCP servers, hooks and standing instructions from. Letter case is not
 significant: on macOS and Windows `claude.md` is `CLAUDE.md`."""
 
-EDITOR_SETTINGS_PATH = re.compile(r"(?:^|[/\\])\.vscode[/\\]settings\.json$|[/\\]Code[/\\]User[/\\]settings\.json$", re.I)
+EDITOR_SETTINGS_PATH = re.compile(r"(?:^|[/\\])\.vscode[/\\]settings\.json$|[/\\]Code[/\\]User[/\\]settings\.json$",
+                                  re.I)
 EDITOR_AGENT_SETTING = re.compile(
     r"chat\.tools\.[\w.]{0,40}autoApprove|chat\.mcp\.|chat\.agent\.|github\.copilot\.chat\.[\w.]{0,60}(?:instructions|"
     r"autoApprove)|task\.allowAutomaticTasks|security\.workspace\.trust|terminal\.integrated\.[\w.]{0,40}autoApprove|"
-    r"claudeCode\.|\"mcp\"\s{0,3}:", re.I)
+    r"claudeCode\.|\"mcp\"\s{0,3}:",
+    re.I)
 """An editor's settings file governs agents only where it holds one of these; a tab width does not."""
 
-GUARDRAIL_FLAGS = ("--dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox", "--yolo",
-                   "--allow-all-tools", "--trust-all-tools", "--yes-always")
+GUARDRAIL_FLAGS = ("--dangerously-skip-permissions",
+                   "--dangerously-bypass-approvals-and-sandbox",
+                   "--yolo",
+                   "--allow-all-tools",
+                   "--trust-all-tools",
+                   "--yes-always")
 """Flags that mean approvals are off whichever program takes them."""
 
 CLI_GUARDRAIL_FLAGS = {
@@ -128,22 +194,28 @@ CLI_GUARDRAIL_FLAGS = {
 """Flags that mean it only to the agent named: `-y` to `gemini` is not `-y` to `apt`."""
 
 CLI_GUARDRAIL_VALUES = (("--permission-mode", "bypasspermissions"), ("--approval-mode", "yolo"),
-                        ("--sandbox", "danger-full-access"), ("-s", "danger-full-access"),
-                        ("--ask-for-approval", "never"), ("-a", "never"))
-AGENT_CLIS = frozenset(["claude", "codex", "gemini", "cursor-agent", "copilot", "goose", "amp", "opencode", "aider",
-                        "q", "kiro", "cline"])
+                        ("--sandbox", "danger-full-access"), ("-s", "danger-full-access"), ("--ask-for-approval",
+                                                                                            "never"), ("-a", "never"))
+AGENT_CLIS = frozenset(
+    ["claude", "codex", "gemini", "cursor-agent", "copilot", "goose", "amp", "opencode", "aider", "q", "kiro", "cline"])
 
-PROFILE_FILES = frozenset([".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile", ".zshenv", ".bash_login",
-                           ".zlogin", "config.fish"])
+PROFILE_FILES = frozenset(
+    [".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile", ".zshenv", ".bash_login", ".zlogin", "config.fish"])
 PERSISTENCE_PATHS = (
-    ("shell_profile_persistence", "T1546.004", re.compile(r"^/etc/(?:profile|bash\.bashrc|environment|zsh/[^/]{1,64}|"
-                                                           r"profile\.d/[^/]{1,128})$")),
+    ("shell_profile_persistence",
+     "T1546.004",
+     re.compile(r"^/etc/(?:profile|bash\.bashrc|environment|zsh/[^/]{1,64}|"
+                r"profile\.d/[^/]{1,128})$")),
     ("ssh_key_persistence", "T1098.004", re.compile(r"[/\\]\.ssh[/\\]authorized_keys2?$")),
-    ("scheduled_persistence", "T1053.003", re.compile(r"^/etc/cron(?:tab|\.[a-z.]{1,16}/[^/]{1,128})$|"
-                                                      r"^/var/spool/cron/")),
-    ("service_persistence", "T1543", re.compile(r"[/\\]\.config[/\\]systemd[/\\]user[/\\]|^/etc/systemd/system/|"
-                                                r"[/\\]Library[/\\]Launch(?:Agents|Daemons)[/\\]|"
-                                                r"[/\\]\.config[/\\]autostart[/\\]")),
+    ("scheduled_persistence",
+     "T1053.003",
+     re.compile(r"^/etc/cron(?:tab|\.[a-z.]{1,16}/[^/]{1,128})$|"
+                r"^/var/spool/cron/")),
+    ("service_persistence",
+     "T1543",
+     re.compile(r"[/\\]\.config[/\\]systemd[/\\]user[/\\]|^/etc/systemd/system/|"
+                r"[/\\]Library[/\\]Launch(?:Agents|Daemons)[/\\]|"
+                r"[/\\]\.config[/\\]autostart[/\\]")),
     ("git_hook_persistence", "T1546", re.compile(r"(?:^|[/\\])\.git[/\\]hooks[/\\][a-z-]{3,32}$")),
 )
 """Where a write is persistence: name, ATT&CK technique, and the path it is recognised by."""
@@ -158,13 +230,30 @@ ROOTISH = re.compile(
 """A deletion target that is a root, a home, the working directory, everything, the repository's history or a
 system directory. A build or cache directory under one of them is not."""
 
-FIND_FILTERS = frozenset(["-name", "-iname", "-path", "-ipath", "-wholename", "-regex", "-iregex", "-mtime", "-mmin",
-                          "-atime", "-ctime", "-newer", "-size", "-empty", "-user", "-perm"])
+FIND_FILTERS = frozenset([
+    "-name",
+    "-iname",
+    "-path",
+    "-ipath",
+    "-wholename",
+    "-regex",
+    "-iregex",
+    "-mtime",
+    "-mmin",
+    "-atime",
+    "-ctime",
+    "-newer",
+    "-size",
+    "-empty",
+    "-user",
+    "-perm"
+])
 PROTECTED_BRANCH = re.compile(r"(?:^|[:/+])(?:main|master|trunk|develop|production|prod|release(?:[/-][\w.-]{1,40})?)$")
 SQL_DESTRUCTION = re.compile(
     r"\b(?:DROP\s{1,4}(?:TABLE|DATABASE|SCHEMA)|TRUNCATE\s{1,4}(?:TABLE\s{1,4})?\w)|"
     r"\bDELETE\s{1,4}FROM\s{1,4}[\w.\"`\[\]]{1,128}\s{0,4}(?:;|$)|\bdb\.dropDatabase\(|\.drop\(\)|"
-    r"\.deleteMany\(\s{0,4}\{\s{0,4}\}\s{0,4}\)", re.I)
+    r"\.deleteMany\(\s{0,4}\{\s{0,4}\}\s{0,4}\)",
+    re.I)
 """Statements that remove a table, a schema or every row: a `DELETE` with no `WHERE` is the last of those."""
 
 PRODUCTION_SCOPE = re.compile(r"(?i)(?:^|[^a-z])(?:prod|production|prd|live)(?:[^a-z]|$)")
@@ -173,22 +262,70 @@ SCRATCH_SCOPE = re.compile(r"(?i)(?:^|[^a-z])(?:tests?|testing|dev|devel|tmp|tem
 """What a destructive command names says how much it matters: the same `DROP DATABASE` is a test's teardown on
 `importer_test` and an incident on `production`. Production wins where a line names both."""
 
-KUBECTL_VALUE_OPTIONS = frozenset(["-n", "--namespace", "--context", "--kubeconfig", "--cluster", "--user", "-s",
-                                   "--server", "--as", "-l", "--selector", "-f", "--filename", "-o", "--output",
-                                   "--grace-period", "--timeout", "--field-selector"])
-KUBECTL_BROAD_KINDS = frozenset(["ns", "namespace", "namespaces", "pv", "persistentvolume", "persistentvolumes", "crd",
-                                 "crds", "customresourcedefinition", "node", "nodes", "clusterrole",
-                                 "clusterrolebinding"])
-KUBECTL_WORKLOAD_KINDS = frozenset(["deployment", "deployments", "deploy", "pvc", "persistentvolumeclaim",
-                                    "statefulset", "statefulsets", "sts", "daemonset", "ds", "secret", "secrets",
-                                    "service", "svc", "ingress", "job", "cronjob", "configmap", "cm"])
+KUBECTL_VALUE_OPTIONS = frozenset([
+    "-n",
+    "--namespace",
+    "--context",
+    "--kubeconfig",
+    "--cluster",
+    "--user",
+    "-s",
+    "--server",
+    "--as",
+    "-l",
+    "--selector",
+    "-f",
+    "--filename",
+    "-o",
+    "--output",
+    "--grace-period",
+    "--timeout",
+    "--field-selector"
+])
+KUBECTL_BROAD_KINDS = frozenset([
+    "ns",
+    "namespace",
+    "namespaces",
+    "pv",
+    "persistentvolume",
+    "persistentvolumes",
+    "crd",
+    "crds",
+    "customresourcedefinition",
+    "node",
+    "nodes",
+    "clusterrole",
+    "clusterrolebinding"
+])
+KUBECTL_WORKLOAD_KINDS = frozenset([
+    "deployment",
+    "deployments",
+    "deploy",
+    "pvc",
+    "persistentvolumeclaim",
+    "statefulset",
+    "statefulsets",
+    "sts",
+    "daemonset",
+    "ds",
+    "secret",
+    "secrets",
+    "service",
+    "svc",
+    "ingress",
+    "job",
+    "cronjob",
+    "configmap",
+    "cm"
+])
 CLOUD_DELETES = {
     "aws": (("ec2", "terminate-instances"), ("rds", "delete-db-instance"), ("rds", "delete-db-cluster"),
-            ("dynamodb", "delete-table"), ("s3api", "delete-bucket"), ("lambda", "delete-function"),
-            ("eks", "delete-cluster"), ("ecs", "delete-cluster"), ("ecs", "delete-service"),
-            ("iam", "delete-user"), ("iam", "delete-role"), ("kms", "schedule-key-deletion"),
-            ("route53", "delete-hosted-zone"), ("secretsmanager", "delete-secret"), ("ec2", "delete-vpc"),
-            ("ec2", "delete-volume"), ("ec2", "delete-snapshot"), ("elasticache", "delete-cache-cluster")),
+            ("dynamodb", "delete-table"), ("s3api", "delete-bucket"), ("lambda", "delete-function"), ("eks",
+                                                                                                      "delete-cluster"),
+            ("ecs", "delete-cluster"), ("ecs", "delete-service"), ("iam", "delete-user"), ("iam", "delete-role"),
+            ("kms", "schedule-key-deletion"), ("route53", "delete-hosted-zone"), ("secretsmanager", "delete-secret"),
+            ("ec2", "delete-vpc"), ("ec2", "delete-volume"), ("ec2", "delete-snapshot"), ("elasticache",
+                                                                                          "delete-cache-cluster")),
     "gcloud": (("compute", "instances", "delete"), ("sql", "instances", "delete"), ("container", "clusters", "delete"),
                ("compute", "disks", "delete"), ("functions", "delete"), ("run", "services", "delete"),
                ("secrets", "delete"), ("iam", "service-accounts", "delete")),
@@ -204,39 +341,173 @@ CLOUD_DELETES = {
 
 URL = re.compile(r"(?i)\bhttps?://[^\s\"'<>)\]]{1,2048}")
 HOSTLIKE = re.compile(r"^(?:[a-z0-9-]{1,63}\.){1,8}[a-z]{2,24}$", re.I)
-FILE_EXTENSIONS = frozenset(["json", "txt", "sh", "py", "html", "gz", "tar", "zip", "log", "csv", "yml", "yaml", "md",
-                             "pem", "key", "crt", "xml", "js", "ts", "out", "tmp", "bak", "conf", "cfg", "ini", "sql",
-                             "db", "png", "jpg", "pdf", "lock", "toml", "env", "pub"])
+FILE_EXTENSIONS = frozenset([
+    "json",
+    "txt",
+    "sh",
+    "py",
+    "html",
+    "gz",
+    "tar",
+    "zip",
+    "log",
+    "csv",
+    "yml",
+    "yaml",
+    "md",
+    "pem",
+    "key",
+    "crt",
+    "xml",
+    "js",
+    "ts",
+    "out",
+    "tmp",
+    "bak",
+    "conf",
+    "cfg",
+    "ini",
+    "sql",
+    "db",
+    "png",
+    "jpg",
+    "pdf",
+    "lock",
+    "toml",
+    "env",
+    "pub"
+])
 DEV_SOCKET = re.compile(r"^/dev/(?:tcp|udp)/([^/\s]{1,255})/\d{1,5}$")
 
 CURL_VALUE_OPTIONS = frozenset([
-    "-o", "--output", "-d", "--data", "--data-raw", "--data-binary", "--data-urlencode", "--json", "-H", "--header",
-    "-F", "--form", "--form-string", "-T", "--upload-file", "-X", "--request", "-u", "--user", "-A", "--user-agent",
-    "-e", "--referer", "-b", "--cookie", "-c", "--cookie-jar", "-w", "--write-out", "-x", "--proxy",
-    "--connect-timeout", "-m", "--max-time", "--retry", "--retry-delay", "-K", "--config", "--cacert", "--cert",
-    "--key", "-E", "-r", "--range", "-C", "--continue-at", "--limit-rate", "--resolve", "--max-redirs", "-y", "-Y",
-    "--interface", "--oauth2-bearer", "--aws-sigv4", "--output-dir", "-D", "--dump-header", "--trace", "--stderr"])
-WGET_VALUE_OPTIONS = frozenset(["-O", "--output-document", "-o", "--output-file", "-P", "--directory-prefix",
-                                "--post-data", "--post-file", "--header", "-U", "--user-agent", "--user", "--password",
-                                "-t", "--tries", "-T", "--timeout", "-w", "--wait", "-e", "--execute", "--body-data",
-                                "--body-file", "--method", "-a", "-i", "--input-file", "-Q", "--quota"])
-SEND_OPTIONS = ("-d", "--data", "--data-raw", "--data-binary", "--data-urlencode", "--json", "-F", "--form",
-                "--form-string", "-T", "--upload-file", "--post-data", "--post-file", "--body-data", "--body-file")
+    "-o",
+    "--output",
+    "-d",
+    "--data",
+    "--data-raw",
+    "--data-binary",
+    "--data-urlencode",
+    "--json",
+    "-H",
+    "--header",
+    "-F",
+    "--form",
+    "--form-string",
+    "-T",
+    "--upload-file",
+    "-X",
+    "--request",
+    "-u",
+    "--user",
+    "-A",
+    "--user-agent",
+    "-e",
+    "--referer",
+    "-b",
+    "--cookie",
+    "-c",
+    "--cookie-jar",
+    "-w",
+    "--write-out",
+    "-x",
+    "--proxy",
+    "--connect-timeout",
+    "-m",
+    "--max-time",
+    "--retry",
+    "--retry-delay",
+    "-K",
+    "--config",
+    "--cacert",
+    "--cert",
+    "--key",
+    "-E",
+    "-r",
+    "--range",
+    "-C",
+    "--continue-at",
+    "--limit-rate",
+    "--resolve",
+    "--max-redirs",
+    "-y",
+    "-Y",
+    "--interface",
+    "--oauth2-bearer",
+    "--aws-sigv4",
+    "--output-dir",
+    "-D",
+    "--dump-header",
+    "--trace",
+    "--stderr"
+])
+WGET_VALUE_OPTIONS = frozenset([
+    "-O",
+    "--output-document",
+    "-o",
+    "--output-file",
+    "-P",
+    "--directory-prefix",
+    "--post-data",
+    "--post-file",
+    "--header",
+    "-U",
+    "--user-agent",
+    "--user",
+    "--password",
+    "-t",
+    "--tries",
+    "-T",
+    "--timeout",
+    "-w",
+    "--wait",
+    "-e",
+    "--execute",
+    "--body-data",
+    "--body-file",
+    "--method",
+    "-a",
+    "-i",
+    "--input-file",
+    "-Q",
+    "--quota"
+])
+SEND_OPTIONS = ("-d",
+                "--data",
+                "--data-raw",
+                "--data-binary",
+                "--data-urlencode",
+                "--json",
+                "-F",
+                "--form",
+                "--form-string",
+                "-T",
+                "--upload-file",
+                "--post-data",
+                "--post-file",
+                "--body-data",
+                "--body-file")
 
-CODE_FETCH = re.compile(r"urlopen|urllib\.request|requests\.(?:get|post)|httpx\.|fetch\(|https?\.get|Net::HTTP|"
-                        r"LWP::|file_get_contents\(\s{0,3}['\"]https?|DownloadString|WebClient|Invoke-WebRequest|"
-                        r"Invoke-RestMethod|\biwr\b|\birm\b", re.I)
+CODE_FETCH = re.compile(
+    r"urlopen|urllib\.request|requests\.(?:get|post)|httpx\.|fetch\(|https?\.get|Net::HTTP|"
+    r"LWP::|file_get_contents\(\s{0,3}['\"]https?|DownloadString|WebClient|Invoke-WebRequest|"
+    r"Invoke-RestMethod|\biwr\b|\birm\b",
+    re.I)
 CODE_EXEC = re.compile(r"\bexec\(|\beval\(|subprocess|os\.system|child_process|\bsystem\(|Invoke-Expression|\biex\b",
                        re.I)
 CODE_DECODE = re.compile(r"b64decode|atob\(|fromhex|base64\.decode|decode\(['\"]base64|FromBase64String", re.I)
 CODE_SOCKET_SHELL = re.compile(
     r"socket[^\n]{0,400}?(?:dup2|pty\.spawn|subprocess|/bin/(?:ba)?sh|cmd\.exe)|"
     r"(?:dup2|pty\.spawn)[^\n]{0,400}?socket|fsockopen\([^\n]{0,200}?(?:exec|shell_exec|proc_open|/bin/sh)|"
-    r"TCPSocket[^\n]{0,200}?(?:exec|/bin/sh|spawn)|Net\.Sockets\.TCPClient", re.I | re.S)
-CODE_WRITE = re.compile(r"open\([^)\n]{0,200}['\"][wa]b?\+?['\"]|write_text\(|writeFile|json\.dump\(|Set-Content|"
-                        r"Out-File|\.write\(", re.I)
-CODE_SEND = re.compile(r"requests\.(?:post|put)|\.sendall\(|\.send\(|urlopen\([^)\n]{0,200}data\s{0,3}=|method\s{0,3}"
-                       r"[:=]\s{0,3}['\"](?:POST|PUT)|-Method\s{1,3}(?:Post|Put)|\.post\(", re.I)
+    r"TCPSocket[^\n]{0,200}?(?:exec|/bin/sh|spawn)|Net\.Sockets\.TCPClient",
+    re.I | re.S)
+CODE_WRITE = re.compile(
+    r"open\([^)\n]{0,200}['\"][wa]b?\+?['\"]|write_text\(|writeFile|json\.dump\(|Set-Content|"
+    r"Out-File|\.write\(",
+    re.I)
+CODE_SEND = re.compile(
+    r"requests\.(?:post|put)|\.sendall\(|\.send\(|urlopen\([^)\n]{0,200}data\s{0,3}=|method\s{0,3}"
+    r"[:=]\s{0,3}['\"](?:POST|PUT)|-Method\s{1,3}(?:Post|Put)|\.post\(",
+    re.I)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -335,7 +606,8 @@ def _egress_of(command: shell.Command, piped_in: bool) -> list:  # pylint: disab
 
     if (program in ("http", "https", "xh")):
         # HTTPie: an optional method, the address, then request items; a body comes from items or standard input.
-        operands = _operands(command, frozenset(["-a", "--auth", "-o", "--output", "--proxy", "--session", "--timeout"]))
+        operands = _operands(command,
+                             frozenset(["-a", "--auth", "-o", "--output", "--proxy", "--session", "--timeout"]))
         method = operands[0].upper() if operands and operands[0].upper() in HTTP_METHODS else ""
         address = operands[1 if method else 0:][:1]
         items = operands[(2 if method else 1):]
@@ -360,8 +632,8 @@ def _egress_of(command: shell.Command, piped_in: bool) -> list:  # pylint: disab
                 found.append(Egress(host, sends or _data_in_address(word), command.raw))
     elif (program in ("iwr", "irm", "invoke-webrequest", "invoke-restmethod")):
         lowered = [word.lower() for word in command.args]
-        sends = any(word in ("-body", "-infile") for word in lowered) or any(
-            word in ("post", "put", "patch") for word in lowered)
+        sends = any(word in ("-body", "-infile") for word in lowered) or any(word in ("post", "put", "patch")
+                                                                             for word in lowered)
 
         for word in command.args:
             if ("://" in word and _host_of(word)):
@@ -370,8 +642,10 @@ def _egress_of(command: shell.Command, piped_in: bool) -> list:  # pylint: disab
         scanning = command.option("-z")
 
         if (program == "socat"):
-            hosts = [match.group(1) for word in command.args
-                     for match in re.finditer(r"(?i)(?:tcp|udp|ssl|openssl)[46]?(?:-connect)?:([^:,\s]{1,255}):\d", word)]
+            hosts = [
+                match.group(1) for word in command.args
+                for match in re.finditer(r"(?i)(?:tcp|udp|ssl|openssl)[46]?(?:-connect)?:([^:,\s]{1,255}):\d", word)
+            ]
         else:
             hosts = [word for word in command.operands if not word.isdigit()][:1]
 
@@ -384,10 +658,29 @@ def _egress_of(command: shell.Command, piped_in: bool) -> list:  # pylint: disab
         for word in destination:
             found.append(Egress(word.split("@", 1)[-1].lower(), piped_in or redirected, command.raw))
     elif (program in ("scp", "sftp", "rsync")):
-        operands = _operands(command, frozenset(["-i", "-P", "-p", "-o", "-F", "-J", "-l", "-e", "-c", "-S",
-                                                 "--rsh", "--port", "--exclude", "--include", "--files-from"]))
-        remote = [(index, word) for (index, word) in enumerate(operands)
-                  if re.match(r"^(?:[\w.-]{1,64}@)?[\w.-]{1,255}:(?!\\)", word) and not re.match(r"^[A-Za-z]:[/\\]", word)]
+        operands = _operands(
+            command,
+            frozenset([
+                "-i",
+                "-P",
+                "-p",
+                "-o",
+                "-F",
+                "-J",
+                "-l",
+                "-e",
+                "-c",
+                "-S",
+                "--rsh",
+                "--port",
+                "--exclude",
+                "--include",
+                "--files-from"
+            ]))
+        remote = [
+            (index, word) for (index, word) in enumerate(operands)
+            if re.match(r"^(?:[\w.-]{1,64}@)?[\w.-]{1,255}:(?!\\)", word) and not re.match(r"^[A-Za-z]:[/\\]", word)
+        ]
 
         for (index, word) in remote:
             uploads = index == len(operands) - 1 and len(operands) > 1
@@ -437,8 +730,11 @@ def _bucket(address: str) -> str:
 
 
 def _secret_operands(words: list) -> list:
-    return sorted({match.group(0) for word in words for match in SECRET_PATH.finditer(word)}
-                  | {word for word in words if SECRET_DIRECTORY.match(word)})
+    return sorted({match.group(0)
+                   for word in words
+                   for match in SECRET_PATH.finditer(word)}
+                  | {word
+                     for word in words if SECRET_DIRECTORY.match(word)})
 
 
 def _secrets_read(command: shell.Command) -> list:
@@ -456,16 +752,18 @@ def _secrets_read(command: shell.Command) -> list:
     elif (program in ("cp", "mv", "install", "rsync", "scp", "sftp")):
         found.extend(_secret_operands(command.operands[:-1]))
     elif (program in ("curl", "wget")):
-        uploads = [value.split("=", 1)[-1].lstrip("@<") for value in command.value("-d", "--data", "--data-binary",
-                                                                                   "--data-raw", "-F", "--form",
-                                                                                   "--json")
-                   if "@" in value or "<" in value]
+        uploads = [
+            value.split("=", 1)[-1].lstrip("@<")
+            for value in command.value("-d", "--data", "--data-binary", "--data-raw", "-F", "--form", "--json")
+            if "@" in value or "<" in value
+        ]
         uploads.extend(command.value("-T", "--upload-file", "--post-file", "--body-file"))
         found.extend(_secret_operands(uploads))
     elif (program == "gh" and command.args[:2] == ["gist", "create"]):
         found.extend(_secret_operands(command.operands[2:]))
-    elif (program in ("aws", "gsutil", "gcloud", "rclone", "az") and any(
-            word in ("cp", "mv", "sync", "rsync", "copy", "copyto", "upload", "upload-batch") for word in command.args)):
+    elif (program in ("aws", "gsutil", "gcloud", "rclone", "az")
+          and any(word in ("cp", "mv", "sync", "rsync", "copy", "copyto", "upload", "upload-batch")
+                  for word in command.args)):
         found.extend(_secret_operands([word for word in command.args if not word.startswith("-")][:-1]))
         found.extend(_secret_operands(command.value("--file", "-f", "--source", "-s")))
     elif (program in ("http", "https", "xh")):
@@ -487,8 +785,9 @@ def _reads_program_from_stdin(command: shell.Command) -> bool:
     program = command.program
 
     if (program in shell.SHELLS):
-        return not any(word.endswith("c") and word.startswith("-") and not word.startswith("--")
-                       for word in command.args) and all(word in ("-", "-s") for word in command.operands)
+        return not any(
+            word.endswith("c") and word.startswith("-") and not word.startswith("--")
+            for word in command.args) and all(word in ("-", "-s") for word in command.operands)
 
     if (program in ("python", "python2", "python3")):
         return not command.option("-c", "-m") and all(word in ("-", "/dev/stdin") for word in command.operands[:1])
@@ -572,8 +871,8 @@ def _risky(commands: tuple) -> list:  # pylint: disable=too-many-branches,too-ma
                     add("decode_and_execute", "T1027", command)
 
         # ... or a substitution that is the whole program: `sh -c "$(curl ...)"`, `bash <(curl ...)`, `eval "$(...)"`.
-        if (command.via in ("-c$(", "eval$(") or (command.via == "<(" and command.parent >= 0 and commands[
-                command.parent].program in STDIN_PROGRAMS)):
+        if (command.via in ("-c$(", "eval$(") or
+            (command.via == "<(" and command.parent >= 0 and commands[command.parent].program in STDIN_PROGRAMS)):
             if (program in FETCHERS):
                 add("download_and_execute", "T1105", commands[command.parent])
             elif (_is_decoder(command)):
@@ -600,8 +899,8 @@ def _risky(commands: tuple) -> list:  # pylint: disable=too-many-branches,too-ma
             if (CODE_SOCKET_SHELL.search(command.code)):
                 add("reverse_shell", "T1059", command)
 
-        if (program in ("pwsh", "powershell") and any(
-                word.lower() in ("-enc", "-encodedcommand", "-e", "-ec") for word in command.args[:-1])):
+        if (program in ("pwsh", "powershell")
+                and any(word.lower() in ("-enc", "-encodedcommand", "-e", "-ec") for word in command.args[:-1])):
             add("decode_and_execute", "T1027", command)
 
         if (program == "certutil" and any("urlcache" in word.lower() for word in command.args)
@@ -622,8 +921,8 @@ def _risky(commands: tuple) -> list:  # pylint: disable=too-many-branches,too-ma
         if (program == "socat" and any(re.search(r"(?i)\b(?:exec|system):", word) for word in command.args)):
             add("reverse_shell", "T1059.004", command)
 
-        if (program in shell.SHELLS and command.option("-i") and any(
-                other.program in ("nc", "ncat", "netcat", "telnet") for other in line)):
+        if (program in shell.SHELLS and command.option("-i")
+                and any(other.program in ("nc", "ncat", "netcat", "telnet") for other in line)):
             add("reverse_shell", "T1059.004", command)
 
         # Persistence: a write to where the system or the shell will run it again.
@@ -635,8 +934,8 @@ def _risky(commands: tuple) -> list:  # pylint: disable=too-many-branches,too-ma
 
             if (name in PROFILE_FILES):
                 written = " ".join(command.operands) if program in ("echo", "printf") else command.heredoc
-                routine = bool(written) and all(PROFILE_ROUTINE.match(line) for line in written.splitlines()
-                                                if line.strip())
+                routine = bool(written) and all(
+                    PROFILE_ROUTINE.match(line) for line in written.splitlines() if line.strip())
                 add("shell_profile_change" if routine else "shell_profile_persistence", "T1546.004", command)
 
             for (kind, technique, pattern) in PERSISTENCE_PATHS:
@@ -661,8 +960,8 @@ def _risky(commands: tuple) -> list:  # pylint: disable=too-many-branches,too-ma
         # Erasing the shell's history.
         history_files = [target for target in _targets_written(command) if target.endswith("_history")]
 
-        if (program == "unset" and "HISTFILE" in command.args
-                or command.assignments.get("HISTFILE") == "/dev/null" or command.assignments.get("HISTSIZE") == "0"
+        if (program == "unset" and "HISTFILE" in command.args or command.assignments.get("HISTFILE") == "/dev/null"
+                or command.assignments.get("HISTSIZE") == "0"
                 or program == "export" and any(word in ("HISTFILE=/dev/null", "HISTSIZE=0") for word in command.args)
                 or program == "set" and command.args[:2] == ["+o", "history"]
                 or program == "history" and command.option("-c") or history_files):
@@ -721,8 +1020,10 @@ def _destructive(commands: tuple) -> list:  # pylint: disable=too-many-branches,
             if (any(ROOTISH.match(word.strip("'\"")) for word in args)):
                 add("recursive_delete", "high", command)
         elif (program == "git" and args[:1] == ["push"]):
-            forced = any(word in ("--force", "-f", "--mirror") or (word.startswith("-") and not word.startswith("--")
-                                                                   and "f" in word[1:]) for word in args[1:])
+            forced = any(
+                word in ("--force", "-f",
+                         "--mirror") or (word.startswith("-") and not word.startswith("--") and "f" in word[1:])
+                for word in args[1:])
             refs = [word for word in args[1:] if not word.startswith("-")][1:]
             plus = [word for word in refs if word.startswith("+")]
             deleting = "--delete" in args or "-d" in args
@@ -735,7 +1036,8 @@ def _destructive(commands: tuple) -> list:  # pylint: disable=too-many-branches,
 
             if (deleted):
                 add("remote_branch_delete",
-                    "high" if any(PROTECTED_BRANCH.search(word) for word in deleted) else "medium", command)
+                    "high" if any(PROTECTED_BRANCH.search(word) for word in deleted) else "medium",
+                    command)
         elif (program in ("terraform", "tofu", "terragrunt")):
             verb = plain[0] if plain else ""
 
@@ -745,14 +1047,13 @@ def _destructive(commands: tuple) -> list:  # pylint: disable=too-many-branches,
         elif (program == "pulumi" and plain[:1] == ["destroy"] or program == "gh" and plain[:2] == ["repo", "delete"]
               or program == "aws" and plain[:2] == ["cloudformation", "delete-stack"]
               or program == "gcloud" and plain[:2] == ["projects", "delete"]
-              or program == "az" and plain[:2] == ["group", "delete"]
-              or program == "cdk" and plain[:1] == ["destroy"]):
+              or program == "az" and plain[:2] == ["group", "delete"] or program == "cdk" and plain[:1] == ["destroy"]):
             add("infrastructure_destroy", _scoped("high", args), command)
-        elif (program == "aws" and plain[:1] == ["s3"] and (plain[1:2] == ["rb"] or (
-                plain[1:2] == ["rm"] and "--recursive" in args))
+        elif (program == "aws" and plain[:1] == ["s3"] and (plain[1:2] == ["rb"] or
+                                                            (plain[1:2] == ["rm"] and "--recursive" in args))
               or program == "gsutil" and "rm" in args and any(word in ("-r", "-R", "-rf") for word in args)
-              or program == "gcloud" and plain[:2] == ["storage", "rm"] and any(
-                  word in ("-r", "--recursive") for word in args)
+              or program == "gcloud" and plain[:2] == ["storage", "rm"] and any(word in ("-r", "--recursive")
+                                                                                for word in args)
               or program == "az" and plain[:1] == ["storage"] and any(word.startswith("delete") for word in plain)):
             add("cloud_storage_delete", _scoped("high", args), command)
         elif (program in CLOUD_DELETES and any(_in_order(plain, sequence) for sequence in CLOUD_DELETES[program])):
@@ -771,9 +1072,8 @@ def _destructive(commands: tuple) -> list:  # pylint: disable=too-many-branches,
         elif (program == "helm" and plain[:1] in (["uninstall"], ["delete"])):
             add("cluster_delete", _scoped("medium", args), command)
         elif (program == "dd" and any(re.match(r"of=/dev/(?:sd|nvme|hd|vd|disk|mmcblk)", word) for word in args)
-              or program.startswith("mkfs")
-              or program in ("chmod", "chown") and command.option("-R") and any(
-                  ROOTISH.match(word) and word not in (".", "./", "*") for word in command.operands)):
+              or program.startswith("mkfs") or program in ("chmod", "chown") and command.option("-R")
+              and any(ROOTISH.match(word) and word not in (".", "./", "*") for word in command.operands)):
             add("disk_destruction", "high", command)
         elif (program == "dropdb"):
             add("drop_database_object", _scoped("high", args), command)
@@ -812,7 +1112,7 @@ def _agent_configuration(commands: tuple) -> tuple:
                     writes.append((word, command.raw))
 
         if (program in AGENT_CLIS and command.args[:1] == ["mcp"] and command.args[1:2] and command.args[1].startswith(
-                ("add", "install"))) or (program in ("code", "code-insiders") and "--add-mcp" in command.args):
+            ("add", "install"))) or (program in ("code", "code-insiders") and "--add-mcp" in command.args):
             registrations.append(command.raw)
 
         for flag in (*GUARDRAIL_FLAGS, *CLI_GUARDRAIL_FLAGS.get(program, ())):

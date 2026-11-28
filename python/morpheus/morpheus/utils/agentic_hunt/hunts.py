@@ -41,13 +41,27 @@ from . import commands
 from . import mcp_audit
 from . import text_indicators
 
-MODEL_API_HOSTS = ("api.anthropic.com", "api.openai.com", "generativelanguage.googleapis.com", "api.githubcopilot.com",
-                   "aiplatform.googleapis.com", "api.mistral.ai", "api.cohere.com", "openrouter.ai", "api.x.ai",
-                   "bedrock-runtime.", "bedrock.", "statsig.anthropic.com", "api2.cursor.sh")
+MODEL_API_HOSTS = ("api.anthropic.com",
+                   "api.openai.com",
+                   "generativelanguage.googleapis.com",
+                   "api.githubcopilot.com",
+                   "aiplatform.googleapis.com",
+                   "api.mistral.ai",
+                   "api.cohere.com",
+                   "openrouter.ai",
+                   "api.x.ai",
+                   "bedrock-runtime.",
+                   "bedrock.",
+                   "statsig.anthropic.com",
+                   "api2.cursor.sh")
 """Where an agent sends its context on every turn. Egress there is the agent working, not a hunt's egress. An entry
 that starts with a dot matches every host under it; one that ends with a dot, every host that starts with it."""
 
-DEFAULT_ALLOWLIST = ("github.com", "api.github.com", "raw.githubusercontent.com", "registry.npmjs.org", "pypi.org",
+DEFAULT_ALLOWLIST = ("github.com",
+                     "api.github.com",
+                     "raw.githubusercontent.com",
+                     "registry.npmjs.org",
+                     "pypi.org",
                      "files.pythonhosted.org")
 """Destinations that are ordinary for a coding agent. Sending there still counts, at a lower severity. An entry that
 starts with a dot allows every host under it."""
@@ -55,7 +69,8 @@ starts with a dot allows every host under it."""
 AGENT_PROCESS = re.compile(
     r"(?:^|[/\\\s])(?:claude|cursor|cursor-agent|codex|copilot|windsurf|aider|gemini|cline|goose|amp|opencode)"
     r"(?:\.exe|\.js|\.mjs)?(?=$|\s)|@anthropic-ai[/\\]claude-code|@openai[/\\]codex|@google[/\\]gemini-cli|"
-    r"[/\\]\.cursor-server[/\\]|claude-code[/\\]cli", re.I)
+    r"[/\\]\.cursor-server[/\\]|claude-code[/\\]cli",
+    re.I)
 """An agent's own process, by image or command line. An editor is not one: `code` hosts people as well as agents."""
 
 PERMISSION_WIDENING = re.compile(
@@ -66,13 +81,53 @@ PERMISSION_WIDENING = re.compile(
     re.I)
 """Edits that turn an agent's approvals off, add servers it will load, or add commands it will run by itself."""
 
-COMMAND_KEYS = ("command", "cmd", "script", "shell", "commandLine", "command_line", "cmdline", "bash_command",
+COMMAND_KEYS = ("command",
+                "cmd",
+                "script",
+                "shell",
+                "commandLine",
+                "command_line",
+                "cmdline",
+                "bash_command",
                 "shell_command")
-PATH_KEYS = ("path", "file", "file_path", "filepath", "filename", "target", "destination", "source", "uri",
-             "notebook_path", "target_file", "absolute_path", "paths", "files")
-CONTENT_KEYS = ("content", "contents", "text", "new_string", "old_string", "body", "data", "new_str", "old_str",
-                "diff", "patch", "edits", "code_edit", "file_text")
-URL_KEYS = ("url", "uri", "endpoint", "href", "link", "webhook", "webhook_url", "target_url", "base_url", "address",
+PATH_KEYS = ("path",
+             "file",
+             "file_path",
+             "filepath",
+             "filename",
+             "target",
+             "destination",
+             "source",
+             "uri",
+             "notebook_path",
+             "target_file",
+             "absolute_path",
+             "paths",
+             "files")
+CONTENT_KEYS = ("content",
+                "contents",
+                "text",
+                "new_string",
+                "old_string",
+                "body",
+                "data",
+                "new_str",
+                "old_str",
+                "diff",
+                "patch",
+                "edits",
+                "code_edit",
+                "file_text")
+URL_KEYS = ("url",
+            "uri",
+            "endpoint",
+            "href",
+            "link",
+            "webhook",
+            "webhook_url",
+            "target_url",
+            "base_url",
+            "address",
             "urls")
 NOT_SENT_KEYS = frozenset([*CONTENT_KEYS, "pattern", "query", "prompt", "description", "regex", "glob", "old_string"])
 """Arguments whose text stays on the machine or goes only to the model: a URL in a file being written is not egress."""
@@ -84,19 +139,69 @@ SEND = "send"
 FETCH = "fetch"
 
 KNOWN_TOOLS = {
-    **dict.fromkeys(("bash", "shell", "exec_command", "local_shell", "run_terminal_cmd", "run_shell_command",
-                     "execute_command", "runinterminal", "run_in_terminal", "terminal", "run_command"), {EXECUTE}),
-    **dict.fromkeys(("write", "edit", "multiedit", "notebookedit", "apply_patch", "edit_file", "search_replace",
-                     "write_file", "replace", "write_to_file", "replace_in_file", "create_file",
-                     "str_replace_editor", "str_replace_based_edit_tool", "insert_edit_into_file", "editfiles"),
-                    {WRITE}),
+    **dict.fromkeys(("bash",
+                     "shell",
+                     "exec_command",
+                     "local_shell",
+                     "run_terminal_cmd",
+                     "run_shell_command",
+                     "execute_command",
+                     "runinterminal",
+                     "run_in_terminal",
+                     "terminal",
+                     "run_command"), {EXECUTE}),
+    **dict.fromkeys(("write",
+                     "edit",
+                     "multiedit",
+                     "notebookedit",
+                     "apply_patch",
+                     "edit_file",
+                     "search_replace",
+                     "write_file",
+                     "replace",
+                     "write_to_file",
+                     "replace_in_file",
+                     "create_file",
+                     "str_replace_editor",
+                     "str_replace_based_edit_tool",
+                     "insert_edit_into_file",
+                     "editfiles"), {WRITE}),
     **dict.fromkeys(("read", "read_file", "view", "open_file", "read_many_files", "readfile", "cat"), {READ}),
-    **dict.fromkeys(("webfetch", "web_fetch", "fetch", "browser_action", "browser_navigate", "puppeteer_navigate",
-                     "navigate", "goto", "download_file", "http_get", "fetch_url"), {FETCH}),
-    **dict.fromkeys(("todowrite", "todoread", "task", "agent", "websearch", "web_search", "google_web_search",
-                     "exitplanmode", "askuserquestion", "bashoutput", "killshell", "killbash", "skill", "toolsearch",
-                     "grep", "glob", "ls", "list_dir", "search_file_content", "codebase_search", "update_plan",
-                     "memory", "sequentialthinking"), set()),
+    **dict.fromkeys(("webfetch",
+                     "web_fetch",
+                     "fetch",
+                     "browser_action",
+                     "browser_navigate",
+                     "puppeteer_navigate",
+                     "navigate",
+                     "goto",
+                     "download_file",
+                     "http_get",
+                     "fetch_url"), {FETCH}),
+    **dict.fromkeys(("todowrite",
+                     "todoread",
+                     "task",
+                     "agent",
+                     "websearch",
+                     "web_search",
+                     "google_web_search",
+                     "exitplanmode",
+                     "askuserquestion",
+                     "bashoutput",
+                     "killshell",
+                     "killbash",
+                     "skill",
+                     "toolsearch",
+                     "grep",
+                     "glob",
+                     "ls",
+                     "list_dir",
+                     "search_file_content",
+                     "codebase_search",
+                     "update_plan",
+                     "memory",
+                     "sequentialthinking"),
+                    set()),
 }
 """What the tools of the common coding agents do, by name. Names not listed are judged by the words in them."""
 
@@ -104,8 +209,24 @@ CAPABILITY_WORDS = {
     EXECUTE: {"bash", "shell", "exec", "execute", "terminal", "powershell", "cmd", "subprocess", "spawn", "eval"},
     WRITE: {"write", "edit", "patch", "apply", "delete", "remove", "move", "rename", "append", "replace", "save"},
     READ: {"read", "view", "cat", "load"},
-    SEND: {"post", "upload", "send", "email", "mail", "webhook", "publish", "share", "message", "gist", "paste",
-           "comment", "tweet", "notify", "push", "submit"},
+    SEND: {
+        "post",
+        "upload",
+        "send",
+        "email",
+        "mail",
+        "webhook",
+        "publish",
+        "share",
+        "message",
+        "gist",
+        "paste",
+        "comment",
+        "tweet",
+        "notify",
+        "push",
+        "submit"
+    },
     FETCH: {"fetch", "http", "request", "browse", "navigate", "goto", "download", "crawl", "scrape", "curl"},
 }
 
@@ -132,8 +253,10 @@ def _clean(value, limit: int = 400, depth: int = 0):
         return text_indicators.clean(value, limit)
 
     if (isinstance(value, dict) and depth < 4):
-        return {text_indicators.clean(str(key), 80): _clean(item, limit, depth + 1)
-                for (key, item) in itertools.islice(value.items(), 50)}
+        return {
+            text_indicators.clean(str(key), 80): _clean(item, limit, depth + 1)
+            for (key, item) in itertools.islice(value.items(), 50)
+        }
 
     if (isinstance(value, (list, tuple, set, frozenset)) and depth < 4):
         items = sorted(value, key=str) if isinstance(value, (set, frozenset)) else list(value)
@@ -313,9 +436,9 @@ def _allowed(host: str, allowlist: tuple) -> bool:
 
 
 def _ignored(host: str, ctx: HuntContext) -> bool:
-    return (not host or host in commands.LOOPBACK or host in ctx.model_api_hosts
-            or any((entry.startswith(".") and host.endswith(entry)) or (entry.endswith(".") and host.startswith(entry))
-                   for entry in ctx.model_api_hosts))
+    return (not host or host in commands.LOOPBACK or host in ctx.model_api_hosts or any(
+        (entry.startswith(".") and host.endswith(entry)) or (entry.endswith(".") and host.startswith(entry))
+        for entry in ctx.model_api_hosts))
 
 
 def egress_of(event: dict, ctx: HuntContext) -> list:
@@ -348,8 +471,10 @@ def egress_of(event: dict, ctx: HuntContext) -> list:
                         found.append(commands.Egress(host, carries, f"{event['tool']} {url}"))
 
         if (sends and isinstance(event["args"].get("to"), str) and "@" in event["args"]["to"]):
-            found.append(commands.Egress(event["args"]["to"].rsplit("@", 1)[-1].lower(), True,
-                                         f"{event['tool']} to {event['args']['to']}"))
+            found.append(
+                commands.Egress(event["args"]["to"].rsplit("@", 1)[-1].lower(),
+                                True,
+                                f"{event['tool']} to {event['args']['to']}"))
 
     command = command_of(event)
 
@@ -420,8 +545,10 @@ def _indicator_lines(indicators, limit: int = 8) -> list[str]:
 
     ranked = sorted(seen.values(), key=lambda indicator: (-indicator.weight, indicator.offset))
 
-    return [f"{indicator.kind}/{indicator.name}" + (f" x{indicator.count}" if indicator.count > 1 else "") +
-            f": {indicator.evidence}" for indicator in ranked[:limit]]
+    return [
+        f"{indicator.kind}/{indicator.name}" + (f" x{indicator.count}" if indicator.count > 1 else "") +
+        f": {indicator.evidence}" for indicator in ranked[:limit]
+    ]
 
 
 def _source(event: dict) -> str:
@@ -446,10 +573,19 @@ def hunt_injected_content(events: list[dict], ctx: HuntContext) -> list[Finding]
         severity = "low" if not result.likely else ("high" if result.strong else "medium")
         how = "addresses the model" if result.likely else "carries one kind of injection indicator"
         found.append(
-            Finding("AAH-001", severity, f"{_source(event)} {how} (score {result.score})", event["session_id"],
-                    _iso(event["ts"]), _indicator_lines(result.indicators), [event["ref"]],
-                    {"score": result.score, "level": result.level, "categories": list(result.categories),
-                     "partial_scan": result.partial}))
+            Finding(
+                "AAH-001",
+                severity,
+                f"{_source(event)} {how} (score {result.score})",
+                event["session_id"],
+                _iso(event["ts"]),
+                _indicator_lines(result.indicators), [event["ref"]],
+                {
+                    "score": result.score,
+                    "level": result.level,
+                    "categories": list(result.categories),
+                    "partial_scan": result.partial
+                }))
 
     return found
 
@@ -459,9 +595,12 @@ def _named_in(text: str) -> dict:
     hosts = {commands._host_of(url) for url in commands.URL.findall(text)}  # pylint: disable=protected-access
     hosts |= {match.group(0).lower() for match in text_indicators.COLLECTION_HOSTS.finditer(text)}
     paths = {_tail(match.group(0)) for match in commands.SECRET_PATH.finditer(text)}
-    tools = {match.group(1).lower() for match in re.finditer(
-        r"(?i)\b(?:call|invoke|use|run|execute)\s{1,3}(?:the\s{1,3})?[`'\"]?([a-z][a-z0-9_.-]{2,40})[`'\"]?\s{1,3}tool",
-        text)}
+    tools = {
+        match.group(1).lower()
+        for match in re.finditer(
+            r"(?i)\b(?:call|invoke|use|run|execute)\s{1,3}(?:the\s{1,3})?[`'\"]?([a-z][a-z0-9_.-]{2,40})[`'\"]?\s{1,3}tool",
+            text)
+    }
     tools |= {match.group(1).lower() for match in re.finditer(r"`([A-Za-z][A-Za-z0-9_.-]{2,40})`", text)}
 
     return {"hosts": hosts - {""}, "paths": paths, "tools": tools}
@@ -497,8 +636,8 @@ def _excerpt(event: dict) -> str:
 
         return "connection to " + text_indicators.defang(str(network.get("dest_host") or network.get("dest_ip")), 120)
 
-    described = ", ".join(f"{key}={text_indicators.defang(str(value), 80)}" for (key, value) in
-                          itertools.islice(event["args"].items(), 3) if key not in CONTENT_KEYS)
+    described = ", ".join(f"{key}={text_indicators.defang(str(value), 80)}"
+                          for (key, value) in itertools.islice(event["args"].items(), 3) if key not in CONTENT_KEYS)
 
     return f"{event['tool'] or event['type']}({described})"
 
@@ -550,13 +689,20 @@ def hunt_injection_then_action(events: list[dict], ctx: HuntContext) -> list[Fin
 
             if (linked):
                 found.append(
-                    Finding("AAH-002", "critical" if worst else "high",
-                            f"{len(linked)} action(s) after injected content in {_source(event)} do what it asked "
-                            "or are risky in themselves", session, _iso(event["ts"]),
-                            [f"{_excerpt(later)}: {'; '.join(reasons)}" for (later, reasons) in linked[:6]],
-                            [event["ref"], *(later["ref"] for (later, _) in linked)],
-                            {"linked_actions": len(linked), "named_hosts": sorted(named["hosts"]),
-                             "named_paths": sorted(named["paths"])}))
+                    Finding(
+                        "AAH-002",
+                        "critical" if worst else "high",
+                        f"{len(linked)} action(s) after injected content in {_source(event)} do what it asked "
+                        "or are risky in themselves",
+                        session,
+                        _iso(event["ts"]),
+                        [f"{_excerpt(later)}: {'; '.join(reasons)}" for (later, reasons) in linked[:6]],
+                        [event["ref"], *(later["ref"] for (later, _) in linked)],
+                        {
+                            "linked_actions": len(linked),
+                            "named_hosts": sorted(named["hosts"]),
+                            "named_paths": sorted(named["paths"])
+                        }))
 
     return found
 
@@ -631,11 +777,18 @@ def hunt_secret_then_egress(events: list[dict], ctx: HuntContext) -> list[Findin
                     flows[key].refs.append(event["ref"])
                     continue
 
-                flows[key] = Finding("AAH-003", "critical", f"a credential is read and sent to {host} in one command",
-                                     session, _iso(event["ts"]),
-                                     [f"reads {what}", text_indicators.defang(evidence, 240)], [event["ref"]],
-                                     {"secret_paths": [what], "hosts": [host], "unlisted_hosts":
-                                      [] if _allowed(host, ctx.egress_allowlist) else [host], "same_command": True})
+                flows[key] = Finding(
+                    "AAH-003",
+                    "critical",
+                    f"a credential is read and sent to {host} in one command",
+                    session,
+                    _iso(event["ts"]), [f"reads {what}", text_indicators.defang(evidence, 240)], [event["ref"]],
+                    {
+                        "secret_paths": [what],
+                        "hosts": [host],
+                        "unlisted_hosts": [] if _allowed(host, ctx.egress_allowlist) else [host],
+                        "same_command": True
+                    })
 
         found.extend(flows.values())
         flowed = {ref for finding in flows.values() for ref in finding.refs}
@@ -677,11 +830,19 @@ def hunt_secret_then_egress(events: list[dict], ctx: HuntContext) -> list[Findin
 
             severity = max(graded.values(), key=order.get)
             hosts = sorted(graded)
-            finding = Finding("AAH-003", severity, f"credential file(s) read, then data sent to {', '.join(hosts)}",
-                              session, _iso(event["ts"]), [*read, *evidence[:6]], [event["ref"], *refs],
-                              {"secret_paths": read, "hosts": hosts, "grades": graded, "unlisted_hosts":
-                               [host for host in hosts if not _allowed(host, ctx.egress_allowlist)],
-                               "same_command": False})
+            finding = Finding(
+                "AAH-003",
+                severity,
+                f"credential file(s) read, then data sent to {', '.join(hosts)}",
+                session,
+                _iso(event["ts"]), [*read, *evidence[:6]], [event["ref"], *refs],
+                {
+                    "secret_paths": read,
+                    "hosts": hosts,
+                    "grades": graded,
+                    "unlisted_hosts": [host for host in hosts if not _allowed(host, ctx.egress_allowlist)],
+                    "same_command": False
+                })
             reported[key] = finding
             found.append(finding)
 
@@ -695,8 +856,8 @@ def _commands_run(events: list[dict]):
         seen = {}
 
         for event in group:
-            if (event["type"] not in ("tool_call", "process") or (event["type"] == "process"
-                                                                  and not from_agent(event))):
+            if (event["type"] not in ("tool_call", "process")
+                    or (event["type"] == "process" and not from_agent(event))):
                 continue
 
             command = command_of(event)
@@ -734,12 +895,12 @@ def _written_persistence(event: dict) -> list:
 
     for path in paths_of(event):
         if (path.replace("\\", "/").rsplit("/", 1)[-1] in commands.PROFILE_FILES):
-            routine = bool(content.strip()) and all(commands.PROFILE_ROUTINE.match(line)
-                                                    for line in content.splitlines() if line.strip())
+            routine = bool(content.strip()) and all(
+                commands.PROFILE_ROUTINE.match(line) for line in content.splitlines() if line.strip())
             found.append(("shell_profile_change" if routine else "shell_profile_persistence", "T1546.004"))
 
-        found.extend((name, technique) for (name, technique, pattern) in commands.PERSISTENCE_PATHS
-                     if pattern.search(path))
+        found.extend(
+            (name, technique) for (name, technique, pattern) in commands.PERSISTENCE_PATHS if pattern.search(path))
 
     return found
 
@@ -751,11 +912,20 @@ def hunt_risky_commands(events: list[dict], ctx: HuntContext) -> list[Finding]:
     def report(event: dict, risky: list, refs: list, uncertain: bool):
         names = list(dict.fromkeys(name for (name, _, _) in risky))
         found.append(
-            Finding("AAH-004", _worst(RISK_SEVERITY.get(name, "high") for name in names),
-                    f"agent ran {', '.join(names)}", event["session_id"], _iso(event["ts"]),
-                    list(dict.fromkeys(text_indicators.defang(evidence, 240) for (_, _, evidence) in risky)), refs,
-                    {"patterns": names, "techniques": sorted({technique for (_, technique, _) in risky}),
-                     "uncertain_parse": uncertain}))
+            Finding(
+                "AAH-004",
+                _worst(RISK_SEVERITY.get(name, "high") for name in names),
+                f"agent ran {', '.join(names)}",
+                event["session_id"],
+                _iso(event["ts"]),
+                list(dict.fromkeys(text_indicators.defang(evidence, 240) for (_, _, evidence) in risky)),
+                refs,
+                {
+                    "patterns": names,
+                    "techniques": sorted({technique
+                                          for (_, technique, _) in risky}),
+                    "uncertain_parse": uncertain
+                }))
 
     for (event, facts, refs) in _commands_run(events):
         if (facts.risky):
@@ -769,7 +939,8 @@ def hunt_risky_commands(events: list[dict], ctx: HuntContext) -> list[Finding]:
 
         if (written):
             report(event, [(name, technique, f"write to {', '.join(paths_of(event))}")
-                           for (name, technique) in written], [event["ref"]], False)
+                           for (name, technique) in written], [event["ref"]],
+                   False)
 
     return found
 
@@ -793,12 +964,20 @@ def hunt_poisoned_tools(events: list[dict], ctx: HuntContext) -> list[Finding]:
 
             seen.add(key)
             found.append(
-                Finding("AAH-005", "critical" if poisoned["score"] >= 8 else "high",
-                        f"tool {event['server']}.{poisoned['tool']} carries instructions for the model "
-                        f"(score {poisoned['score']}, in {', '.join(poisoned['places'][:4])})", event["session_id"],
-                        _iso(event["ts"]), _indicator_lines(poisoned["indicators"]), [event["ref"]],
-                        {"server": event["server"], "tool": poisoned["tool"], "score": poisoned["score"],
-                         "categories": poisoned["categories"]}))
+                Finding(
+                    "AAH-005",
+                    "critical" if poisoned["score"] >= 8 else "high",
+                    f"tool {event['server']}.{poisoned['tool']} carries instructions for the model "
+                    f"(score {poisoned['score']}, in {', '.join(poisoned['places'][:4])})",
+                    event["session_id"],
+                    _iso(event["ts"]),
+                    _indicator_lines(poisoned["indicators"]), [event["ref"]],
+                    {
+                        "server": event["server"],
+                        "tool": poisoned["tool"],
+                        "score": poisoned["score"],
+                        "categories": poisoned["categories"]
+                    }))
 
     return found
 
@@ -836,13 +1015,22 @@ def hunt_shadowed_tools(events: list[dict], ctx: HuntContext) -> list[Finding]:
                 continue
 
             seen.add(key)
-            marked = [server for server in sorted(servers) if mcp_audit.tool_assessment(offered[server][name]).score > 0]
+            marked = [
+                server for server in sorted(servers) if mcp_audit.tool_assessment(offered[server][name]).score > 0
+            ]
             found.append(
-                Finding("AAH-006", "high" if marked else "low", f"tool name {name!r} is offered by {len(servers)} servers",
-                        session, None, sorted(servers) + [f"{server}'s definition carries an injection indicator"
-                                                          for server in marked],
-                        sorted({ref for server in servers for ref in refs[server]}),
-                        {"tool": name, "servers": sorted(servers), "marked": marked}))
+                Finding(
+                    "AAH-006",
+                    "high" if marked else "low",
+                    f"tool name {name!r} is offered by {len(servers)} servers",
+                    session,
+                    None,
+                    sorted(servers) + [f"{server}'s definition carries an injection indicator" for server in marked],
+                    sorted({ref
+                            for server in servers
+                            for ref in refs[server]}), {
+                                "tool": name, "servers": sorted(servers), "marked": marked
+                            }))
 
         names = {server: set(tools) for (server, tools) in offered.items()}
 
@@ -857,10 +1045,14 @@ def hunt_shadowed_tools(events: list[dict], ctx: HuntContext) -> list[Finding]:
                 seen.add(key)
                 marked = mcp_audit.tool_assessment(tool).score > 0
                 found.append(
-                    Finding("AAH-006", "high" if marked else "low",
-                            f"{server}.{name}'s description names other servers' tools", session, None,
-                            [text_indicators.defang(str(tool.get("description") or ""))], refs[server][:5],
-                            {"tool": f"{server}.{name}", "mentions": mentioned, "marked": marked}))
+                    Finding("AAH-006",
+                            "high" if marked else "low",
+                            f"{server}.{name}'s description names other servers' tools",
+                            session,
+                            None, [text_indicators.defang(str(tool.get("description") or ""))],
+                            refs[server][:5], {
+                                "tool": f"{server}.{name}", "mentions": mentioned, "marked": marked
+                            }))
 
     return found
 
@@ -880,10 +1072,12 @@ def hunt_redefined_tools(events: list[dict], ctx: HuntContext) -> list[Finding]:
 
             tool = next(tool for tool in tools if str(tool.get("name")) == change["tool"])
             found.append(
-                Finding("AAH-007", "high" if mcp_audit.poisoned_tool(tool) else "medium",
-                        f"{server}.{change['tool']} was redefined after it was first seen", event["session_id"],
-                        _iso(event["ts"]), [text_indicators.defang(str(tool.get("description") or ""))],
-                        [event["ref"]], change))
+                Finding("AAH-007",
+                        "high" if mcp_audit.poisoned_tool(tool) else "medium",
+                        f"{server}.{change['tool']} was redefined after it was first seen",
+                        event["session_id"],
+                        _iso(event["ts"]), [text_indicators.defang(str(tool.get("description") or ""))], [event["ref"]],
+                        change))
 
         known.setdefault(server, {}).update(mcp_audit.baseline_of({server: tools})[server])
 
@@ -897,8 +1091,13 @@ def audit_configs(configs: list[tuple]) -> list[Finding]:
     for (name, document) in configs:
         for item in mcp_audit.audit_config(document):
             found.append(
-                Finding("AAH-008", item["severity"], f"{item['server']}: {item['check']}", "", None, [item["detail"]],
-                        [name], {"server": item["server"], "check": item["check"]}))
+                Finding("AAH-008",
+                        item["severity"],
+                        f"{item['server']}: {item['check']}",
+                        "",
+                        None, [item["detail"]], [name], {
+                            "server": item["server"], "check": item["check"]
+                        }))
 
     return found
 
@@ -919,19 +1118,28 @@ def hunt_agent_credentials(events: list[dict], ctx: HuntContext) -> list[Finding
 
         if (source and known[identity] and source not in known[identity]):
             found.append(
-                Finding("AAH-009", "high", f"agent identity {identity} used from new source {source}",
-                        event["session_id"], _iso(event["ts"]),
-                        [f"known sources: {', '.join(sorted(known[identity])[:10])}"], [event["ref"]],
-                        {"identity": identity, "source": source}))
+                Finding("AAH-009",
+                        "high",
+                        f"agent identity {identity} used from new source {source}",
+                        event["session_id"],
+                        _iso(event["ts"]), [f"known sources: {', '.join(sorted(known[identity])[:10])}"],
+                        [event["ref"]], {
+                            "identity": identity, "source": source
+                        }))
 
         declared = set(auth.get("declared_scopes") or [])
         extra = sorted(set(auth.get("scopes") or []) - declared) if declared else []
 
         if (extra):
             found.append(
-                Finding("AAH-009", "high", f"agent identity {identity} used scopes beyond its declaration",
-                        event["session_id"], _iso(event["ts"]), extra, [event["ref"]],
-                        {"identity": identity, "extra_scopes": extra}))
+                Finding("AAH-009",
+                        "high",
+                        f"agent identity {identity} used scopes beyond its declaration",
+                        event["session_id"],
+                        _iso(event["ts"]),
+                        extra, [event["ref"]], {
+                            "identity": identity, "extra_scopes": extra
+                        }))
 
         if (source):
             known[identity].add(source)
@@ -949,10 +1157,16 @@ def hunt_destructive_activity(events: list[dict], ctx: HuntContext) -> list[Find
         names = list(dict.fromkeys(name for (name, _, _) in facts.destructive))
         severity = _worst(level for (_, level, _) in facts.destructive)
         found.append(
-            Finding("AAH-010", severity, f"agent issued {', '.join(names)}", event["session_id"], _iso(event["ts"]),
-                    list(dict.fromkeys(text_indicators.defang(evidence, 240)
-                                       for (_, _, evidence) in facts.destructive)), refs,
-                    {"patterns": names, "uncertain_parse": facts.uncertain}))
+            Finding(
+                "AAH-010",
+                severity,
+                f"agent issued {', '.join(names)}",
+                event["session_id"],
+                _iso(event["ts"]),
+                list(dict.fromkeys(text_indicators.defang(evidence, 240) for (_, _, evidence) in facts.destructive)),
+                refs, {
+                    "patterns": names, "uncertain_parse": facts.uncertain
+                }))
 
     for (session, group) in sessions(events):
         calls = [event for event in group if event["type"] == "tool_call" and event["ts"] is not None]
@@ -967,7 +1181,10 @@ def hunt_destructive_activity(events: list[dict], ctx: HuntContext) -> list[Find
         if (busiest[0] > ctx.calls_per_minute):
             (count, first, last) = busiest
             found.append(
-                Finding("AAH-010", "medium", f"{count} tool calls within one minute", session,
+                Finding("AAH-010",
+                        "medium",
+                        f"{count} tool calls within one minute",
+                        session,
                         _iso(calls[first]["ts"]), [], [calls[first]["ref"], calls[last]["ref"]], {"calls": count}))
 
         read = set()
@@ -979,8 +1196,11 @@ def hunt_destructive_activity(events: list[dict], ctx: HuntContext) -> list[Find
 
         if (len(read) > ctx.distinct_files):
             found.append(
-                Finding("AAH-010", "medium", f"{len(read)} distinct files read in one session", session, None, [],
-                        [group[0]["ref"]], {"files": len(read)}))
+                Finding("AAH-010",
+                        "medium",
+                        f"{len(read)} distinct files read in one session",
+                        session,
+                        None, [], [group[0]["ref"]], {"files": len(read)}))
 
     return found
 
@@ -1020,8 +1240,10 @@ def hunt_guardrail_tampering(events: list[dict], ctx: HuntContext) -> list[Findi
 
     def report(event: dict, paths: list, content: str | None, refs: list):
         text = content or ""
-        widening = sorted({match.lower() for match in PERMISSION_WIDENING.findall(text)}
-                          | {" ".join(match.lower().split()) for match in INSTRUCTION_WIDENING.findall(text)})
+        widening = sorted({match.lower()
+                           for match in PERMISSION_WIDENING.findall(text)}
+                          | {" ".join(match.lower().split())
+                             for match in INSTRUCTION_WIDENING.findall(text)})
         injected = text_indicators.assess(text).likely
         prose = all(INSTRUCTION_FILE.search(path) for path in paths)
 
@@ -1038,13 +1260,19 @@ def hunt_guardrail_tampering(events: list[dict], ctx: HuntContext) -> list[Findi
             evidence.append("the written text carries injection indicators")
 
         found.append(
-            Finding("AAH-011", severity, "an agent wrote to agent configuration or standing instructions",
-                    event["session_id"], _iso(event["ts"]), evidence, refs,
-                    {"paths": sorted(set(paths)), "widening": widening, "injection": injected}))
+            Finding("AAH-011",
+                    severity,
+                    "an agent wrote to agent configuration or standing instructions",
+                    event["session_id"],
+                    _iso(event["ts"]),
+                    evidence,
+                    refs, {
+                        "paths": sorted(set(paths)), "widening": widening, "injection": injected
+                    }))
 
     for event in events:
-        if (event["type"] == "file" and str(event["file"].get("op") or "") in ("write", "create", "modify", "append",
-                                                                              "delete", "rename")):
+        if (event["type"] == "file"
+                and str(event["file"].get("op") or "") in ("write", "create", "modify", "append", "delete", "rename")):
             written = True
         else:
             written = event["type"] == "tool_call" and WRITE in tool_capabilities(event["tool"])
@@ -1055,8 +1283,9 @@ def hunt_guardrail_tampering(events: list[dict], ctx: HuntContext) -> list[Findi
         content = _written_content(event)
         targets = [path for path in paths_of(event) if commands.AGENT_CONFIG_PATH.search(path.strip())]
         # An editor's settings file governs agents only in the keys that do.
-        targets.extend(path for path in paths_of(event) if commands.EDITOR_SETTINGS_PATH.search(path.strip())
-                       and commands.EDITOR_AGENT_SETTING.search(content))
+        targets.extend(
+            path for path in paths_of(event)
+            if commands.EDITOR_SETTINGS_PATH.search(path.strip()) and commands.EDITOR_AGENT_SETTING.search(content))
 
         if (targets):
             report(event, targets, content if event["type"] == "tool_call" or content else None, [event["ref"]])
@@ -1068,24 +1297,32 @@ def hunt_guardrail_tampering(events: list[dict], ctx: HuntContext) -> list[Findi
 
         for evidence in facts.mcp_registrations:
             found.append(
-                Finding("AAH-011", "medium", "an agent registered an MCP server from the command line",
-                        event["session_id"], _iso(event["ts"]), [text_indicators.defang(evidence, 240)], refs,
-                        {"registration": True}))
+                Finding("AAH-011",
+                        "medium",
+                        "an agent registered an MCP server from the command line",
+                        event["session_id"],
+                        _iso(event["ts"]), [text_indicators.defang(evidence, 240)],
+                        refs, {"registration": True}))
 
         for (flag, evidence) in facts.guardrail_flags:
             found.append(
-                Finding("AAH-011", "medium", "an agent was started with its approvals turned off",
-                        event["session_id"], _iso(event["ts"]), [text_indicators.defang(evidence, 240)], refs,
-                        {"flag": flag}))
+                Finding("AAH-011",
+                        "medium",
+                        "an agent was started with its approvals turned off",
+                        event["session_id"],
+                        _iso(event["ts"]), [text_indicators.defang(evidence, 240)],
+                        refs, {"flag": flag}))
 
     # A person starting an agent with its approvals off is the same exposure, whoever typed it.
     for event in events:
         if (event["type"] == "process" and not from_agent(event)):
             for (flag, evidence) in commands.facts(command_of(event)).guardrail_flags:
                 found.append(
-                    Finding("AAH-011", "medium", "an agent was started with its approvals turned off",
-                            event["session_id"], _iso(event["ts"]), [text_indicators.defang(evidence, 240)],
-                            [event["ref"]], {"flag": flag}))
+                    Finding("AAH-011",
+                            "medium",
+                            "an agent was started with its approvals turned off",
+                            event["session_id"],
+                            _iso(event["ts"]), [text_indicators.defang(evidence, 240)], [event["ref"]], {"flag": flag}))
 
     return found
 
@@ -1116,7 +1353,8 @@ def hunt_leaked_credentials(events: list[dict], ctx: HuntContext) -> list[Findin
             (secrets, where, severity) = (_secrets_in([event["content"]]), "model output", "high")
         elif (event["type"] == "tool_result"):
             (secrets, where, severity) = (text_indicators.find_secrets(event["content"]),
-                                          f"output of {event['tool'] or 'a tool'}", "medium")
+                                          f"output of {event['tool'] or 'a tool'}",
+                                          "medium")
         elif (event["type"] == "tool_call" or (event["type"] == "process" and from_agent(event))):
             texts = _strings(event["args"]) if event["type"] == "tool_call" else [command_of(event)]
             secrets = _secrets_in(texts)
@@ -1132,9 +1370,15 @@ def hunt_leaked_credentials(events: list[dict], ctx: HuntContext) -> list[Findin
             severity = "low"
 
         found.append(
-            Finding("AAH-012", severity, f"credential(s) in {where}", event["session_id"], _iso(event["ts"]),
-                    list(dict.fromkeys(indicator.evidence for indicator in secrets)), [event["ref"]],
-                    {"kinds": sorted({indicator.name for indicator in secrets}), "where": where.split(" of ")[0]}))
+            Finding("AAH-012",
+                    severity,
+                    f"credential(s) in {where}",
+                    event["session_id"],
+                    _iso(event["ts"]),
+                    list(dict.fromkeys(indicator.evidence for indicator in secrets)), [event["ref"]], {
+                        "kinds": sorted({indicator.name
+                                         for indicator in secrets}), "where": where.split(" of ")[0]
+                    }))
 
     return found
 
