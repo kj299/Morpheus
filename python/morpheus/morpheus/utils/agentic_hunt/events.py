@@ -24,11 +24,19 @@ Two inputs are read, one JSON object per line:
   tool calls, their responses tool results, and `tools/list` responses the manifest a server offered.
 
 A file whose top level is a JSON object holding `mcpServers` is an MCP client configuration; `mcp_audit` reads those.
+
+Real telemetry is untidy, and the reader is built for that. A value of the wrong type is coerced or dropped, a time
+in any common form is read, and a line that still cannot be read is **skipped and counted**, never allowed to end
+the run: the first version lost every finding of every file to one truncated line. What was skipped is returned
+beside the events so that a caller can say so, loudly; a skipped line is a blind spot, and an attacker who can
+write telemetry can make one.
 """
 
 import datetime
 import json
+import math
 import os
+import re
 
 EVENT_TYPES = ("prompt",
                "model_output",
@@ -42,154 +50,379 @@ EVENT_TYPES = ("prompt",
                "auth")
 """Every event type the hunts read. `document` is content retrieved into a context other than by a tool call."""
 
+MAX_LINE = 8 * 1024 * 1024
+"""The longest line read as one event. A longer one is skipped and counted."""
+
+MAX_NESTING = 64
+
 
 class TelemetryError(ValueError):
-    """A line that is not an event either reader understands."""
+    """A record that is not an event either reader understands."""
+
+
+_ISO = re.compile(
+    r"^\s*(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?\s*"
+    r"(Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)?\s*$", re.I)
 
 
 def parse_time(value) -> datetime.datetime | None:
-    """An ISO 8601 time, or epoch seconds, as an aware UTC time; `None` when the event carries none."""
-    if (value is None or value == ""):
+    """
+    A time in any form telemetry commonly carries it, as an aware UTC time; `None` when there is none to read.
+
+    ISO 8601 with `T` or a space, any number of fractional digits, and `Z`, `UTC` or a numeric offset with or
+    without its colon; and epoch numbers, as numbers or digit strings, in seconds, milliseconds, microseconds or
+    nanoseconds, told apart by magnitude. Anything else is no time, not an error.
+    """
+    if (value is None or isinstance(value, bool)):
         return None
 
-    if (isinstance(value, (int, float))):
-        return datetime.datetime.fromtimestamp(value, tz=datetime.timezone.utc)
+    if (isinstance(value, datetime.datetime)):
+        return value if value.tzinfo else value.replace(tzinfo=datetime.timezone.utc)
 
-    parsed = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if (isinstance(value, str)):
+        text = value.strip()
 
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.timezone.utc)
+        if (not text):
+            return None
+
+        match = _ISO.match(text)
+
+        if (match is not None):
+            (year, month, day, hour, minute, second, fraction, zone) = match.groups()
+            micro = int((fraction or "0")[:6].ljust(6, "0"))
+            offset = datetime.timezone.utc
+
+            if (zone and zone.upper() not in ("Z", "UTC", "GMT")):
+                digits = zone[1:].replace(":", "").ljust(4, "0")
+                delta = datetime.timedelta(hours=int(digits[:2]), minutes=int(digits[2:4]))
+                offset = datetime.timezone(delta if zone[0] == "+" else -delta)
+
+            try:
+                return datetime.datetime(int(year), int(month), int(day), int(hour), int(minute), int(second or 0),
+                                         micro, tzinfo=offset).astimezone(datetime.timezone.utc)
+            except (ValueError, OverflowError):
+                return None
+
+        try:
+            value = float(text)
+        except ValueError:
+            return None
+
+    if (not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0):
+        return None
+
+    # Seconds until the year 5138 are below 1e11; each larger unit is a thousand times that.
+    for (limit, divisor) in ((1e11, 1), (1e14, 1e3), (1e17, 1e6), (1e20, 1e9)):
+        if (value < limit):
+            try:
+                return datetime.datetime.fromtimestamp(value / divisor, tz=datetime.timezone.utc)
+            except (ValueError, OverflowError, OSError):
+                return None
+
+    return None
 
 
-def _section(record: dict, name: str) -> dict:
-    value = record.get(name)
+def _mapping(value) -> dict:
+    """A section as a mapping: given as one, or as JSON text of one; anything else is an empty section."""
+    if (isinstance(value, dict)):
+        return dict(value)
 
-    return dict(value) if isinstance(value, dict) else {}
+    if (isinstance(value, str) and value.lstrip()[:1] == "{"):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, RecursionError):
+            return {}
+
+        return parsed if isinstance(parsed, dict) else {}
+
+    return {}
 
 
-def normalize(record: dict, ref: str) -> dict:
-    """One agent event in the shared shape. Unknown fields are dropped; a missing section is an empty one."""
+def _sequence(value) -> list:
+    if (isinstance(value, (list, tuple))):
+        return list(value)
+
+    if (isinstance(value, str) and value.lstrip()[:1] == "["):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, RecursionError):
+            return []
+
+        return parsed if isinstance(parsed, list) else []
+
+    return []
+
+
+def _text(value) -> str:
+    """
+    Content as text: a string as it is, a list of content blocks as their text joined, any other value as JSON that
+    keeps non-ASCII characters as characters, so that a hunt reads what a model read.
+    """
+    if (value is None):
+        return ""
+
+    if (isinstance(value, str)):
+        return value
+
+    if (isinstance(value, (list, tuple))):
+        parts = []
+
+        for item in value:
+            if (isinstance(item, dict) and isinstance(item.get("text"), str)):
+                parts.append(item["text"])
+            elif (isinstance(item, dict) and isinstance(item.get("content"), (str, list))):
+                parts.append(_text(item["content"]))
+            elif (isinstance(item, dict) and isinstance(item.get("resource"), dict)):
+                parts.append(_text(item["resource"].get("text")))
+            elif (isinstance(item, str)):
+                parts.append(item)
+            elif (item is not None):
+                parts.append(_json(item))
+
+        return "\n".join(part for part in parts if part)
+
+    if (isinstance(value, (int, float, bool))):
+        return str(value)
+
+    return _json(value)
+
+
+def _json(value) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except (ValueError, TypeError, RecursionError):
+        return ""
+
+
+def _name(value) -> str:
+    return value if isinstance(value, str) else ("" if value is None or isinstance(value, (dict, list)) else str(value))
+
+
+def normalize(record: dict, ref: str, session: str = "") -> dict:
+    """
+    One agent event in the shared shape.
+
+    Unknown fields are dropped and a missing or mistyped section is an empty one. `args` may be a mapping, JSON text
+    of one, or a list (kept under `argv`); `content` may be text or content blocks. An event without a session id
+    is given one from its host, or failing that from `session`, so that events of unrelated machines are never
+    hunted as one session.
+
+    Raises
+    ------
+    TelemetryError
+        If the record is not a mapping or its `type` is not one of `EVENT_TYPES`.
+    """
+    if (not isinstance(record, dict)):
+        raise TelemetryError(f"{ref}: an event must be a JSON object")
+
     kind = record.get("type")
 
     if (kind not in EVENT_TYPES):
-        raise TelemetryError(f"{ref}: event type {kind!r} is not one of {', '.join(EVENT_TYPES)}")
+        raise TelemetryError(f"{ref}: event type {str(kind)[:40]!r} is not one of {', '.join(EVENT_TYPES)}")
 
     args = record.get("args")
+
+    if (isinstance(args, (list, tuple))):
+        args = {"argv": list(args)}
+
+    host = _name(record.get("host"))
+    session_id = _name(record.get("session_id"))
+    inferred = not session_id
+
+    if (inferred):
+        session_id = f"(no session id; host {host})" if host else (session or "(no session id)")
+
+    process = _mapping(record.get("process"))
+
+    if ("ancestors" in process):
+        process["ancestors"] = [_name(item) for item in _sequence(process["ancestors"])]
+
+    auth = _mapping(record.get("auth"))
+
+    for key in ("scopes", "declared_scopes"):
+        if (key in auth):
+            auth[key] = [_name(item) for item in _sequence(auth[key]) if _name(item)]
 
     return {
         "ref": ref,
         "ts": parse_time(record.get("ts")),
-        "session_id": str(record.get("session_id") or ""),
-        "agent": str(record.get("agent") or ""),
-        "host": str(record.get("host") or ""),
-        "principal": str(record.get("principal") or ""),
+        "session_id": session_id,
+        "session_inferred": inferred,
+        "agent": _name(record.get("agent")),
+        "host": host,
+        "principal": _name(record.get("principal")),
         "type": kind,
-        "tool": str(record.get("tool") or ""),
-        "server": str(record.get("server") or ""),
-        "args": dict(args) if isinstance(args, dict) else {},
-        "content": record.get("content") if isinstance(record.get("content"), str) else "",
-        "tools": list(record.get("tools") or []),
-        "process": _section(record, "process"),
-        "file": _section(record, "file"),
-        "network": _section(record, "network"),
-        "auth": _section(record, "auth"),
+        "tool": _name(record.get("tool")),
+        "server": _name(record.get("server")),
+        "args": _mapping(args),
+        "content": _text(record.get("content")),
+        "tools": [tool for tool in _sequence(record.get("tools")) if isinstance(tool, dict)],
+        "process": process,
+        "file": _mapping(record.get("file")),
+        "network": _mapping(record.get("network")),
+        "auth": auth,
     }
 
 
 def _result_text(result: dict) -> str:
-    parts = []
-
-    for item in result.get("content") or []:
-        if (isinstance(item, dict) and item.get("type") == "text"):
-            parts.append(str(item.get("text", "")))
-        elif (isinstance(item, dict) and item.get("type") == "resource"):
-            parts.append(str((item.get("resource") or {}).get("text", "")))
+    parts = [_text(result.get("content"))]
 
     if (isinstance(result.get("structuredContent"), (dict, list))):
-        parts.append(json.dumps(result["structuredContent"], sort_keys=True))
+        parts.append(_json(result["structuredContent"]))
 
-    return "\n".join(parts)
+    return "\n".join(part for part in parts if part)
+
+
+CLIENT_REQUESTS = ("initialize", "ping", "tools/", "prompts/", "resources/", "completion/", "logging/")
+"""Methods a client asks of a server. Anything else carrying an id is the server asking the client."""
 
 
 class _TranscriptReader:
-    """Turns MCP JSON-RPC messages into events, pairing each response with the request it answers."""
+    """
+    Turns MCP JSON-RPC messages into events, pairing each response with the request it answers.
+
+    A server may send requests of its own, and may choose their ids, so requests are kept by who asked: a server
+    request that reuses a client's id cannot displace the client's request, which is how a hostile server once hid
+    its tool list from every hunt. A response is matched to the client's request when its shape fits one.
+    """
 
     def __init__(self):
         self.pending: dict = {}
 
-    def read(self, record: dict, ref: str) -> dict | None:
+    def read(self, record: dict, ref: str, session: str) -> dict | None:
         message = record["message"]
-        session = str(record.get("session_id") or "")
-        server = str(record.get("server") or "")
-        base = {"ts": record.get("ts"), "session_id": session, "server": server, "agent": record.get("agent")}
-        key = (session, server, json.dumps(message.get("id"), sort_keys=True))
+        base = {"ts": record.get("ts"), "session_id": record.get("session_id"), "server": record.get("server"),
+                "agent": record.get("agent"), "host": record.get("host")}
 
-        if ("method" in message):
-            if ("id" in message):
-                self.pending[key] = message
+        try:
+            key = (str(record.get("session_id")), str(record.get("server")), json.dumps(message.get("id")))
+        except (TypeError, ValueError):
+            key = (str(record.get("session_id")), str(record.get("server")), "?")
 
-            if (message["method"] == "tools/call"):
-                params = message.get("params") or {}
-                return normalize(
-                    {
-                        **base, "type": "tool_call", "tool": params.get("name"), "args": params.get("arguments")
-                    }, ref)
+        method = message.get("method")
+
+        if (isinstance(method, str)):
+            if ("id" in message and method.startswith(CLIENT_REQUESTS)):
+                self.pending.setdefault(key, []).append(message)
+
+            if (method == "tools/call"):
+                params = _mapping(message.get("params"))
+
+                return normalize({**base, "type": "tool_call", "tool": params.get("name"),
+                                  "args": params.get("arguments")}, ref, session)
 
             return None
 
-        request = self.pending.pop(key, None)
+        result = message.get("result")
+        waiting = self.pending.get(key) or []
 
-        if (request is None or not isinstance(message.get("result"), dict)):
+        if (not isinstance(result, dict) or not waiting):
             return None
 
-        result = message["result"]
+        # The oldest request this result's shape can answer; a tool list answers `tools/list`, and so on.
+        wanted = "tools/list" if isinstance(result.get("tools"), list) else (
+            "tools/call" if "content" in result or "structuredContent" in result or "isError" in result else None)
+        request = next((item for item in waiting if item.get("method") == wanted), None) if wanted else None
 
-        if (request["method"] == "tools/list"):
-            return normalize({**base, "type": "tool_manifest", "tools": result.get("tools")}, ref)
+        if (request is None):
+            request = waiting[0]
 
-        if (request["method"] == "tools/call"):
-            return normalize(
-                {
-                    **base,
-                    "type": "tool_result",
-                    "tool": (request.get("params") or {}).get("name"),
-                    "content": _result_text(result),
-                    "args": {
-                        "is_error": bool(result.get("isError"))
-                    }
-                },
-                ref)
+        waiting.remove(request)
+
+        if (not waiting):
+            del self.pending[key]
+
+        if (request.get("method") == "tools/list" and isinstance(result.get("tools"), list)):
+            return normalize({**base, "type": "tool_manifest", "tools": result.get("tools")}, ref, session)
+
+        if (request.get("method") == "tools/call"):
+            return normalize({**base, "type": "tool_result",
+                              "tool": _mapping(request.get("params")).get("name"),
+                              "content": _result_text(result),
+                              "args": {"is_error": bool(result.get("isError"))}}, ref, session)
 
         return None
 
 
-def is_mcp_config(document) -> bool:
-    return isinstance(document, dict) and isinstance(document.get("mcpServers"), dict)
+def _too_deep(text: str) -> bool:
+    """Whether a line nests brackets past `MAX_NESTING`; such a line is refused before the parser recurses on it."""
+    depth = 0
+    quoted = False
+    escaped = False
+
+    for character in text:
+        if (escaped):
+            escaped = False
+        elif (character == "\\"):
+            escaped = quoted
+        elif (character == '"'):
+            quoted = not quoted
+        elif (not quoted and character in "[{"):
+            depth += 1
+
+            if (depth > MAX_NESTING):
+                return True
+        elif (not quoted and character in "]}"):
+            depth -= 1
+
+    return False
 
 
-def read_lines(path: str) -> list[dict]:
-    """The events in one JSON-lines file, of either kind, in file order."""
+def read_lines(path: str, skipped: list | None = None) -> list[dict]:
+    """
+    The events in one JSON-lines file, of either kind, in file order.
+
+    Parameters
+    ----------
+    path : str
+        The file. A byte-order mark is ignored, and bytes that are not UTF-8 are replaced, not refused.
+    skipped : list, optional
+        Receives `(ref, reason)` for every line that could not be read as an event. Without it, the first such line
+        raises `TelemetryError`, which is the strict reading.
+    """
     events = []
     reader = _TranscriptReader()
+    name = os.path.basename(path)
 
-    with open(path, encoding="utf-8") as handle:
+    def refuse(ref: str, reason: str):
+        if (skipped is None):
+            raise TelemetryError(f"{ref}: {reason}")
+
+        skipped.append((ref, reason))
+
+    with open(path, encoding="utf-8-sig", errors="replace") as handle:
         for (number, line) in enumerate(handle, start=1):
             if (not line.strip()):
                 continue
 
-            ref = f"{os.path.basename(path)}:{number}"
+            ref = f"{name}:{number}"
+
+            if (len(line) > MAX_LINE):
+                refuse(ref, f"line of {len(line)} characters is over the {MAX_LINE} limit")
+                continue
+
+            if (line.count("[") + line.count("{") > MAX_NESTING and _too_deep(line)):
+                refuse(ref, f"nested more than {MAX_NESTING} deep")
+                continue
 
             try:
                 record = json.loads(line)
-            except json.JSONDecodeError as error:
-                raise TelemetryError(f"{ref}: not JSON ({error.msg})") from error
 
-            if (not isinstance(record, dict)):
-                raise TelemetryError(f"{ref}: a line must be a JSON object")
+                if (not isinstance(record, dict)):
+                    raise TelemetryError(f"{ref}: a line must be a JSON object")
 
-            if (isinstance(record.get("message"), dict) and record["message"].get("jsonrpc") == "2.0"):
-                event = reader.read(record, ref)
-            else:
-                event = normalize(record, ref)
+                message = record.get("message")
+
+                if (isinstance(message, dict) and message.get("jsonrpc") == "2.0"):
+                    event = reader.read(record, ref, f"(no session id; file {name})")
+                else:
+                    event = normalize(record, ref, f"(no session id; file {name})")
+            except TelemetryError as error:
+                refuse(ref, str(error).split(": ", 1)[-1])
+                continue
+            except (ValueError, TypeError, AttributeError, OverflowError, RecursionError) as error:
+                refuse(ref, f"not a readable event ({type(error).__name__})")
+                continue
 
             if (event is not None):
                 events.append(event)
@@ -198,12 +431,26 @@ def read_lines(path: str) -> list[dict]:
 
 
 def order(events: list[dict]) -> list[dict]:
-    """Events by session, then time, keeping file order where times tie or are missing."""
-    indexed = list(enumerate(events))
-    earliest = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
-    indexed.sort(key=lambda pair: (pair[1]["session_id"], pair[1]["ts"] or earliest, pair[0]))
+    """
+    Events by session and then time, keeping the order they were given in where times tie.
 
-    return [event for (_, event) in indexed]
+    An event without a time keeps its place: it is ordered as if it happened when the event before it in the same
+    session did. Moving such events to the start of their session, as the first version did, put a later action
+    before the content that caused it.
+    """
+    earliest = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    last_seen: dict = {}
+    keyed = []
+
+    for (index, event) in enumerate(events):
+        session = event["session_id"]
+        moment = event["ts"] or last_seen.get(session, earliest)
+        last_seen[session] = moment
+        keyed.append((session, moment, index, event))
+
+    keyed.sort(key=lambda item: item[:3])
+
+    return [item[3] for item in keyed]
 
 
 def summarize(events: list[dict]) -> dict:
@@ -216,10 +463,11 @@ def summarize(events: list[dict]) -> dict:
 
     return {
         "events": len(events),
-        "sessions": len({event["session_id"]
-                         for event in events}),
+        "sessions": len({event["session_id"] for event in events}),
         "by_type": dict(sorted(by_type.items())),
         "missing_types": [kind for kind in EVENT_TYPES if kind not in by_type],
+        "untimed": len(events) - len(times),
+        "without_session_id": sum(1 for event in events if event.get("session_inferred")),
         "first": min(times).isoformat() if times else None,
         "last": max(times).isoformat() if times else None,
     }

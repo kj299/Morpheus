@@ -25,16 +25,26 @@ telemetry-schema.md`): a `type`, a `session_id`, a time, and the sections an eve
   engine reports them.
 
 A finding is written on the newest row of the batch that it rests on, and only once, unless it later grows more
-severe. A chain whose first event
-came in an earlier batch is still found: the stage keeps each session's events for the hunts' window (at least a
-minute, the call-rate hunt's), and feeds what earlier batches taught it, the MCP tool definitions seen and the
-networks each agent identity was seen from, to the hunts that compare against history (AAH-007, AAH-009). Hunt
-AAH-008 reads MCP client configurations, not a stream, and is refused here; `examples/agentic_ai_hunting/hunt.py
-audit-config` runs it.
+severe. A chain whose first event came in an earlier batch is still found: the stage keeps each session's events
+for the hunts' window (at least a minute, the call-rate hunt's), and feeds what earlier batches taught it, the MCP
+tool definitions seen and the networks each agent identity was seen from, to the hunts that compare against
+history (AAH-007, AAH-009). Hunt AAH-008 reads MCP client configurations, not a stream, and is refused here;
+`examples/agentic_ai_hunting/hunt.py audit-config` runs it.
 
-Event time is guarded like every stateful telemetry stage's: a row from too far ahead of the stream is refused,
-marked in `clock_refused`, hunted on its own and never kept, so that one forged time cannot empty a session's
-history. All the stage's memory is in `_checkpoint_attributes` and survives a restart.
+Each session's history is aged against that session's own newest event, so a host whose clock runs ahead shortens
+nobody else's window. A session that has gone quiet is let go once the stream is more than the clock skew and the
+window past it, and the stage holds at most `MAX_SESSIONS` sessions and `MAX_RETAINED` events, letting the
+quietest go first. A row with no session id belongs to a session of its host's own, never to one shared by every
+host.
+
+Event time is guarded like every stateful telemetry stage's: a row from too far ahead of the stream (the clock
+skew, seven days unless set) is refused, marked in `clock_refused`, hunted on its own and never kept. A row
+without a usable time is hunted with its batch and not kept either, and the stage says so in its log, since a
+chain cannot be followed across batches without one. All the stage's memory is in `_checkpoint_attributes` and
+survives a restart.
+
+No row stops the pipeline. A row the stage cannot read, or a hunt that fails on a batch, is logged with a count
+and the rows that can be hunted still are.
 
 The quoted evidence comes from telemetry an attacker may have written. It is data for an analyst or a SIEM, never
 an instruction to a model that reads the column.
@@ -72,6 +82,13 @@ CONFIGURATION_HUNTS = ("AAH-008", )
 MAX_RETAINED_PER_SESSION = 5000
 """The most events one session keeps between batches, so a runaway session cannot grow the stage without bound."""
 
+MAX_SESSIONS = 20_000
+MAX_RETAINED = 200_000
+"""The most sessions and events kept in all. Past either, the sessions quiet for longest are let go."""
+
+MAX_REPORTED_PER_SESSION = 2000
+"""The most findings one session remembers having written; the oldest are forgotten first."""
+
 MIN_RETENTION_SECONDS = 60
 """The call-rate hunt counts calls within a minute, so a session keeps at least a minute of events."""
 
@@ -89,18 +106,32 @@ def _blank(value) -> bool:
         return False
 
 
+def _listed(value):
+    """A cell as plain Python: an array (how Parquet and Arrow hand over a list column) becomes a list."""
+    if (hasattr(value, "tolist") and not isinstance(value, (str, bytes))):
+        value = value.tolist()
+
+    if (isinstance(value, (list, tuple))):
+        return [_listed(item) for item in value]
+
+    if (isinstance(value, dict)):
+        return {str(key): _listed(item) for (key, item) in value.items()}
+
+    return value
+
+
 def _section(value) -> typing.Optional[typing.Any]:
-    """A section as a mapping or list: given as one, or as JSON text."""
+    """A section as a mapping or list: given as one, as an array of them, or as JSON text."""
+    if (isinstance(value, (dict, list, tuple)) or (hasattr(value, "tolist") and getattr(value, "ndim", 0))):
+        return _listed(value)
+
     if (_blank(value)):
         return None
-
-    if (isinstance(value, (dict, list))):
-        return value
 
     if (isinstance(value, str) and value.strip()[:1] in ("{", "[")):
         try:
             return json.loads(value)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             return None
 
     return None
@@ -112,7 +143,11 @@ def _plain(value):
         return None
 
     if (hasattr(value, "item") and not isinstance(value, (str, bytes))):
-        return value.item()
+        value = value.item()
+
+    # A column of whole-number ids that also holds a null arrives as floats: 4021.0 is the id 4021.
+    if (isinstance(value, float) and value.is_integer()):
+        return int(value)
 
     return value
 
@@ -224,6 +259,9 @@ class AgenticHuntStage(CheckpointMixin, TelemetryStage):
         self._auth_sources: dict = {}
         """The networks each agent identity has been seen from."""
         self._batches = 0
+        self._retention_seconds = max(self._window_seconds, MIN_RETENTION_SECONDS)
+        self._idle_seconds = self._retention_seconds + int(max_clock_skew_seconds)
+        self._warned_untimed = False
 
         for column in (SEVERITY_COLUMN, HUNTS_COLUMN, FINDINGS_COLUMN):
             self._needed_columns[column] = TypeId.STRING
@@ -240,41 +278,59 @@ class AgenticHuntStage(CheckpointMixin, TelemetryStage):
 
     def _records(self, host, times: list, refused: list) -> list:
         """
-        One plain record per row, in the engine's input shape, each naming its batch and its place in it.
+        One plain record per row, in the engine's input shape, each naming its batch and its place in it; `None`
+        for a row that could not be read.
 
         Believed rows are numbered among themselves and refused rows apart, so that a refused row inserted into a
         batch renumbers nothing a finding about the other rows refers to.
         """
-        columns = list(host.columns)
+        columns = [str(column) for column in host.columns]
         dotted = [column for column in columns if "." in column and column.split(".", 1)[0] in SECTION_FIELDS]
         records = []
         counts = {False: 0, True: 0}
 
         for (position, row) in enumerate(host.itertuples(index=False, name=None)):
-            cells = dict(zip(columns, row))
             kind = bool(refused[position])
             ref = f"{self._batches}:{'refused:' if kind else ''}{counts[kind]}"
             counts[kind] += 1
-            record = {"ref": ref, "ts": _iso(times[position])}
 
-            for field in SCALAR_FIELDS:
-                value = _plain(cells.get(field))
-                record[field] = None if value is None else str(value)
-
-            for field in (*SECTION_FIELDS, "tools"):
-                value = _section(cells.get(field))
-                record[field] = json.loads(json.dumps(value, default=str)) if value is not None else None
-
-            for column in dotted:
-                (section, key) = column.split(".", 1)
-                value = _plain(cells[column])
-
-                if (value is not None):
-                    record[section] = {**(record[section] or {}), key: value}
-
-            records.append(record)
+            try:
+                records.append(self._record(dict(zip(columns, row)), dotted, ref, _iso(times[position])))
+            except Exception:  # pylint: disable=broad-exception-caught
+                # Whatever a cell holds, one row is one row's loss and never the pipeline's.
+                records.append(None)
 
         return records
+
+    @staticmethod
+    def _record(cells: dict, dotted: list, ref: str, moment: typing.Optional[str]) -> dict:
+        record = {"ref": ref, "ts": moment}
+
+        for field in SCALAR_FIELDS:
+            value = cells.get(field)
+
+            if (field == "content" and _section(value) is not None and not isinstance(value, str)):
+                # Content blocks, as agent frameworks log them.
+                record[field] = json.loads(json.dumps(_section(value), default=str))
+                continue
+
+            value = _plain(value)
+            record[field] = None if value is None else str(value)
+
+        for field in (*SECTION_FIELDS, "tools"):
+            value = _section(cells.get(field))
+            record[field] = json.loads(json.dumps(value, default=str)) if value is not None else None
+
+        for column in dotted:
+            (section, key) = column.split(".", 1)
+            value = _section(cells[column])
+            value = _plain(cells[column]) if value is None else json.loads(json.dumps(value, default=str))
+
+            if (value is not None):
+                held = record[section] if isinstance(record[section], dict) else {}
+                record[section] = {**held, key: value}
+
+        return record
 
     def _context(self) -> hunts.HuntContext:
         return hunts.HuntContext(
@@ -305,68 +361,118 @@ class AgenticHuntStage(CheckpointMixin, TelemetryStage):
                         known.append(source)
                         known.sort()
 
-    def _retain(self, records: list) -> None:
-        """Keep each session's events for the window; let a session go once nothing of it is left."""
-        for record in records:
+    def _retain(self, kept: list) -> None:
+        """
+        Keep each session's events for the window, measured from that session's own newest event.
+
+        `kept` is `(session, record)` for each believed row of the batch. Measuring every session against the
+        newest event of any session, as the first version did, let one host a few minutes ahead of the rest empty
+        every other session's history.
+        """
+        touched = set()
+
+        for (session, record) in kept:
             if (record["ts"] is not None):
-                self._retained.setdefault(record["session_id"] or "", []).append(record)
+                self._retained.setdefault(session, []).append(record)
+                touched.add(session)
 
-        horizon_s = max(self._window_seconds, MIN_RETENTION_SECONDS)
-        latest = max((events.parse_time(record["ts"]) for kept in self._retained.values() for record in kept),
-                     default=None)
+        for session in touched:
+            timed = [(events.parse_time(record["ts"]), record) for record in self._retained[session]]
+            newest = max(moment for (moment, _) in timed)
+            recent = [record for (moment, record) in timed
+                      if (newest - moment).total_seconds() <= self._retention_seconds]
+            self._retained[session] = recent[-MAX_RETAINED_PER_SESSION:]
 
-        for session in list(self._retained):
-            kept = [
-                record for record in self._retained[session]
-                if (latest - events.parse_time(record["ts"])).total_seconds() <= horizon_s
-            ]
-            self._retained[session] = kept[-MAX_RETAINED_PER_SESSION:]
+        self._release()
 
-            if (not self._retained[session]):
-                del self._retained[session]
-                self._reported.pop(session, None)
+        for session in list(self._reported):
+            if (session not in self._retained):
+                del self._reported[session]
+            elif (len(self._reported[session]) > MAX_REPORTED_PER_SESSION):
+                del self._reported[session][:-MAX_REPORTED_PER_SESSION]
+
+    def _release(self) -> None:
+        """Let quiet sessions go: those the stream has left far behind, then the quietest while over the caps."""
+        if (not self._retained):
+            return
+
+        newest = {session: events.parse_time(max(record["ts"] for record in kept))
+                  for (session, kept) in self._retained.items()}
+        latest = max(newest.values())
+        total = sum(len(kept) for kept in self._retained.values())
+
+        # The guard refuses a row more than the skew ahead, so a session this far behind is behind real time too,
+        # and not only behind one host's fast clock.
+        for session in sorted(self._retained, key=lambda name: (newest[name], name)):
+            idle = (latest - newest[session]).total_seconds() > self._idle_seconds
+
+            if (not idle and len(self._retained) <= MAX_SESSIONS and total <= MAX_RETAINED):
+                break
+
+            total -= len(self._retained.pop(session))
 
     def _process(self, df) -> None:
         host = to_host_frame(df)
+        timed = self._time_column in host.columns
         (times, refused) = (self._guarded_times(df, self._time_column, self._time_unit)
-                            if self._time_column in host.columns else ([None] * len(host), [False] * len(host)))
+                            if timed else ([None] * len(host), [False] * len(host)))
         self._refuse(df, refused, logger=logger, what="agent events", outcome="hunted alone and not kept")
 
         records = self._records(host, times, refused)
         current = {}
         believed = []
         refused_events = []
-        skipped = 0
+        unreadable = 0
+        untyped = 0
 
         for (position, record) in enumerate(records):
             try:
                 event = events.normalize(record, record["ref"])
             except events.TelemetryError:
-                skipped += 1
+                untyped += 1
+                continue
+            except Exception:  # pylint: disable=broad-exception-caught
+                unreadable += 1
                 continue
 
-            current[record["ref"]] = position
+            current[event["ref"]] = position
             (refused_events if refused[position] else believed).append(event)
 
-        if (skipped):
+        if (untyped):
             logger.warning("AgenticHuntStage skipped %d row(s) whose type is not one of %s",
-                           skipped,
+                           untyped,
                            ", ".join(events.EVENT_TYPES))
 
+        if (unreadable):
+            logger.error("AgenticHuntStage could not read %d row(s); they were NOT hunted", unreadable)
+
+        untimed = sum(1 for event in believed if event["ts"] is None)
+
+        if (untimed and not self._warned_untimed):
+            self._warned_untimed = True
+            logger.warning(
+                "AgenticHuntStage: %d row(s) have no usable time%s. They are hunted with their batch and not "
+                "kept, so a chain that spans batches is not found for them. Logged once.",
+                untimed,
+                "" if timed else f" (no {self._time_column!r} column; set time_column)")
+
+        ctx = self._context()
+        failed = []
         sessions = {event["session_id"] for event in believed}
         earlier = [
             events.normalize(record, record["ref"]) for session in sorted(sessions)
             for record in self._retained.get(session, [])
         ]
-        found = hunts.run_hunts(events.order(earlier + believed), [],
-                                self._context(),
-                                self._hunt_ids,
-                                self._min_severity)
+        found = hunts.run_hunts(events.order(earlier + believed), [], ctx, self._hunt_ids, self._min_severity, failed)
 
         # A refused row has no time the stream believes, so it may not join any session's sequence: it is hunted by
         # itself, and nothing it carries is learnt.
         for event in refused_events:
-            found.extend(hunts.run_hunts([event], [], self._context(), self._hunt_ids, self._min_severity))
+            found.extend(hunts.run_hunts([event], [], ctx, self._hunt_ids, self._min_severity, failed))
+
+        if (failed):
+            logger.error("AgenticHuntStage: hunt(s) did NOT complete on this batch and report nothing for it: %s",
+                         ", ".join(sorted({f"{hunt_id} ({error})" for (hunt_id, error) in failed})))
 
         per_row = [[] for _ in range(len(host))]
 
@@ -406,5 +512,5 @@ class AgenticHuntStage(CheckpointMixin, TelemetryStage):
         assign_str_column(df, FINDINGS_COLUMN, payloads)
 
         self._learn(believed)
-        self._retain([records[current[event["ref"]]] for event in believed])
+        self._retain([(event["session_id"], records[current[event["ref"]]]) for event in believed])
         self._batches += 1
