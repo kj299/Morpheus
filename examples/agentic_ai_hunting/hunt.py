@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from morpheus.utils.agentic_hunt import catalog  # noqa: E402  pylint: disable=wrong-import-position
 from morpheus.utils.agentic_hunt import service  # noqa: E402  pylint: disable=wrong-import-position
+from morpheus.utils.agentic_hunt import text_indicators  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def table(result: dict) -> str:
@@ -198,9 +199,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return dispatch(args)
     except (OSError, ValueError) as error:
-        print(f"hunt.py: {error}", file=sys.stderr)
+        # The message may quote a file name or a line of telemetry: it is cleaned like any finding.
+        print(f"hunt.py: {text_indicators.clean(str(error), 400)}", file=sys.stderr)
     except Exception as error:  # pylint: disable=broad-exception-caught
-        print(f"hunt.py: could not complete ({type(error).__name__}: {error})", file=sys.stderr)
+        print(f"hunt.py: could not complete ({type(error).__name__}: {text_indicators.clean(str(error), 300)})",
+              file=sys.stderr)
 
     return 2
 

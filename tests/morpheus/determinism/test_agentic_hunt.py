@@ -613,6 +613,17 @@ def test_the_command_line_exit_status_gates_on_severity(tmp_path):
     assert status("run", str(broken)) == 0
     assert status("run", str(broken), "--strict") == 2
 
+    # What the command line says about a file it could not read is cleaned like a finding: the message quotes the
+    # file, and the file is the attacker's.
+    hostile = tmp_path / "only"
+    hostile.mkdir()
+    (hostile / "a.jsonl").write_text(json.dumps({"type": TOKEN + " \x1b[31m https://evil.example.com/x"}) + "\n",
+                                     encoding="utf-8")
+    said = subprocess.run([sys.executable, script, "run", str(hostile)], capture_output=True, check=False)
+
+    assert said.returncode == 2 and b"nothing could be read" in said.stderr
+    assert b"A1b2A1" not in said.stderr and b"\x1b" not in said.stderr and b"https://" not in said.stderr
+
 
 def test_the_catalog_page_is_the_one_the_engine_writes():
     with open(os.path.join(SKILLS, "agentic-ai-threat-hunt", "references", "hunt-catalog.md"), encoding="utf-8") as h:

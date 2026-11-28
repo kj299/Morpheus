@@ -261,6 +261,7 @@ ODD_LINES = {
     "nested past any depth": (b"[" * 100000, -32700),
     "NaN": (b"NaN", -32600),
     "an object for an id": (b'{"jsonrpc": "2.0", "id": {"a": 1}, "method": "ping"}', -32600),
+    "NaN for an id": (b'{"jsonrpc": "2.0", "id": NaN, "method": "ping"}', -32600),
     "a number for a method": (b'{"jsonrpc": "2.0", "id": 7, "method": 42}', -32600),
     "a list for params": (b'{"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": [1]}', -32602),
     "a list for a tool name": (b'{"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": ["x"]}}',

@@ -59,9 +59,7 @@ EXAMPLE_VALUES = frozenset(["AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRf
 """Values vendors publish for documentation. They are redacted like any other, and reported as examples."""
 
 SECRETS = (
-    ("private_key",
-     re.compile(r"-----BEGIN (?:[A-Z0-9]{1,12} ){0,3}PRIVATE KEY(?: BLOCK)?-----"
-                r"(?:[^-]{0,8192}-----END (?:[A-Z0-9]{1,12} ){0,3}PRIVATE KEY(?: BLOCK)?-----)?")),
+    ("private_key", re.compile(r"-----BEGIN (?:[A-Z0-9]{1,12} ){0,3}PRIVATE KEY(?: BLOCK)?-----")),
     ("aws_access_key_id", re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9])")),
     ("aws_secret_access_key",
      re.compile(r"(?i:aws_secret_access_key|secret_?access_?key)[\"']?\s{0,3}[=:]\s{0,3}[\"']?([A-Za-z0-9/+=]{40})"
@@ -86,13 +84,29 @@ SECRETS = (
     ("url_password", re.compile(r"://[^/\s:@\"']{1,64}:([^@\s/\"']{3,128})@")),
 )
 """Credential shapes, matched by their published prefixes and lengths. Where a pattern has a group, the group is the
-credential and the rest is its label."""
+credential and the rest is its label. A private key is matched by its opening line and extended to its closing line
+by `_key_end`. These are the patterns a credential is *reported* by: each wants a boundary before it, so that a
+word which merely ends in `sk-` is not a key."""
+
+LOOSE_SECRETS = tuple((name, re.compile(re.sub(r"^\(\?<!\[[^\]]{1,40}\]\)", "", pattern.pattern), pattern.flags))
+                      for (name, pattern) in SECRETS)
+"""The same shapes with no boundary wanted before them, which is how a credential is *redacted*. A token straight
+after a terminal colour code, an escaped newline or any other letter is still a token, and redacting a word that
+was not one costs nothing."""
 
 GENERIC_SECRET = re.compile(
-    r"(?i:\b(?:api[_-]?key|secret|token|passw(?:or)?d|auth)[a-z0-9_-]{0,20})[\"']?\s{0,3}[=:]\s{0,3}[\"']?"
-    r"([A-Za-z0-9/+_=.-]{20,512})")
-"""A long value assigned to a name that says it is a secret. Redacted, since over-redaction costs nothing, but too
-loose to report as a leak on its own."""
+    r"(?i:(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|auth|credential|access[_-]?key|private[_-]?key)"
+    r"[a-z0-9_-]{0,20})[\"']?\s{0,3}[=:]\s{0,3}[\"']?([A-Za-z0-9/+_=.-]{20,512})")
+"""A long value assigned to a name that says it is a secret, wherever in the name it says so (`DB_PASSWORD`,
+`client_secret`, `AWS_SESSION_TOKEN`). Redacted, since over-redaction costs nothing, but too loose to report as a
+leak on its own."""
+
+BASIC_AUTH = re.compile(r"(?i:\bbasic)\s{1,3}([A-Za-z0-9+/=]{16,2048})")
+"""The value of an `Authorization: Basic` header, which is a user name and password in base64. Redaction only."""
+
+KEY_BODY = re.compile(r"[A-Za-z0-9+/=\s:,-]{0,8192}")
+"""What may follow a private key's opening line when its closing line is missing: base64 and PEM header lines."""
+MAX_KEY = 8192
 
 # --- Characters a reader does not see ---------------------------------------------------------------------------
 
@@ -480,19 +494,47 @@ def _is_example(value: str) -> bool:
     return value in EXAMPLE_VALUES
 
 
-def _credential_spans(text: str, most: int | None = MAX_MATCHES) -> list[tuple]:
-    """
-    `(start, end, name, value)` for every credential in `text`, longest first where two overlap.
+def _key_end(text: str, end: int, loose: bool) -> int:
+    """Where the private key whose opening line ends at `end` stops: after its closing line, if it has one."""
+    close = text.find("-----END", end, end + MAX_KEY)
 
-    `most` bounds the matches of each kind, for reporting. Redaction passes `None`: the fifty-first credential in a
-    text is as much a credential as the first.
+    if (close != -1):
+        after = text.find("-----", close + 8, close + 80)
+
+        return after + 5 if after != -1 else close + 8
+
+    # Cut short, or pasted without its last line: what follows the opening line is still the key.
+    return KEY_BODY.match(text, end).end() if loose else end
+
+
+def _credential_spans(text: str, most: int | None = MAX_MATCHES, loose: bool = False) -> list[tuple]:
+    """
+    `(start, end, name, value)` for every credential in `text`, in order, with overlapping ones merged into one.
+
+    `most` bounds the matches of each kind, for reporting. Redaction passes `None` and `loose`: the fifty-first
+    credential in a text is as much a credential as the first, and so is one with a letter in front of it.
     """
     spans = []
+    patterns = (*LOOSE_SECRETS, ("generic_secret", GENERIC_SECRET),
+                ("basic_auth", BASIC_AUTH)) if loose else (*SECRETS, ("generic_secret", GENERIC_SECRET))
 
-    for (name, pattern) in (*SECRETS, ("generic_secret", GENERIC_SECRET)):
-        for match in itertools.islice(pattern.finditer(text), most):
+    for (name, pattern) in patterns:
+        position = 0
+
+        for _ in itertools.count() if most is None else range(most):
+            match = pattern.search(text, position)
+
+            if (match is None):
+                break
+
             group = 1 if pattern.groups else 0
-            value = match.group(group)
+            (start, end) = (match.start(group), match.end(group))
+
+            if (name == "private_key"):
+                end = _key_end(text, end, loose)
+
+            position = max(end, match.end(), match.start() + 1)
+            value = text[start:end]
 
             if (name == "openai_style_api_key"
                     and not (any(c.isdigit() for c in value) and any(c.isupper() for c in value))):
@@ -502,7 +544,7 @@ def _credential_spans(text: str, most: int | None = MAX_MATCHES) -> list[tuple]:
             if (name == "generic_secret" and (not any(c.isdigit() for c in value) or value.isdigit())):
                 continue
 
-            spans.append((match.start(group), match.end(group), name, value))
+            spans.append((start, end, name, value))
 
     spans.sort(key=lambda span: (span[0], -(span[1] - span[0])))
     kept = []
@@ -510,8 +552,35 @@ def _credential_spans(text: str, most: int | None = MAX_MATCHES) -> list[tuple]:
     for span in spans:
         if (not kept or span[0] >= kept[-1][1]):
             kept.append(span)
+        elif (span[1] > kept[-1][1]):
+            # Two that overlap are one stretch to redact; dropping the second would leave its tail in the quote.
+            (start, _, name, _) = kept[-1]
+            kept[-1] = (start, span[1], name if name != "generic_secret" else span[2], text[start:span[1]])
 
     return kept
+
+
+def outside_credential(text: str, position: int, forward: bool = False) -> int:
+    """
+    `position`, moved so that cutting `text` there does not cut a credential in two: back to where the credential
+    starts, or with `forward`, on to where it ends. Half a key is something no pattern recognises and a quote
+    would then carry.
+    """
+    if (position <= 0 or position >= len(text)):
+        return max(0, min(position, len(text)))
+
+    base = max(0, position - CREDENTIAL_REACH)
+
+    for (start, end, _, _) in _credential_spans(text[base:position + CREDENTIAL_REACH], None, True):
+        if (start + base < position < end + base):
+            return end + base if forward else start + base
+
+    return position
+
+
+def lowered(text: str) -> str:
+    """`text` in lower case, with any credential in it redacted first: lower case hides a key from its pattern."""
+    return redact(text).lower() if _credential_spans(text, 1, True) else text.lower()
 
 
 def _marked(text: str, low: int, high: int, spans: list) -> str:
@@ -560,7 +629,7 @@ def _encoded_spans(text: str) -> list[tuple]:
     origin.extend((index, index + 1) for index in range(position, len(text)))
 
     return [(origin[start][0], origin[end - 1][1], name, value)
-            for (start, end, name, value) in _credential_spans("".join(pieces), None) if end > start]
+            for (start, end, name, value) in _credential_spans("".join(pieces), None, True) if end > start]
 
 
 def redact(text: str) -> str:
@@ -569,7 +638,7 @@ def redact(text: str) -> str:
 
     Credentials are looked for in the text as given and, where it is percent-encoded, in what it decodes to.
     """
-    redacted = _marked(text, 0, len(text), _credential_spans(text, None))
+    redacted = _marked(text, 0, len(text), _credential_spans(text, None, True))
 
     if ("%" in redacted and len(redacted) <= MAX_DECODED_REDACTION and _ENCODED_RUN.search(redacted)):
         redacted = _marked(redacted, 0, len(redacted), _encoded_spans(redacted))
@@ -604,9 +673,12 @@ def _visible(text: str) -> str:
     return "".join(shown)
 
 
+_WEB_SCHEME = re.compile(r"(?i)(https?|hxxps?|ftps?|wss?|file)://([^/\s?#]{0,255})")
+"""The schemes a terminal or a chat client turns into a link, wherever they stand: `1http://` and a scheme at the end
+of a long word are links to them too."""
 _SCHEME = re.compile(r"(?i)(?<![a-z0-9])([a-z][a-z0-9+.-]{1,15})://([^/\s?#]{0,255})")
 _BARE_LINK = re.compile(
-    r"(?i)(?<![a-z0-9@/.])(www)\.(?=[a-z0-9-]{1,63}\.)|(?<![a-z0-9])(mailto|javascript|data|vbscript):")
+    r"(?i)(?<![a-z0-9])(www)\.(?=[^\s./\[\]]{1,63}\.)|(?<![a-z0-9])(mailto|javascript|data|vbscript):")
 
 _BARE_DOT = re.compile(r"(?<!\[)\.(?!\])")
 
@@ -614,20 +686,38 @@ _BARE_DOT = re.compile(r"(?<!\[)\.(?!\])")
 def _break_scheme(match: re.Match) -> str:
     """Break one link. Breaking twice changes nothing, so a quote can pass through `defang` and then `clean`."""
     scheme = match.group(1)
-    lowered = scheme.lower()
+    lower = scheme.lower()
     host = _BARE_DOT.sub("[.]", match.group(2))
 
-    if (lowered in ("http", "https")):
+    if (lower in ("http", "https")):
         return "hxxp" + scheme[4:] + "://" + host
 
-    if (lowered in ("hxxp", "hxxps")):
+    if (lower in ("hxxp", "hxxps")):
         return scheme + "://" + host
 
     return f"{scheme}[:]//{host}"
 
 
+def _break_links(text: str) -> str:
+    text = _SCHEME.sub(_break_scheme, _WEB_SCHEME.sub(_break_scheme, text))
+
+    return _BARE_LINK.sub(lambda m: "www[.]" if m.group(1) else f"{m.group(2)}[:]", text)
+
+
 def _cut(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1] + "\u2026"
+
+
+def _head(text: str, limit: int) -> str:
+    """
+    As much of the start of `text` as a quote of `limit` characters can draw on, cut where no credential is cut.
+
+    Redaction can shrink a text (a private key becomes a short marker), so the head is far longer than the quote;
+    it is still short enough that every way a credential is looked for is tried on all of it.
+    """
+    reach = limit * 300 + 2 * CREDENTIAL_REACH
+
+    return text if len(text) <= reach else text[:outside_credential(text, reach)]
 
 
 def defang(text: str, limit: int = 160) -> str:
@@ -635,11 +725,9 @@ def defang(text: str, limit: int = 160) -> str:
     A quotable form of hostile text: credentials redacted, invisible and control characters shown as `<U+XXXX>`,
     links of every scheme broken, whitespace collapsed, and cut to `limit` characters.
     """
-    quoted = re.sub(r" {2,}", " ", _visible(redact(str(text)))).strip()
-    quoted = _SCHEME.sub(_break_scheme, quoted)
-    quoted = _BARE_LINK.sub(lambda m: "www[.]" if m.group(1) else f"{m.group(2)}[:]", quoted)
+    quoted = re.sub(r" {2,}", " ", _visible(redact(_head(str(text), limit)))).strip()
 
-    return _cut(quoted, limit)
+    return _cut(_break_links(quoted), limit)
 
 
 def clean(text, limit: int = 200) -> str:
@@ -648,10 +736,9 @@ def clean(text, limit: int = 200) -> str:
     control characters shown, links broken, and cut to `limit`. Other dots and slashes are left alone, so a path
     stays a path.
     """
-    cleaned = re.sub(r" {2,}", " ", _visible(redact(str(text)))).strip()
-    cleaned = _SCHEME.sub(_break_scheme, cleaned)
+    cleaned = re.sub(r" {2,}", " ", _visible(redact(_head(str(text), limit)))).strip()
 
-    return _cut(_BARE_LINK.sub(lambda m: "www[.]" if m.group(1) else f"{m.group(2)}[:]", cleaned), limit)
+    return _cut(_break_links(cleaned), limit)
 
 
 CREDENTIAL_REACH = 9000
@@ -669,7 +756,7 @@ def _context(text: str, start: int, end: int, margin: int = 40) -> str:
     high = min(len(text), end + margin)
     base = max(0, low - CREDENTIAL_REACH)
     spans = [(first + base, last + base, name, value)
-             for (first, last, name, value) in _credential_spans(text[base:high + CREDENTIAL_REACH], None)]
+             for (first, last, name, value) in _credential_spans(text[base:high + CREDENTIAL_REACH], None, True)]
 
     return defang(_marked(text, low, high, spans))
 
@@ -1182,7 +1269,11 @@ def _scannable(text: str) -> tuple:
     if (len(text) <= 2 * MAX_SCAN):
         return (text, False)
 
-    return (text[:MAX_SCAN] + "\n" + text[-MAX_SCAN:], True)
+    # Neither cut may fall inside a credential: half of one is not recognised and would be quoted.
+    head = text[:outside_credential(text, MAX_SCAN)]
+    tail = text[outside_credential(text, len(text) - MAX_SCAN, forward=True):]
+
+    return (head + "\n" + tail, True)
 
 
 def scan_text(text: str) -> list[Indicator]:

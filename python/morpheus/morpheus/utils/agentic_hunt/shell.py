@@ -35,11 +35,41 @@ import dataclasses
 import functools
 import re
 
+from . import text_indicators
+
 MAX_PARSE = 200_000
 """The most characters of one command line that are read. A longer line is read to here and marked uncertain."""
 
 MAX_DEPTH = 6
-RESERVED_PREFIXES = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
+MAX_NESTED = 400_000
+PLAIN_RUN = re.compile(r"[A-Za-z0-9_./=:,@%+^~-]+")
+QUOTED_RUN = re.compile(r"[^\"\\$`]+")
+RESERVED_PREFIXES = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{", "("])
+GLOBAL_VALUE_OPTIONS = {
+    "git":
+        frozenset(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"]),
+    "aws":
+        frozenset([
+            "--profile",
+            "--region",
+            "--endpoint-url",
+            "--output",
+            "--ca-bundle",
+            "--color",
+            "--cli-read-timeout",
+            "--cli-connect-timeout"
+        ]),
+    "gcloud":
+        frozenset(
+            ["--project", "--account", "--configuration", "--format", "--verbosity", "--impersonate-service-account"]),
+    "az":
+        frozenset(["--subscription"]),
+    "docker":
+        frozenset(["--context", "-c", "-H", "--host", "--config", "-l", "--log-level"]),
+}
+"""Programs whose subcommand may follow options of the program itself, and which of those take a value."""
+FUNCTION_NAME = re.compile(r"^[A-Za-z_][\w.:-]{0,63}\(\)$")
+CASE_ARM = re.compile(r"^[\w.*?|\[\]\"'$-]{1,64}\)$")
 
 WINDOWS_LINE = re.compile(
     r"(?i)(?:^|[\s\"'=(])[a-z]:\\|\\\\[\w.$-]{1,64}\\|%[a-z_()]{2,32}%|\$env:|\bHK(?:CU|LM|CR|U|EY_[A-Z_]{4,24})\\|"
@@ -139,6 +169,8 @@ class Command:
     code: str = ""
     """Code this command hands to a language interpreter: the text after `python -c`, or a heredoc fed to one."""
     uncertain: bool = False
+    globals: list = dataclasses.field(default_factory=list)
+    """Options given before the subcommand (`git -C dir`, `aws --profile p`), set aside so `args` starts with it."""
 
     @property
     def operands(self) -> list:
@@ -182,6 +214,10 @@ class Command:
                     found.append(word[len(name) + 1:])
                 elif (len(name) == 2 and word.startswith(name) and len(word) > 2 and not word.startswith("--")):
                     found.append(word[2:])
+                elif (len(name) == 2 and len(word) > 2 and word[0] == "-" and word[1:].isalpha() and word[-1] == name[1]
+                      and index + 1 < len(self.args)):
+                    # `curl -sT file`: the last letter of a cluster may be an option that takes the next word.
+                    found.append(self.args[index + 1])
 
         return found
 
@@ -233,22 +269,40 @@ def _matching(text: str, start: int, opener: str, closer: str) -> int:
 class _Reader:
     """One pass over a line, collecting commands; nested code is read by a nested reader into the same list."""
 
-    def __init__(self, commands: list, depth: int, via: str, parent: int, windows: bool = False):
+    def __init__(self,
+                 commands: list,
+                 depth: int,
+                 via: str,
+                 parent: int,
+                 windows: bool = False,
+                 budget: list | None = None):
         self.commands = commands
         self.depth = depth
         self.via = via
         self.parent = parent
         self.windows = windows
+        self.budget = [MAX_NESTED] if budget is None else budget
+        """How many more characters of nested code this line may have read, shared by every reader of the line."""
 
     def nested(self, text: str, via: str, parent: int) -> list:
         """Read `text` as code run by `parent`; returns the indexes of the commands it holds."""
-        if (self.depth >= MAX_DEPTH or len(self.commands) >= MAX_COMMANDS or not text.strip()):
+        # Depth is counted along the chain of commands that run one another, whichever reader found them: code a
+        # command hands to `eval` or `sh -c` is read after the line is, by the line's own reader.
+        depth = 0
+        cursor = parent
+
+        while (0 <= cursor < len(self.commands) and depth <= MAX_DEPTH):
+            depth += 1
+            cursor = self.commands[cursor].parent
+
+        if (depth > MAX_DEPTH or len(self.commands) >= MAX_COMMANDS or not text.strip() or self.budget[0] < len(text)):
             return []
 
+        self.budget[0] -= len(text)
         before = len(self.commands)
 
         try:
-            _Reader(self.commands, self.depth + 1, via, parent, self.windows).read(text)
+            _Reader(self.commands, self.depth + 1, via, parent, self.windows, self.budget).read(text)
         except _Unreadable:
             del self.commands[before:]
             self.commands.extend(_fallback_commands(text, via, parent))
@@ -323,12 +377,15 @@ class _Reader:
                 self.commands.append(command)
                 own = len(self.commands) - 1
 
-                for (kind, inner) in substitutions:
-                    children = self.nested(inner, kind, own)
+                # Each distinct substitution is read once, however often the line repeats it.
+                read = {}
 
-                    for (word_index, whole_kind, whole_inner) in whole:
-                        if (whole_kind == kind and whole_inner == inner):
-                            command.whole_words.append((word_index, kind, children))
+                for piece in substitutions:
+                    if (piece not in read):
+                        read[piece] = self.nested(piece[1], piece[0], own)
+
+                for (word_index, kind, inner) in whole:
+                    command.whole_words.append((word_index, kind, read.get((kind, inner), [])))
 
                 if (len(self.commands) > MAX_COMMANDS):
                     raise _Unreadable("too many commands")
@@ -343,6 +400,16 @@ class _Reader:
                 pipeline += 1
 
         while index < length:
+            # Most of any line is plain word characters; taking a run of them at once is what keeps a long line
+            # from costing a dozen checks a character.
+            run = PLAIN_RUN.match(text, index)
+
+            if (run is not None):
+                word.append(run.group(0))
+                (in_word, literal) = (True, True)
+                index = run.end()
+                continue
+
             character = text[index]
 
             if (character == "\\" and index + 1 < length):
@@ -361,6 +428,30 @@ class _Reader:
                 index += 2
                 continue
 
+            if (character == "$" and text.startswith("$'", index)):
+                # ANSI-C quoting: a backslash escapes the quote that would otherwise end it.
+                cursor = index + 2
+
+                while cursor < length and text[cursor] != "'":
+                    cursor += 2 if text[cursor] == "\\" else 1
+
+                if (cursor >= length):
+                    raise _Unreadable("quote")
+
+                word.append(text[index + 2:cursor])
+                (in_word, literal) = (True, True)
+                index = cursor + 1
+                continue
+
+            if (character == "$" and text.startswith("$((", index)):
+                # Arithmetic: `<<` in it is a shift, not a here-document, and nothing in it is a command.
+                close = text.find("))", index + 3)
+                close = length if close == -1 else close + 2
+                word.append(text[index:close])
+                (in_word, literal) = (True, True)
+                index = close
+                continue
+
             if (character == "'"):
                 close = text.find("'", index + 1)
 
@@ -377,7 +468,13 @@ class _Reader:
                 in_word = True
 
                 while index < length and text[index] != '"':
-                    if (text[index] == "\\" and index + 1 < length):
+                    run = QUOTED_RUN.match(text, index)
+
+                    if (run is not None):
+                        word.append(run.group(0))
+                        literal = True
+                        index = run.end()
+                    elif (text[index] == "\\" and index + 1 < length):
                         # Inside double quotes a backslash escapes only these; before anything else it is itself.
                         if (text[index + 1] not in '$`"\\\n'):
                             word.append("\\")
@@ -387,7 +484,13 @@ class _Reader:
                             literal = True
 
                         index += 2
-                    elif (text.startswith("$(", index) and not text.startswith("$((", index)):
+                    elif (text.startswith("$((", index)):
+                        close = text.find("))", index + 3)
+                        close = length if close == -1 else close + 2
+                        word.append(text[index:close])
+                        literal = True
+                        index = close
+                    elif (text.startswith("$(", index)):
                         close = _matching(text, index + 2, "(", ")")
                         pieces.append(("$(", text[index + 2:close - 1]))
                         substitutions.append(pieces[-1])
@@ -458,6 +561,11 @@ class _Reader:
 
             if (character == "\n"):
                 end_word()
+
+                if (position > 0 and not (words or writes or reads or heredocs)):
+                    # A line that ends in a pipe goes on with the next.
+                    index += 1
+                    continue
 
                 if (heredocs):
                     cursor = index + 1
@@ -639,6 +747,35 @@ def _resolve(command: Command) -> None:
         (name, value) = words.pop(0).split("=", 1)
         command.assignments[name] = value
 
+    # `(cd /tmp && make)`: the parentheses of a subshell belong to no word.
+    while (words and words[0].startswith("(") and not words[0].startswith("((") and len(words[0]) > 1):
+        words[0] = words[0][1:]
+
+    if (words and words[-1].endswith(")") and words[-1].count(")") > words[-1].count("(")):
+        words[-1] = words[-1].rstrip(")")
+
+        if (not words[-1]):
+            words.pop()
+
+    # `f() { curl ...`, `function f { curl ...`: the body's first command is what the definition holds.
+    if (len(words) > 1 and FUNCTION_NAME.match(words[0])):
+        del words[:1]
+    elif (len(words) > 2 and words[0] == "function"):
+        del words[:2]
+
+        if (words and words[0] == "()"):
+            words.pop(0)
+    elif (len(words) > 3 and words[0] == "case" and "in" in words[1:4]):
+        # `case $x in a|b) curl ...`: the first arm's command follows its pattern.
+        arm = next((index for (index, word) in enumerate(words) if index > words.index("in") and word.endswith(")")),
+                   None)
+
+        if (arm is not None and arm + 1 < len(words)):
+            del words[:arm + 1]
+    elif (len(words) > 1 and CASE_ARM.match(words[0])):
+        # A later arm: `b) rm -rf ~`.
+        words.pop(0)
+
     # `do curl ...`, `then rm ...`, `! grep ...`: the command is what follows the reserved word.
     while len(words) > 1 and words[0] in RESERVED_PREFIXES:
         words.pop(0)
@@ -676,6 +813,17 @@ def _resolve(command: Command) -> None:
 
     command.program = "" if words[0][:2] in ("$(", "<(", ">(") or words[0][:1] == "`" else program_name(words[0])
     command.args = words[1:]
+
+    # `git -C /srv/app push`, `aws --profile prod s3 rb`: what comes before the subcommand is set aside.
+    takes_value = GLOBAL_VALUE_OPTIONS.get(command.program)
+
+    if (takes_value is not None):
+        while (command.args and command.args[0].startswith("-") and len(command.args[0]) > 1):
+            option = command.args.pop(0)
+            command.globals.append(option)
+
+            if (option in takes_value and command.args):
+                command.globals.append(command.args.pop(0))
 
     # `python3.12` is `python3`.
     for base in ("python3", "python2", "python"):
@@ -776,7 +924,8 @@ def _inline(reader: _Reader, commands: list) -> None:  # pylint: disable=too-man
                     written[target] = content
 
         # ... and running it is running what was written.
-        invoked = command.argv[len(command.argv) - len(command.args) - 1] if program and command.argv else ""
+        invoked = command.argv[len(command.argv) - len(command.args) - len(command.globals) -
+                               1] if program and command.argv else ""
 
         if (program not in SHELLS and invoked):
             for path in (invoked, invoked.removeprefix("./")):
@@ -842,7 +991,10 @@ def parse(text: str) -> tuple:
         return ()
 
     cut = len(text) > MAX_PARSE
-    text = text[:MAX_PARSE]
+
+    if (cut):
+        # Not through the middle of a credential: half of one is quoted as evidence and no pattern redacts it.
+        text = text[:text_indicators.outside_credential(text, MAX_PARSE)]
     commands: list = []
     reader = _Reader(commands, 0, "", -1, WINDOWS_LINE.search(text) is not None)
 
@@ -867,9 +1019,21 @@ def parse(text: str) -> tuple:
     return tuple(commands)
 
 
+_GROUPED: list = [(None, {})]
+
+
 def pipeline_of(commands: tuple, command: Command) -> list:
     """The commands of one pipeline, in order, at the same nesting as `command`."""
-    return [
-        other for other in commands
-        if other.pipeline == command.pipeline and other.via == command.via and other.parent == command.parent
-    ]
+    (known, groups) = _GROUPED[0]
+
+    if (known is not commands):
+        # Grouped once for a line, however many of its commands ask: asking per command made a long pipeline
+        # cost the square of its length.
+        groups = {}
+
+        for other in commands:
+            groups.setdefault((other.pipeline, other.via, other.parent), []).append(other)
+
+        _GROUPED[0] = (commands, groups)
+
+    return groups.get((command.pipeline, command.via, command.parent), [])

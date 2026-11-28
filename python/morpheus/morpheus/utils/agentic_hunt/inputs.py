@@ -133,7 +133,10 @@ def load(paths: list[str], strict: bool = False) -> tuple:
         if (mcp_audit.servers_in(document)):
             configs.append((name, document))
         elif (isinstance(document, dict) and isinstance(document.get("tools"), list)):
-            found.append(_manifest_event(document, path))
+            try:
+                found.append(_manifest_event(document, path))
+            except (ValueError, TypeError, OverflowError, RecursionError) as error:
+                refuse(name, f"a tool manifest that could not be read ({type(error).__name__})")
         else:
             refuse(name, "JSON, but neither an MCP configuration nor a tool manifest")
 

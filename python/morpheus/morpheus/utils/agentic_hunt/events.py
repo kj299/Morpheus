@@ -60,9 +60,10 @@ class TelemetryError(ValueError):
     """A record that is not an event either reader understands."""
 
 
+MAX_TIME_TEXT = 64
 _ISO = re.compile(
-    r"^\s*(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?\s*"
-    r"(Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)?\s*$",
+    r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?[ ]{0,2}"
+    r"(Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)?$",
     re.I)
 
 
@@ -83,7 +84,8 @@ def parse_time(value) -> datetime.datetime | None:  # pylint: disable=too-many-r
     if (isinstance(value, str)):
         text = value.strip()
 
-        if (not text):
+        # No time is written in more than a few dozen characters, and a long string of spaces must not be searched.
+        if (not text or len(text) > MAX_TIME_TEXT):
             return None
 
         match = _ISO.match(text)
@@ -115,7 +117,12 @@ def parse_time(value) -> datetime.datetime | None:  # pylint: disable=too-many-r
         except ValueError:
             return None
 
-    if (not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0):
+    try:
+        usable = isinstance(value, (int, float)) and math.isfinite(value) and 0 < value < 1e20
+    except OverflowError:  # an integer too large to be a float
+        usable = False
+
+    if (not usable):
         return None
 
     # Seconds until the year 5138 are below 1e11; each larger unit is a thousand times that.
@@ -283,6 +290,8 @@ def _result_text(result: dict) -> str:
 CLIENT_REQUESTS = ("initialize", "ping", "tools/", "prompts/", "resources/", "completion/", "logging/")
 """Methods a client asks of a server. Anything else carrying an id is the server asking the client."""
 
+MAX_PENDING_PER_ID = 32
+
 
 class _TranscriptReader:
     """
@@ -315,7 +324,12 @@ class _TranscriptReader:
 
         if (isinstance(method, str)):
             if ("id" in message and method.startswith(CLIENT_REQUESTS)):
-                self.pending.setdefault(key, []).append(message)
+                waiting = self.pending.setdefault(key, [])
+                waiting.append(message)
+
+                # A client does not leave many requests open under one id; a log that does is not paired at all.
+                if (len(waiting) > MAX_PENDING_PER_ID):
+                    del waiting[0]
 
             if (method == "tools/call"):
                 params = _mapping(message.get("params"))

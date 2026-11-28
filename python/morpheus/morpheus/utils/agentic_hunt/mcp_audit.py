@@ -178,9 +178,14 @@ def audit_server(name: str, entry: dict) -> list[dict]:
     url = str(entry.get("url") or entry.get("serverUrl") or "")
 
     if (url):
-        parsed = urllib.parse.urlparse(url)
+        try:
+            parsed = urllib.parse.urlparse(url)
+            plaintext = parsed.scheme == "http" and parsed.hostname not in LOCAL_HOSTS
+        except ValueError:
+            # An address that cannot be parsed is not a reason to drop what the launch line already showed.
+            plaintext = url.lower().startswith("http://")
 
-        if (parsed.scheme == "http" and parsed.hostname not in LOCAL_HOSTS):
+        if (plaintext):
             found.append(
                 _finding(name,
                          "plaintext_remote",
@@ -431,6 +436,9 @@ def changed_definitions(baseline: dict, server: str, tools: list) -> list[dict]:
 def cross_references(server: str, tool: dict, others: dict) -> list[str]:
     """The names of other servers' tools that one tool's description mentions: a description steering another."""
     text = " ".join(text for (_, text) in tool_texts(tool))
+    # The description is split into names once; looking for each other tool by its own pattern made a pair of
+    # large servers cost the product of their sizes in compiled patterns.
+    words = set(re.findall(r"[\w-]+", text))
     named = []
 
     for (other_server, names) in others.items():
@@ -441,7 +449,7 @@ def cross_references(server: str, tool: dict, others: dict) -> list[str]:
             # A bare word such as `search` would match ordinary prose; a compound or long name would not.
             distinctive = "_" in name or "-" in name or len(name) >= 8
 
-            if (distinctive and re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text)):
+            if (distinctive and (name in words if re.fullmatch(r"[\w-]+", name) else name in text)):
                 named.append(f"{other_server}.{name}")
 
     return sorted(named)

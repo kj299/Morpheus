@@ -39,6 +39,7 @@ import re
 import urllib.parse
 
 from . import shell
+from . import text_indicators
 
 LOOPBACK = frozenset(["localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]", "host.docker.internal"])
 
@@ -261,8 +262,9 @@ SQL_DESTRUCTION = re.compile(
 """Statements that remove a table, a schema or every row: a `DELETE` with no `WHERE` is the last of those."""
 
 PRODUCTION_SCOPE = re.compile(r"(?i)(?:^|[^a-z])(?:prod|production|prd|live)(?:[^a-z]|$)")
-SCRATCH_SCOPE = re.compile(r"(?i)(?:^|[^a-z])(?:tests?|testing|dev|devel|tmp|temp|smoke|scratch|sandbox|ci|local|"
-                           r"localhost|127\.0\.0\.1|demo|e2e|fixtures?|ephemeral|preview|playground)(?:[^a-z]|$)")
+SCRATCH_SCOPE = re.compile(
+    r"(?i)(?:^|[^a-z])(?:tests?|testing|dev|devel|tmp|temp|smoke|scratch|sandbox|ci|local|"
+    r"localhost|127\.0\.0\.1|demo|e2e|fixtures?|ephemeral|preview|playground|development)(?:[^a-z]|$)")
 """What a destructive command names says how much it matters: the same `DROP DATABASE` is a test's teardown on
 `importer_test` and an incident on `production`. Production wins where a line names both."""
 
@@ -547,24 +549,36 @@ class Facts:
 
 
 def _host_of(word: str) -> str:
-    """The host of a URL, a `user@host:path`, or a bare host; empty when the word is none of them."""
+    """The host of a URL, a `user@host:path`, or a bare host, in lower case; empty when the word is none of them."""
+    return text_indicators.lowered(_host_as_written(word))
+
+
+def _host_as_written(word: str) -> str:
     word = word.strip("'\"")
 
     if ("://" in word):
         try:
-            return (urllib.parse.urlsplit(word).hostname or "").lower()
+            netloc = urllib.parse.urlsplit(word).netloc
         except ValueError:
             return ""
+
+        # The host as written, not as `hostname` gives it: lower case hides a key from the pattern that redacts it.
+        host = netloc.rsplit("@", 1)[-1]
+
+        if (host.startswith("[")):
+            return host[1:].split("]", 1)[0]
+
+        return host.split(":", 1)[0]
 
     candidate = word.split("@", 1)[-1].split("/", 1)[0]
 
     if (candidate.startswith("[") and "]" in candidate):
-        return candidate[1:candidate.index("]")].lower()
+        return candidate[1:candidate.index("]")]
 
     candidate = candidate.split(":", 1)[0]
 
     if (HOSTLIKE.match(candidate) and candidate.rsplit(".", 1)[-1].lower() not in FILE_EXTENSIONS):
-        return candidate.lower()
+        return candidate
 
     if (re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", candidate)):
         return candidate
@@ -587,6 +601,8 @@ def _operands(command: shell.Command, value_options: frozenset) -> list:
             ended = True
         elif (word in value_options):
             skip = True
+        elif (len(word) > 2 and word[0] == "-" and word[1:].isalpha() and "-" + word[-1] in value_options):
+            skip = True  # `-fsSLo file`: a cluster whose last letter takes the next word
         elif (not word.startswith("-") or word == "-"):
             found.append(word)
 
@@ -809,9 +825,19 @@ def _reads_program_from_stdin(command: shell.Command) -> bool:
     program = command.program
 
     if (program in shell.SHELLS):
-        return not any(
-            word.endswith("c") and word.startswith("-") and not word.startswith("--")
-            for word in command.args) and all(word in ("-", "-s") for word in command.operands)
+        if (any(word.endswith("c") and word.startswith("-") and not word.startswith("--") for word in command.args)):
+            return False
+
+        if (command.option("-s")):
+            return True  # `bash -s -- --quiet`: what follows are the script's arguments, and the script is stdin
+
+        # `bash -eux -o pipefail`: `pipefail` is the value of `-o`, not a script to run.
+        scripts = [
+            word for (index, word) in enumerate(command.args)
+            if not word.startswith(("-", "+")) and command.args[max(0, index - 1):index] not in (["-o"], ["+o"])
+        ]
+
+        return not scripts
 
     if (program in ("python", "python2", "python3")):
         return not command.option("-c", "-m") and all(word in ("-", "/dev/stdin") for word in command.operands[:1])
@@ -822,10 +848,31 @@ def _reads_program_from_stdin(command: shell.Command) -> bool:
     return program in ("iex", "invoke-expression")
 
 
+def _saved_as(command: shell.Command) -> list:
+    """The files a download is saved to: `-o name`, the address's own last part for `curl -O` and plain `wget`."""
+    program = command.program
+
+    if (program not in ("curl", "wget")):
+        return []
+
+    addresses = [word for word in command.args if "://" in word]
+    remote = [address.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] for address in addresses]
+
+    if (program == "curl"):
+        named = command.value("-o", "--output")
+
+        return [*named, *(remote if command.option("-O", "--remote-name", "--remote-name-all") else [])]
+
+    named = [name for name in command.value("-O", "--output-document") if name != "-"]
+
+    return named or ([] if command.value("-O", "--output-document") else remote)
+
+
 def _targets_written(command: shell.Command) -> list:
     """Every path a command writes, replaces or deletes: redirections, and the operands that name a destination."""
     program = command.program
     found = [target for (target, _) in command.writes]
+    found.extend(_saved_as(command))
 
     if (program == "tee"):
         found.extend(command.operands)
@@ -840,6 +887,30 @@ def _targets_written(command: shell.Command) -> list:
 
     return found
 
+
+KNOWN_INSTALLER_HOSTS = frozenset([
+    "sh.rustup.rs",
+    "get.docker.com",
+    "astral.sh",
+    "bun.sh",
+    "deno.land",
+    "get.pnpm.io",
+    "fnm.vercel.app",
+    "starship.rs",
+    "get.helm.sh",
+    "install.python-poetry.org",
+    "sdk.cloud.google.com",
+    "get.sdkman.io",
+    "mise.run",
+    "get.volta.sh",
+    "install.determinate.systems",
+    "ohmyposh.dev",
+    "pyenv.run",
+    "get.k3s.io",
+    "cli.github.com"
+])
+"""Hosts whose documented installation is a script piped to a shell. Running one is still running fetched code, so
+it is reported, at low: it is what a developer asked for far more often than what an attacker planted."""
 
 PROFILE_ROUTINE = re.compile(
     r"^\s{0,8}(?:#[^\n]{0,200}|(?:export\s{1,4})?PATH=[\"']?(?:\$HOME|~|\$\{HOME\}|/usr/local|/opt/homebrew|\$PATH)"
@@ -888,7 +959,13 @@ def _risky(commands: tuple) -> list:  # pylint: disable=too-many-branches,too-ma
 
             if (all(other.program in PASS_THROUGH or _is_decoder(other) or other.program in FETCHERS
                     for other in between)):
-                if (any(other.program in FETCHERS for other in upstream)):
+                fetched = [
+                    item.host for other in upstream if other.program in FETCHERS for item in _egress_of(other, False)
+                ]
+
+                if (fetched and all(host in KNOWN_INSTALLER_HOSTS for host in fetched)):
+                    add("known_installer_run", "T1105", command if len(command.raw) > 8 else upstream[0])
+                elif (any(other.program in FETCHERS for other in upstream)):
                     add("download_and_execute", "T1105", command if len(command.raw) > 8 else upstream[0])
 
                 if (any(_is_decoder(other) for other in upstream)):
@@ -904,10 +981,11 @@ def _risky(commands: tuple) -> list:  # pylint: disable=too-many-branches,too-ma
 
         # ... or a file fetched and then run in the same line.
         if (program in ("curl", "wget")):
-            for name in [*command.value("-o", "--output", "-O", "--output-document")]:
+            # Saved under a name, under the address's own, or by redirection: `curl -s url > p.sh; sh p.sh`.
+            for name in [*_saved_as(command), *(target for (target, _) in command.writes)]:
                 downloaded[name.removeprefix("./")] = command
         elif (downloaded and command.argv):
-            invoked = command.argv[len(command.argv) - len(command.args) - 1].removeprefix("./")
+            invoked = command.argv[len(command.argv) - len(command.args) - len(command.globals) - 1].removeprefix("./")
             script = next((word.removeprefix("./") for word in command.operands[:1]), "")
 
             if (invoked in downloaded or (program in STDIN_PROGRAMS and script in downloaded)):
@@ -920,7 +998,10 @@ def _risky(commands: tuple) -> list:  # pylint: disable=too-many-branches,too-ma
             if (CODE_DECODE.search(command.code) and CODE_EXEC.search(command.code)):
                 add("decode_and_execute", "T1027", command)
 
-            if (CODE_SOCKET_SHELL.search(command.code)):
+            connects = re.search(r"(?i)\.connect(?:_ex)?\(|fsockopen\(|TCPSocket|TCPClient", command.code) is not None
+
+            # A socket and a subprocess in one script is a port check as often as a shell; the connection is not.
+            if (connects and CODE_SOCKET_SHELL.search(command.code)):
                 add("reverse_shell", "T1059", command)
 
         if (program in ("pwsh", "powershell")
@@ -1030,6 +1111,11 @@ def _destructive(commands: tuple) -> list:  # pylint: disable=too-many-branches,
         args = command.args
         lowered = [word.lower() for word in args]
         plain = [word for word in args if not word.startswith("-")]
+        scope = [*args, *command.globals]
+
+        # A rehearsal destroys nothing.
+        if (any(word.startswith("--dry-run") or word in ("--dryrun", "--what-if", "-WhatIf") for word in args)):
+            continue
 
         if (program == "rm" and (command.option("-r", "-R", "--recursive") or "--no-preserve-root" in args)):
             if ("--no-preserve-root" in args or any(ROOTISH.match(word) for word in command.operands)):
@@ -1067,21 +1153,22 @@ def _destructive(commands: tuple) -> list:  # pylint: disable=too-many-branches,
 
             # `plan -destroy` shows what a destroy would do and changes nothing.
             if (verb == "destroy" or (verb == "apply" and "-destroy" in args)):
-                add("infrastructure_destroy", _scoped("high", args), command)
+                add("infrastructure_destroy", _scoped("high", scope), command)
         elif (program == "pulumi" and plain[:1] == ["destroy"] or program == "gh" and plain[:2] == ["repo", "delete"]
-              or program == "aws" and plain[:2] == ["cloudformation", "delete-stack"]
-              or program == "gcloud" and plain[:2] == ["projects", "delete"]
-              or program == "az" and plain[:2] == ["group", "delete"] or program == "cdk" and plain[:1] == ["destroy"]):
-            add("infrastructure_destroy", _scoped("high", args), command)
+              or program == "aws" and _in_order(plain, ("cloudformation", "delete-stack"))
+              or program == "gcloud" and _in_order(plain, ("projects", "delete"))
+              or program == "az" and _in_order(plain,
+                                               ("group", "delete")) or program == "cdk" and plain[:1] == ["destroy"]):
+            add("infrastructure_destroy", _scoped("high", scope), command)
         elif (program == "aws" and plain[:1] == ["s3"] and (plain[1:2] == ["rb"] or
                                                             (plain[1:2] == ["rm"] and "--recursive" in args))
               or program == "gsutil" and "rm" in args and any(word in ("-r", "-R", "-rf") for word in args)
               or program == "gcloud" and plain[:2] == ["storage", "rm"] and any(word in ("-r", "--recursive")
                                                                                 for word in args)
               or program == "az" and plain[:1] == ["storage"] and any(word.startswith("delete") for word in plain)):
-            add("cloud_storage_delete", _scoped("high", args), command)
+            add("cloud_storage_delete", _scoped("high", scope), command)
         elif (program in CLOUD_DELETES and any(_in_order(plain, sequence) for sequence in CLOUD_DELETES[program])):
-            add("cloud_resource_delete", _scoped("high", args), command)
+            add("cloud_resource_delete", _scoped("high", scope), command)
         elif (program in ("kubectl", "oc")):
             operands = _operands(command, KUBECTL_VALUE_OPTIONS)
 
@@ -1090,19 +1177,20 @@ def _destructive(commands: tuple) -> list:  # pylint: disable=too-many-branches,
                 everything = "--all" in args or "--all-namespaces" in args or "-A" in args
 
                 if (kinds & KUBECTL_BROAD_KINDS or everything):
-                    add("cluster_delete", _scoped("high", args), command)
+                    add("cluster_delete", _scoped("high", scope), command)
                 elif (kinds & KUBECTL_WORKLOAD_KINDS):
-                    add("cluster_delete", _scoped("medium", args), command)
+                    add("cluster_delete", _scoped("medium", scope), command)
         elif (program == "helm" and plain[:1] in (["uninstall"], ["delete"])):
-            add("cluster_delete", _scoped("medium", args), command)
+            add("cluster_delete", _scoped("medium", scope), command)
         elif (program == "dd" and any(re.match(r"of=/dev/(?:sd|nvme|hd|vd|disk|mmcblk)", word) for word in args)
-              or program.startswith("mkfs") or program in ("chmod", "chown") and command.option("-R")
+              or program.startswith("mkfs") and any(word.startswith("/dev/") for word in command.operands)
+              or program in ("chmod", "chown") and command.option("-R")
               and any(ROOTISH.match(word) and word not in (".", "./", "*") for word in command.operands)):
             add("disk_destruction", "high", command)
         elif (program == "dropdb"):
-            add("drop_database_object", _scoped("high", args), command)
+            add("drop_database_object", _scoped("high", scope), command)
         elif (program in ("redis-cli", "valkey-cli") and any(word.upper() in ("FLUSHALL", "FLUSHDB") for word in args)):
-            add("data_store_flush", _scoped("high", args), command)
+            add("data_store_flush", _scoped("high", scope), command)
 
         if (program in DATABASE_CLIENTS):
             fed = command.heredoc or command.herestring
@@ -1154,15 +1242,80 @@ def _agent_configuration(commands: tuple) -> tuple:
     return (tuple(dict.fromkeys(writes)), tuple(dict.fromkeys(registrations)), tuple(dict.fromkeys(flags)))
 
 
+COMMON_VARIABLES = frozenset([
+    "HOME",
+    "PWD",
+    "OLDPWD",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "USER",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "HOSTNAME",
+    "LANG",
+    "EDITOR",
+    "RANDOM",
+    "UID",
+    "IFS",
+    "OSTYPE",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "RUNNER_TEMP",
+    "GITHUB_WORKSPACE",
+    "CI"
+])
+VARIABLE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]{0,63})")
+OUTPUT_OPTIONS = frozenset([
+    "-o",
+    "--output",
+    "-O",
+    "--output-document",
+    "--output-dir",
+    "-P",
+    "--directory-prefix",
+    "-D",
+    "--dump-header",
+    "-c",
+    "--cookie-jar",
+    "--trace",
+    "--stderr"
+])
+
+
+def _variables_sent(command: shell.Command) -> set:
+    """The variables a network command uses anywhere but in where it saves what it fetched."""
+    used = set()
+    skip = False
+
+    for word in command.args:
+        if (skip):
+            skip = False
+        elif (word in OUTPUT_OPTIONS):
+            skip = True
+        else:
+            used.update(VARIABLE.findall(word))
+
+    return used - COMMON_VARIABLES
+
+
 def _flows(commands: tuple, reads: dict, egress: dict) -> list:
     """Where one line reads a credential and carries it to the network: by pipe, upload, substitution or variable."""
     found = []
     tainted = set()
     sourced = False
+    index_of = {id(command): index for (index, command) in enumerate(commands)}
+    substituted: dict = {}
+
+    for (child, other) in enumerate(commands):
+        if (other.via == "$("):
+            substituted.setdefault(other.parent, []).append(child)
 
     for (index, command) in enumerate(commands):
         # A variable assigned from a credential, or an environment file sourced, taints what uses it later.
-        children = [child for (child, other) in enumerate(commands) if other.parent == index and other.via == "$("]
+        children = substituted.get(index, [])
 
         if (command.assignments and any(child in reads for child in children)):
             tainted.update(command.assignments)
@@ -1174,9 +1327,14 @@ def _flows(commands: tuple, reads: dict, egress: dict) -> list:
         if (command.program in ("source", ".") and index in reads):
             sourced = True
 
-        for item in egress.get(index, []):
-            line = shell.pipeline_of(commands, command)
-            upstream = [commands.index(other) for other in line[:command.position]] if command.position else []
+        if (index not in egress):
+            continue
+
+        line = shell.pipeline_of(commands, command)
+        upstream = [index_of[id(other)] for other in line[:command.position]] if command.position else []
+        used = _variables_sent(command) if (tainted or sourced) else set()
+
+        for item in egress[index]:
             what = None
 
             if (index in reads and command.program not in ("ssh", )):
@@ -1185,9 +1343,11 @@ def _flows(commands: tuple, reads: dict, egress: dict) -> list:
                 what = next(reads[other] for other in upstream if other in reads)
             elif (any(child in reads for child in children)):
                 what = next(reads[child] for child in children if child in reads)
-            elif (tainted and any(re.search(rf"\$\{{?{re.escape(name)}\b", command.raw) for name in tainted)):
+            elif (used & tainted):
                 what = ["(a variable holding a credential)"]
-            elif (sourced and re.search(r"\$\{?[A-Za-z_]", command.raw)):
+            elif (sourced and used):
+                # A variable the environment file may have set, used in what is sent or where it is sent: not
+                # `$TMPDIR` in the name of the file a download is saved to.
                 what = ["(a variable from a sourced environment file)"]
 
             if (what):

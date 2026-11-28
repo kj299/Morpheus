@@ -399,7 +399,8 @@ class Server:
         if ("id" not in message):
             return None
 
-        if (isinstance(ident, bool) or not isinstance(ident, (str, int, float))):
+        if (isinstance(ident, bool) or not isinstance(ident, (str, int, float)) or ident != ident  # NaN
+                or ident in (float("inf"), float("-inf"))):
             return _error(None, -32600, "invalid request: id must be a string or a number")
 
         if (not isinstance(method, str)):

@@ -50,12 +50,13 @@ MODEL_API_HOSTS = ("api.anthropic.com",
                    "api.cohere.com",
                    "openrouter.ai",
                    "api.x.ai",
-                   "bedrock-runtime.",
-                   "bedrock.",
                    "statsig.anthropic.com",
                    "api2.cursor.sh")
 """Where an agent sends its context on every turn. Egress there is the agent working, not a hunt's egress. An entry
-that starts with a dot matches every host under it; one that ends with a dot, every host that starts with it."""
+that starts with a dot matches every host under it."""
+
+MODEL_API_PATTERN = re.compile(r"^bedrock(?:-runtime|-agent-runtime)?(?:-fips)?\.[a-z0-9-]{1,32}\.amazonaws\.com$")
+"""Model endpoints named by region. The whole name is matched: `bedrock.evil.example` is not Amazon's."""
 
 DEFAULT_ALLOWLIST = ("github.com",
                      "api.github.com",
@@ -436,9 +437,9 @@ def _allowed(host: str, allowlist: tuple) -> bool:
 
 
 def _ignored(host: str, ctx: HuntContext) -> bool:
-    return (not host or host in commands.LOOPBACK or host in ctx.model_api_hosts or any(
-        (entry.startswith(".") and host.endswith(entry)) or (entry.endswith(".") and host.startswith(entry))
-        for entry in ctx.model_api_hosts))
+    return (not host or host in commands.LOOPBACK or host in ctx.model_api_hosts
+            or MODEL_API_PATTERN.match(host) is not None
+            or any(entry.startswith(".") and host.endswith(entry) for entry in ctx.model_api_hosts))
 
 
 def egress_of(event: dict, ctx: HuntContext) -> list:
@@ -451,7 +452,7 @@ def egress_of(event: dict, ctx: HuntContext) -> list:
     found = []
 
     if (event["type"] == "network"):
-        host = str(event["network"].get("dest_host") or event["network"].get("dest_ip") or "").lower()
+        host = text_indicators.lowered(str(event["network"].get("dest_host") or event["network"].get("dest_ip") or ""))
         found.append(commands.Egress(host, False, f"connection to {host}"))
     elif (event["type"] == "tool_call"):
         capabilities = tool_capabilities(event["tool"])
@@ -472,7 +473,7 @@ def egress_of(event: dict, ctx: HuntContext) -> list:
 
         if (sends and isinstance(event["args"].get("to"), str) and "@" in event["args"]["to"]):
             found.append(
-                commands.Egress(event["args"]["to"].rsplit("@", 1)[-1].lower(),
+                commands.Egress(text_indicators.lowered(event["args"]["to"].rsplit("@", 1)[-1]),
                                 True,
                                 f"{event['tool']} to {event['args']['to']}"))
 
@@ -797,6 +798,7 @@ def hunt_secret_then_egress(events: list[dict], ctx: HuntContext) -> list[Findin
         found.extend(flows.values())
         flowed = {ref for finding in flows.values() for ref in finding.refs}
         reported = {}
+        sent: dict = {}
 
         for (index, event) in enumerate(group):
             read = secret_reads(event)
@@ -806,21 +808,25 @@ def hunt_secret_then_egress(events: list[dict], ctx: HuntContext) -> list[Findin
 
             graded = {}
             refs = []
+            listed = set()
             evidence = []
 
             for later in _later(group, index, ctx):
-                for item in egress_of(later, ctx):
-                    grade = _grade(item, later, ctx)
+                # What a later event sends is the same whichever read it follows: graded once for the session.
+                if (later["ref"] not in sent):
+                    sent[later["ref"]] = [(item, grade) for item in egress_of(later, ctx)
+                                          for grade in [_grade(item, later, ctx)] if grade is not None]
 
-                    if (grade is None):
-                        continue
-
+                for (item, grade) in sent[later["ref"]]:
                     if (order[grade] > order.get(graded.get(item.host), -1)):
                         graded[item.host] = grade
 
-                    if (later["ref"] not in refs):
+                    if (later["ref"] not in listed):
+                        listed.add(later["ref"])
                         refs.append(later["ref"])
-                        evidence.append(f"{item.host}: {text_indicators.defang(item.evidence, 160)}")
+
+                        if (len(evidence) < 6):
+                            evidence.append(f"{item.host}: {text_indicators.defang(item.evidence, 160)}")
 
             if (not graded):
                 continue
@@ -877,7 +883,9 @@ def _commands_run(events: list[dict]):
         yield from seen.values()
 
 
-RISK_SEVERITY = {"reverse_shell": "critical", "service_enable": "low", "shell_profile_change": "low"}
+RISK_SEVERITY = {
+    "reverse_shell": "critical", "service_enable": "low", "shell_profile_change": "low", "known_installer_run": "low"
+}
 """What each risky pattern is worth by itself; `high` where not named. Enabling a unit that exists and adding a
 `PATH` entry to a shell profile are worth a line in a timeline and not an alert."""
 
@@ -1074,7 +1082,15 @@ def hunt_redefined_tools(events: list[dict], ctx: HuntContext) -> list[Finding]:
             if (change["change"] != "redefined"):
                 continue
 
-            tool = next(tool for tool in tools if str(tool.get("name")) == change["tool"])
+            # The definition that differs, by its digest: a manifest may offer one name twice, and the second
+            # is the one a client ends up with.
+            tool = next((tool for tool in tools if str(tool.get("name")) == change["tool"]
+                         and mcp_audit.definition_digest(tool) == change.get("digest")),
+                        None)
+
+            if (tool is None):
+                continue
+
             found.append(
                 Finding("AAH-007",
                         "high" if mcp_audit.poisoned_tool(tool) else "medium",
@@ -1296,8 +1312,13 @@ def hunt_guardrail_tampering(events: list[dict], ctx: HuntContext) -> list[Findi
 
     for (event, facts, refs) in _commands_run(events):
         if (facts.config_writes):
-            # A command shows what it writes only when the text is in the line: a heredoc or an `echo`.
-            report(event, [path for (path, _) in facts.config_writes], command_of(event) + "\n", refs)
+            # A command shows what it writes only when the text is in the line: a heredoc or an `echo`. What a
+            # download wrote is not in the line at all.
+            fetched = any(
+                re.match(r"\s{0,8}(?:sudo\s{1,4})?(?:curl|wget)\b", evidence) for (_, evidence) in facts.config_writes)
+            report(event, [path for (path, _) in facts.config_writes],
+                   None if fetched else command_of(event) + "\n",
+                   refs)
 
         for evidence in facts.mcp_registrations:
             found.append(

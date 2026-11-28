@@ -143,6 +143,27 @@ placeholders and built when the tests run.
   at low unless something else is wrong with it.
 - **The skills** say to recommend and not to act, and the catalog's triage steps are worded that way.
 
+## The rewrite was reviewed too
+
+Before this revision was offered for merge, one more reviewer was given it cold, with the same instruction: break
+it and show the input. It reproduced 29 defects, eight of them serious, and all are fixed here with a test each:
+
+- **Redaction still depended on what stood around a credential.** A token straight after a terminal colour code
+  or an escaped newline, a key inside another match, a key with its last line missing, `DB_PASSWORD=` and other
+  prefixed names, and a token that a length limit cut in half all came through. Redaction now uses looser
+  patterns than reporting does, merges overlapping matches, and never cuts a text inside a credential.
+- **The stalls had moved from the patterns to the command reader.** A line of repeated substitutions cost memory by
+  the square of its length, a long pipeline time by the cube, and a time field of spaces minutes. The test that
+  times every pattern could not see these; a second test now times whole command lines at two sizes.
+- **Ordinary shell shapes silenced the command hunts:** a newline after a pipe, a function body, a `case` arm,
+  `$((1<<2))` read as a here-document, options written as one cluster, and options before a subcommand
+  (`git -C dir push --force`). Any host whose name began with `bedrock.` was treated as a model endpoint.
+- **Some benign commands were reported:** a dry run, `mkfs` on an image file, a script that imports both `socket`
+  and `subprocess`, and any variable used after `source .env`.
+
+The lesson is the first one again. The rewrite was measured on the corpus its author had been looking at for the
+whole of the work, and a reader who had not seen that corpus found what it did not hold.
+
 ## Measured
 
 `fixtures/corpus/commands.json` holds 140 attack sessions and 85 benign ones; `fixtures/corpus/texts.json` holds
