@@ -66,7 +66,7 @@ _ISO = re.compile(
     re.I)
 
 
-def parse_time(value) -> datetime.datetime | None:
+def parse_time(value) -> datetime.datetime | None:  # pylint: disable=too-many-return-statements
     """
     A time in any form telemetry commonly carries it, as an aware UTC time; `None` when there is none to read.
 

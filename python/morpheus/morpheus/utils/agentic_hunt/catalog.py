@@ -126,9 +126,9 @@ CATALOG = (
          "machine the hunt runs on.",
          "Check the host for the persistence the command would have written."),
         ("Installers documented as `curl ... | sh` that a developer asked the agent to run.",
-         "A tool's own initialiser added to a shell profile, which is reported at low."),
+         "A tool's own initializer added to a shell profile, which is reported at low."),
         "Critical for a reverse shell; high for download and run, decode and run, persistence and erased history; "
-        "low for a unit that exists being enabled and for a `PATH` entry, alias or well-known initialiser added to "
+        "low for a unit that exists being enabled and for a `PATH` entry, alias or well-known initializer added to "
         "a shell profile. A command is judged on what it runs: text that is only written, searched for or "
         "committed is not a command."),
     Hunt(

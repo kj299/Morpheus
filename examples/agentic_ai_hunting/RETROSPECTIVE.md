@@ -15,7 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# Retrospective: the agentic AI hunts
+# Retrospective on the agentic AI hunts
 
 A review of the first version of this example (the hunt engine, the command line, the MCP server, the four skills,
 the SIEM ports and `AgenticHuntStage`), what it found, what this revision fixes, and what is still owed.
@@ -67,7 +67,7 @@ placeholders and built when the tests run.
 - **Credentials reached the output.** Redaction ran on quoted evidence only. About thirty other fields (session
   ids, tool and server names, paths, hosts, details) were passed through as written, so a token in a tool name or
   a path came back whole. A quote cut from the middle of a text could end halfway through a key, which no pattern
-  recognised. A percent-encoded key (`%3DAKIA...`) was not recognised either, and only the first fifty credentials
+  recognised. A key written with URL escapes (`%3DAKIA...`) was not recognised either, and only the first fifty credentials
   in a text were looked for.
 - **Links and control characters reached the output** the same way, and only `http` links were broken.
 - **Two patterns could be stalled.** One was quadratic and one cubic on input an attacker chooses. They were found
@@ -80,7 +80,7 @@ placeholders and built when the tests run.
 - **Risky commands (AAH-004)** found 11 of 40. `bash <(curl ...)`, `sh -c "$(wget ...)"`, a download saved and then
   run, PowerShell and `cmd /c` forms were all missed, while `curl ... | python -c 'import json...'` and a port
   check with `nc -z` were reported as critical.
-- **Commands were matched as text**, so a commit message, a `grep` pattern or a heredoc that mentioned an attack
+- **Commands were matched as text**, so a commit message, a `grep` pattern or a here-document that mentioned an attack
   was reported as one.
 - **Credential theft (AAH-003)** treated file names as hosts, any later network contact as data sent, and
   `.env.example` as a credential, and merged unrelated reads into one finding.
@@ -119,7 +119,7 @@ placeholders and built when the tests run.
 ## What this revision changes
 
 - **Commands are parsed.** [`shell.py`](../../python/morpheus/morpheus/utils/agentic_hunt/shell.py) reads a line
-  as a shell does (quotes, pipes, lists, redirections, heredocs, substitutions, `sh -c`, `eval`, `ssh`, `cmd /c`,
+  as a shell does (quotes, pipes, lists, redirections, here-documents, substitutions, `sh -c`, `eval`, `ssh`, `cmd /c`,
   a script written and then run, Windows paths) and never raises.
   [`commands.py`](../../python/morpheus/morpheus/utils/agentic_hunt/commands.py) asks what the parsed commands do:
   what is risky, what is destroyed and how much it matters, which hosts are reached and whether data is sent,
@@ -167,6 +167,11 @@ engine as merged before this revision, run on the same files by the same script.
 
 The one benign session still reported is an agent adding an allow rule to its own settings file, which is the
 hypothesis of AAH-011 and is reported at medium on purpose.
+
+The review also ran the hunts over ten real coding-agent sessions (1,076 events, not in the repository). The first
+version raised 122 findings at medium or above, 76 of them critical, and the review found no attack among them.
+This revision raises 39 and none critical: text about prompt injection that the sessions read, synthetic tokens
+printed by tests, and one MCP server the agent was asked to register.
 
 What these figures are not: a measure on real incidents. The corpus was written by reviewers of this code. It is
 far harder than the fixtures and it is not the world.

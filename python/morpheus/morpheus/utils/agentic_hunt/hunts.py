@@ -376,7 +376,7 @@ def tool_capabilities(name: str) -> set:
     return {capability for (capability, words) in CAPABILITY_WORDS.items() if tokens & words}
 
 
-def command_of(event: dict) -> str:
+def command_of(event: dict) -> str:  # pylint: disable=too-many-return-statements
     """The command line an event runs: a process's, or the command argument of a tool call."""
     if (event["type"] == "process"):
         return str(event["process"].get("cmdline") or "")
@@ -598,12 +598,13 @@ def _named_in(text: str) -> dict:
     tools = {
         match.group(1).lower()
         for match in re.finditer(
-            r"(?i)\b(?:call|invoke|use|run|execute)\s{1,3}(?:the\s{1,3})?[`'\"]?([a-z][a-z0-9_.-]{2,40})[`'\"]?\s{1,3}tool",
-            text)
+            r"(?i)\b(?:call|invoke|use|run|execute)\s{1,3}"
+            r"(?:the\s{1,3})?[`'\"]?([a-z][a-z0-9_.-]{2,40})[`'\"]?\s{1,3}tool", text)
     }
     tools |= {match.group(1).lower() for match in re.finditer(r"`([A-Za-z][A-Za-z0-9_.-]{2,40})`", text)}
 
-    return {"hosts": hosts - {""}, "paths": paths, "tools": tools}
+    # An agent's own tools are called after every tool result; naming `Bash` ties nothing to the text.
+    return {"hosts": hosts - {""}, "paths": paths, "tools": tools - set(KNOWN_TOOLS)}
 
 
 def _risk_of(event: dict) -> list[str]:
@@ -612,10 +613,13 @@ def _risk_of(event: dict) -> list[str]:
         return []
 
     facts = commands.facts(command_of(event))
-    reasons = [name for (name, _, _) in facts.risky]
+    # Only what another hunt would report above low: a profile's `PATH` entry or a note added to an instructions
+    # file is not something injected text is needed to explain.
+    reasons = [name for (name, _, _) in facts.risky if RISK_SEVERITY.get(name, "high") != "low"]
     reasons += [name for (name, severity, _) in facts.destructive if severity == "high"]
     reasons += ["credential sent"] if facts.secret_flow else []
-    reasons += ["agent configuration written"] if facts.config_writes else []
+    reasons += ["agent permissions written"
+                ] if facts.config_writes and PERMISSION_WIDENING.search(command_of(event)) else []
     reasons += [flag for (flag, _) in facts.guardrail_flags]
 
     return list(dict.fromkeys(reasons))
@@ -1404,6 +1408,7 @@ def run_hunts(events: list[dict],
               ctx: HuntContext | None = None,
               hunt_ids: list[str] | None = None,
               min_severity: str = "info",
+              *,
               failures: list | None = None) -> list[Finding]:
     """
     The findings of the chosen hunts (all of them by default), most severe first.

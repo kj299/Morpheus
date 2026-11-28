@@ -51,7 +51,8 @@ def explain_hunt(hunt_id: str) -> dict:
     return catalog.BY_ID[hunt_id].to_dict()
 
 
-def context(window_seconds: int | None = None,
+def context(*,
+            window_seconds: int | None = None,
             allow_hosts: list[str] | None = None,
             replace_allowlist: bool = False,
             baseline_path: str | None = None,
@@ -90,7 +91,12 @@ def run(paths: list[str],
     """The findings of the chosen hunts over the given files, with what the files covered and what was skipped."""
     (found_events, configs, skipped) = inputs.load(paths, strict)
     failed = []
-    findings = hunts.run_hunts(found_events, configs, ctx or hunts.HuntContext(), hunt_ids, min_severity, failed)
+    findings = hunts.run_hunts(found_events,
+                               configs,
+                               ctx or hunts.HuntContext(),
+                               hunt_ids,
+                               min_severity,
+                               failures=failed)
 
     if (failed and strict):
         raise RuntimeError(f"hunt(s) did not complete: {', '.join(hunt_id for (hunt_id, _) in failed)}")

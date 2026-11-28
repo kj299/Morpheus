@@ -19,8 +19,9 @@ The agentic AI hunts, measured on inputs they were not written against, and held
 it: 225 short sessions around the command, credential and configuration hunts (140 attacks in the spellings
 attackers use, 85 things a coding agent does all day), and 174 texts for the injection indicators (110 injections
 across twelve evasion families, 64 benign texts chosen to look like them). The first version found 24% of the
-attacks, reported 40% of the benign sessions and reported 13% of the injections. The floors here are a little under what the engine measures now, so
-that a change which costs recall or precision fails a test and one that buys some can raise them.
+attacks, reported 40% of the benign sessions and reported 13% of the injections. The floors here are a little under
+what the engine measures now, so that a change which costs recall or precision fails a test and one that buys some
+can raise them.
 
 The rest are the engine's standing promises, each checked on input built to break it: nothing a finding carries
 can show a credential, a live link or a character a terminal would act on; no input stalls a pattern; a line the
@@ -173,7 +174,9 @@ def test_injections_are_reported_across_the_evasion_families(text_results: list)
     assert len(malicious) == 110
     assert len(reported) >= 88 and len(likely) >= 60, (len(reported), len(likely))
     # Hidden and encoded text is the part a pattern can be sure of: every one of those is found.
-    assert all(families[family][0] == families[family][1] for family in ("invisible", "homoglyph", "encoding")), families
+    certain = ("invisible", "homoglyph", "encoding")
+
+    assert all(families[family][0] == families[family][1] for family in certain), families
     assert all(seen >= 1 for (_, seen) in families.values()), families
 
 

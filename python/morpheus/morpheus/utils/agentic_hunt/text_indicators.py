@@ -192,7 +192,8 @@ DIRECTIVES = (
          r"is\b|:)|\byour\s{1,3}(?:new|updated|real|actual|true)\s{1,3}(?:task|job|goal|objective|role|persona|"
          r"instructions?|purpose)\b|\b(?:guidance|instructions?|rules|directions)\s{1,3}(?:you\s{1,3}(?:were|have"
          r"\s{1,3}been)\s{1,3}given|above|so\s{1,3}far)\b[^.\n]{0,30}?\b(?:out\s{1,3}of\s{1,3}date|obsolete|void|"
-         r"superseded|no\s{1,3}longer|cancell?ed|invalid)\b|\b(?:previous|prior|earlier|above)\s{1,3}instructions\s{1,3}"
+         r"superseded|no\s{1,3}longer|cancell?ed|invalid)\b|\b"
+         r"(?:previous|prior|earlier|above)\s{1,3}instructions\s{1,3}"
          r"are\s{1,3}(?:void|obsolete|cancell?ed|superseded|invalid|out\s{1,3}of\s{1,3}date)\b|\b(?:set|put)\s{1,3}"
          r"aside\s{1,3}(?:everything|anything|all)\b[^.\n]{0,40}?\b(?:asked|told|instructed|given)\b|\bhigher\s{1,3}"
          r"priority\s{1,3}than\s{1,3}(?:anything|everything|any|all)\b|\bthe\s{1,3}task\s{1,3}above\s{1,3}is\s{1,3}"
@@ -212,13 +213,17 @@ DIRECTIVES = (
      ADDRESS,
      2,
      re.compile(
-         r"\b(?:note|message|attention|instructions?|reminder|notice|task|request)\s{1,3}(?:for|to)\s{1,3}(?:the\s{1,3}|"
+         r"\b(?:note|message|attention|instructions?|reminder|notice"
+         r"|task|request)\s{1,3}(?:for|to)\s{1,3}(?:the\s{1,3}|"
          r"any\s{1,3}|all\s{1,3})?(?:coding\s{1,3}|ai\s{1,3})?(?:ai|llm|language model|assistant|agent|chatbot|copilot|"
-         r"code\s{1,3}reviewer)s?\b(?!\s{1,3}(?:in|on|at|is|are|was|were|of|that|which|configuration|settings?)\b)|\bif you are an? (?:ai|llm|language model|assistant|agent)\b|"
+         r"code\s{1,3}reviewer)s?\b(?!\s{1,3}(?:in|on|at|is|are|was|were|of|that|which|configuration"
+         r"|settings?)\b)|\bif you are an? (?:ai|llm|language model|assistant|agent)\b|"
          r"\bas an ai (?:assistant|agent|model),? you\b|\b(?:attention|important|notice)\s{0,3}[,:]?\s{1,3}(?:ai|llm|"
          r"model|assistant|agent)s?\b|\b(?:ai|llm)\s{1,3}(?:agents?|assistants?|models?|code\s{1,3}reviewers?|systems?|"
-         r"tools?)(?:\s{0,3}:\s|\b[^.:\n]{0,40}?\b(?:must|shall|are\s{1,3}required)\b)|\bwhen\s{1,3}an?\s{1,3}(?:ai|llm|"
-         r"assistant|agent|language model)\b[^.\n]{0,30}?\b(?:reads?|sees?|process(?:es)?|summari[sz]es?|encounters?)\b|"
+         r"tools?)(?:\s{0,3}:\s|\b[^.:\n]{0,40}?\b(?:must|shall"
+         r"|are\s{1,3}required)\b)|\bwhen\s{1,3}an?\s{1,3}(?:ai|llm|"
+         r"assistant|agent|language model)\b[^.\n]{0,30}?\b"
+         r"(?:reads?|sees?|process(?:es)?|summari[sz]es?|encounters?)\b|"
          r"(?:^|[.>\n])\s{0,4}(?:model|assistant|agent|ai)\s{0,2}(?:note\s{0,2})?[,:]\s{1,3}(?:your|you|please|"
          r"the\s{1,3}next|collect|after|when|before)\b",
          re.I | re.M)),
@@ -316,7 +321,8 @@ DIRECTIVES = (
      2,
      re.compile(
          r"https?://[^\s\"'<>)\]]{1,200}?(?:\{[^{}\n]{0,40}?(?:content|data|conversation|history|secret|token|key|"
-         r"password|credential|env|file|output|result|summary|context|prompt|base64|cookie|session|value)[^{}\n]{0,40}\}"
+         r"password|credential|env|file|output|result|summary|context"
+         r"|prompt|base64|cookie|session|value)[^{}\n]{0,40}\}"
          r"|[?&/#=](?-i:[A-Z]{3,20}(?:_[A-Z]{2,20}){1,4})(?![A-Za-z]))|"
          r"<[^<>\n]{3,80}>\.(?:[a-z0-9-]{1,40}\.){1,4}[a-z]{2,12}\b",
          re.I)),
@@ -390,7 +396,8 @@ _ALT = r"(?:[^\]\[\n]|\[[^\]\[\n]{0,100}\]){0,1000}"
 MARKDOWN_IMAGE = re.compile(r"!\[" + _ALT + r"\]\(\s{0,10}<?((?:https?:)?//[^)\n>]{1,2048})>?\s{0,10}\)", re.I)
 HTML_IMAGE = re.compile(
     r"<(?:img|iframe|video|audio|source|embed|object|link|script|input)\b[^>]{0,300}?\b(?:src|srcset|poster|data|"
-    r"href)\s{0,5}=\s{0,5}[\"']?((?:https?:)?//[^\"'>\s]{1,2048})|\burl\(\s{0,5}[\"']?((?:https?:)?//[^\"')\s]{1,2048})",
+    r"href)\s{0,5}=\s{0,5}[\"']?((?:https?:)?//[^\"'>\s]{1,2048})"
+    r"|\burl\(\s{0,5}[\"']?((?:https?:)?//[^\"')\s]{1,2048})",
     re.I)
 """What a renderer loads without being asked: an image, a frame, a media poster, a prefetch, a stylesheet's `url()`."""
 MARKDOWN_LINK = re.compile(r"(?<!!)\[" + _ALT + r"\]\(\s{0,10}<?(https?://[^)\n>]{1,2048})>?\s{0,10}\)", re.I)
@@ -585,7 +592,7 @@ def _visible(text: str) -> str:
 
         if (character in "\t\n\r"):
             shown.append(" ")
-        elif (codepoint < 0x7F and codepoint >= 0x20):
+        elif (0x20 <= codepoint < 0x7F):
             shown.append(character)
         elif (_invisible(codepoint) or unicodedata.category(character) in ("Cc", "Cf", "Co", "Cs", "Cn")):
             shown.append(f"<U+{codepoint:04X}>")
@@ -620,7 +627,7 @@ def _break_scheme(match: re.Match) -> str:
 
 
 def _cut(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[:limit - 1] + "…"
+    return text if len(text) <= limit else text[:limit - 1] + "\u2026"
 
 
 def defang(text: str, limit: int = 160) -> str:

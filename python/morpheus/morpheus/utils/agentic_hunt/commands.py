@@ -30,6 +30,9 @@ written or searched for (a heredoc, a commit message, a `grep` pattern), and mis
 the textbook one. `fixtures/corpus/commands.jsonl` holds the labelled lines both habits were measured on.
 """
 
+# The rules below are tables written as conditions: one branch per program, one clause per spelling.
+# pylint: disable=too-many-boolean-expressions
+
 import dataclasses
 import functools
 import re
@@ -158,7 +161,8 @@ AGENT_CONFIG_PATH = re.compile(
     r"\.github[/\\]instructions[/\\][^\s]{1,256}|CLAUDE(?:\.local)?\.md|AGENTS(?:\.override)?\.md|GEMINI\.md|"
     r"\.gemini[/\\]settings\.json|\.codex[/\\]config\.toml|\.aider\.conf\.yml|\.clinerules(?:[/\\][^\s]{0,256})?|"
     r"\.roo(?:[/\\][^\s]{1,256})|\.roomodes|\.continue[/\\](?:config\.(?:json|yaml|ts)|mcpServers[/\\][^\s]{1,256})|"
-    r"\.kiro[/\\](?:settings|steering)[/\\][^\s]{1,256}|opencode\.jsonc?|\.goosehints|\.config[/\\]goose[/\\]config\.yaml|"
+    r"\.kiro[/\\](?:settings|steering)[/\\][^\s]{1,256}|opencode\.jsonc?|\.goosehints|"
+    r"\.config[/\\]goose[/\\]config\.yaml|"
     r"\.amazonq[/\\](?:mcp\.json|rules[/\\][^\s]{1,256})|\.junie[/\\]guidelines\.md|"
     r"\.claude[/\\](?:hooks|commands|agents|skills|rules)[/\\][^\s]{1,256})$",
     re.I)
@@ -737,6 +741,23 @@ def _secret_operands(words: list) -> list:
                      for word in words if SECRET_DIRECTORY.match(word)})
 
 
+PATTERN_FIRST = frozenset(["grep", "egrep", "fgrep", "rg", "awk", "gawk", "sed", "jq", "yq"])
+"""Readers whose first operand is a pattern, a script or a filter, and not a file."""
+
+CODE_READ = re.compile(r"(?:\bopen|\bPath|read_text|read_bytes|readFile(?:Sync)?|\bGet-Content|\bslurp|File\.read|"
+                       r"file_get_contents|\bcat)\s{0,3}\(?\s{0,3}([^)\n]{1,300})")
+
+
+def _code_reads(code: str) -> list:
+    """
+    The arguments of the calls in inline code that read a file.
+
+    Only what such a call is given can be a credential read. A script that opens one file and mentions `.env` in a
+    string elsewhere reads the first and not the second.
+    """
+    return [match.group(1) for match in CODE_READ.finditer(code)][:50]
+
+
 def _secrets_read(command: shell.Command) -> list:
     """What credentials one command reads: the secret files it is given to read, or the credential it prints."""
     program = command.program
@@ -747,6 +768,9 @@ def _secrets_read(command: shell.Command) -> list:
 
         if (program == "sed" and command.option("-i")):
             operands = []
+        elif (program in PATTERN_FIRST and not command.option("-e", "-f", "--regexp", "--file")):
+            # The first word after `grep` is what to look for, not where: `grep '\.env' notes.md` reads notes.md.
+            operands = operands[1:]
 
         found.extend(_secret_operands(operands))
     elif (program in ("cp", "mv", "install", "rsync", "scp", "sftp")):
@@ -770,8 +794,8 @@ def _secrets_read(command: shell.Command) -> list:
         found.extend(_secret_operands([word.split("@", 1)[-1] for word in command.operands if "@" in word]))
     elif (program in ("env", "printenv") and not command.operands):
         found.append("(environment)")
-    elif (command.code and re.search(r"open\(|read|Get-Content|slurp", command.code)):
-        found.extend(_secret_operands([command.code]))
+    elif (command.code):
+        found.extend(_secret_operands(_code_reads(command.code)))
 
     for (name, words) in CREDENTIAL_COMMANDS:
         if (program == name and all(word in command.args for word in words)):
@@ -825,7 +849,7 @@ PROFILE_ROUTINE = re.compile(
     r"asdf/asdf\.sh)[\"']?|eval\s{1,4}\"\$\((?:[\w/.-]{0,64}/)?(?:pyenv|rbenv|nodenv|direnv|starship|zoxide|fnm|mise|"
     r"brew|conda)\s[\w -]{1,40}\)\")\s{0,8}$")
 """Lines an installer or a developer ordinarily adds to a shell profile: a `PATH` entry under the home directory, an
-alias with nothing run inside it, a well-known tool's own initialiser. A profile write of only these is a change,
+alias with nothing run inside it, a well-known tool's own initializer. A profile write of only these is a change,
 not persistence; `PATH` put ahead of the system's from a temporary directory is not among them."""
 
 

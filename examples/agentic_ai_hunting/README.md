@@ -73,8 +73,9 @@ thresholds are flags: `--window`, `--calls-per-minute`, `--distinct-files`, `--i
 | AAH-012 | Credentials in model output, in arguments or command lines, or in tool output | `model_output`, `tool_call`, `tool_result`, `process` |
 
 A command is judged on what it runs. The engine reads each command line as a shell does (pipes, substitutions,
-`sh -c`, heredocs, `cmd /c`, a script written and then run) and asks what the commands do, so `curl ... | sh`
-inside a commit message, a `grep` pattern or a heredoc written to a file is text and not a command, and
+`sh -c`, here-documents, `cmd /c`, a script written and then run) and asks what the commands do. That makes
+`curl ... | sh` inside a commit message, a `grep` pattern or a here-document written to a file text and not a
+command, and
 `bash <(curl ...)`, `sh -c "$(wget ...)"` and a download saved and then run are all the same attack. Severity
 follows what a finding rests on, not only which hunt made it: the same `DROP DATABASE` is low against
 `importer_test` on `localhost` and high against production.
@@ -154,8 +155,8 @@ size.
 The hunts are indicators, not verdicts, and how good they are is measured, not asserted.
 [`fixtures/corpus/`](./fixtures/corpus/) holds two labelled sets written to break the first version: 225 short
 sessions around the command, credential and configuration hunts, and 174 texts for the injection indicators.
-`tests/morpheus/determinism/test_agentic_hunt_corpus.py` holds the engine to floors a little under these figures,
-so a change that costs recall or precision fails a test.
+`tests/morpheus/determinism/test_agentic_hunt_corpus.py` holds the engine to floors a little under these figures:
+a change that costs recall or precision fails a test.
 
 | Measured on | First version | Now |
 | --- | --- | --- |

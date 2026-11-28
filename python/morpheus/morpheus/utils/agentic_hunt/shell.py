@@ -43,7 +43,8 @@ RESERVED_PREFIXES = frozenset(["do", "then", "else", "elif", "if", "while", "unt
 
 WINDOWS_LINE = re.compile(
     r"(?i)(?:^|[\s\"'=(])[a-z]:\\|\\\\[\w.$-]{1,64}\\|%[a-z_()]{2,32}%|\$env:|\bHK(?:CU|LM|CR|U|EY_[A-Z_]{4,24})\\|"
-    r"^\s{0,8}(?:\S{0,200}[\\/])?(?:cmd|powershell|pwsh)(?:\.exe)?\s|\b(?:get|set|remove|invoke|new|copy|move|start|add|out)"
+    r"^\s{0,8}(?:\S{0,200}[\\/])?(?:cmd|powershell|pwsh)(?:\.exe)?\s"
+    r"|\b(?:get|set|remove|invoke|new|copy|move|start|add|out)"
     r"-[a-z]{3,20}\b")
 """A line written for Windows, where a backslash separates a path and escapes nothing."""
 MAX_COMMANDS = 2000

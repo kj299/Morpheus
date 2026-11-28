@@ -72,7 +72,7 @@ Known benign causes:
 
 An agent, or a shell it started, downloads and runs code, decodes and runs a payload, opens a reverse shell, adds persistence, or erases its history.
 
-Severity: Critical for a reverse shell; high for download and run, decode and run, persistence and erased history; low for a unit that exists being enabled and for a `PATH` entry, alias or well-known initialiser added to a shell profile. A command is judged on what it runs: text that is only written, searched for or committed is not a command.
+Severity: Critical for a reverse shell; high for download and run, decode and run, persistence and erased history; low for a unit that exists being enabled and for a `PATH` entry, alias or well-known initializer added to a shell profile. A command is judged on what it runs: text that is only written, searched for or committed is not a command.
 
 Triage:
 
@@ -83,7 +83,7 @@ Triage:
 Known benign causes:
 
 - Installers documented as `curl ... | sh` that a developer asked the agent to run.
-- A tool's own initialiser added to a shell profile, which is reported at low.
+- A tool's own initializer added to a shell profile, which is reported at low.
 
 ## AAH-005: Poisoned MCP tool descriptions
 

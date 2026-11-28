@@ -466,12 +466,16 @@ class AgenticHuntStage(CheckpointMixin, TelemetryStage):
             events.normalize(record, record["ref"]) for session in sorted(sessions)
             for record in self._retained.get(session, [])
         ]
-        found = hunts.run_hunts(events.order(earlier + believed), [], ctx, self._hunt_ids, self._min_severity, failed)
+        found = hunts.run_hunts(events.order(earlier + believed), [],
+                                ctx,
+                                self._hunt_ids,
+                                self._min_severity,
+                                failures=failed)
 
         # A refused row has no time the stream believes, so it may not join any session's sequence: it is hunted by
         # itself, and nothing it carries is learnt.
         for event in refused_events:
-            found.extend(hunts.run_hunts([event], [], ctx, self._hunt_ids, self._min_severity, failed))
+            found.extend(hunts.run_hunts([event], [], ctx, self._hunt_ids, self._min_severity, failures=failed))
 
         if (failed):
             logger.error("AgenticHuntStage: hunt(s) did NOT complete on this batch and report nothing for it: %s",

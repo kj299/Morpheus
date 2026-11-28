@@ -390,7 +390,7 @@ class Server:
 
         return result
 
-    def handle(self, message: dict) -> dict | None:
+    def handle(self, message: dict) -> dict | None:  # pylint: disable=too-many-return-statements
         """The response to one message, or `None` for a notification."""
         method = message.get("method")
         params = message.get("params", {})

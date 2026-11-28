@@ -14,7 +14,7 @@ with either line ending; bytes that are not UTF-8 are replaced.
 
 | Field | Meaning |
 | --- | --- |
-| `ts` | ISO 8601 time (`2026-11-19T14:00:05Z`, with or without a zone or fraction, `T` or a space) or an epoch number in seconds, milliseconds, microseconds or nanoseconds, told apart by size. A time that cannot be read leaves the event untimed: it keeps the place it was given in, and sequences that include it are bounded by position (200 events) and not by the window |
+| `ts` | ISO 8601 time (`2026-11-19T14:00:05Z`, with or without a zone or fraction, `T` or a space) or an epoch number in seconds, milliseconds, microseconds or nanoseconds, told apart by size. A time that cannot be read leaves the event without one: it keeps the place it was given in, and sequences that include it are bounded by position (200 events) and not by the window |
 | `session_id` | One agent session or conversation; sequence hunts never join across sessions. An event without one is put in a session of its `host` (or of its file, for a transcript), never in one shared by every host; `coverage.without_session_id` counts them |
 | `type` | `prompt`, `model_output`, `tool_call`, `tool_result`, `document`, `tool_manifest`, `process`, `file`, `network` or `auth` |
 | `agent` | The agent product (`claude-code`, `cursor`, ...). A `process` event with `agent` set counts as the agent's |
